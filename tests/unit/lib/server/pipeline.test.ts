@@ -311,11 +311,10 @@ beforeEach(() => {
     window: { stdout: Buffer.from('RIFFwav'), fd3: JPEG, stderr: MEASURE_STDERR },
   };
   h.spawn.mockReset();
-  h.spawn.mockImplementation((command: string, args: string[]) =>
-    child(
-      command === 'ffprobe' ? tools.probe : args.includes('-ss') ? tools.window : tools.measure,
-    ),
-  );
+  h.spawn.mockImplementation((command: string, args: string[]) => {
+    if (command === 'ffprobe') return child(tools.probe);
+    return child(args.includes('-ss') ? tools.window : tools.measure);
+  });
   handlers = defaultHandlers();
   calls.length = 0;
   vi.stubGlobal(
@@ -495,7 +494,7 @@ describe('runStep: ANALYZE', () => {
     expect(chunk).toMatchObject({ index: 0, startSec: 0, durationSec: 29.5, raw: null });
     expect(chunk.analysis).toEqual(ANALYSIS);
     const body = chatBodies()[0]!;
-    expect(body.temperature).toBe(0.2);
+    expect(body.temperature).toBeCloseTo(0.2);
     expect(body.max_tokens).toBeGreaterThanOrEqual(2048);
   });
 

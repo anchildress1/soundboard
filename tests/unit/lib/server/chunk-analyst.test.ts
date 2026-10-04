@@ -255,7 +255,7 @@ describe('analyzeChunk', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(chunk.analysis).toBeNull();
     expect(chunk.raw).toBe('Sorry, {not json');
-    expect(chunk.measurements.integratedLufs).toBe(-9.7);
+    expect(chunk.measurements.integratedLufs).toBeCloseTo(-9.7);
   });
 
   it('recovers on the retry after one bad reply', async () => {

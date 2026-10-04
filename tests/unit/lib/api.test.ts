@@ -115,8 +115,11 @@ describe('action', () => {
 });
 
 describe('uploadToGcs', () => {
+  let lastXhr: FakeXhr;
+  const track = (xhr: FakeXhr) => {
+    lastXhr = xhr;
+  };
   class FakeXhr {
-    static last: FakeXhr;
     upload: {
       onprogress:
         ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
@@ -130,7 +133,7 @@ describe('uploadToGcs', () => {
     setRequestHeader = vi.fn();
     send = vi.fn();
     constructor() {
-      FakeXhr.last = this;
+      track(this);
     }
   }
 
@@ -143,7 +146,7 @@ describe('uploadToGcs', () => {
   it('PUTs the file with the signed headers and reports progress', async () => {
     const progress = vi.fn();
     const done = uploadToGcs('https://storage.example/u?sig=1', file, progress);
-    const xhr = FakeXhr.last;
+    const xhr = lastXhr;
     expect(xhr.open).toHaveBeenCalledWith('PUT', 'https://storage.example/u?sig=1');
     expect(xhr.setRequestHeader).toHaveBeenCalledWith('content-type', 'video/mp4');
     expect(xhr.setRequestHeader).toHaveBeenCalledWith(
@@ -161,25 +164,25 @@ describe('uploadToGcs', () => {
 
   it('rejects with the HTTP status on a failed upload', async () => {
     const done = uploadToGcs('u', file, () => {});
-    FakeXhr.last.status = 403;
-    FakeXhr.last.onload!();
+    lastXhr.status = 403;
+    lastXhr.onload!();
     await expect(done).rejects.toMatchObject({ status: 403, message: 'Upload failed (403)' });
   });
 
   it('treats 299 as success and 300 as failure', async () => {
     const ok = uploadToGcs('u', file, () => {});
-    FakeXhr.last.status = 299;
-    FakeXhr.last.onload!();
+    lastXhr.status = 299;
+    lastXhr.onload!();
     await expect(ok).resolves.toBeUndefined();
     const redirect = uploadToGcs('u', file, () => {});
-    FakeXhr.last.status = 300;
-    FakeXhr.last.onload!();
+    lastXhr.status = 300;
+    lastXhr.onload!();
     await expect(redirect).rejects.toBeInstanceOf(ApiError);
   });
 
   it('rejects with status 0 on a network error', async () => {
     const done = uploadToGcs('u', file, () => {});
-    FakeXhr.last.onerror!();
+    lastXhr.onerror!();
     await expect(done).rejects.toMatchObject({
       status: 0,
       message: 'Upload failed: network error',

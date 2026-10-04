@@ -100,9 +100,9 @@ function setup(
 
 const chip = () => screen.getByRole('status');
 
+const xhr: { status: number; last: FakeXhr | null } = { status: 200, last: null };
+
 class FakeXhr {
-  static status = 200;
-  static last: FakeXhr | null = null;
   status = 0;
   headers: Record<string, string> = {};
   upload: {
@@ -117,7 +117,7 @@ class FakeXhr {
   open(method: string, url: string) {
     this.method = method;
     this.url = url;
-    FakeXhr.last = this;
+    xhr.last = this;
   }
   setRequestHeader(name: string, value: string) {
     this.headers[name] = value;
@@ -125,7 +125,7 @@ class FakeXhr {
   send() {
     setTimeout(() => {
       this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
-      this.status = FakeXhr.status;
+      this.status = xhr.status;
       this.onload?.();
     });
   }
@@ -134,8 +134,8 @@ class FakeXhr {
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  FakeXhr.status = 200;
-  FakeXhr.last = null;
+  xhr.status = 200;
+  xhr.last = null;
   vi.stubGlobal('XMLHttpRequest', FakeXhr);
   URL.revokeObjectURL = vi.fn();
 });
@@ -394,7 +394,7 @@ describe('job page: upload hand-off', () => {
     );
     expect(container.querySelector('video')).toHaveAttribute('src', 'blob:local');
     await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
-    expect(FakeXhr.last).toMatchObject({
+    expect(xhr.last).toMatchObject({
       method: 'PUT',
       url: 'https://storage.googleapis.com/put?sig=1',
       headers: { 'content-type': 'video/mp4', 'x-goog-content-length-range': '1,2147483648' },
@@ -404,7 +404,7 @@ describe('job page: upload hand-off', () => {
   });
 
   it('shows a failed GCS upload', async () => {
-    FakeXhr.status = 403;
+    xhr.status = 403;
     setPending('j1', {
       file,
       uploadUrl: 'https://storage.googleapis.com/put',

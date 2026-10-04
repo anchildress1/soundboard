@@ -159,7 +159,7 @@ describe('parseMeasurements', () => {
   it('only counts peak recurrences as clipping at full scale', () => {
     const stderr = STDERR.replace('Peak level dB: 0.000265', 'Peak level dB: -3.200000');
     const m = parseMeasurements(stderr, 0, 30);
-    expect(m.peakLevelDb).toBe(-3.2);
+    expect(m.peakLevelDb).toBeCloseTo(-3.2);
     expect(m.clippedSamples).toBe(0);
   });
 
@@ -172,7 +172,7 @@ describe('parseMeasurements', () => {
 
   it('reads the last summary when ffmpeg prints more than one', () => {
     const stderr = `Summary:\n    I: -30.0 LUFS\n${STDERR}`;
-    expect(parseMeasurements(stderr, 0, 30).integratedLufs).toBe(-9.7);
+    expect(parseMeasurements(stderr, 0, 30).integratedLufs).toBeCloseTo(-9.7);
   });
 
   it('returns nulls and no silences for empty stderr', () => {
@@ -269,7 +269,7 @@ describe('measureFile', () => {
   it('measures the whole file from offset zero', async () => {
     nextRun({ stderr: `${STDERR}[silencedetect @ 0x3] silence_start: 170\n` });
     const m = await measureFile('https://storage.example/obj', 183.2);
-    expect(m.integratedLufs).toBe(-9.7);
+    expect(m.integratedLufs).toBeCloseTo(-9.7);
     expect(m.silences).toEqual([
       { start: 4, end: 7 },
       { start: 170, end: 183.2 },
@@ -320,7 +320,7 @@ describe('extractWindow', () => {
     const window = await extractWindow('u', 59, 10);
     expect(window.measurements.silences).toEqual([{ start: 65, end: 69 }]);
     expect(window.frames).toEqual([]);
-    expect(window.wav.length).toBe(0);
+    expect(window.wav).toHaveLength(0);
   });
 
   it('rejects on a non-zero exit', async () => {

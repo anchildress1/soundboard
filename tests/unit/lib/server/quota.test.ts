@@ -65,7 +65,7 @@ describe('hashIp', () => {
 
   it('throws without a session secret', () => {
     vi.stubEnv('SESSION_SECRET', '');
-    expect(() => hashIp('1.2.3.4')).toThrow('SESSION_SECRET');
+    expect(() => hashIp('203.0.113.9')).toThrow('SESSION_SECRET');
   });
 });
 

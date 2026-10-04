@@ -323,7 +323,7 @@ describe('allowedLinks', () => {
   });
 
   it('drops every link with no facts', () => {
-    expect(allowedLinks('http://a.b https://c.d', [])).toBe(' ');
+    expect(allowedLinks('https://a.b https://c.d', [])).toBe(' ');
   });
 
   it('leaves text without links untouched', () => {
@@ -676,7 +676,7 @@ describe('runPick', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toBe('http://127.0.0.1:8081/v1/chat/completions');
     const [body] = sentBodies();
-    expect(body!.temperature).toBe(0.2);
+    expect(body!.temperature).toBeCloseTo(0.2);
     expect(body!.max_tokens).toBeGreaterThanOrEqual(2048);
     expect(body!.response_format.type).toBe('json_schema');
     expect(body!.response_format.json_schema.name).toBe('smart_pick');

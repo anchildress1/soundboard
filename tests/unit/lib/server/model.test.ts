@@ -118,7 +118,7 @@ describe('chat', () => {
         json_schema: { name: 'chunk_analysis', strict: true, schema },
       },
     });
-    expect(TEMPERATURE).toBe(0.2);
+    expect(TEMPERATURE).toBeCloseTo(0.2);
     expect(MAX_TOKENS).toBeGreaterThanOrEqual(2048);
     expect(CALL_TIMEOUT_MS).toBeLessThan(120_000);
 
