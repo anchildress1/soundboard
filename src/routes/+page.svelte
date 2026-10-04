@@ -1,5 +1,4 @@
 <svelte:head>
-  <title>Soundboard</title>
   <meta
     name="description"
     content="Release agent for Flies Like Robots: self-hosted Gemma 4 watches and listens to a music video, then drafts and verifies the YouTube upload."

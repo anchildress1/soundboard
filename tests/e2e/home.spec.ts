@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('home page renders the Soundboard heading', async ({ page }) => {
   await page.goto('/');
+  await expect(page).toHaveTitle('Soundboard');
   await expect(page.getByRole('heading', { level: 1, name: 'Soundboard' })).toBeVisible();
 });
 
