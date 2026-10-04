@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SERVICE="soundboard"
-REGION="${GCP_REGION:-us-central1}"
+REGION="us-central1"
 SEPARATOR="=================================================="
 
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
