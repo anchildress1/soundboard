@@ -1,0 +1,43 @@
+# Two ecosystems, one grouped PR each, staggered (gha Monday, npm Thursday) so both rarely sit
+# open at once. cooldown holds every proposal 7 days so a compromised release can be yanked first.
+# open-pull-requests-limit is 0 through the challenge deadline (2026-10-05 06:59 UTC): no version
+# update PRs this weekend. Raise both to 1 afterward.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: 'chore(deps)'
+      include: scope
+    groups:
+      gha:
+        patterns:
+          - '*'
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: thursday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+    labels:
+      - dependencies
+      - javascript
+    commit-message:
+      prefix: 'chore(deps)'
+      include: scope
+    groups:
+      pkg:
+        patterns:
+          - '*'
