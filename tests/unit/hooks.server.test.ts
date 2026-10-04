@@ -130,13 +130,21 @@ describe('handle', () => {
   it('reads an allowlisted session from its signed cookie', async () => {
     const { resolve, seen } = renderer();
     await run(event(sessionCookie('Nathan@example.com')), resolve);
-    expect(seen.locals?.session).toEqual({ email: 'Nathan@example.com', allowlisted: true });
+    expect(seen.locals?.session).toEqual({
+      email: 'Nathan@example.com',
+      allowlisted: true,
+      demo: false,
+    });
   });
 
   it('marks a signed-in stranger as not allowlisted', async () => {
     const { resolve, seen } = renderer();
     await run(event(sessionCookie('someone@example.com')), resolve);
-    expect(seen.locals?.session).toEqual({ email: 'someone@example.com', allowlisted: false });
+    expect(seen.locals?.session).toEqual({
+      email: 'someone@example.com',
+      allowlisted: false,
+      demo: false,
+    });
   });
 
   it('drops a tampered cookie', async () => {

@@ -6,6 +6,7 @@ export const POST: RequestHandler = ({ request, locals, getClientAddress }) =>
   respond(async () =>
     create((await readBody(request)) as CreateInput, {
       allowlisted: locals.session?.allowlisted ?? false,
+      demo: locals.session?.demo ?? false,
       ip: getClientAddress(),
     }),
   );

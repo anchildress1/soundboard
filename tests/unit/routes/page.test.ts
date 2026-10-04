@@ -8,7 +8,10 @@ const h = vi.hoisted(() => ({ goto: vi.fn() }));
 vi.mock('$app/navigation', () => ({ goto: h.goto }));
 
 type Sample = { id: string; songTitle: string; videoId: string; durationSec: number };
-type Data = { samples: Sample[]; session: { email: string; allowlisted: boolean } | null };
+type Data = {
+  samples: Sample[];
+  session: { email: string; allowlisted: boolean; demo: boolean } | null;
+};
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) =>
@@ -91,14 +94,19 @@ describe('home page: form', () => {
     expect(screen.getByText(/^Signed out: your own video ends/)).toBeInTheDocument();
   });
 
-  it('calls a signed-in visitor run a demo run, not signed out', () => {
-    setup({ session: { email: 'someone@example.com', allowlisted: false } });
-    expect(screen.getByText(/^Demo run: your own video ends/)).toBeInTheDocument();
+  it('tells the demo account where its uploads go, with 15 minutes like Nathan', () => {
+    setup({ session: { email: 'demo@example.com', allowlisted: false, demo: true } });
+    expect(
+      screen.getByText(/^Demo account: approved uploads go private to the sandbox/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('up to 15 min')).toBeInTheDocument();
     expect(screen.queryByText(/Signed out/)).toBeNull();
   });
 
   it('allows Nathan 15 minutes and drops the signed-out note', async () => {
-    const { container } = setup({ session: { email: 'nathan@example.com', allowlisted: true } });
+    const { container } = setup({
+      session: { email: 'nathan@example.com', allowlisted: true, demo: false },
+    });
     expect(screen.getByText('up to 15 min')).toBeInTheDocument();
     expect(screen.queryByText(/Signed out/)).toBeNull();
     await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });

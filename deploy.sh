@@ -36,9 +36,10 @@ require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
 require_env ALLOWLIST_EMAILS
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
+DEMO_EMAILS="${DEMO_EMAILS:-}"
 
 export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID ALLOWLIST_EMAILS \
-  PUBLIC_SENTRY_DSN
+  PUBLIC_SENTRY_DSN DEMO_EMAILS
 SERVICE_ACCOUNT="${SERVICE}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 GIT_SHA="$(git rev-parse --short HEAD)"
 APP_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/app:${GIT_SHA}"
@@ -151,7 +152,7 @@ trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
 envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${MODEL_IMAGE} ${GCP_PROJECT_ID} ${GCS_BUCKET}
-  ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${ALLOWLIST_EMAILS} ${PUBLIC_SENTRY_DSN}' \
+  ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${ALLOWLIST_EMAILS} ${DEMO_EMAILS} ${PUBLIC_SENTRY_DSN}' \
   < service.yaml > "$rendered"
 
 gcloud run services replace "$rendered" --region "$REGION" --project "$GCP_PROJECT_ID"

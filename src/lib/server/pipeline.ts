@@ -97,7 +97,8 @@ async function analyze(job: JobDoc): Promise<StepOutput> {
 async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
-  const nathan = job.owner === 'nathan';
+  // Demo jobs read Nathan's memory so they run like his; they never write it.
+  const nathan = job.owner !== 'visitor';
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),

@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
-import { allowlist, required } from './env';
+import { allowlist, demoEmails, required } from './env';
 
 export const SESSION_COOKIE = 'sb_session';
 export const OAUTH_COOKIE = 'sb_oauth';
@@ -13,7 +13,7 @@ export const CHANNEL_SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly',
 ];
 
-export type Session = { email: string; allowlisted: boolean };
+export type Session = { email: string; allowlisted: boolean; demo: boolean };
 
 const mac = (value: string) =>
   createHmac('sha256', required('SESSION_SECRET')).update(value).digest('base64url');
@@ -42,11 +42,16 @@ export function isAllowlisted(email: string): boolean {
   return allowlist().has(email.trim().toLowerCase());
 }
 
+/** A demo account that isn't also allowlisted; allowlisting wins. */
+export function isDemo(email: string): boolean {
+  return !isAllowlisted(email) && demoEmails().has(email.trim().toLowerCase());
+}
+
 /** Allowlist membership is re-checked on every request, so removing an email revokes access at once. */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
   const data = unsign<{ email: string; exp: number }>(cookie);
   if (!data || typeof data.email !== 'string' || data.exp < now) return null;
-  return { email: data.email, allowlisted: isAllowlisted(data.email) };
+  return { email: data.email, allowlisted: isAllowlisted(data.email), demo: isDemo(data.email) };
 }
 
 export function sessionCookie(email: string, now = Date.now()): string {

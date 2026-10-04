@@ -21,8 +21,11 @@ export const DRIVEN_STATES: readonly JobState[] = [
   'CLAIMED_COMPLETE',
 ];
 
-/** Who the job belongs to: allowlisted sessions own `nathan` jobs; everything else is a visitor job. */
-export type JobOwner = 'nathan' | 'visitor';
+/**
+ * Who the job belongs to: allowlisted sessions own `nathan` jobs, demo sessions own `demo` jobs
+ * (Nathan's memory read-only, sandbox channel), and everything else is a visitor job.
+ */
+export type JobOwner = 'nathan' | 'demo' | 'visitor';
 
 /** Upload target: Nathan's channel, the throwaway sandbox channel, or none (ends at the would-be payload). */
 export type Channel = 'nathan' | 'sandbox' | null;

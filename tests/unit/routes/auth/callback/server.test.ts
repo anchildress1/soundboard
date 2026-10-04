@@ -53,7 +53,8 @@ async function call(opts: {
     ),
     cookies,
     locals: {
-      session: allowlisted === null ? null : { email: 'nathan@example.com', allowlisted },
+      session:
+        allowlisted === null ? null : { email: 'nathan@example.com', allowlisted, demo: false },
     },
   } as unknown as Event;
   let thrown: unknown;
@@ -118,6 +119,18 @@ describe('GET /auth/callback: sign-in', () => {
     expect(cookies.set).not.toHaveBeenCalled();
   });
 
+  it('signs in a demo account', async () => {
+    vi.stubEnv('DEMO_EMAILS', 'demo@example.com');
+    google('demo@example.com');
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/']);
+    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toEqual({
+      email: 'demo@example.com',
+      allowlisted: false,
+      demo: true,
+    });
+  });
+
   it('sets a signed session cookie for an allowlisted account', async () => {
     google('Nathan@Example.com');
     const { thrown, cookies } = await call({
@@ -132,6 +145,7 @@ describe('GET /auth/callback: sign-in', () => {
     expect(readSession(value as string)).toEqual({
       email: 'nathan@example.com',
       allowlisted: true,
+      demo: false,
     });
     expect(h.getToken).toHaveBeenCalledWith('c1');
   });

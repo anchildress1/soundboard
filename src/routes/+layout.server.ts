@@ -11,7 +11,11 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   return {
     channel,
     session: locals.session
-      ? { email: locals.session.email, allowlisted: locals.session.allowlisted }
+      ? {
+          email: locals.session.email,
+          allowlisted: locals.session.allowlisted,
+          demo: locals.session.demo,
+        }
       : null,
   };
 };

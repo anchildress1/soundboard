@@ -38,7 +38,7 @@ describe('layout', () => {
 
   it('confirms a connected channel', () => {
     h.page.url = new URL('https://soundboard.test/?connected=nathan');
-    setup({ session: { email: 'nathan@example.com', allowlisted: true } });
+    setup({ session: { email: 'nathan@example.com', allowlisted: true, demo: false } });
     expect(screen.getByRole('status')).toHaveTextContent("Nathan's channel is connected.");
   });
 
@@ -85,7 +85,7 @@ describe('layout', () => {
   });
 
   it("shows FLR channel stats to Nathan's session", () => {
-    setup({ channel, session: { email: 'nathan@example.com', allowlisted: true } });
+    setup({ channel, session: { email: 'nathan@example.com', allowlisted: true, demo: false } });
     expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
     expect(screen.getByText('12 videos · 340 subs')).toBeInTheDocument();
     expect(screen.queryByText(/last upload/)).toBeNull();
@@ -112,7 +112,7 @@ describe('layout', () => {
   });
 
   it('shows the email and sign-out for a non-allowlisted session, still without connect links', () => {
-    setup({ session: { email: 'someone@example.com', allowlisted: false } });
+    setup({ session: { email: 'someone@example.com', allowlisted: false, demo: false } });
     expect(screen.queryByText('someone@example.com')).toBeNull();
     const signOut = screen.getByRole('button', { name: 'Sign out' });
     expect(signOut).toHaveAttribute('title', 'someone@example.com');
@@ -125,11 +125,19 @@ describe('layout', () => {
   });
 
   it('gives an allowlisted session the brand guide link, without a sign-in', () => {
-    setup({ session: { email: 'nathan@example.com', allowlisted: true } });
+    setup({ session: { email: 'nathan@example.com', allowlisted: true, demo: false } });
     const brand = screen.getByRole('link', { name: 'Brand guide' });
     expect(brand).toHaveAttribute('href', '/brand');
     expect(brand.closest('header')).not.toBeNull();
     expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+  });
+
+  it('gives a demo account the stats and Sign out, without the brand guide', () => {
+    setup({ channel, session: { email: 'demo@example.com', allowlisted: false, demo: true } });
+    expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Brand guide' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
   });
 
@@ -144,7 +152,7 @@ describe('layout', () => {
   it('never prints "undefined" for a partial stats record', () => {
     setup({
       channel: { handle: '@flieslikerobots', lastUploadAt: null },
-      session: { email: 'nathan@example.com', allowlisted: true },
+      session: { email: 'nathan@example.com', allowlisted: true, demo: false },
     });
     expect(screen.getByText(/videos ·/).textContent).not.toContain('undefined');
   });

@@ -36,7 +36,7 @@ const TRACE = { sentryTrace: 'abc-def-1', baggage: 'sentry-trace_id=abc' };
 
 async function run(id: string, allowlisted = false) {
   const locals: App.Locals = {
-    session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null,
+    session: allowlisted ? { email: 'nathan@example.com', allowlisted, demo: false } : null,
   };
   const data = (await load({ params: { id }, locals } as unknown as Event)) as Data;
   return { data, locals };

@@ -317,6 +317,30 @@ describe('approve', () => {
     expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1, visitorUploads: 1 });
   });
 
+  it("uploads a demo job to the sandbox on the visitor share, never Nathan's slots", async () => {
+    connected();
+    store.set(`quota/${quotaDay()}`, {
+      runs: 0,
+      ips: {},
+      uploads: VISITOR_UPLOADS_PER_DAY,
+      visitorUploads: VISITOR_UPLOADS_PER_DAY,
+    });
+    const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
+    await approve(job, input());
+    const after = (await getJob('job1'))!;
+    expect(after.state).toBe('PAYLOAD');
+    expect(after.error).toBe("Today's upload quota is used up.");
+  });
+
+  it('keeps demo feedback on the job, out of the artist memory', async () => {
+    connected();
+    const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
+    await approve(job, input({ title: 'Edited Title' }));
+    expect((await getJob('job1'))!.state).toBe('PUBLISHING');
+    expect(feedbackRows('jobs/job1/feedback/').length).toBeGreaterThan(0);
+    expect(feedbackRows('artists/')).toHaveLength(0);
+  });
+
   it('keeps visitor feedback on the job', async () => {
     const job = await makeJob({ channel: null });
     await approve(job, input({ title: 'Edited Title' }));

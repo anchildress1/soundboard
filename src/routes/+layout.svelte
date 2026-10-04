@@ -37,7 +37,7 @@
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
-      {#if data.channel && data.session?.allowlisted}
+      {#if data.channel && (data.session?.allowlisted || data.session?.demo)}
         <p class="chip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
             ><path

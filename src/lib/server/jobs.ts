@@ -8,7 +8,7 @@ import type { AudienceEvidence } from './hashtags';
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
 
 /** Longest video each owner may run, in minutes. */
-export const MAX_MINUTES = { nathan: 15, visitor: 5 } as const;
+export const MAX_MINUTES = { nathan: 15, demo: 15, visitor: 5 } as const;
 
 export type JobDoc = PublicJob & {
   object: string;
@@ -243,9 +243,9 @@ export function toPublic(doc: JobDoc): PublicJob {
   };
 }
 
-/** Visitor jobs are reachable by their unguessable ID; Nathan's only from an allowlisted session. */
+/** Visitor and demo jobs are reachable by their unguessable ID; Nathan's only from an allowlisted session. */
 export function canAccess(doc: { owner: JobOwner }, allowlisted: boolean): boolean {
-  return doc.owner === 'visitor' || allowlisted;
+  return doc.owner !== 'nathan' || allowlisted;
 }
 
 export function fail(state: JobState, message: string): Partial<JobDoc> {

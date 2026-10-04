@@ -145,6 +145,8 @@
 **R10 · Auth**
 
 - Google sign-in with an allowlist (Nathan, Ashley) targets Nathan's channel. YouTube refresh tokens live in Secret Manager.
+- Demo accounts (`DEMO_EMAILS`) sign in and run like Nathan: 15-minute videos, no visitor caps, picks that read his memory. They never write it: feedback stays on the job, nothing lands in `artists/*`. Approvals upload private to the sandbox channel on the visitor quota. No brand guide, channel connect, or access to Nathan's jobs.
+- Any other Google account is turned away with a notice and stays signed out.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays: Advanced → Continue (tell Nathan).
 - Redirect URI is set to the deployed URL after the first deploy.
 - Firestore security rules deny all client access; only the app's service account reads and writes.

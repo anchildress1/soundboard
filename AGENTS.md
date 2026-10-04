@@ -9,7 +9,7 @@ Read `docs/prd.md` before changing behavior. It is the source of truth; when cod
 - Audio-engineering numbers (LUFS, peak, clipping, silence) come from ffmpeg only. Strip numerics the model emits.
 - Hashtags come only from the job's deterministic candidate list (PRD R4). Reject any hashtag not in it.
 - A publish is `VERIFIED` only after `videos.list` returns it. The insert response sets `CLAIMED_COMPLETE`.
-- Only allowlisted sessions read or write `artists/*` or Nathan's jobs and tokens. Visitor feedback stays on the job.
+- Only allowlisted sessions write `artists/*` or reach Nathan's jobs and tokens. Demo jobs read Nathan's memory for the pick and never write it. Visitor and demo feedback stays on the job.
 - Never record audio or image bytes in Sentry. Use `{type, mime, bytes}` placeholders.
 - Never stream media through app memory: ffmpeg and the YouTube upload read from GCS by signed URL.
 

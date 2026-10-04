@@ -13,11 +13,20 @@ export function modelUrl(): string {
   return optional('MODEL_URL', 'http://127.0.0.1:8081');
 }
 
-export function allowlist(): Set<string> {
-  return new Set(
-    optional('ALLOWLIST_EMAILS')
+const emailSet = (name: string) =>
+  new Set(
+    optional(name)
       .split(',')
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean),
   );
+
+/** Accounts with Nathan-level access: his memory, jobs, channel tokens, and the brand guide. */
+export function allowlist(): Set<string> {
+  return emailSet('ALLOWLIST_EMAILS');
+}
+
+/** Demo accounts: run like Nathan against the sandbox channel and never write his memory. */
+export function demoEmails(): Set<string> {
+  return emailSet('DEMO_EMAILS');
 }

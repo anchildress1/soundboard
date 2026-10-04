@@ -633,6 +633,29 @@ describe('runStep: PICK', () => {
     expect(called(/i\.ytimg\.com/)).toHaveLength(4);
   });
 
+  it("reads Nathan's memory for a demo job without writing any of it", async () => {
+    store.set('artists/flr/feedback/f1', {
+      kind: 'EDITED',
+      jobId: 'old',
+      songTitle: 'Earlier',
+      pickVersion: 1,
+      field: 'title',
+      before: 'A',
+      after: 'B',
+      at: 5,
+    });
+    const before = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    await runStep(seed({ state: 'PICK', owner: 'demo', channel: 'sandbox' }));
+    expect(saved().state).toBe('REVIEW');
+    const ctx = context();
+    expect(ctx.feedback).toHaveLength(1);
+    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
+    const after = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    expect(after.filter((k) => !before.includes(k) && !k.startsWith('artists/flr/facts/'))).toEqual(
+      [],
+    );
+  });
+
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
     store.set('artists/flr/feedback/f1', {
       kind: 'EDITED',

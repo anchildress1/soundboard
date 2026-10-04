@@ -239,6 +239,10 @@ describe('canAccess', () => {
     expect(canAccess({ owner: 'visitor' }, false)).toBe(true);
   });
 
+  it('lets anyone holding the ID see a demo job', () => {
+    expect(canAccess({ owner: 'demo' }, false)).toBe(true);
+  });
+
   it("keeps Nathan's jobs to allowlisted sessions", () => {
     expect(canAccess({ owner: 'nathan' }, false)).toBe(false);
     expect(canAccess({ owner: 'nathan' }, true)).toBe(true);

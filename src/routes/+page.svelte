@@ -11,7 +11,7 @@
 
   let { data }: { data: PageData } = $props();
 
-  const maxMinutes = $derived(data.session?.allowlisted ? 15 : 5);
+  const maxMinutes = $derived(data.session?.allowlisted || data.session?.demo ? 15 : 5);
 
   let file = $state<File | null>(null);
   let objectUrl = $state<string | null>(null);
@@ -125,10 +125,14 @@
       <label for="notes">Notes <span>optional</span></label>
       <textarea id="notes" rows="3" bind:value={notes} maxlength="1000" disabled={busy}></textarea>
     </div>
-    {#if !data.session?.allowlisted}
+    {#if data.session?.demo}
       <p class="note">
-        {data.session ? 'Demo run' : 'Signed out'}: your own video ends at the would-be upload
-        payload; nothing is posted.
+        Demo account: approved uploads go private to the sandbox channel, and nothing is saved to
+        Nathan's memory.
+      </p>
+    {:else if !data.session}
+      <p class="note">
+        Signed out: your own video ends at the would-be upload payload; nothing is posted.
       </p>
     {/if}
     <div class="actions">

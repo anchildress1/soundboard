@@ -26,8 +26,9 @@ vi.mock('@google-cloud/storage', () => ({
   },
 }));
 
-const visitor = { allowlisted: false, ip: '203.0.113.7' };
-const nathan = { allowlisted: true, ip: '198.51.100.1' };
+const visitor = { allowlisted: false, demo: false, ip: '203.0.113.7' };
+const nathan = { allowlisted: true, demo: false, ip: '198.51.100.1' };
+const demo = { allowlisted: false, demo: true, ip: '192.0.2.9' };
 
 const upload = (over: Record<string, unknown> = {}): CreateInput =>
   ({
@@ -96,6 +97,12 @@ describe('create from a sample', () => {
     expect(quota()).toBeUndefined();
   });
 
+  it('makes a demo sample job a demo job on the sandbox, without IP caps', async () => {
+    const { id } = await create({ sampleId: 'peek' }, demo);
+    expect(job(id)).toMatchObject({ owner: 'demo', channel: 'sandbox', ipHash: null });
+    expect(quota()).toBeUndefined();
+  });
+
   it('returns 404 for a missing sample', async () => {
     const error = await rejection(create({ sampleId: 'gone' }, visitor));
     expect(error.status).toBe(404);
@@ -123,6 +130,15 @@ describe('create from an own video', () => {
       sampleId: null,
       liveVideoId: null,
     });
+  });
+
+  it('makes a demo own-video job that uploads to the sandbox, 15 minutes, no IP caps', async () => {
+    const { id } = await create(upload({ durationSec: 900 }), demo);
+    expect(job(id)).toMatchObject({ owner: 'demo', channel: 'sandbox', ipHash: null });
+    expect(quota()).toBeUndefined();
+    const error = await rejection(create(upload({ durationSec: 901 }), demo));
+    expect(error.status).toBe(400);
+    expect(error.message).toBe('Videos are capped at 15 minutes here.');
   });
 
   it('trims the title and notes and caps the filename', async () => {

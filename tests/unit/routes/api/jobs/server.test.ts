@@ -30,7 +30,9 @@ const post = (body: unknown, allowlisted = false, ip = '203.0.113.7') =>
       method: 'POST',
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
-    locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted: true } : null },
+    locals: {
+      session: allowlisted ? { email: 'nathan@example.com', allowlisted: true, demo: false } : null,
+    },
     getClientAddress: () => ip,
   } as unknown as Event);
 

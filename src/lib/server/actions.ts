@@ -84,7 +84,7 @@ export async function approve(
     let patch: Partial<JobDoc>;
     if (!job.channel) patch = payload(null);
     else if (!connected) patch = payload('The upload channel is not connected.');
-    else if (await takeUploadSlot(tx, job.owner === 'visitor')) {
+    else if (await takeUploadSlot(tx, job.owner !== 'nathan')) {
       patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
     } else patch = payload("Today's upload quota is used up.");
 
