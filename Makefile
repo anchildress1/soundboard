@@ -34,7 +34,7 @@ perf: build
 
 secret-scan:
 	@command -v gitleaks > /dev/null || { echo "❌ gitleaks not found: https://github.com/gitleaks/gitleaks#installing"; exit 1; }
-	gitleaks git --staged --no-banner --redact
+	gitleaks git --no-banner --redact
 
 deploy:
 	./deploy.sh

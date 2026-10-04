@@ -12,7 +12,7 @@ pre-commit:
       glob: '.github/workflows/*.{yml,yaml}'
       run: actionlint {staged_files}
     secret-scan:
-      run: make secret-scan
+      run: gitleaks git --staged --no-banner --redact
 
 commit-msg:
   commands:
