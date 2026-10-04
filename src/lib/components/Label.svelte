@@ -50,7 +50,9 @@
 
 <section class="youtube" aria-labelledby="youtube-title">
   <h2 id="youtube-title">YouTube</h2>
-  <p class="hint">Edit any field, then approve. The upload stays private.</p>
+  {#if editable}
+    <p class="hint">Edit any field, then approve. The upload stays private.</p>
+  {/if}
   <div class="fields">
     <div class="field" class:err={errors.title}>
       <label for="title">Title <span>{title.length} / {TITLE_MAX}</span></label>

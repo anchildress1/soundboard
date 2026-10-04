@@ -41,6 +41,16 @@ describe('Label: draft and counters', () => {
     expect(screen.getByRole('heading', { name: 'YouTube' })).toBeInTheDocument();
   });
 
+  it('only offers the edit hint while the draft is editable', () => {
+    setup({ editable: true });
+    expect(screen.getByText(/Edit any field, then approve/)).toBeInTheDocument();
+  });
+
+  it('drops the edit hint once nothing is editable', () => {
+    setup({ editable: false, done: true });
+    expect(screen.queryByText(/Edit any field, then approve/)).toBeNull();
+  });
+
   it('fills the fields from the draft with live counters', () => {
     setup();
     expect(title().value).toBe('PeekaBoo');
