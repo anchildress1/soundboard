@@ -345,7 +345,7 @@ export async function createShort(
     if (blocked) return { blocked };
     const pick: StoredPick = {
       ...(pickSnap.data() as StoredPick),
-      ...(current.finalFields ?? {}),
+      ...current.finalFields,
       version: 1,
       skipped: false,
     };

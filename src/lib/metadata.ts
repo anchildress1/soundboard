@@ -77,7 +77,5 @@ export function validateFields(
     description: descriptionError(fields.description, candidates),
     tags: tagsError(fields.tags),
   };
-  return Object.fromEntries(
-    Object.entries(found).filter(([, message]) => message !== undefined),
-  ) as FieldErrors;
+  return Object.fromEntries(Object.entries(found).filter(([, message]) => message !== undefined));
 }

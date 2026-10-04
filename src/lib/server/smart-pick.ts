@@ -221,10 +221,12 @@ const URL_PATTERN = /https?:\/\/[^\s)]+/g;
 
 /** Keeps only links that appear in public FACT or APPROVED records. */
 export function allowedLinks(text: string, facts: Fact[]): string {
-  const allowed = facts
-    .filter((f) => f.public && f.kind !== 'INFERENCE')
-    .flatMap((f) => f.value.match(URL_PATTERN) ?? []);
-  return text.replaceAll(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
+  const allowed = new Set(
+    facts
+      .filter((f) => f.public && f.kind !== 'INFERENCE')
+      .flatMap((f) => f.value.match(URL_PATTERN) ?? []),
+  );
+  return text.replaceAll(URL_PATTERN, (url) => (allowed.has(url) ? url : ''));
 }
 
 const BODY_HASHTAG = /(?<!\S)#[\p{L}\p{N}_]+/gu;
@@ -387,12 +389,11 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   };
 }
 
+const normText = (t: string) =>
+  t.replaceAll(BODY_HASHTAG, '').replaceAll(/\s+/g, ' ').trim().toLowerCase();
+
 /** Same words, ignoring case, spacing, and hashtags, so a reshuffled closing line doesn't count as new. */
-export const sameText = (a: string, b: string) => {
-  const norm = (t: string) =>
-    t.replaceAll(BODY_HASHTAG, '').replaceAll(/\s+/g, ' ').trim().toLowerCase();
-  return norm(a) === norm(b);
-};
+export const sameText = (a: string, b: string) => normText(a) === normText(b);
 
 /**
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the

@@ -11,16 +11,16 @@ export async function authorizedJob(id: string, allowlisted: boolean): Promise<J
 }
 
 /** States in which a Short's rendered object is the one on screen. */
-const RENDERED: readonly JobState[] = [
+const RENDERED: ReadonlySet<JobState> = new Set([
   'REVIEW',
   'PUBLISHING',
   'CLAIMED_COMPLETE',
   'VERIFIED',
   'PAYLOAD',
-];
+]);
 
 export async function buildView(job: JobDoc, wait?: Wait): Promise<JobView> {
-  const rendered = Boolean(job.short?.renders) && RENDERED.includes(job.state);
+  const rendered = Boolean(job.short?.renders) && RENDERED.has(job.state);
   const [chunks, stored, playbackUrl] = await Promise.all([
     listChunks(job.id),
     latestPick(job.id),

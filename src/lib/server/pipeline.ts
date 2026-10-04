@@ -277,7 +277,7 @@ const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> 
   CLAIMED_COMPLETE: verify,
 };
 
-const NEEDS_MODEL: readonly JobState[] = ['ANALYZE', 'PICK', 'HOOK'];
+const NEEDS_MODEL: ReadonlySet<JobState> = new Set(['ANALYZE', 'PICK', 'HOOK']);
 
 /** A step that throws counts as a failure; two in a row stop the job at that step for a retry. */
 export function failurePatch(job: JobDoc, error: unknown): Patch {
@@ -337,7 +337,7 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
     return {};
   }
   // Readiness is checked against the claimed state, which may be ahead of the caller's snapshot.
-  const wait = NEEDS_MODEL.includes(job.state) ? await modelWait() : undefined;
+  const wait = NEEDS_MODEL.has(job.state) ? await modelWait() : undefined;
   if (wait) {
     await releaseJob(job.id, token, job.state);
     return { wait };

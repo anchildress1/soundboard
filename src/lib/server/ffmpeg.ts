@@ -288,6 +288,10 @@ export const SHORT_WIDTH = 1080;
 export const SHORT_HEIGHT = 1920;
 const SHORT_FPS = 30;
 
+/** Scales a frame to cover `w`x`h`, then crops the overflow from its center. */
+const fill = (w: number, h: number) =>
+  `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+
 /**
  * Filter graph fitting any frame to 9:16. Blur fill keeps the whole frame over a blurred copy of
  * itself (blurred at quarter size, which is cheap and looks the same); crop fills the frame from
@@ -295,8 +299,6 @@ const SHORT_FPS = 30;
  */
 export function shortFilter(reframe: Reframe): string {
   const [w, h] = [SHORT_WIDTH, SHORT_HEIGHT];
-  const fill = (sw: number, sh: number) =>
-    `scale=${sw}:${sh}:force_original_aspect_ratio=increase,crop=${sw}:${sh}`;
   if (reframe === 'crop') return `[0:v:0]fps=${SHORT_FPS},${fill(w, h)},setsar=1[v]`;
   return [
     `[0:v:0]fps=${SHORT_FPS},split=2[bg][fg]`,

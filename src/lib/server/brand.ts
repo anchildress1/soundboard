@@ -182,6 +182,8 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
   return { proposal };
 }
 
+const trimRules = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
+
 /**
  * Approves the guide as edited, replacing any earlier one. The proposal is re-read in the same
  * transaction and must be the one under review (`proposedAt` is its `createdAt`), so a discard or
@@ -193,12 +195,11 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
   const { proposedAt } = input as { proposedAt?: unknown };
   if (typeof proposedAt !== 'number')
     throw new ActionError(400, 'Name the proposal being approved.');
-  const trim = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
   const guide: BrandGuide = {
     statement: input.statement.trim(),
-    keep: trim(input.keep),
-    fix: trim(input.fix),
-    drop: trim(input.drop),
+    keep: trimRules(input.keep),
+    fix: trimRules(input.fix),
+    drop: trimRules(input.drop),
   };
   const problem = guideError(guide);
   if (problem) throw new ActionError(422, problem);
