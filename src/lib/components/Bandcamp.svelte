@@ -49,7 +49,7 @@
     ondone?.(fields.every((f) => !f.value || isCopied(f.label, f.value)));
   });
 
-  async function copy(label: string, value: string) {
+  const copy = async (label: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value);
     } catch {
@@ -62,13 +62,19 @@
     } catch {
       // Private mode or blocked storage: the checklist just won't survive a reload.
     }
-  }
+  };
 
-  /** A separate window keeps Bandcamp beside Soundboard; a blocked popup falls back to a tab. */
-  function openEditor(event: MouseEvent) {
-    const opened = window.open(EDITOR, 'bandcamp', 'popup,width=1200,height=900');
-    if (opened) event.preventDefault();
-  }
+  /**
+   * A separate window keeps Bandcamp beside Soundboard; a blocked popup falls back to a tab. The
+   * window opens blank and drops its opener before it loads Bandcamp, so the page can't reach back.
+   */
+  const openEditor = (event: MouseEvent) => {
+    const opened = window.open('', 'bandcamp', 'popup,width=1200,height=900');
+    if (!opened) return;
+    opened.opener = null;
+    opened.location.href = EDITOR;
+    event.preventDefault();
+  };
 </script>
 
 <section class="bandcamp" aria-labelledby="bandcamp-title">

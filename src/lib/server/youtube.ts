@@ -107,14 +107,17 @@ type PlaylistItem = { contentDetails?: { videoId?: string; videoPublishedAt?: st
 async function uploadsPage(playlistId: string, maxResults: number): Promise<PlaylistItem[]> {
   const body = await keyGet<ListResponse<PlaylistItem>>('playlistItems', {
     part: 'contentDetails',
-    playlistId,
     maxResults: String(maxResults),
+    playlistId,
   });
   return body.items ?? [];
 }
 
 let statsCache: { at: number; value: ChannelStats } | null = null;
 const STATS_TTL_MS = 10 * 60 * 1000;
+
+const latestUpload = async (playlistId: string): Promise<PlaylistItem | undefined> =>
+  playlistId ? (await uploadsPage(playlistId, 1))[0] : undefined;
 
 /** FLR channel header stats; cached so the home page doesn't spend a read on every visit. */
 export async function channelStats(now = Date.now()): Promise<ChannelStats> {
@@ -126,13 +129,13 @@ export async function channelStats(now = Date.now()): Promise<ChannelStats> {
   const item = body.items?.[0];
   if (!item) throw new YouTubeError(404, 'FLR channel not found');
   const uploadsPlaylist = item.contentDetails?.relatedPlaylists?.uploads ?? '';
-  const latest = uploadsPlaylist ? (await uploadsPage(uploadsPlaylist, 1))[0] : undefined;
+  const latest = await latestUpload(uploadsPlaylist);
   const value: ChannelStats = {
     handle: item.snippet?.customUrl ?? item.snippet?.title ?? '',
     videoCount: Number(item.statistics?.videoCount ?? 0),
     subscriberCount: Number(item.statistics?.subscriberCount ?? 0),
-    uploadsPlaylist,
     lastUploadAt: latest?.contentDetails?.videoPublishedAt ?? null,
+    uploadsPlaylist,
   };
   statsCache = { at: now, value };
   return value;
@@ -151,10 +154,10 @@ export async function recentVideos(
   const items = await uploadsPage(uploadsPlaylist, count + 5);
   const ids = items
     .map((item) => item.contentDetails?.videoId)
-    .filter((id): id is string => Boolean(id) && id !== excludeId);
+    .filter((id): id is string => typeof id === 'string' && id !== '' && id !== excludeId);
   const videos = await videosByIds(ids);
   const order = new Map(ids.map((id, i) => [id, i]));
-  return videos.sort((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);
+  return videos.toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);
 }
 
 export type VideoDuration = 'short' | 'medium' | 'long';

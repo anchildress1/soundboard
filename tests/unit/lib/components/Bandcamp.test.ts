@@ -66,16 +66,16 @@ describe('Bandcamp', () => {
   });
 
   it('opens the editor in its own window, falling back to a tab when popups are blocked', async () => {
-    const open = vi.spyOn(window, 'open').mockReturnValueOnce({} as Window);
+    const popup = { opener: {} as unknown, location: { href: '' } };
+    const open = vi.spyOn(window, 'open').mockReturnValueOnce(popup as unknown as Window);
     render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     const link = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
     const opened = new MouseEvent('click', { bubbles: true, cancelable: true });
     link.dispatchEvent(opened);
-    expect(open).toHaveBeenCalledWith(
-      'https://flieslikerobots.bandcamp.com/edit_track',
-      'bandcamp',
-      'popup,width=1200,height=900',
-    );
+    expect(open).toHaveBeenCalledWith('', 'bandcamp', 'popup,width=1200,height=900');
+    // The opener is cut before Bandcamp loads, so its page can't reach back into Soundboard.
+    expect(popup.opener).toBeNull();
+    expect(popup.location.href).toBe('https://flieslikerobots.bandcamp.com/edit_track');
     expect(opened.defaultPrevented).toBe(true);
     open.mockReturnValueOnce(null);
     const blocked = new MouseEvent('click', { bubbles: true, cancelable: true });

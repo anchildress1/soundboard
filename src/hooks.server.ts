@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/sveltekit';
+import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth';
@@ -43,6 +43,6 @@ const securityHeaders: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(jobTraceMeta, Sentry.sentryHandle(), session, securityHeaders);
+export const handle = sequence(jobTraceMeta, sentryHandle(), session, securityHeaders);
 
-export const handleError = Sentry.handleErrorWithSentry();
+export const handleError = handleErrorWithSentry();

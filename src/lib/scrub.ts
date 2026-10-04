@@ -1,9 +1,10 @@
 // Signed GCS URLs, YouTube upload session URIs, and API-key requests all carry credentials in the
 // query string. Sentry keeps the path and loses the query.
+const REDACTED = '[redacted]';
 const URL_IN_TEXT = /(https?:\/\/[^\s?#"']+)\?[^\s#"']*/g;
 
 export function scrubUrl(text: string): string {
-  return text.replaceAll(URL_IN_TEXT, '$1?[redacted]');
+  return text.replaceAll(URL_IN_TEXT, `$1?${REDACTED}`);
 }
 
 const URL_KEYS = ['url', 'url.full', 'http.url', 'http.query', 'url.query', 'from', 'to'];
@@ -13,7 +14,7 @@ function scrubData(data: Record<string, unknown> | undefined): void {
   for (const key of URL_KEYS) {
     const value = data[key];
     if (typeof value !== 'string') continue;
-    data[key] = key.endsWith('query') ? '[redacted]' : scrubUrl(value);
+    data[key] = key.endsWith('query') ? REDACTED : scrubUrl(value);
   }
 }
 
@@ -37,10 +38,7 @@ type EventLike = {
 
 /** Strips query strings from request, span, and trace data before an event leaves the process. */
 export function scrubEvent<T extends EventLike>(event: T): T {
-  if (event.request) {
-    if (event.request.url) event.request.url = scrubUrl(event.request.url);
-    if (event.request.query_string) event.request.query_string = '[redacted]';
-  }
+  scrubRequest(event.request);
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
   // ffmpeg and fetch errors quote the signed URL they failed on.
   if (event.message) event.message = scrubUrl(event.message);
@@ -48,11 +46,19 @@ export function scrubEvent<T extends EventLike>(event: T): T {
     if (exception.value) exception.value = scrubUrl(exception.value);
   }
   scrubData(event.contexts?.trace?.data);
-  for (const span of event.spans ?? []) {
-    if (span.description) span.description = scrubUrl(span.description);
-    scrubData(span.data);
-  }
+  for (const span of event.spans ?? []) scrubSpanLike(span);
   return event;
+}
+
+function scrubRequest(request: EventLike['request']): void {
+  if (!request) return;
+  if (request.url) request.url = scrubUrl(request.url);
+  if (request.query_string) request.query_string = REDACTED;
+}
+
+function scrubSpanLike(span: SpanLike): void {
+  if (span.description) span.description = scrubUrl(span.description);
+  scrubData(span.data);
 }
 
 type StreamedSpanLike = { name: string; attributes: Record<string, unknown> };
@@ -72,7 +78,7 @@ export function scrubSpan<T extends StreamedSpanLike>(span: T): T {
 
 /** Raw attributes can be a string, a string array, or a `{ value, unit }` object. */
 function scrubAttribute(key: string, value: unknown): unknown {
-  if (typeof value === 'string') return key.endsWith('query') ? '[redacted]' : scrubUrl(value);
+  if (typeof value === 'string') return key.endsWith('query') ? REDACTED : scrubUrl(value);
   if (Array.isArray(value)) return value.map((item) => scrubAttribute(key, item));
   if (typeof value === 'object' && value !== null && 'value' in value) {
     return { ...value, value: scrubAttribute(key, value.value) };

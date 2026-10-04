@@ -114,8 +114,10 @@ export function searchQuery(chunks: Chunk[]): string {
   return [...genreTerms(chunks), 'music video'].join(' ');
 }
 
-const bucketOf = (seconds: number): VideoDuration =>
-  seconds < 240 ? 'short' : seconds <= 1200 ? 'medium' : 'long';
+function bucketOf(seconds: number): VideoDuration {
+  if (seconds < 240) return 'short';
+  return seconds <= 1200 ? 'medium' : 'long';
+}
 
 /**
  * YouTube's search length bucket (short under 4 minutes, long over 20) holding the whole

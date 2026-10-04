@@ -81,13 +81,13 @@ export async function chat(
       signal: AbortSignal.timeout(timeout),
       body: JSON.stringify({
         model: MODEL_NAME,
-        messages,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
         response_format: {
           type: 'json_schema',
           json_schema: { name: schemaName, strict: true, schema },
         },
+        messages,
       }),
     });
     if (!response.ok) {

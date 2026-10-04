@@ -60,7 +60,7 @@
   const proposing = $derived(wait ?? 'Reading uploads');
 
   /** A loading or busy model answers with a wait at once; keep asking until it takes the call. */
-  async function propose() {
+  const propose = async () => {
     busy = true;
     message = '';
     try {
@@ -81,9 +81,9 @@
       wait = null;
       busy = false;
     }
-  }
+  };
 
-  async function approve(event: SubmitEvent) {
+  const approve = async (event: SubmitEvent) => {
     event.preventDefault();
     if (!guide || problem || proposedAt === null) return;
     busy = true;
@@ -96,9 +96,9 @@
     } finally {
       busy = false;
     }
-  }
+  };
 
-  async function discard() {
+  const discard = async () => {
     busy = true;
     message = '';
     try {
@@ -109,7 +109,7 @@
     } finally {
       busy = false;
     }
-  }
+  };
 
   onDestroy(() => (stopped = true));
 </script>

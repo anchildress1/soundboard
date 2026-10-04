@@ -39,33 +39,45 @@ export function splitTags(field: string): string[] {
 
 export type FieldErrors = Partial<Record<'title' | 'description' | 'tags', string>>;
 
+function titleError(raw: string): string | undefined {
+  const title = raw.trim();
+  if (!title) return 'Title is required.';
+  if (title.length > TITLE_MAX) return `Title is over ${TITLE_MAX} characters.`;
+  if (/[<>]/.test(title)) return 'YouTube rejects < and > in titles.';
+  return undefined;
+}
+
+function descriptionError(description: string, candidates: readonly string[]): string | undefined {
+  if (description.length > DESCRIPTION_MAX) {
+    return `Description is over ${DESCRIPTION_MAX} characters.`;
+  }
+  if (/[<>]/.test(description)) return 'YouTube rejects < and > in descriptions.';
+  const allowed = new Set(candidates.map((tag) => tag.toLowerCase()));
+  const stray = parseHashtags(description).filter((tag) => !allowed.has(tag));
+  return stray.length > 0 ? `Not in this job's hashtag list: ${stray.join(' ')}` : undefined;
+}
+
+function tagsError(tags: string[]): string | undefined {
+  const length = tagsLength(tags);
+  if (length > TAGS_MAX) return `Tags are ${length} / ${TAGS_MAX} characters.`;
+  if (tags.some((tag) => /[<>]/.test(tag))) return 'YouTube rejects < and > in tags.';
+  if (tags.some((tag) => tag.startsWith('#'))) {
+    return 'Tags are plain terms; hashtags belong in the description.';
+  }
+  return undefined;
+}
+
 /** YouTube's hard limits plus the rule that every hashtag comes from the job's candidates. */
 export function validateFields(
   fields: { title: string; description: string; tags: string[] },
   candidates: readonly string[],
 ): FieldErrors {
-  const errors: FieldErrors = {};
-  const title = fields.title.trim();
-  if (!title) errors.title = 'Title is required.';
-  else if (title.length > TITLE_MAX) errors.title = `Title is over ${TITLE_MAX} characters.`;
-  else if (/[<>]/.test(title)) errors.title = 'YouTube rejects < and > in titles.';
-
-  if (fields.description.length > DESCRIPTION_MAX) {
-    errors.description = `Description is over ${DESCRIPTION_MAX} characters.`;
-  } else if (/[<>]/.test(fields.description)) {
-    errors.description = 'YouTube rejects < and > in descriptions.';
-  } else {
-    const allowed = new Set(candidates.map((tag) => tag.toLowerCase()));
-    const stray = parseHashtags(fields.description).filter((tag) => !allowed.has(tag));
-    if (stray.length > 0) errors.description = `Not in this job's hashtag list: ${stray.join(' ')}`;
-  }
-
-  const length = tagsLength(fields.tags);
-  if (length > TAGS_MAX) errors.tags = `Tags are ${length} / ${TAGS_MAX} characters.`;
-  else if (fields.tags.some((tag) => /[<>]/.test(tag)))
-    errors.tags = 'YouTube rejects < and > in tags.';
-  else if (fields.tags.some((tag) => tag.startsWith('#'))) {
-    errors.tags = 'Tags are plain terms; hashtags belong in the description.';
-  }
-  return errors;
+  const found = {
+    title: titleError(fields.title),
+    description: descriptionError(fields.description, candidates),
+    tags: tagsError(fields.tags),
+  };
+  return Object.fromEntries(
+    Object.entries(found).filter(([, message]) => message !== undefined),
+  ) as FieldErrors;
 }

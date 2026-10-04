@@ -8,6 +8,7 @@ import { signedReadUrl, uploadFile } from './gcs';
 import { listChunks, ok, type JobDoc } from './jobs';
 import { chatJson, stepDeadline } from './model';
 import { stripNumerics } from './numerics';
+import { isFiniteNumber, isString, shape } from './shape';
 import { digestChunks } from './smart-pick';
 import { agentInput, agentOutput, invokeAgent, type AgentSpan, type ChatMessage } from './tracing';
 
@@ -27,15 +28,10 @@ export const HOOK_SCHEMA = {
 
 export type RawHook = { window: number; lengthSec: number; reason: string };
 
+const RAW_HOOK = shape({ window: isFiniteNumber, lengthSec: isFiniteNumber, reason: isString });
+
 export function isRawHook(value: unknown): value is RawHook {
-  const v = value as RawHook | null;
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    Number.isFinite(v.window) &&
-    Number.isFinite(v.lengthSec) &&
-    typeof v.reason === 'string'
-  );
+  return RAW_HOOK(value);
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -137,6 +133,13 @@ const FLOOR_LUFS = -70;
 const meanOf = (points: LoudnessPoint[]) =>
   points.reduce((sum, p) => sum + Math.max(FLOOR_LUFS, p.m), 0) / points.length;
 
+/** Mean loudness in the span after `t` minus the span before it; null at the curve's edges. */
+function riseAt(curve: LoudnessPoint[], t: number): number | null {
+  const before = curve.filter((p) => p.t > t - RISE_SPAN_SEC && p.t <= t);
+  const after = curve.filter((p) => p.t > t && p.t <= t + RISE_SPAN_SEC);
+  return before.length === 0 || after.length === 0 ? null : meanOf(after) - meanOf(before);
+}
+
 /**
  * Places the cut inside the model's window from ffmpeg's loudness: at the biggest jump in
  * momentary loudness (the hit the hook starts on), backed up to the quietest moment in the second
@@ -150,13 +153,9 @@ export function placeCut(
   const latest = Math.max(0, cut.sourceSec - cut.lengthSec);
   let onset = cut.windowStart;
   let best = MIN_RISE_LU;
-  for (const { t } of curve) {
-    if (t < cut.windowStart || t >= cut.windowEnd) continue;
-    const before = curve.filter((p) => p.t > t - RISE_SPAN_SEC && p.t <= t);
-    const after = curve.filter((p) => p.t > t && p.t <= t + RISE_SPAN_SEC);
-    if (before.length === 0 || after.length === 0) continue;
-    const rise = meanOf(after) - meanOf(before);
-    if (rise > best) {
+  for (const { t } of curve.filter((p) => p.t >= cut.windowStart && p.t < cut.windowEnd)) {
+    const rise = riseAt(curve, t);
+    if (rise !== null && rise > best) {
       best = rise;
       onset = t;
     }
@@ -177,8 +176,8 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
     songTitle: job.songTitle,
     notes: job.notes,
     sourceDurationSec: short.sourceDurationSec,
-    chunks,
     skipped: short.skipped,
+    chunks,
   };
   const result = await invokeAgent('hook-pick', async (span) => {
     const picked = await runHook(ctx, stepDeadline() - LOUDNESS_RESERVE_MS, span);
@@ -228,8 +227,10 @@ export async function renderStep(job: JobDoc): Promise<Partial<JobDoc>> {
     await rm(local, { force: true });
   }
   const probed = await probe(await signedReadUrl(object));
-  if (!(probed.durationSec > 0)) throw new Error('The rendered Short has no playable video.');
-  return ok({ state: 'REVIEW', object, probe: probed, short: { ...short, renders } });
+  if (!Number.isFinite(probed.durationSec) || probed.durationSec <= 0) {
+    throw new Error('The rendered Short has no playable video.');
+  }
+  return ok({ state: 'REVIEW', probe: probed, short: { ...short, renders }, object });
 }
 
 function requireShort(job: JobDoc): Short {

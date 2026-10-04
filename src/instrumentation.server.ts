@@ -1,7 +1,7 @@
-import * as Sentry from '@sentry/sveltekit';
+import { init } from '@sentry/sveltekit';
 import { scrubBreadcrumb, scrubEvent, scrubSpan } from '$lib/scrub';
 
-Sentry.init({
+init({
   dsn: process.env.PUBLIC_SENTRY_DSN,
   // Every job is one complete trace, upload through verify.
   tracesSampleRate: 1,

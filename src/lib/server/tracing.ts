@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/sveltekit';
+import { getTraceData, startNewTrace, startSpan, type Span } from '@sentry/sveltekit';
 
 export const MODEL_NAME = 'gemma-4-12b-it';
 export const PROVIDER = 'llama.cpp';
@@ -6,7 +6,7 @@ export const PROVIDER = 'llama.cpp';
 export const PIPELINE = 'soundboard';
 
 export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-pick';
-export type AgentSpan = Sentry.Span;
+export type AgentSpan = Span;
 
 type Part =
   | { type: 'text'; text: string }
@@ -15,7 +15,7 @@ type Part =
 
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string | Part[] };
 
-const dataUrlMime = (url: string) => url.match(/^data:([^;,]+)/)?.[1] ?? 'unknown';
+const dataUrlMime = (url: string) => /^data:([^;,]+)/.exec(url)?.[1] ?? 'unknown';
 const base64Bytes = (b64: string) => {
   const padding = b64.endsWith('==') ? 2 : Number(b64.endsWith('='));
   return Math.floor((b64.length * 3) / 4) - padding;
@@ -48,11 +48,8 @@ export function redactMessages(messages: ChatMessage[]): unknown[] {
 }
 
 /** `invoke_agent` span; model and tool spans started inside become its children. */
-export function invokeAgent<T>(
-  agent: AgentName,
-  fn: (span: Sentry.Span) => Promise<T>,
-): Promise<T> {
-  return Sentry.startSpan(
+export function invokeAgent<T>(agent: AgentName, fn: (span: Span) => Promise<T>): Promise<T> {
+  return startSpan(
     {
       op: 'gen_ai.invoke_agent',
       name: `invoke_agent ${agent}`,
@@ -121,7 +118,7 @@ export function chatSpan<T extends ChatReply>(
   params: { agent: AgentName; temperature: number; maxTokens: number },
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Sentry.startSpan(
+  return startSpan(
     {
       op: 'gen_ai.chat',
       name: `chat ${MODEL_NAME}`,
@@ -177,9 +174,9 @@ export function toolSpan<T>(
   agent: string,
   tool: string,
   args: Record<string, unknown>,
-  fn: (span: Sentry.Span) => Promise<T>,
+  fn: (span: Span) => Promise<T>,
 ): Promise<T> {
-  return Sentry.startSpan(
+  return startSpan(
     {
       op: 'gen_ai.execute_tool',
       name: `execute_tool ${tool}`,
@@ -197,11 +194,11 @@ export function toolSpan<T>(
 
 /** Starts a fresh trace for a new job and returns the headers every later step continues from. */
 export function startJobTrace(jobId: string): { sentryTrace: string; baggage: string } | null {
-  return Sentry.startNewTrace(() =>
-    Sentry.startSpan(
+  return startNewTrace(() =>
+    startSpan(
       { op: 'job.create', name: 'job', forceTransaction: true, attributes: { 'job.id': jobId } },
       () => {
-        const data = Sentry.getTraceData();
+        const data = getTraceData();
         const sentryTrace = data['sentry-trace'];
         return sentryTrace ? { sentryTrace, baggage: data.baggage ?? '' } : null;
       },

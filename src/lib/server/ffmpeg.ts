@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import * as Sentry from '@sentry/sveltekit';
+import type { Readable } from 'node:stream';
+import { startSpan } from '@sentry/sveltekit';
 import type { Measurements, Probe, Reframe } from '$lib/types';
 
 /** Gemma's audio input caps at 30 s; each analyze step reads one window this long. */
@@ -12,6 +13,10 @@ const SILENCE_FILTER = 'silencedetect=n=-60dB:d=2';
 // full scale and its peak count becomes a clipped-sample count.
 const MEASURE_FILTER = `ebur128=peak=true:framelog=verbose,aformat=sample_fmts=s16,astats=measure_perchannel=none:measure_overall=Peak_level+Peak_count,${SILENCE_FILTER}`;
 
+/** No banner or progress lines: stderr carries only what the parsers read. */
+const QUIET = ['-hide_banner', '-nostats'] as const;
+const FILTER_GRAPH = '-filter_complex';
+
 type RunResult = { stdout: Buffer; stderr: string; fd3: Buffer };
 
 type Task = 'probe' | 'measure' | 'window' | 'loudness' | 'render';
@@ -21,7 +26,7 @@ type Task = 'probe' | 'measure' | 'window' | 'loudness' | 'render';
  * so they never reach the span.
  */
 function run(task: Task, command: string, args: string[], timeoutMs: number): Promise<RunResult> {
-  return Sentry.startSpan(
+  return startSpan(
     {
       op: 'process.ffmpeg',
       name: `${command} ${task}`,
@@ -42,7 +47,7 @@ function spawnRun(command: string, args: string[], timeoutMs: number): Promise<R
     const fd3: Buffer[] = [];
     child.stdout?.on('data', (c: Buffer) => out.push(c));
     child.stderr?.on('data', (c: Buffer) => err.push(c));
-    (child.stdio[3] as NodeJS.ReadableStream | null)?.on('data', (c: Buffer) => fd3.push(c));
+    (child.stdio[3] as Readable | null)?.on('data', (c: Buffer) => fd3.push(c));
     child.on('error', reject);
     child.on('close', (code) => {
       const stderr = Buffer.concat(err).toString('utf8');
@@ -54,7 +59,7 @@ function spawnRun(command: string, args: string[], timeoutMs: number): Promise<R
         );
         return;
       }
-      resolve({ stdout: Buffer.concat(out), stderr, fd3: Buffer.concat(fd3) });
+      resolve({ stdout: Buffer.concat(out), fd3: Buffer.concat(fd3), stderr });
     });
   });
 }
@@ -106,13 +111,13 @@ const num = (match: RegExpMatchArray | null): number | null => {
  */
 export function parseMeasurements(stderr: string, offsetSec: number, endSec: number): Measurements {
   const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
-  const peakLevelDb = num(stderr.match(/Peak level dB:\s*(-?[\d.]+|-?inf)/));
-  const peakCount = num(stderr.match(/Peak count:\s*([\d.]+)/)) ?? 0;
+  const peakLevelDb = num(/Peak level dB:\s*(-?[\d.]+|-?inf)/.exec(stderr));
+  const peakCount = num(/Peak count:\s*([\d.]+)/.exec(stderr)) ?? 0;
   const silences: Measurements['silences'] = [];
   let open: number | null = null;
   for (const line of stderr.split('\n')) {
-    const start = line.match(/silence_start:\s*(-?[\d.]+)/);
-    const end = line.match(/silence_end:\s*(-?[\d.]+)/);
+    const start = /silence_start:\s*(-?[\d.]+)/.exec(line);
+    const end = /silence_end:\s*(-?[\d.]+)/.exec(line);
     if (start) open = Number(start[1]);
     if (end) {
       silences.push({
@@ -124,11 +129,11 @@ export function parseMeasurements(stderr: string, offsetSec: number, endSec: num
   }
   if (open !== null) silences.push({ start: round(offsetSec + open), end: round(endSec) });
   return {
-    integratedLufs: num(summary.match(/I:\s*(-?[\d.]+|-?inf) LUFS/)),
-    truePeakDbtp: num(summary.match(/Peak:\s*(-?[\d.]+|-?inf) dBFS/)),
-    peakLevelDb,
+    integratedLufs: num(/I:\s*(-?[\d.]+|-?inf) LUFS/.exec(summary)),
+    truePeakDbtp: num(/Peak:\s*(-?[\d.]+|-?inf) dBFS/.exec(summary)),
     // astats counts how often the peak level recurs; that is clipping only when the peak is 0 dBFS.
     clippedSamples: peakLevelDb !== null && peakLevelDb >= -0.01 ? Math.round(peakCount) : 0,
+    peakLevelDb,
     silences,
   };
 }
@@ -150,18 +155,7 @@ export async function measureFile(url: string, durationSec: number): Promise<Mea
   const { stderr } = await run(
     'measure',
     'ffmpeg',
-    [
-      '-hide_banner',
-      '-nostats',
-      '-vn',
-      '-i',
-      url,
-      '-filter_complex',
-      `[0:a:0]${MEASURE_FILTER}`,
-      '-f',
-      'null',
-      '-',
-    ],
+    [...QUIET, '-vn', '-i', url, FILTER_GRAPH, `[0:a:0]${MEASURE_FILTER}`, '-f', 'null', '-'],
     110_000,
   );
   return parseMeasurements(stderr, 0, durationSec);
@@ -202,15 +196,14 @@ export async function extractWindow(
     'window',
     'ffmpeg',
     [
-      '-hide_banner',
-      '-nostats',
+      ...QUIET,
       '-ss',
       startSec.toFixed(3),
       '-t',
       durationSec.toFixed(3),
       '-i',
       url,
-      '-filter_complex',
+      FILTER_GRAPH,
       graph,
       '-map',
       '[ms]',
@@ -270,8 +263,7 @@ export async function loudnessCurve(
     'loudness',
     'ffmpeg',
     [
-      '-hide_banner',
-      '-nostats',
+      ...QUIET,
       '-ss',
       startSec.toFixed(3),
       '-t',
@@ -279,7 +271,7 @@ export async function loudnessCurve(
       '-vn',
       '-i',
       url,
-      '-filter_complex',
+      FILTER_GRAPH,
       '[0:a:0]ebur128',
       '-f',
       'null',
@@ -327,8 +319,7 @@ export async function renderShort(
     'render',
     'ffmpeg',
     [
-      '-hide_banner',
-      '-nostats',
+      ...QUIET,
       '-loglevel',
       'error',
       '-y',
@@ -338,7 +329,7 @@ export async function renderShort(
       cut.lengthSec.toFixed(3),
       '-i',
       sourceUrl,
-      '-filter_complex',
+      FILTER_GRAPH,
       shortFilter(cut.reframe),
       '-map',
       '[v]',

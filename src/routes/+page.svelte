@@ -22,11 +22,10 @@
   let message = $state('');
 
   const tooLong = $derived(duration > maxMinutes * 60);
-  const canStart = $derived(
-    Boolean(file) && songTitle.trim().length > 0 && duration > 0 && !tooLong && !busy,
-  );
+  const picked = $derived(Boolean(file) && duration > 0 && songTitle.trim().length > 0);
+  const canStart = $derived(picked && !tooLong && !busy);
 
-  function pick(event: Event) {
+  const pick = (event: Event) => {
     const input = event.currentTarget as HTMLInputElement;
     const chosen = input.files?.[0] ?? null;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -35,9 +34,9 @@
     message = '';
     // The monitor plays the local file at once, while the upload runs.
     objectUrl = chosen ? URL.createObjectURL(chosen) : null;
-  }
+  };
 
-  async function start(event: SubmitEvent) {
+  const start = async (event: SubmitEvent) => {
     event.preventDefault();
     if (!file || !objectUrl || !canStart) return;
     busy = true;
@@ -49,9 +48,9 @@
         songTitle: songTitle.trim(),
         notes: notes.trim(),
         filename: file.name,
-        contentType,
         size: file.size,
         durationSec: duration,
+        contentType,
       });
       if (uploadUrl) setPending(id, { file, uploadUrl, objectUrl, contentType });
       objectUrl = null;
@@ -60,9 +59,9 @@
       message = error instanceof ApiError ? error.message : 'Could not start the run.';
       busy = false;
     }
-  }
+  };
 
-  async function runSample(sampleId: string) {
+  const runSample = async (sampleId: string) => {
     busy = true;
     message = '';
     try {
@@ -72,7 +71,7 @@
       message = error instanceof ApiError ? error.message : 'Could not start the sample.';
       busy = false;
     }
-  }
+  };
 
   onDestroy(() => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);

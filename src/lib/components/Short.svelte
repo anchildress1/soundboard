@@ -72,10 +72,10 @@
   );
   const canRecut = $derived(editable && changed && Object.keys(errors).length === 0 && !busy);
 
-  function submit(event: SubmitEvent) {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     if (canRecut) onrecut({ ...cut, reframe });
-  }
+  };
 </script>
 
 <div class="short">

@@ -17,8 +17,8 @@ export async function signedUploadUrl(object: string, contentType: string): Prom
       version: 'v4',
       action: 'write',
       expires: Date.now() + UPLOAD_TTL_MS,
-      contentType,
       extensionHeaders: { 'x-goog-content-length-range': CONTENT_LENGTH_RANGE },
+      contentType,
     });
   return url;
 }

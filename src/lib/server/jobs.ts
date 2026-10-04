@@ -269,6 +269,50 @@ export function fail(state: JobState, message: string): Partial<JobDoc> {
   return { state: 'FAILED', failedState: state, error: message };
 }
 
+/** The Short job cut from the video `current`, before its hook is picked. */
+function shortDoc(current: JobDoc, id: string): JobDoc {
+  const base = newJobDoc(
+    {
+      owner: current.owner,
+      channel: current.channel,
+      songTitle: current.songTitle,
+      notes: current.notes,
+      filename: `${current.filename.replace(/\.[^.]+$/, '')} (Short).mp4`,
+      contentType: 'video/mp4',
+      object: null,
+      sampleId: current.sampleId,
+      liveVideoId: null,
+      ipHash: current.ipHash,
+      trace: current.trace,
+    },
+    id,
+  );
+  return {
+    ...base,
+    state: 'HOOK',
+    hashtagCandidates: current.hashtagCandidates,
+    audience: current.audience,
+    pickVersion: 1,
+    sourceObject: current.object,
+    short: {
+      parentId: current.id,
+      sourceDurationSec: current.probe?.durationSec ?? 0,
+      reframe: 'blur',
+      hook: null,
+      skipped: [],
+      renders: 0,
+      modelMs: 0,
+    },
+  };
+}
+
+/** The video's Short, unless it was discarded or is gone. */
+async function liveShortId(tx: Transaction, id: string | null): Promise<string | null> {
+  if (!id) return null;
+  const snap = await tx.get(jobs().doc(id));
+  return snap.exists && (snap.data() as JobDoc).state !== 'DISCARDED' ? id : null;
+}
+
 export type ShortStart = { id: string } | { blocked: string } | { noPick: true } | null;
 
 /**
@@ -290,12 +334,8 @@ export async function createShort(
     const snap = await tx.get(parentRef);
     const current = snap.exists ? (snap.data() as JobDoc) : null;
     if (!current || !states.includes(current.state)) return null;
-    if (current.shortId) {
-      const existing = await tx.get(jobs().doc(current.shortId));
-      if (existing.exists && (existing.data() as JobDoc).state !== 'DISCARDED') {
-        return { id: current.shortId };
-      }
-    }
+    const live = await liveShortId(tx, current.shortId);
+    if (live) return { id: live };
     const pickSnap =
       current.pickVersion === null
         ? null
@@ -309,39 +349,7 @@ export async function createShort(
       version: 1,
       skipped: false,
     };
-    const base = newJobDoc(
-      {
-        owner: current.owner,
-        channel: current.channel,
-        songTitle: current.songTitle,
-        notes: current.notes,
-        filename: `${current.filename.replace(/\.[^.]+$/, '')} (Short).mp4`,
-        contentType: 'video/mp4',
-        object: null,
-        sampleId: current.sampleId,
-        liveVideoId: null,
-        ipHash: current.ipHash,
-        trace: current.trace,
-      },
-      id,
-    );
-    const doc: JobDoc = {
-      ...base,
-      state: 'HOOK',
-      hashtagCandidates: current.hashtagCandidates,
-      audience: current.audience,
-      pickVersion: 1,
-      sourceObject: current.object,
-      short: {
-        parentId: current.id,
-        sourceDurationSec: current.probe?.durationSec ?? 0,
-        reframe: 'blur',
-        hook: null,
-        skipped: [],
-        renders: 0,
-        modelMs: 0,
-      },
-    };
+    const doc = shortDoc(current, id);
     tx.set(jobs().doc(id), doc);
     tx.set(jobs().doc(id).collection('pick').doc(pad(1)), pick);
     tx.update(parentRef, { shortId: id, updatedAt: Date.now() });

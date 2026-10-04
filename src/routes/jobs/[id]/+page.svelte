@@ -66,66 +66,65 @@
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
 
+  // Reading `view` reruns this whenever a new view lands.
   $effect(() => {
-    void view;
-    stepStartedAt = now = Date.now();
+    if (view) stepStartedAt = now = Date.now();
   });
 
   $effect(() => {
-    if (!working) return;
-    const tick = setInterval(() => (now = Date.now()), 1000);
+    const tick = working ? setInterval(() => (now = Date.now()), 1000) : undefined;
     return () => clearInterval(tick);
   });
 
-  async function run() {
+  const run = async () => {
     if (driving) return;
     driving = true;
     try {
       await drive(view, {
         step: () => step(job.id, data.trace),
-        sleep,
         stopped: () => stopped,
         onView: (next) => {
           view = next;
           message = next.job.error ?? '';
         },
         onError: (text) => (message = text),
+        sleep,
       });
     } finally {
       driving = false;
     }
-  }
+  };
 
   /** Signed URLs change on every response; the player only reloads for a new render. */
-  function showShort(next: JobView) {
+  const showShort = (next: JobView) => {
     const renders = shortView?.job.short?.renders;
     shortView = next;
     if (next.playbackUrl && (next.job.short?.renders !== renders || !shortSrc)) {
       shortSrc = next.playbackUrl;
     }
-  }
+  };
 
-  async function runShort() {
+  const runShort = async () => {
     if (drivingShort || !shortView) return;
     drivingShort = true;
     const id = shortView.job.id;
     try {
       await drive(shortView, {
         step: () => step(id, data.trace),
-        sleep,
         stopped: () => stopped || shortView?.job.id !== id,
         onView: (next) => {
           showShort(next);
           shortMessage = next.job.error ?? '';
         },
         onError: (text) => (shortMessage = text),
+        sleep,
       });
     } finally {
       drivingShort = false;
     }
-  }
+  };
 
-  async function actShort(name: ActionName, body: unknown = {}) {
+  const actShort = async (name: ActionName, body: unknown = {}) => {
     shortBusy = true;
     shortMessage = '';
     shortErrors = {};
@@ -147,9 +146,9 @@
     } finally {
       shortBusy = false;
     }
-  }
+  };
 
-  async function act(name: 'approve' | 'rerun' | 'discard' | 'retry', body: unknown = {}) {
+  const act = async (name: Exclude<ActionName, 'recut' | 'short'>, body: unknown = {}) => {
     busy = true;
     message = '';
     serverErrors = {};
@@ -167,21 +166,22 @@
     } finally {
       busy = false;
     }
-  }
+  };
 
-  onMount(async () => {
-    if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
-    if (job.state !== 'AWAITING_UPLOAD') {
+  /** A reload mid-upload loses the file; the upload may still have landed. */
+  const resumeAfterReload = async () => {
+    view = await step(job.id, data.trace).catch(() => view);
+    if (view.job.state === 'AWAITING_UPLOAD') {
+      message = 'The upload was interrupted. Start a new run from the home page.';
+    } else {
       void run();
-      return;
     }
+  };
+
+  const finishUpload = async () => {
     const pending = takePending(job.id);
     if (!pending) {
-      // A reload mid-upload loses the file; the upload may still have landed.
-      view = await step(job.id, data.trace).catch(() => view);
-      if (view.job.state === 'AWAITING_UPLOAD')
-        message = 'The upload was interrupted. Start a new run from the home page.';
-      else void run();
+      await resumeAfterReload();
       return;
     }
     localUrl = pending.objectUrl;
@@ -200,6 +200,12 @@
     } catch (error) {
       message = error instanceof Error ? error.message : 'Upload failed';
     }
+  };
+
+  onMount(() => {
+    if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
+    if (job.state === 'AWAITING_UPLOAD') void finishUpload();
+    else void run();
   });
 
   onDestroy(() => {

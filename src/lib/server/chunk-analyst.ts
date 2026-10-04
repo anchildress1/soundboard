@@ -2,6 +2,7 @@ import type { Chunk, ChunkAnalysis, Measurements } from '$lib/types';
 import { extractWindow } from './ffmpeg';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep, stripNumerics } from './numerics';
+import { isString, isStrings, shape } from './shape';
 import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracing';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
@@ -28,24 +29,20 @@ export const CHUNK_SCHEMA = {
   },
 } as const;
 
-const isStrings = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((s) => typeof s === 'string');
+const CHUNK_ANALYSIS = shape({
+  visual: isString,
+  music: shape({
+    genre: isStrings,
+    tempoFeel: isString,
+    instrumentation: isStrings,
+    vocals: isString,
+    mood: isStrings,
+  }),
+  qualityFlags: isStrings,
+});
 
 export function isChunkAnalysis(value: unknown): value is ChunkAnalysis {
-  const v = value as ChunkAnalysis | null;
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    typeof v.visual === 'string' &&
-    typeof v.music === 'object' &&
-    v.music !== null &&
-    isStrings(v.music.genre) &&
-    typeof v.music.tempoFeel === 'string' &&
-    isStrings(v.music.instrumentation) &&
-    typeof v.music.vocals === 'string' &&
-    isStrings(v.music.mood) &&
-    isStrings(v.qualityFlags)
-  );
+  return CHUNK_ANALYSIS(value);
 }
 
 const INSTRUCTIONS = [
@@ -119,9 +116,9 @@ export async function analyzeChunk(input: {
       startSec: input.startSec,
       durationSec: input.durationSec,
       measurements: window.measurements,
-      analysis,
       raw: stripped,
       modelMs: ms,
+      analysis,
     };
   });
 }
