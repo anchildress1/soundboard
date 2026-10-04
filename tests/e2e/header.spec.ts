@@ -36,6 +36,9 @@ for (const [who, email, control] of [
     expect(wordmark && bar).toBeTruthy();
     expect(overlaps(wordmark!, bar!)).toBe(false);
     await expect(page.getByText('Release agent · Flies Like Robots')).toBeVisible();
+    const banner = page.getByRole('complementary', { name: 'Demo account' });
+    if (email === 'demo@e2e.test') await expect(banner).toBeVisible();
+    else await expect(banner).toHaveCount(0);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(page.viewportSize()!.width);
   });

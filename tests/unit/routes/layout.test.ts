@@ -138,6 +138,18 @@ describe('layout', () => {
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
   });
 
+  it('flags a demo session on every page with a banner', () => {
+    setup({ session: { email: 'demo@example.com', allowlisted: false, demo: true } });
+    const banner = screen.getByRole('complementary', { name: 'Demo account' });
+    expect(banner).toHaveTextContent('Uploads go private to the sandbox channel.');
+    expect(banner).toHaveTextContent("Nothing is saved to Nathan's memory.");
+  });
+
+  it('shows no demo banner to Nathan or a signed-out visitor', () => {
+    setup({ session: { email: 'nathan@example.com', allowlisted: true, demo: false } });
+    expect(screen.queryByRole('complementary', { name: 'Demo account' })).toBeNull();
+  });
+
   it('gives a demo account the stats and Sign out, without the brand guide', () => {
     setup({ channel, session: { email: 'demo@example.com', allowlisted: false, demo: true } });
     expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
