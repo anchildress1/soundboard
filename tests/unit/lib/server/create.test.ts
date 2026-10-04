@@ -208,8 +208,11 @@ describe('create from an own video', () => {
     ['size 0', upload({ size: 0 }), TOO_BIG],
     ['size over 2 GB', upload({ size: MAX_BYTES + 1 }), TOO_BIG],
     ['a non-numeric size', upload({ size: 'big' }), TOO_BIG],
+    ['a size sent as a string', upload({ size: '50000000' }), TOO_BIG],
     ['duration 0', upload({ durationSec: 0 }), TOO_LONG],
     ['a NaN duration', upload({ durationSec: 'long' }), TOO_LONG],
+    ['a null duration', upload({ durationSec: null }), TOO_LONG],
+    ['a duration in an array', upload({ durationSec: [180] }), TOO_LONG],
   ])('rejects %s with 400', async (_label, input, message) => {
     const error = await rejection(create(input as CreateInput, visitor));
     expect(error.status).toBe(400);

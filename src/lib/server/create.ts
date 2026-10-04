@@ -3,7 +3,7 @@ import type { JobOwner } from '$lib/types';
 import { ActionError } from './actions';
 import { signedUploadUrl, uploadObjectName } from './gcs';
 import { createJob, MAX_MINUTES, newJobId, type NewJob } from './jobs';
-import { text } from './http';
+import { num, text } from './http';
 import { hashIp, reserveVisitorRun } from './quota';
 import { getSample } from './samples';
 import { startJobTrace } from './tracing';
@@ -31,8 +31,8 @@ function parseUpload(input: Exclude<CreateInput, { sampleId: string }>, maxMinut
   const songTitle = text(input.songTitle).trim();
   const notes = text(input.notes).trim();
   const contentType = text(input.contentType);
-  const size = Number(input.size);
-  const duration = Number(input.durationSec);
+  const size = num(input.size);
+  const duration = num(input.durationSec);
   if (!songTitle) throw new ActionError(400, 'Song title is required.');
   if (songTitle.length > TITLE_MAX)
     throw new ActionError(400, `Song title is over ${TITLE_MAX} characters.`);

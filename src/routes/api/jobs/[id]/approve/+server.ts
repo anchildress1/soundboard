@@ -1,5 +1,5 @@
 import { approve } from '$lib/server/actions';
-import { readBody, respond, text } from '$lib/server/http';
+import { num, readBody, respond, text } from '$lib/server/http';
 import { getJob } from '$lib/server/jobs';
 import { splitTags } from '$lib/metadata';
 import { authorizedJob, buildView } from '$lib/server/view';
@@ -15,7 +15,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
     await approve(job, {
       title: text(body.title),
       description: text(body.description),
-      pickVersion: Number(body.pickVersion),
+      pickVersion: num(body.pickVersion),
       tags,
     });
     return buildView((await getJob(job.id)) ?? job);

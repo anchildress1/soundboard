@@ -88,6 +88,17 @@ describe('POST /api/jobs/[id]/recut', () => {
     expect((await recut('s', { startSec: 70, lengthSec: 30 })).status).toBe(400);
   });
 
+  it.each([
+    ['a null start', { startSec: null, lengthSec: 30 }],
+    ['a string start', { startSec: '70', lengthSec: 30 }],
+    ['an array length', { startSec: 70, lengthSec: [30] }],
+    ['a false length', { startSec: 70, lengthSec: false }],
+  ])('400s %s instead of reading it as a number', async (_label, cut) => {
+    seed('s');
+    expect((await recut('s', { ...cut, reframe: 'blur' })).status).toBe(400);
+    expect((store.get('jobs/s') as { state: string }).state).toBe('REVIEW');
+  });
+
   it('400s a framing that is not a string', async () => {
     seed('s');
     expect((await recut('s', { startSec: 70, lengthSec: 30, reframe: ['crop'] })).status).toBe(400);

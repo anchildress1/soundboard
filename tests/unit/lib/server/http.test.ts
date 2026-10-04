@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ActionError } from '$lib/server/actions';
-import { readBody, respond, text } from '$lib/server/http';
+import { num, readBody, respond, text } from '$lib/server/http';
 
 const post = (body: string) =>
   new Request('http://localhost/api', {
@@ -85,5 +85,25 @@ describe('text', () => {
   ])('reads %s as the fallback', (_label, value) => {
     expect(text(value)).toBe('');
     expect(text(value, 'video')).toBe('video');
+  });
+});
+
+describe('num', () => {
+  it('passes a JSON number through', () => {
+    expect(num(70)).toBe(70);
+    expect(num(-0.5)).toBe(-0.5);
+    expect(num(0)).toBe(0);
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['false', false],
+    ['an empty array', []],
+    ['a one-number array', [70]],
+    ['a numeric string', '70'],
+    ['an object', { n: 70 }],
+  ])('reads %s as NaN', (_label, value) => {
+    expect(num(value)).toBeNaN();
   });
 });

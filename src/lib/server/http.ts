@@ -20,6 +20,9 @@ export function text(value: unknown, fallback = ''): string {
   return fallback;
 }
 
+/** A JSON body field as a number: a JSON number as is, anything else NaN for validation to refuse. */
+export const num = (value: unknown): number => (typeof value === 'number' ? value : Number.NaN);
+
 export async function readBody(request: Request): Promise<Record<string, unknown>> {
   try {
     const body: unknown = await request.json();

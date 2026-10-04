@@ -123,6 +123,15 @@ describe('POST /api/jobs/[id]/approve', () => {
     expect(await response.json()).toMatchObject({ fields: { title: 'Title is required.' } });
   });
 
+  it('400s a recommendation version sent as a string', async () => {
+    seed('j');
+    const response = await approve('j', { ...fields, pickVersion: '1' });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: 'Name the recommendation version being approved.',
+    });
+  });
+
   it('treats missing fields as empty and reports the title', async () => {
     seed('j');
     const response = await approve('j', {});
