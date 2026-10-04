@@ -126,11 +126,14 @@ const video = (
 describe('durationBucket', () => {
   it.each([
     [0, 'short'],
-    [239, 'short'],
-    [240, 'medium'],
-    [1200, 'medium'],
-    [1201, 'long'],
-  ])('puts %is in %s', (seconds, bucket) => {
+    [179, 'short'],
+    [180, undefined],
+    [299, undefined],
+    [300, 'medium'],
+    [1140, 'medium'],
+    [1141, undefined],
+    [1261, 'long'],
+  ])('puts a %is upload in %s', (seconds, bucket) => {
     expect(durationBucket(seconds)).toBe(bucket);
   });
 });
@@ -160,6 +163,17 @@ describe('rankTags', () => {
       { tag: 'outrun', usedBy: 2 },
       { tag: 'darkwave', usedBy: 1 },
       { tag: 'retro', usedBy: 1 },
+    ]);
+  });
+
+  it("counts a result's description hashtags as tags, once per video", () => {
+    const tags = rankTags([
+      video('a', 10, ['glitch'], 'New one #Glitch #industrial'),
+      video('b', 5, [], '#industrial'),
+    ]);
+    expect(tags).toEqual([
+      { tag: 'industrial', usedBy: 2 },
+      { tag: 'glitch', usedBy: 1 },
     ]);
   });
 
@@ -223,6 +237,7 @@ describe('audienceEvidence', () => {
     expect(evidence.tags).toEqual([
       { tag: 'synthwave', usedBy: 2 },
       { tag: '80s', usedBy: 1 },
+      { tag: 'retro', usedBy: 1 },
     ]);
     expect(evidence.top.map((v) => v.title)).toEqual(['Two', 'One']);
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
@@ -275,6 +290,13 @@ describe('audienceEvidence', () => {
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.hashtags).toEqual(['#industrial']);
     expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
+  });
+
+  it('searches every length when the window crosses a bucket edge', async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [] }));
+    await audienceEvidence([chunk(['synthwave'])], 230);
+    const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(searchUrl.searchParams.has('videoDuration')).toBe(false);
   });
 
   it('returns empty evidence when no result is close to the upload length', async () => {

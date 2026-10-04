@@ -56,14 +56,17 @@ export function rankHashtags(descriptions: string[], limit = CANDIDATE_LIMIT): s
 }
 
 /**
- * Plain tags across videos ranked by how many videos use them, then by those videos' total views.
+ * Tags and hashtag terms across videos, ranked by how many videos use them, then by those videos'
+ * total views.
  * Case-folded for counting; the first spelling seen is kept.
  */
 export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): TagCandidate[] {
   const stats = new Map<string, { tag: string; videos: number; views: number }>();
   for (const video of videos) {
     const seen = new Set<string>();
-    for (const raw of video.tags) {
+    // A result's own hashtags are tags too: the same evidence, often more specific than its tags.
+    const hashtagTerms = parseHashtags(video.description).map((h) => h.slice(1));
+    for (const raw of [...video.tags, ...hashtagTerms]) {
       const tag = raw.trim();
       const key = tag.toLowerCase();
       if (!tag || tag.startsWith('#') || seen.has(key)) continue;
@@ -96,10 +99,16 @@ export function searchQuery(chunks: Chunk[]): string {
   return [...genreTerms(chunks), 'music video'].join(' ');
 }
 
-/** YouTube's search length bucket for a video: short under 4 minutes, long over 20. */
-export function durationBucket(seconds: number): VideoDuration {
-  if (seconds < 240) return 'short';
-  return seconds <= 1200 ? 'medium' : 'long';
+const bucketOf = (seconds: number): VideoDuration =>
+  seconds < 240 ? 'short' : seconds <= 1200 ? 'medium' : 'long';
+
+/**
+ * YouTube's search length bucket (short under 4 minutes, long over 20) holding the whole
+ * comparable window, or undefined when the window crosses a bucket edge.
+ */
+export function durationBucket(seconds: number): VideoDuration | undefined {
+  const low = bucketOf(seconds - LENGTH_TOLERANCE_SEC);
+  return low === bucketOf(seconds + LENGTH_TOLERANCE_SEC) ? low : undefined;
 }
 
 export function similarLength(videos: CatalogVideo[], seconds: number): CatalogVideo[] {
