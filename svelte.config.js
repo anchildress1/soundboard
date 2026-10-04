@@ -3,7 +3,8 @@ import adapter from '@sveltejs/adapter-node';
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   compilerOptions: {
-    runes: true,
+    // Runes for app code only; third-party components may still ship legacy syntax.
+    runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true),
   },
   kit: {
     adapter: adapter(),
