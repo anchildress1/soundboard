@@ -1,0 +1,31 @@
+pre-commit:
+  parallel: false
+  commands:
+    format:
+      glob: '*.{js,ts,svelte,json,md,yml,yaml,css,html}'
+      run: pnpm exec prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    lint:
+      glob: '*.{js,ts,svelte}'
+      run: pnpm exec eslint --max-warnings 0 {staged_files}
+    actionlint:
+      glob: '.github/workflows/*.{yml,yaml}'
+      run: actionlint {staged_files}
+    secret-scan:
+      run: gitleaks git --staged --no-banner --redact
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  parallel: false
+  commands:
+    typecheck:
+      run: make typecheck
+    test:
+      run: make test
+    # e2e then Lighthouse, chained so the two production builds never race into build/.
+    e2e-perf:
+      run: make e2e && make perf

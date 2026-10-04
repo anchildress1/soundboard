@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+build
+coverage
+playwright-report
+test-results
+.lighthouseci
+pnpm-lock.yaml
+**/CHANGELOG.md
+.release-please-manifest.json

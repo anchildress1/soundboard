@@ -1,0 +1,15 @@
+# Allowlist: upload only what the Docker build reads. Everything else stays local.
+*
+!Dockerfile
+!.dockerignore
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.npmrc
+!svelte.config.js
+!vite.config.ts
+!tsconfig.json
+!src/
+!src/**
+!static/
+!static/**

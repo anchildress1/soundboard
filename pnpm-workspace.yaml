@@ -1,0 +1,21 @@
+# Supply-chain guard: resolve only versions published at least 7 days ago (value in minutes).
+minimumReleaseAge: 10080
+
+# Direct dependencies pinned deliberately to their latest release at scaffold time (2026-10-03),
+# some newer than 7 days, plus the internal packages that ship in lockstep with them. The guard
+# still applies to every other transitive dependency.
+minimumReleaseAgeExclude:
+  - '@types/node'
+  - eslint
+  - globals
+  - lefthook
+  - 'lefthook-*'
+  - typescript-eslint
+  - '@typescript-eslint/*'
+  - vite
+  - vitest
+  - '@vitest/*'
+
+# lefthook's postinstall only installs hooks; `make install` runs `lefthook install` explicitly.
+allowBuilds:
+  lefthook: false
