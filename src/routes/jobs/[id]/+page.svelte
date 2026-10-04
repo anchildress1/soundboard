@@ -216,6 +216,7 @@
             jobId={job.id}
             songTitle={job.songTitle}
             {pick}
+            tags={fields.tags}
             ondone={(d) => (bandcampDone = d)}
           />
         {/snippet}

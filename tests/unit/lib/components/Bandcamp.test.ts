@@ -31,11 +31,17 @@ const field = (label: string) => screen.getByText(label, { selector: 'dt' }).clo
 
 describe('Bandcamp', () => {
   it('shows the track name, about, credits, and tags for the editor', () => {
-    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     expect(within(field('Track name') as HTMLElement).getByText('Vaporgram')).toBeInTheDocument();
     expect(screen.getByText('A terminal screen and some noise.')).toBeInTheDocument();
     expect(screen.getByText(/hacked and slashed by Nathan/)).toBeInTheDocument();
     expect(screen.getByText('vaporwave, glitch, Flies Like Robots')).toBeInTheDocument();
+  });
+
+  it('offers the tags it is given, not the pick draft, so edits reach Bandcamp', () => {
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: ['vaporwave'] });
+    expect(within(field('Tags') as HTMLElement).getByText('vaporwave')).toBeInTheDocument();
+    expect(screen.queryByText(/glitch/)).toBeNull();
   });
 
   it('marks itself done once every field is copied, and remembers it per pick', async () => {
@@ -44,6 +50,7 @@ describe('Bandcamp', () => {
       jobId: 'j1',
       songTitle: 'Vaporgram',
       pick,
+      tags: pick.tags,
       ondone: (value: boolean) => (done = value),
     };
     const { unmount } = render(Bandcamp, props);
@@ -60,7 +67,7 @@ describe('Bandcamp', () => {
 
   it('opens the editor in its own window, falling back to a tab when popups are blocked', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValueOnce({} as Window);
-    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     const link = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
     const opened = new MouseEvent('click', { bubbles: true, cancelable: true });
     link.dispatchEvent(opened);
@@ -78,7 +85,7 @@ describe('Bandcamp', () => {
   });
 
   it("opens Bandcamp's new-track page in a new tab", () => {
-    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     const open = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
     expect(open).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com/edit_track');
     expect(open).toHaveAttribute('target', '_blank');
@@ -86,7 +93,7 @@ describe('Bandcamp', () => {
   });
 
   it('copies one field and says so', async () => {
-    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     await fireEvent.click(screen.getByRole('button', { name: 'Copy About' }));
     expect(writeText).toHaveBeenCalledWith('A terminal screen and some noise.');
     expect(screen.getByRole('button', { name: 'Copy About' })).toHaveTextContent('Copied');
@@ -96,7 +103,7 @@ describe('Bandcamp', () => {
 
   it('shows no copied state when the clipboard refuses', async () => {
     writeText.mockRejectedValue(new Error('denied'));
-    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
     await fireEvent.click(screen.getByRole('button', { name: 'Copy Tags' }));
     expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copy');
     expect(screen.queryByText(/copied$/)).toBeNull();
@@ -107,6 +114,7 @@ describe('Bandcamp', () => {
       jobId: 'j1',
       songTitle: 'Vaporgram',
       pick: { ...pick, bandcamp: { about: '', credits: 'x' } },
+      tags: pick.tags,
     });
     expect(screen.getByRole('button', { name: 'Copy About' })).toBeDisabled();
   });

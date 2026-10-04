@@ -7,11 +7,14 @@
     jobId,
     songTitle,
     pick,
+    tags,
     ondone,
   }: {
     jobId: string;
     songTitle: string;
     pick: Pick;
+    /** The tags going to YouTube: the approved ones once approved, so both destinations agree. */
+    tags: string[];
     /** Called with whether every non-empty field has been copied. */
     ondone?: (done: boolean) => void;
   } = $props();
@@ -20,7 +23,7 @@
     { label: 'Track name', value: songTitle },
     { label: 'About', value: pick.bandcamp.about },
     { label: 'Credits', value: pick.bandcamp.credits },
-    { label: 'Tags', value: pick.tags.join(', ') },
+    { label: 'Tags', value: tags.join(', ') },
   ]);
 
   // Copies are remembered per pick in this browser, so a reload keeps the checklist.
@@ -68,7 +71,7 @@
     <!-- Bandcamp has no artist upload API and refuses to be framed, so the editor opens outside. -->
     <a
       class="btn ghost small"
-      href="https://flieslikerobots.bandcamp.com/edit_track"
+      href={EDITOR}
       target="_blank"
       rel="noopener noreferrer"
       onclick={openEditor}>Open Bandcamp's new-track page</a
