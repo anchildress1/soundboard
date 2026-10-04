@@ -498,6 +498,17 @@ describe('finalizePick', () => {
     expect(pick.description.endsWith('#SynthWave #indie #80s')).toBe(true);
   });
 
+  it('draws hashtags from the chosen tags first, so the description and tags agree', () => {
+    const pick = finalizePick(
+      raw({ tags: ['retrowave', 'new music', 'outrun'], hashtags: ['#indie', '#80s'] }),
+      fix({
+        candidates: ['#indie', '#80s', '#retrowave', '#newmusic'],
+        tagCandidates: cands('retrowave', 'new music', 'outrun'),
+      }),
+    );
+    expect(pick.hashtags).toEqual(['#retrowave', '#newmusic', '#indie', '#80s']);
+  });
+
   it('moves candidate hashtags from the body to the closing line and removes invented ones', () => {
     const pick = finalizePick(
       raw({
@@ -506,9 +517,9 @@ describe('finalizePick', () => {
       }),
       fix(),
     );
-    expect(pick.hashtags).toEqual(['#electronic', '#indie', '#synthwave']);
+    expect(pick.hashtags).toEqual(['#synthwave', '#electronic', '#indie']);
     expect(pick.description).toBe(
-      'Night drive vibes .\n\nMore soon\n\n#electronic #indie #synthwave',
+      'Night drive vibes .\n\nMore soon\n\n#synthwave #electronic #indie',
     );
     expect(allInCandidates(pick.description)).toBe(true);
   });

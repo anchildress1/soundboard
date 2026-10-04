@@ -107,7 +107,7 @@ export const CONTACT_LINE = 'Contact at flieslikerobots@gmail.com.';
 
 export const ARTIST_VOICE = [
   'Write the description the way the artist writes his own:',
-  '- Short, plain, literal. Open with "<song> by Flies Like Robots".',
+  '- Short, plain, literal. Never open with or repeat the title: YouTube shows it right above.',
   '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
   '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
@@ -163,7 +163,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     `title: at most ${TITLE_MAX} characters.`,
     `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
     ARTIST_VOICE,
-    'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
+    'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
     `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones. Include "${ARTIST_NAME}". Never the song title. Never invent one.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     ctx.brand
@@ -277,14 +277,22 @@ export function measuredFlags(m: Measurements | null): string[] {
 }
 
 /** 3 to 5 hashtags from the pool: the model's picks first, padded from the top of the pool. */
-function pickHashtags(draft: RawPick, pool: string[]): string[] {
+/** A tag's hashtag form: "dark synth" → "#darksynth". */
+const asHashtag = (tag: string) => `#${tag.toLowerCase().replaceAll(/[^\p{L}\p{N}_]/gu, '')}`;
+
+/**
+ * 3 to 5 hashtags from the pool. Hashtags that match the chosen tags come first, so the description
+ * and the tags field agree; then the model's other picks; then the top of the pool.
+ */
+function pickHashtags(draft: RawPick, pool: string[], tags: string[]): string[] {
   const byLower = new Map(pool.map((c) => [c.toLowerCase(), c]));
   const picked = [
-    ...new Set(
-      [...draft.hashtags, ...parseHashtags(draft.description)].map((t) =>
+    ...new Set([
+      ...tags.map(asHashtag),
+      ...[...draft.hashtags, ...parseHashtags(draft.description)].map((t) =>
         (t.startsWith('#') ? t : `#${t}`).toLowerCase(),
       ),
-    ),
+    ]),
   ]
     .filter((t) => byLower.has(t))
     .slice(0, 5);
@@ -339,7 +347,12 @@ function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
  */
 export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const draft = stripDeep(raw);
-  const hashtags = pickHashtags(draft, fix.candidates);
+  const tags = pickTags(
+    draft.tags,
+    tagPool(fix).map((c) => c.tag),
+    fix.songTitle,
+  );
+  const hashtags = pickHashtags(draft, fix.candidates, tags);
 
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
   let body = tidy(
@@ -351,12 +364,6 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const closing = hashtags.join(' ');
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
-
-  const tags = pickTags(
-    draft.tags,
-    tagPool(fix).map((c) => c.tag),
-    fix.songTitle,
-  );
 
   return {
     title: clip(tidy(draft.title), TITLE_MAX),
