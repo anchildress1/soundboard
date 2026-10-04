@@ -47,7 +47,7 @@ echo "Model:   $MODEL_IMAGE"
 echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
-  iam.googleapis.com --project "$GCP_PROJECT_ID" --quiet
+  iam.googleapis.com iamcredentials.googleapis.com --project "$GCP_PROJECT_ID" --quiet
 
 # Runtime identity: create it once, and let the deploying account attach it to the service
 # (Cloud Run requires iam.serviceAccounts.actAs on a user-managed service account).
@@ -86,6 +86,11 @@ gcloud storage buckets update "gs://${GCS_BUCKET}" --project "$GCP_PROJECT_ID" \
   --lifecycle-file gcs-lifecycle.json --quiet > /dev/null
 gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
   --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/storage.objectAdmin \
+  --project "$GCP_PROJECT_ID" --quiet > /dev/null
+# Cloud Run holds no private key, so signed upload/playback URLs are signed through the IAM
+# signBlob API: the runtime identity needs Token Creator on itself.
+gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
+  --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/iam.serviceAccountTokenCreator \
   --project "$GCP_PROJECT_ID" --quiet > /dev/null
 
 gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
