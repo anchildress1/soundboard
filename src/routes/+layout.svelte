@@ -33,7 +33,9 @@
 
   <header>
     <h1 class="wordmark">
-      <a href={resolve('/')}>Soundboard</a><small>Release agent · Flies Like Robots</small>
+      <a href={resolve('/')}>Soundboard</a><small
+        ><span class="role">Release agent ·</span> Flies Like Robots</small
+      >
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
@@ -110,15 +112,19 @@
     opacity: 0.9;
   }
 
+  /*
+   * Two fixed columns that never wrap: if the controls could drop to a second row, a web font
+   * arriving late would reflow the header and shift the whole page.
+   */
   header {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px 24px;
-    flex-wrap: wrap;
+    gap: 16px;
   }
 
   .wordmark {
+    min-width: 0;
     margin: 0;
     font: 400 clamp(52px, 8vw, 84px) / 0.9 var(--script);
     color: var(--magenta);
@@ -135,6 +141,9 @@
 
   .wordmark small {
     display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font: 600 11px/1 var(--sans);
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -143,9 +152,17 @@
     margin: 8px 0 0 6px;
   }
 
+  /* Phones keep the artist's name and drop the descriptor, rather than cutting the name off. */
+  @media (max-width: 440px) {
+    .role {
+      display: none;
+    }
+  }
+
   .bar {
     display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 10px;
   }
@@ -224,21 +241,17 @@
     animation: flicker-on 1.4s ease-out both;
   }
 
+  /* Starts and ends lit: the wordmark is the page's largest paint, so it must show at once. */
   @keyframes flicker-on {
-    0% {
-      opacity: 0;
-    }
-    10%,
-    22%,
-    40% {
-      opacity: 1;
-    }
-    16%,
-    30% {
-      opacity: 0.35;
-    }
+    0%,
+    12%,
+    26%,
     100% {
       opacity: 1;
+    }
+    6%,
+    20% {
+      opacity: 0.35;
     }
   }
 </style>
