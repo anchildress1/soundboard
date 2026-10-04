@@ -580,6 +580,19 @@ describe('makeShort', () => {
     },
   );
 
+  it('starts from fields approved after the caller read the video', async () => {
+    const stale = await makeJob({ patch: { probe: PROBE } });
+    const final = {
+      title: 'Approved',
+      description: 'Mine. #synthwave',
+      hashtags: ['#synthwave'],
+      tags: ['synthwave'],
+    };
+    await updateJob('job1', { state: 'PUBLISHING', finalFields: final });
+    const [stored] = await listPicks(await makeShort(stale));
+    expect(stored).toMatchObject({ ...final, version: 1 });
+  });
+
   it('returns the live Short instead of starting another', async () => {
     const job = await makeJob({ patch: { probe: PROBE } });
     const first = await makeShort(job);

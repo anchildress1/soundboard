@@ -33,6 +33,7 @@ function seed(id: string, patch: Record<string, unknown> = {}) {
     probe: PROBE,
     hashtagCandidates: ['#synthwave'],
     finalFields: null,
+    pickVersion: 1,
     shortId: null,
     trace: { sentryTrace: 't', baggage: 'b' },
     ...patch,

@@ -251,14 +251,17 @@ describe('createShort', () => {
         tags: [{ tag: 'synthwave', usedBy: 2 }],
         top: [],
       },
+      pickVersion: 3,
       ...patch,
     });
+    await savePick('p', pick(2));
+    await savePick('p', pick(3));
     return (await getJob('p'))!;
   }
 
-  it("creates a HOOK job carrying the parent's pick, candidates, trace, and owner", async () => {
+  it('creates a HOOK job carrying the pick on screen, candidates, trace, and owner', async () => {
     const job = await parent();
-    expect(await createShort(job, pick(3), SHORT_SOURCE_STATES, null, 's1')).toEqual({ id: 's1' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's1')).toEqual({ id: 's1' });
     const short = (await getJob('s1'))!;
     expect(short).toMatchObject({
       state: 'HOOK',
@@ -291,35 +294,35 @@ describe('createShort', () => {
 
   it('returns the live Short instead of starting a second one', async () => {
     const job = await parent();
-    await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's1');
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's1' });
+    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
+    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's1' });
     expect(store.has('jobs/s2')).toBe(false);
   });
 
   it('starts a new Short once the old one was discarded', async () => {
     const job = await parent();
-    await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
     await updateJob('s1', { state: 'DISCARDED' });
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's2' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's2' });
     expect((await getJob('p'))!.shortId).toBe('s2');
   });
 
   it('starts a new Short when the recorded one is gone', async () => {
     const job = await parent({ shortId: 'vanished' });
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's3')).toEqual({ id: 's3' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's3')).toEqual({ id: 's3' });
   });
 
   it('refuses a parent that left the allowed states, or is missing', async () => {
     const job = await parent({ state: 'DISCARDED' });
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's1')).toBeNull();
+    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's1')).toBeNull();
     expect(store.has('jobs/s1')).toBe(false);
-    expect(await createShort({ ...job, id: 'ghost' }, pick(1), SHORT_SOURCE_STATES)).toBeNull();
+    expect(await createShort({ ...job, id: 'ghost' }, SHORT_SOURCE_STATES)).toBeNull();
   });
 
   it('charges a new Short in the same transaction and starts it when the charge passes', async () => {
     const job = await parent();
     const charge = vi.fn(async () => null);
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, charge, 's1')).toEqual({
+    expect(await createShort(job, SHORT_SOURCE_STATES, charge, 's1')).toEqual({
       id: 's1',
     });
     expect(charge).toHaveBeenCalledOnce();
@@ -328,7 +331,7 @@ describe('createShort', () => {
   it('starts nothing when the charge names a cap', async () => {
     const job = await parent();
     const charge = async () => '5 runs per visitor per day. Try again tomorrow.';
-    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, charge, 's1')).toEqual({
+    expect(await createShort(job, SHORT_SOURCE_STATES, charge, 's1')).toEqual({
       blocked: '5 runs per visitor per day. Try again tomorrow.',
     });
     expect(store.has('jobs/s1')).toBe(false);
@@ -337,15 +340,38 @@ describe('createShort', () => {
 
   it('never charges for returning the live Short', async () => {
     const job = await parent();
-    await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
     const charge = vi.fn(async () => null);
-    await createShort(job, pick(1), SHORT_SOURCE_STATES, charge, 's2');
+    await createShort(job, SHORT_SOURCE_STATES, charge, 's2');
     expect(charge).not.toHaveBeenCalled();
+  });
+
+  it('starts from the approved fields over the pick, as read inside the transaction', async () => {
+    const stale = await parent();
+    const final = {
+      title: 'Approved',
+      description: 'Mine.',
+      hashtags: [],
+      tags: ['synthwave'],
+    };
+    await updateJob('p', { state: 'PUBLISHING', finalFields: final });
+    expect(await createShort(stale, SHORT_SOURCE_STATES, null, 's1')).toEqual({ id: 's1' });
+    expect(await listPicks('s1')).toEqual([{ ...pick(3), ...final, version: 1, skipped: false }]);
+  });
+
+  it('starts nothing, uncharged, when the video has no pick on screen', async () => {
+    const charge = vi.fn(async () => null);
+    const none = await parent({ pickVersion: null });
+    expect(await createShort(none, SHORT_SOURCE_STATES, charge, 's1')).toEqual({ noPick: true });
+    const gone = await parent({ pickVersion: 9 });
+    expect(await createShort(gone, SHORT_SOURCE_STATES, charge, 's2')).toEqual({ noPick: true });
+    expect(charge).not.toHaveBeenCalled();
+    expect(store.has('jobs/s1') || store.has('jobs/s2')).toBe(false);
   });
 
   it('keeps a filename without an extension readable', async () => {
     const job = await parent({ filename: 'master take' });
-    await createShort(job, pick(1), SHORT_SOURCE_STATES, null, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
     expect((await getJob('s1'))!.filename).toBe('master take (Short).mp4');
   });
 });

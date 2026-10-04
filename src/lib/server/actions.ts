@@ -219,17 +219,17 @@ export async function makeShort(job: JobDoc): Promise<string> {
   if (!(job.probe && job.probe.durationSec > 0)) {
     throw new ActionError(409, "This video's length is unknown.");
   }
-  const pick = await latestPick(job.id);
-  if (!pick) throw new ActionError(409, 'This video has no recommendation to start from.');
   // A Short costs a model call and a render, so a signed-out visitor pays for it with a run.
   const ipHash = job.owner === 'visitor' ? job.ipHash : null;
   const started = await createShort(
     job,
-    { ...pick, ...(job.finalFields ?? {}) },
     SHORT_SOURCE_STATES,
     ipHash ? (tx) => takeVisitorRun(tx, ipHash) : null,
   );
   if (!started) throw new ActionError(409, 'The video moved on before the Short could start.');
+  if ('noPick' in started) {
+    throw new ActionError(409, 'This video has no recommendation to start from.');
+  }
   if ('blocked' in started) throw new ActionError(429, started.blocked);
   return started.id;
 }

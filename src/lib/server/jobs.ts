@@ -269,18 +269,18 @@ export function fail(state: JobState, message: string): Partial<JobDoc> {
   return { state: 'FAILED', failedState: state, error: message };
 }
 
-export type ShortStart = { id: string } | { blocked: string } | null;
+export type ShortStart = { id: string } | { blocked: string } | { noPick: true } | null;
 
 /**
- * Cuts a Short job from a video job: the parent's reviewed metadata becomes the Short's pick v1, its
- * candidate lists come along so approve holds the same rules, and its trace is shared, so the Short
- * lands in the video's trace. One live Short per video: an existing one that isn't discarded is
- * returned instead, uncharged. A new one first passes `charge` (a run cap) in the same transaction.
- * Null when the parent left `states` before the transaction ran.
+ * Cuts a Short job from a video job. Everything is read inside the transaction, so an approval that
+ * lands first is what the Short starts from: the video's approved fields over its pick on screen
+ * become the Short's pick v1. Candidate lists come along so approve holds the same rules, and the
+ * trace is shared, so the Short lands in the video's trace. One live Short per video: an existing
+ * one that isn't discarded is returned instead, uncharged. A new one first passes `charge` (a run
+ * cap) in the same transaction. Null when the parent left `states` before the transaction ran.
  */
 export async function createShort(
   parent: JobDoc,
-  pick: Pick,
   states: readonly JobState[],
   charge: ((tx: Transaction) => Promise<string | null>) | null = null,
   id = newJobId(),
@@ -296,8 +296,19 @@ export async function createShort(
         return { id: current.shortId };
       }
     }
+    const pickSnap =
+      current.pickVersion === null
+        ? null
+        : await tx.get(parentRef.collection('pick').doc(pad(current.pickVersion)));
+    if (!pickSnap?.exists) return { noPick: true };
     const blocked = charge ? await charge(tx) : null;
     if (blocked) return { blocked };
+    const pick: StoredPick = {
+      ...(pickSnap.data() as StoredPick),
+      ...(current.finalFields ?? {}),
+      version: 1,
+      skipped: false,
+    };
     const base = newJobDoc(
       {
         owner: current.owner,
@@ -331,9 +342,8 @@ export async function createShort(
         modelMs: 0,
       },
     };
-    const stored: StoredPick = { ...pick, version: 1, skipped: false };
     tx.set(jobs().doc(id), doc);
-    tx.set(jobs().doc(id).collection('pick').doc(pad(1)), stored);
+    tx.set(jobs().doc(id).collection('pick').doc(pad(1)), pick);
     tx.update(parentRef, { shortId: id, updatedAt: Date.now() });
     return { id };
   });
