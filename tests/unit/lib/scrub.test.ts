@@ -129,6 +129,28 @@ describe('scrubSpan', () => {
     expect(span.attributes['job.ok']).toBe(true);
   });
 
+  it('scrubs string arrays and { value, unit } attribute objects', () => {
+    const span = scrubSpan({
+      name: 'fetch',
+      attributes: {
+        'url.list': [SIGNED, 'plain'],
+        'url.full': { value: SIGNED, unit: 'none' },
+        'url.query': { value: 'X-Goog-Signature=secret' },
+        'job.sizes': [1, 2],
+      },
+    });
+    expect(span.attributes['url.list']).toEqual([
+      'https://storage.googleapis.com/b/uploads/j1?[redacted]',
+      'plain',
+    ]);
+    expect(span.attributes['url.full']).toEqual({
+      value: 'https://storage.googleapis.com/b/uploads/j1?[redacted]',
+      unit: 'none',
+    });
+    expect(span.attributes['url.query']).toEqual({ value: '[redacted]' });
+    expect(span.attributes['job.sizes']).toEqual([1, 2]);
+  });
+
   it('leaves spans without credentials unchanged', () => {
     const span = { name: 'chat gemma-4-12b-it', attributes: { 'gen_ai.agent.name': 'smart-pick' } };
     expect(scrubSpan(structuredClone(span))).toEqual(span);

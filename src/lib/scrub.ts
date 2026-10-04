@@ -65,8 +65,17 @@ type StreamedSpanLike = { name: string; attributes: Record<string, unknown> };
 export function scrubSpan<T extends StreamedSpanLike>(span: T): T {
   span.name = scrubUrl(span.name);
   for (const [key, value] of Object.entries(span.attributes)) {
-    if (typeof value !== 'string') continue;
-    span.attributes[key] = key.endsWith('query') ? '[redacted]' : scrubUrl(value);
+    span.attributes[key] = scrubAttribute(key, value);
   }
   return span;
+}
+
+/** Raw attributes can be a string, a string array, or a `{ value, unit }` object. */
+function scrubAttribute(key: string, value: unknown): unknown {
+  if (typeof value === 'string') return key.endsWith('query') ? '[redacted]' : scrubUrl(value);
+  if (Array.isArray(value)) return value.map((item) => scrubAttribute(key, item));
+  if (typeof value === 'object' && value !== null && 'value' in value) {
+    return { ...value, value: scrubAttribute(key, value.value) };
+  }
+  return value;
 }
