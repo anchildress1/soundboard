@@ -265,6 +265,7 @@ function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     claim: null,
     trace: null,
     hashtagCandidates: null,
+    audience: null,
     upload: null,
     finalFields: null,
     pickVersion: null,
@@ -585,6 +586,9 @@ describe('runStep: PICK', () => {
       feedback: unknown[];
       skippedVersions?: { title: string }[];
       candidateHashtags: string[];
+      candidateTags: string[];
+      audienceTopVideos: unknown[];
+      recentUploads?: unknown[];
       brandGuide?: unknown;
     };
   };
@@ -611,6 +615,10 @@ describe('runStep: PICK', () => {
     expect(ctx.skippedVersions).toBeUndefined();
     expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+    // Own-video visitor runs never read FLR's catalog, so his credits can't reach the prompt.
+    expect(called(/playlistItems/)).toHaveLength(0);
+    expect(ctx.recentUploads).toBeUndefined();
+    expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
   });
 
   it('names the artist for a sample and leaves its live video out of the comparison set', async () => {
@@ -643,6 +651,12 @@ describe('runStep: PICK', () => {
         owner: 'nathan',
         channel: 'nathan',
         hashtagCandidates: ['#synthwave', '#retrowave', '#newmusic'],
+        audience: {
+          query: 'synthwave music video',
+          hashtags: ['#synthwave', '#retrowave', '#newmusic'],
+          tags: ['synthwave', 'outrun'],
+          top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
+        },
       }),
     );
     expect(saved().state).toBe('REVIEW');
@@ -650,6 +664,10 @@ describe('runStep: PICK', () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');
+    expect(ctx.candidateTags).toEqual(['synthwave', 'outrun', 'Flies Like Robots']);
+    expect(ctx.audienceTopVideos).toEqual([
+      { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
+    ]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     expect(ctx.feedback).toHaveLength(1);

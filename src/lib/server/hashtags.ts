@@ -1,11 +1,31 @@
 import { parseHashtags } from '$lib/metadata';
 import type { Chunk } from '$lib/types';
 import { toolSpan } from './tracing';
-import { searchMusicVideos, videosByIds } from './youtube';
+import { searchMusicVideos, videosByIds, type CatalogVideo, type VideoDuration } from './youtube';
 
 export const CANDIDATE_LIMIT = 30;
+export const SEARCH_RESULTS = 50;
+/** Evidence counts only from videos this close to the upload's length, which drops hour-long mixes. */
+export const LENGTH_TOLERANCE_SEC = 60;
+export const TAG_CANDIDATE_LIMIT = 40;
+export const TOP_VIDEO_COUNT = 5;
+const TOP_DESCRIPTION_CHARS = 700;
 
-/** The chunk analyst's most frequent genre terms, which seed the hashtag search. */
+/** One of the most-viewed genre search results, as the model sees it. */
+export type AudienceVideo = { title: string; description: string; tags: string[]; views: number };
+
+/**
+ * What the genre's audience responds to, from the genre search: the deterministic hashtag and tag
+ * candidates, and the most-viewed results as examples. Stored on the job so re-runs reuse it.
+ */
+export type AudienceEvidence = {
+  query: string;
+  hashtags: string[];
+  tags: string[];
+  top: AudienceVideo[];
+};
+
+/** The chunk analyst's most frequent genre terms, which seed the genre search. */
 export function genreTerms(chunks: Chunk[], limit = 2): string[] {
   const counts = new Map<string, number>();
   for (const chunk of chunks) {
@@ -32,25 +52,91 @@ export function rankHashtags(descriptions: string[], limit = CANDIDATE_LIMIT): s
     .map(([tag]) => tag);
 }
 
+/**
+ * Plain tags across videos ranked by how many videos use them, then by those videos' total views.
+ * Case-folded for counting; the first spelling seen is kept.
+ */
+export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): string[] {
+  const stats = new Map<string, { tag: string; videos: number; views: number }>();
+  for (const video of videos) {
+    const seen = new Set<string>();
+    for (const raw of video.tags) {
+      const tag = raw.trim();
+      const key = tag.toLowerCase();
+      if (!tag || tag.startsWith('#') || seen.has(key)) continue;
+      seen.add(key);
+      const entry = stats.get(key) ?? { tag, videos: 0, views: 0 };
+      entry.videos += 1;
+      entry.views += video.views;
+      stats.set(key, entry);
+    }
+  }
+  return [...stats.values()]
+    .sort((a, b) => b.videos - a.videos || b.views - a.views)
+    .slice(0, limit)
+    .map((entry) => entry.tag);
+}
+
+export function topVideos(videos: CatalogVideo[], count = TOP_VIDEO_COUNT): AudienceVideo[] {
+  return [...videos]
+    .sort((a, b) => b.views - a.views)
+    .slice(0, count)
+    .map((v) => ({
+      title: v.title,
+      description: v.description.slice(0, TOP_DESCRIPTION_CHARS),
+      tags: v.tags,
+      views: v.views,
+    }));
+}
+
 export function searchQuery(chunks: Chunk[]): string {
   return [...genreTerms(chunks), 'music video'].join(' ');
 }
 
+/** YouTube's search length bucket for a video: short under 4 minutes, long over 20. */
+export function durationBucket(seconds: number): VideoDuration {
+  if (seconds < 240) return 'short';
+  return seconds <= 1200 ? 'medium' : 'long';
+}
+
+export function similarLength(videos: CatalogVideo[], seconds: number): CatalogVideo[] {
+  return videos.filter((v) => Math.abs(v.durationSec - seconds) <= LENGTH_TOLERANCE_SEC);
+}
+
 /**
- * The deterministic candidate list: hashtags from FLR's recent descriptions plus the top music
- * videos for the analysis's genre terms. The model may only pick from this list.
+ * Runs the genre search once and derives every candidate list from it. With the upload's length,
+ * only results within a minute of it count.
  */
-export async function hashtagCandidates(
-  recentDescriptions: string[],
+export async function audienceEvidence(
   chunks: Chunk[],
-): Promise<string[]> {
+  durationSec: number | null,
+): Promise<AudienceEvidence> {
   const query = searchQuery(chunks);
   return toolSpan('smart-pick', 'hashtag_search', { query }, async (span) => {
-    const ids = await searchMusicVideos(query);
-    const found = await videosByIds(ids);
-    const candidates = rankHashtags([...recentDescriptions, ...found.map((v) => v.description)]);
-    span.setAttributes({ 'search.query': query, 'hashtag.candidate_count': candidates.length });
-    span.setAttribute('gen_ai.tool.call.result', JSON.stringify(candidates));
-    return candidates;
+    const ids = await searchMusicVideos(
+      query,
+      SEARCH_RESULTS,
+      durationSec === null ? undefined : durationBucket(durationSec),
+    );
+    const results = await videosByIds(ids);
+    const found = durationSec === null ? results : similarLength(results, durationSec);
+    const evidence: AudienceEvidence = {
+      query,
+      hashtags: rankHashtags(found.map((v) => v.description)),
+      tags: rankTags(found),
+      top: topVideos(found),
+    };
+    span.setAttributes({
+      'search.query': query,
+      'search.result_count': results.length,
+      'search.evidence_count': found.length,
+      'hashtag.candidate_count': evidence.hashtags.length,
+      'tag.candidate_count': evidence.tags.length,
+    });
+    span.setAttribute(
+      'gen_ai.tool.call.result',
+      JSON.stringify({ hashtags: evidence.hashtags, tags: evidence.tags }),
+    );
+    return evidence;
   });
 }

@@ -28,7 +28,7 @@
   {#if measured.length > 0}
     <p class="ffmpeg"><span>ffmpeg</span> {measured.join(' · ')}</p>
   {/if}
-  <p>Matched against the 5 most recent Flies Like Robots uploads.</p>
+  <p>Grounded in the most-viewed music videos for this genre.</p>
 </div>
 
 <style>

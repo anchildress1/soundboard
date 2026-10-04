@@ -31,6 +31,7 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
 });
 
 const candidates = ['#synthwave', '#retrowave', '#newmusic', '#electronic', '#indie', '#80s'];
+const tagCandidates = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'outrun'];
 
 const facts: Fact[] = [
   { key: 'artist-name', value: 'Flies Like Robots', kind: 'FACT', public: true },
@@ -47,6 +48,7 @@ const facts: Fact[] = [
 const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   songTitle: 'PeekaBoo',
   candidates,
+  tagCandidates,
   facts,
   useArtistName: true,
   measurements: null,
@@ -100,6 +102,8 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   measurements: null,
   recent: [],
   candidates,
+  tagCandidates,
+  audience: [],
   facts,
   feedback: [],
   skipped: [],
@@ -225,17 +229,78 @@ describe('buildPickMessages', () => {
     expect(body.artist).toBe('Flies Like Robots');
     expect(body.artistNotes).toBe('live take');
     expect(body.candidateHashtags).toEqual(candidates);
+    expect(body.candidateTags).toEqual([...tagCandidates, 'Flies Like Robots']);
     expect(body.ffmpeg).toEqual(measurements());
-    expect(system(messages)).toContain(', the artist name');
+    expect(system(messages)).toContain("recentUploads are the artist's own uploads");
+    expect(system(messages)).toContain('credit lines');
     expect(system(messages)).not.toContain('name no artist');
+  });
+
+  it('grounds title, description, and tags in the genre search', () => {
+    const audience = [{ title: 'Top hit', description: 'Credits.', tags: ['outrun'], views: 9000 }];
+    const messages = buildPickMessages(ctx({ audience }));
+    const body = context(messages);
+    expect(body.audienceTopVideos).toEqual(audience);
+    expect(system(messages)).toContain('most-viewed music videos in this genre');
+    expect(system(messages)).toContain('copied exactly from candidateTags');
+    expect(system(messages)).toContain('Never the song title');
+    expect(system(messages)).not.toMatch(/keep what already works/i);
+  });
+
+  it("sends the artist's uploads for identity only, without their tags", () => {
+    const recent = [
+      {
+        videoId: 'a',
+        title: 'A',
+        description: 'Written and performed by Nathan.',
+        tags: ['old tag'],
+        publishedAt: 'p',
+        thumbnailUrl: null,
+        views: 3,
+        durationSec: 0,
+        thumbnail: null,
+      },
+    ];
+    const uploads = context(buildPickMessages(ctx({ recent }))).recentUploads as object[];
+    expect(uploads).toEqual([
+      { title: 'A', description: 'Written and performed by Nathan.', publishedAt: 'p' },
+    ]);
   });
 
   it('sets artist null and forbids naming one when useArtistName is false', () => {
     const messages = buildPickMessages(ctx({ useArtistName: false }));
     expect(context(messages).artist).toBeNull();
     expect(system(messages)).toContain('name no artist');
-    expect(system(messages)).not.toContain('the artist name');
+    expect(system(messages)).not.toContain('recentUploads');
     expect(JSON.stringify(messages)).not.toMatch(/"artist":"Flies Like Robots"/);
+  });
+
+  it("gives signed-out own-video runs none of the artist's uploads, thumbnails, or name tags", () => {
+    const recent = [
+      {
+        videoId: 'a',
+        title: 'A',
+        description: 'Written and performed by Nathan.',
+        tags: [],
+        publishedAt: 'p',
+        thumbnailUrl: 'u',
+        views: 3,
+        durationSec: 0,
+        thumbnail: 'data:image/jpeg;base64,AAA',
+      },
+    ];
+    const messages = buildPickMessages(
+      ctx({
+        useArtistName: false,
+        recent,
+        tagCandidates: ['synthwave', 'Flies Like Robots', 'flr live'],
+      }),
+    );
+    const body = context(messages);
+    expect(body).not.toHaveProperty('recentUploads');
+    expect(body.candidateTags).toEqual(['synthwave']);
+    expect(userParts(messages)).toHaveLength(1);
+    expect(JSON.stringify(messages)).not.toContain('Written and performed');
   });
 
   it('omits empty notes, measurements, and skipped versions', () => {
@@ -276,6 +341,8 @@ describe('buildPickMessages', () => {
         tags: ['x'],
         publishedAt: 'p',
         thumbnailUrl: 'u',
+        views: 0,
+        durationSec: 0,
         thumbnail: 'data:image/jpeg;base64,AAA',
       },
       {
@@ -285,6 +352,8 @@ describe('buildPickMessages', () => {
         tags: [],
         publishedAt: 'p',
         thumbnailUrl: null,
+        views: 0,
+        durationSec: 0,
         thumbnail: null,
       },
       {
@@ -294,6 +363,8 @@ describe('buildPickMessages', () => {
         tags: [],
         publishedAt: 'p',
         thumbnailUrl: 'u',
+        views: 0,
+        durationSec: 0,
         thumbnail: 'data:image/png;base64,BBB',
       },
     ];
@@ -518,28 +589,45 @@ describe('finalizePick', () => {
     expect(pick.description.startsWith('Line one\n\nLine two\n\n')).toBe(true);
   });
 
-  it('removes plain-term tags #, dedupes case-insensitively, and drops empties', () => {
+  it('keeps only candidate tags, deduped, in the model order with candidate casing', () => {
     const pick = finalizePick(
-      raw({
-        tags: [
-          '#synthwave',
-          '##Retro',
-          'Synthwave',
-          'retro',
-          '  ',
-          'PeekaBoo',
-          'Flies Like Robots',
-        ],
-      }),
+      raw({ tags: ['#Synthwave', '##RETROWAVE', 'synthwave', 'synthpop', 'invented', '  '] }),
       fix(),
     );
-    expect(pick.tags).toEqual(['synthwave', 'Retro', 'PeekaBoo', 'Flies Like Robots']);
-    expect(pick.tags.some((t) => t.startsWith('#'))).toBe(false);
+    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', 'new music', '80s']);
+    expect(pick.tags.every((t) => tagCandidates.includes(t))).toBe(true);
+  });
+
+  it('never uses the song title as a tag, even when the search returns it', () => {
+    const pick = finalizePick(
+      raw({ tags: ['PeekaBoo', 'peekaboo official video', 'synthwave'] }),
+      fix({ tagCandidates: ['PeekaBoo', 'peekaboo official video', ...tagCandidates] }),
+    );
+    expect(pick.tags.some((t) => t.toLowerCase().includes('peekaboo'))).toBe(false);
+    expect(pick.tags[0]).toBe('synthwave');
+  });
+
+  it('pads to 5 from the top of the pool when the model picks nothing usable', () => {
+    const pick = finalizePick(raw({ tags: ['made up', 'PeekaBoo'] }), fix());
+    expect(pick.tags).toEqual(tagCandidates.slice(0, 5));
+  });
+
+  it('keeps more than 5 model picks without padding', () => {
+    const pick = finalizePick(raw({ tags: [...tagCandidates].reverse() }), fix());
+    expect(pick.tags).toEqual([...tagCandidates].reverse());
+  });
+
+  it('returns no tags when the search found none and the artist may not be named', () => {
+    const pick = finalizePick(
+      raw({ tags: ['synthwave'] }),
+      fix({ tagCandidates: [], useArtistName: false }),
+    );
+    expect(pick.tags).toEqual([]);
   });
 
   it('keeps tags within 500 characters by YouTube counting', () => {
     const tags = Array.from({ length: 60 }, (_, i) => `tag number ${i}`);
-    const pick = finalizePick(raw({ tags }), fix());
+    const pick = finalizePick(raw({ tags }), fix({ tagCandidates: tags }));
     expect(tagsLength(pick.tags)).toBeLessThanOrEqual(TAGS_MAX);
     expect(pick.tags.length).toBeGreaterThan(10);
     expect(pick.tags.length).toBeLessThan(tags.length);
@@ -547,8 +635,9 @@ describe('finalizePick', () => {
   });
 
   it('skips one oversize tag but keeps later ones that fit', () => {
-    const pick = finalizePick(raw({ tags: ['a', 'x'.repeat(600), 'b'] }), fix());
-    expect(pick.tags).toEqual(['a', 'b']);
+    const pool = ['a', 'x'.repeat(600), 'b'];
+    const pick = finalizePick(raw({ tags: pool }), fix({ tagCandidates: pool }));
+    expect(pick.tags).toEqual(['a', 'b', 'Flies Like Robots']);
   });
 
   it('clips the title to 100 characters at a word boundary', () => {
@@ -593,13 +682,17 @@ describe('finalizePick', () => {
       raw({
         title: 'PeekaBoo - Flies Like Robots',
         description: 'New from FLR. Flies  like robots fans rejoice.',
-        tags: ['Flies Like Robots', 'FLR', 'PeekaBoo', 'flr synthwave'],
+        tags: ['Flies Like Robots', 'FLR', 'PeekaBoo', 'flr synthwave', 'outrun'],
       }),
-      fix({ useArtistName: false }),
+      fix({
+        useArtistName: false,
+        tagCandidates: ['Flies Like Robots', 'flr synthwave', ...tagCandidates],
+      }),
     );
     expect(pick.title).toBe('PeekaBoo (Official Video)');
     expect(pick.description).not.toMatch(/flies\s+like\s+robots|\bflr\b/i);
-    expect(pick.tags).toEqual(['PeekaBoo', 'synthwave']);
+    expect(pick.tags[0]).toBe('outrun');
+    expect(pick.tags.some((t) => /flies like robots|\bflr\b|peekaboo/i.test(t))).toBe(false);
   });
 
   it('keeps the FLR name when useArtistName is true', () => {
@@ -608,7 +701,7 @@ describe('finalizePick', () => {
       fix(),
     );
     expect(pick.title).toBe('PeekaBoo - Flies Like Robots');
-    expect(pick.tags).toEqual(['Flies Like Robots']);
+    expect(pick.tags[0]).toBe('Flies Like Robots');
   });
 
   it('ignores a model title that leads with the artist', () => {

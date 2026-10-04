@@ -166,6 +166,8 @@ describe('buildBrandMessages', () => {
     tags: [],
     publishedAt: '',
     thumbnailUrl: null,
+    views: 0,
+    durationSec: 0,
     thumbnail,
   });
 

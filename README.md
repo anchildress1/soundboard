@@ -43,7 +43,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                                                                                    |
 | Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model                                                                  |
-| Metadata draft           | One title, description, hashtag set, and tag set, compared against the channel's 5 most recent videos                                                            |
+| Metadata draft           | One title, description, hashtag set, and tag set, grounded in the most-viewed music videos for its genre                                                         |
 | Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                                                                               |
 | Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts                                                                      |
 | Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                    |

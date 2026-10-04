@@ -4,7 +4,7 @@ import { approvedBrand } from './brand';
 import { analyzeChunk } from './chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from './ffmpeg';
 import { objectInfo, signedReadUrl } from './gcs';
-import { hashtagCandidates } from './hashtags';
+import { audienceEvidence } from './hashtags';
 import {
   claimJob,
   fail,
@@ -88,10 +88,11 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
   const nathan = job.owner === 'nathan';
+  const useArtistName = nathan || job.sampleId !== null;
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),
-    recentVideos(RECENT_COUNT, job.liveVideoId),
+    useArtistName ? recentVideos(RECENT_COUNT, job.liveVideoId) : [],
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
@@ -100,12 +101,8 @@ async function pick(job: JobDoc): Promise<StepOutput> {
     })),
   );
   return invokeAgent('smart-pick', async (span) => {
-    const candidates =
-      job.hashtagCandidates ??
-      (await hashtagCandidates(
-        recent.map((v) => v.description),
-        chunks,
-      ));
+    const audience =
+      job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
     const [facts, feedback, brand] = nathan
       ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
       : [PUBLIC_FACTS, [], null];
@@ -113,11 +110,13 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       {
         songTitle: job.songTitle,
         notes: job.notes,
-        useArtistName: nathan || job.sampleId !== null,
+        useArtistName,
         chunks,
         measurements: job.measurements,
         recent: withThumbs,
-        candidates,
+        candidates: audience.hashtags,
+        tagCandidates: audience.tags,
+        audience: audience.top,
         facts,
         feedback,
         skipped: picks
@@ -131,7 +130,12 @@ async function pick(job: JobDoc): Promise<StepOutput> {
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
     return {
-      ...ok({ state: 'REVIEW', hashtagCandidates: candidates, pickVersion: version }),
+      ...ok({
+        state: 'REVIEW',
+        hashtagCandidates: audience.hashtags,
+        audience,
+        pickVersion: version,
+      }),
       pick: { ...result.pick, version, modelMs: result.ms },
     };
   });

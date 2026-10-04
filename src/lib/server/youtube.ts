@@ -44,6 +44,8 @@ type VideoItem = {
     publishedAt?: string;
     thumbnails?: Thumbs;
   };
+  statistics?: { viewCount?: string };
+  contentDetails?: { duration?: string };
   status?: { privacyStatus?: string; uploadStatus?: string };
 };
 type ListResponse<T> = { items?: T[] };
@@ -56,7 +58,20 @@ export type ChannelStats = {
   lastUploadAt: string | null;
 };
 
-export type CatalogVideo = LiveMetadata & { publishedAt: string; thumbnailUrl: string | null };
+export type CatalogVideo = LiveMetadata & {
+  publishedAt: string;
+  thumbnailUrl: string | null;
+  views: number;
+  durationSec: number;
+};
+
+/** Seconds in an ISO 8601 video duration (`PT1H2M3S`); 0 when absent or unreadable. */
+export function isoSeconds(duration: string | undefined): number {
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(duration ?? '');
+  if (!match) return 0;
+  const [, d = '0', h = '0', m = '0', sec = '0'] = match;
+  return ((Number(d) * 24 + Number(h)) * 60 + Number(m)) * 60 + Number(sec);
+}
 
 const toCatalog = (item: VideoItem): CatalogVideo => {
   const thumbs = item.snippet?.thumbnails ?? {};
@@ -67,13 +82,15 @@ const toCatalog = (item: VideoItem): CatalogVideo => {
     tags: item.snippet?.tags ?? [],
     publishedAt: item.snippet?.publishedAt ?? '',
     thumbnailUrl: (thumbs.medium ?? thumbs.default ?? thumbs.high)?.url ?? null,
+    views: Number(item.statistics?.viewCount ?? 0),
+    durationSec: isoSeconds(item.contentDetails?.duration),
   };
 };
 
 export async function videosByIds(ids: string[]): Promise<CatalogVideo[]> {
   if (ids.length === 0) return [];
   const body = await keyGet<ListResponse<VideoItem>>('videos', {
-    part: 'snippet',
+    part: 'snippet,statistics,contentDetails',
     id: ids.slice(0, 50).join(','),
     maxResults: '50',
   });
@@ -140,14 +157,21 @@ export async function recentVideos(
   return videos.sort((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);
 }
 
-/** Top music videos for a query (`type=video`, `videoCategoryId=10`). */
-export async function searchMusicVideos(query: string, maxResults = 25): Promise<string[]> {
+export type VideoDuration = 'short' | 'medium' | 'long';
+
+/** Top music videos for a query (`type=video`, `videoCategoryId=10`), optionally by length bucket. */
+export async function searchMusicVideos(
+  query: string,
+  maxResults = 25,
+  videoDuration?: VideoDuration,
+): Promise<string[]> {
   const body = await keyGet<ListResponse<{ id?: { videoId?: string } }>>('search', {
     part: 'id',
     q: query,
     type: 'video',
     videoCategoryId: '10',
     maxResults: String(maxResults),
+    ...(videoDuration ? { videoDuration } : {}),
   });
   return (body.items ?? [])
     .map((item) => item.id?.videoId)

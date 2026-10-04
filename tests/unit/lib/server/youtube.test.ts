@@ -12,6 +12,7 @@ import {
   uploadChunk,
   uploadOffset,
   videosByIds,
+  isoSeconds,
   YouTubeError,
 } from '$lib/server/youtube';
 import type { PickFields } from '$lib/types';
@@ -112,6 +113,8 @@ describe('catalog reads', () => {
       tags: [],
       publishedAt: '',
       thumbnailUrl: null,
+      views: 0,
+      durationSec: 0,
     });
     expect(videos[1]!.thumbnailUrl).toBe('h.jpg');
     expect(videos[2]!.thumbnailUrl).toBe('d.jpg');
@@ -458,5 +461,21 @@ describe('readBack', () => {
   it('throws on a non-ok read', async () => {
     fetchMock.mockResolvedValueOnce(new Response('unauthorized', { status: 401 }));
     await expect(readBack('tok', 'pub1')).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('isoSeconds', () => {
+  it.each([
+    ['PT1M18S', 78],
+    ['PT1H2M3S', 3723],
+    ['PT45S', 45],
+    ['PT4M', 240],
+    ['P1DT1S', 86401],
+    ['P0D', 0],
+    ['', 0],
+    [undefined, 0],
+    ['not a duration', 0],
+  ])('reads %s as %i seconds', (duration, seconds) => {
+    expect(isoSeconds(duration)).toBe(seconds);
   });
 });
