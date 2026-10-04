@@ -60,7 +60,7 @@ describe('layout', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toHaveTextContent(
-      'Built for Flies Like Robots by Ashley ChildressHacktoberfest Weekend Challenge: Build for a Friend',
+      'Built for Flies Like Robots by Ashley Childress Hacktoberfest Weekend Challenge: Build for a Friend',
     );
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
   });
