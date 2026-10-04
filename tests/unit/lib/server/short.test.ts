@@ -442,6 +442,17 @@ describe('placeCut', () => {
     expect(placeCut(curve, cut)).toBe(80);
   });
 
+  it('backs up into a -inf silence gap before the hit', () => {
+    const curve = pts(56, 90.5, 70).map((p) =>
+      p.t > 69.45 && p.t <= 69.75 ? { ...p, m: -Infinity } : p,
+    );
+    expect(placeCut(curve, cut)).toBeCloseTo(69.5, 9);
+  });
+
+  it('finds a hit that comes straight out of -inf silence', () => {
+    expect(placeCut(pts(56, 90.5, 70, -Infinity), cut)).toBe(70);
+  });
+
   it("keeps the window's start without a curve", () => {
     expect(placeCut([], cut)).toBe(59);
   });

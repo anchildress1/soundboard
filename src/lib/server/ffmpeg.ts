@@ -247,8 +247,9 @@ export type LoudnessPoint = { t: number; m: number };
 export function parseLoudness(stderr: string, offsetSec: number): LoudnessPoint[] {
   const points: LoudnessPoint[] = [];
   for (const match of stderr.matchAll(/\bt:\s*([\d.]+)\s+TARGET:.*?\bM:\s*(-?[\d.]+|-?inf)/g)) {
-    const m = Number(match[2]);
-    if (Number.isFinite(m)) points.push({ t: round(offsetSec + Number(match[1])), m });
+    // Silence reads `-inf`; it is the gap a cut backs up to, so it stays in the curve.
+    const m = Number(match[2]!.replace('inf', 'Infinity'));
+    points.push({ t: round(offsetSec + Number(match[1])), m });
   }
   return points;
 }

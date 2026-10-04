@@ -400,12 +400,13 @@ describe('parseLoudness', () => {
     expect(parseLoudness(EBUR_LINES, 26.5)).toEqual([
       { t: 26.6, m: -120.7 },
       { t: 26.7, m: -48 },
+      { t: 26.8, m: -Infinity },
       { t: 26.9, m: -9.5 },
     ]);
   });
 
-  it('skips -inf readings, which are not a level', () => {
-    expect(parseLoudness(EBUR_LINES, 0).map((p) => p.m)).not.toContain(-Infinity);
+  it('keeps -inf silence as the quietest reading, not a gap in the curve', () => {
+    expect(parseLoudness(EBUR_LINES, 0).map((p) => p.t)).toEqual([0.1, 0.2, 0.3, 0.4]);
   });
 
   it('returns nothing for output without frame lines', () => {
@@ -418,7 +419,7 @@ describe('loudnessCurve', () => {
   it('seeks the stretch, reads audio only, and returns the shifted curve', async () => {
     nextRun({ stderr: EBUR_LINES });
     const curve = await loudnessCurve(OBJECT_URL, 26.5, 35);
-    expect(curve).toHaveLength(3);
+    expect(curve).toHaveLength(4);
     expect(curve[0]).toEqual({ t: 26.6, m: -120.7 });
     const [command, args] = spawnMock.mock.calls[0]!;
     expect(command).toBe('ffmpeg');
