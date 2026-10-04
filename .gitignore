@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# SvelteKit / Vite output
+.svelte-kit/
+build/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+gha-creds-*.json
+service-account*.json
+
+# Test, coverage, and perf output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.lighthouseci/
+test-report.junit.xml
+
+# Media scratch — source videos and extracted audio never get committed
+tmp/
+scratch/
+*.mp4
+*.mov
+*.webm
+*.wav
+*.gguf
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Logs and caches
+*.log
+.cache/
+.eslintcache
+
+# Agent worktrees
+.claude/worktrees/
