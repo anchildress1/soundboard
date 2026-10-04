@@ -83,7 +83,7 @@
 
   {#if editable || done}
     <div class="actions">
-      <button class="btn danger" type="button" onclick={ondiscard} disabled={busy || done}
+      <button class="btn ghost" type="button" onclick={ondiscard} disabled={busy || done}
         >Discard</button
       >
       <button class="btn ghost" type="button" onclick={onrerun} disabled={busy || done}
@@ -152,10 +152,6 @@
     .actions :global(.primary) {
       grid-column: 1 / -1;
       order: -1;
-    }
-
-    .actions :global(.danger) {
-      padding-left: 18px;
     }
   }
 </style>

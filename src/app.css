@@ -114,12 +114,6 @@ a {
   color: var(--muted);
 }
 
-.btn.danger {
-  border-color: transparent;
-  color: var(--red-text);
-  padding-left: 0;
-}
-
 .field {
   display: grid;
   gap: 6px;
