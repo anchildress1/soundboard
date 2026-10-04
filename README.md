@@ -115,12 +115,13 @@ make install
 make dev
 ```
 
-| Command          | What it does                                                  |
-| ---------------- | ------------------------------------------------------------- |
-| `make dev`       | Start the dev server                                          |
-| `make ai-checks` | Format, lint, typecheck, test, build                          |
-| `make e2e`       | Playwright end-to-end tests                                   |
-| `make deploy`    | Build and deploy to Cloud Run (requires a clean working tree) |
+| Command            | What it does                                                                     |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `make dev`         | Start the dev server                                                             |
+| `make ai-checks`   | Format, lint, typecheck, test, build                                             |
+| `make e2e`         | Playwright end-to-end tests                                                      |
+| `make deploy`      | Build and deploy to Cloud Run (requires a clean working tree)                    |
+| `make model-image` | Build the Gemma 4 sidecar image on Cloud Build; skipped if `model/` is unchanged |
 
 ---
 
