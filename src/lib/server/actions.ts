@@ -18,7 +18,7 @@ import {
   type JobDoc,
 } from './jobs';
 import { approvalFeedback, ARTIST_NAME, writeFeedback } from './memory';
-import { takeUploadSlot } from './quota';
+import { takeUploadSlot, takeVisitorRun } from './quota';
 import { getRefreshToken } from './tokens';
 
 export class ActionError extends Error {
@@ -103,18 +103,17 @@ export async function approve(
       patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
     } else patch = payload("Today's upload quota is used up.");
 
-    // A Short reuses the video's pick, so approving it again would count the same choice twice.
-    if (!job.short)
-      writeFeedback(
-        tx,
-        approvalFeedback(proposed, final, {
-          jobId: job.id,
-          songTitle: job.songTitle,
-          pickVersion: proposed.version,
-          at: Date.now(),
-        }),
-        { allowlisted: allowlistedFor(job), jobId: job.id },
-      );
+    const feedback = approvalFeedback(proposed, final, {
+      jobId: job.id,
+      songTitle: job.songTitle,
+      pickVersion: proposed.version,
+      at: Date.now(),
+    });
+    // A Short's draft is the video's own metadata: its edits are new signal, its acceptance is not.
+    writeFeedback(tx, job.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback, {
+      allowlisted: allowlistedFor(job),
+      jobId: job.id,
+    });
     tx.update(ref, { ...patch, updatedAt: Date.now() });
     return 'approved';
   });
@@ -204,7 +203,8 @@ export async function retry(job: JobDoc): Promise<void> {
 
 /**
  * Starts a Short from a video whose analysis is done, or returns the live one it already has. Its
- * metadata starts from what the artist approved, else the recommendation on screen.
+ * metadata starts from what the artist approved, else the recommendation on screen. A visitor's new
+ * Short counts as one of their runs.
  */
 export async function makeShort(job: JobDoc): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
@@ -214,9 +214,17 @@ export async function makeShort(job: JobDoc): Promise<string> {
   }
   const pick = await latestPick(job.id);
   if (!pick) throw new ActionError(409, 'This video has no recommendation to start from.');
-  const id = await createShort(job, { ...pick, ...(job.finalFields ?? {}) }, SHORT_SOURCE_STATES);
-  if (!id) throw new ActionError(409, 'The video moved on before the Short could start.');
-  return id;
+  // A Short costs a model call and a render, so a signed-out visitor pays for it with a run.
+  const ipHash = job.owner === 'visitor' ? job.ipHash : null;
+  const started = await createShort(
+    job,
+    { ...pick, ...(job.finalFields ?? {}) },
+    SHORT_SOURCE_STATES,
+    ipHash ? (tx) => takeVisitorRun(tx, ipHash) : null,
+  );
+  if (!started) throw new ActionError(409, 'The video moved on before the Short could start.');
+  if ('blocked' in started) throw new ActionError(429, started.blocked);
+  return started.id;
 }
 
 export const REFRAMES: readonly Reframe[] = ['blur', 'crop'];

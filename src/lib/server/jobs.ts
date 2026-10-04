@@ -269,18 +269,22 @@ export function fail(state: JobState, message: string): Partial<JobDoc> {
   return { state: 'FAILED', failedState: state, error: message };
 }
 
+export type ShortStart = { id: string } | { blocked: string } | null;
+
 /**
  * Cuts a Short job from a video job: the parent's reviewed metadata becomes the Short's pick v1, its
  * candidate lists come along so approve holds the same rules, and its trace is shared, so the Short
  * lands in the video's trace. One live Short per video: an existing one that isn't discarded is
- * returned instead. Null when the parent left `states` before the transaction ran.
+ * returned instead, uncharged. A new one first passes `charge` (a run cap) in the same transaction.
+ * Null when the parent left `states` before the transaction ran.
  */
 export async function createShort(
   parent: JobDoc,
   pick: Pick,
   states: readonly JobState[],
+  charge: ((tx: Transaction) => Promise<string | null>) | null = null,
   id = newJobId(),
-): Promise<string | null> {
+): Promise<ShortStart> {
   const parentRef = jobs().doc(parent.id);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(parentRef);
@@ -289,9 +293,11 @@ export async function createShort(
     if (current.shortId) {
       const existing = await tx.get(jobs().doc(current.shortId));
       if (existing.exists && (existing.data() as JobDoc).state !== 'DISCARDED') {
-        return current.shortId;
+        return { id: current.shortId };
       }
     }
+    const blocked = charge ? await charge(tx) : null;
+    if (blocked) return { blocked };
     const base = newJobDoc(
       {
         owner: current.owner,
@@ -329,6 +335,6 @@ export async function createShort(
     tx.set(jobs().doc(id), doc);
     tx.set(jobs().doc(id).collection('pick').doc(pad(1)), stored);
     tx.update(parentRef, { shortId: id, updatedAt: Date.now() });
-    return id;
+    return { id };
   });
 }

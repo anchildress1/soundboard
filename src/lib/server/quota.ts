@@ -33,17 +33,24 @@ const empty = (): QuotaDoc => ({ runs: 0, ips: {}, uploads: 0, visitorUploads: 0
 
 /** Counts a signed-out run, or names the cap that stops it. */
 export async function reserveVisitorRun(ipHash: string, now = new Date()): Promise<string | null> {
+  return db().runTransaction((tx) => takeVisitorRun(tx, ipHash, now));
+}
+
+/** `reserveVisitorRun` inside the caller's transaction, after the caller's own reads. */
+export async function takeVisitorRun(
+  tx: Transaction,
+  ipHash: string,
+  now = new Date(),
+): Promise<string | null> {
   const ref = db().collection('quota').doc(quotaDay(now));
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const doc = snap.exists ? (snap.data() as QuotaDoc) : empty();
-    if (doc.runs >= RUNS_PER_DAY)
-      return `Today's ${RUNS_PER_DAY} public runs are used up. Try again tomorrow.`;
-    const mine = doc.ips[ipHash] ?? 0;
-    if (mine >= RUNS_PER_IP) return `${RUNS_PER_IP} runs per visitor per day. Try again tomorrow.`;
-    tx.set(ref, { ...doc, runs: doc.runs + 1, ips: { ...doc.ips, [ipHash]: mine + 1 } });
-    return null;
-  });
+  const snap = await tx.get(ref);
+  const doc = snap.exists ? (snap.data() as QuotaDoc) : empty();
+  if (doc.runs >= RUNS_PER_DAY)
+    return `Today's ${RUNS_PER_DAY} public runs are used up. Try again tomorrow.`;
+  const mine = doc.ips[ipHash] ?? 0;
+  if (mine >= RUNS_PER_IP) return `${RUNS_PER_IP} runs per visitor per day. Try again tomorrow.`;
+  tx.set(ref, { ...doc, runs: doc.runs + 1, ips: { ...doc.ips, [ipHash]: mine + 1 } });
+  return null;
 }
 
 /**

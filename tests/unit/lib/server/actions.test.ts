@@ -552,6 +552,32 @@ describe('makeShort', () => {
     expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
   });
 
+  it("charges a visitor's new Short as one of their runs", async () => {
+    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
+    await makeShort(job);
+    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ runs: 1, ips: { ipA: 1 } });
+  });
+
+  it('turns a visitor away with 429 once their runs are spent, starting nothing', async () => {
+    store.set(`quota/${quotaDay()}`, { runs: 5, ips: { ipA: 5 }, uploads: 0, visitorUploads: 0 });
+    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([
+      429,
+      '5 runs per visitor per day. Try again tomorrow.',
+    ]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+  });
+
+  it.each(['nathan', 'demo'] as JobOwner[])(
+    'never charges a %s Short against visitor caps',
+    async (owner) => {
+      const job = await makeJob({ owner, patch: { probe: PROBE, ipHash: 'ipA' } });
+      await makeShort(job);
+      expect(store.has(`quota/${quotaDay()}`)).toBe(false);
+    },
+  );
+
   it('returns the live Short instead of starting another', async () => {
     const job = await makeJob({ patch: { probe: PROBE } });
     const first = await makeShort(job);
@@ -720,7 +746,7 @@ describe('rerun on a Short', () => {
 });
 
 describe('approve on a Short', () => {
-  it("uploads through the same flow without writing feedback for the video's pick again", async () => {
+  it('uploads through the same flow and does not count the acceptance twice', async () => {
     connected();
     const job = await shortJob({ channel: 'nathan' });
     await approve({ ...job, owner: 'nathan' }, input());
@@ -730,6 +756,21 @@ describe('approve on a Short', () => {
     expect(feedbackRows('artists/')).toHaveLength(0);
     expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
     expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1 });
+  });
+
+  it("learns Nathan's edits to the Short's metadata", async () => {
+    connected();
+    const job = await shortJob({ channel: 'nathan' });
+    await approve({ ...job, owner: 'nathan' }, input({ title: 'Shorter title' }));
+    expect(feedbackRows('artists/flr/feedback/')).toEqual([
+      expect.objectContaining({
+        kind: 'EDITED',
+        field: 'title',
+        before: 'Title 1',
+        after: 'Shorter title',
+        jobId: 'job1',
+      }),
+    ]);
   });
 
   it('holds the Short to the same hashtag and tag rules', async () => {

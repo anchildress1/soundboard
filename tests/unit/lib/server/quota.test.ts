@@ -9,6 +9,7 @@ import {
   RUNS_PER_DAY,
   RUNS_PER_IP,
   takeUploadSlot,
+  takeVisitorRun,
   UPLOADS_PER_DAY,
   VISITOR_UPLOADS_PER_DAY,
 } from '$lib/server/quota';
@@ -109,6 +110,31 @@ describe('reserveVisitorRun', () => {
   it('resets on the next Pacific day', async () => {
     store.set('quota/2026-10-04', { runs: RUNS_PER_DAY, ips: {}, uploads: 0, visitorUploads: 0 });
     expect(await reserveVisitorRun('ipA', new Date('2026-10-05T08:00:00Z'))).toBeNull();
+  });
+});
+
+describe('takeVisitorRun', () => {
+  it("counts a run inside the caller's transaction", async () => {
+    expect(await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA', NOW))).toBeNull();
+    expect(store.get('quota/2026-10-04')).toMatchObject({ runs: 1, ips: { ipA: 1 } });
+  });
+
+  it('names the cap and counts nothing once the visitor is out of runs', async () => {
+    store.set('quota/2026-10-04', {
+      runs: 5,
+      ips: { ipA: RUNS_PER_IP },
+      uploads: 0,
+      visitorUploads: 0,
+    });
+    expect(await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA', NOW))).toBe(
+      '5 runs per visitor per day. Try again tomorrow.',
+    );
+    expect(store.get('quota/2026-10-04')).toMatchObject({ runs: 5 });
+  });
+
+  it('defaults to today', async () => {
+    await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA'));
+    expect([...store.keys()]).toEqual([`quota/${quotaDay()}`]);
   });
 });
 
