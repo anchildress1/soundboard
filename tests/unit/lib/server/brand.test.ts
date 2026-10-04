@@ -17,6 +17,7 @@ import {
 } from '$lib/server/brand';
 import { resetClients } from '$lib/server/clients';
 import { clearStatsCache, type CatalogVideo } from '$lib/server/youtube';
+import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -213,6 +214,16 @@ describe('proposeBrand', () => {
     expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(10);
   });
 
+  it('records the redacted request and the guide on the agent span', async () => {
+    clearAgentSpan();
+    await proposeBrand();
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    expect(input[0]!['gen_ai.input.messages']).toContain('"type":"image"');
+    expect(input[0]!['gen_ai.input.messages']).not.toContain('base64');
+    expect(JSON.parse(output[0]!)).toEqual(GUIDE);
+  });
+
   it('409s when the channel has no uploads', async () => {
     uploads = [];
     await expect(proposeBrand()).rejects.toMatchObject({ status: 409 });
@@ -221,8 +232,10 @@ describe('proposeBrand', () => {
 
   it('502s and stores nothing when the reply never parses', async () => {
     on(/chat\/completions$/, () => completion('{"statement": 1}'));
+    clearAgentSpan();
     await expect(proposeBrand()).rejects.toMatchObject({ status: 502 });
     expect(store.has('artists/flr/brand/proposal')).toBe(false);
+    expect(agentSpanIO().output).toEqual([]);
   });
 });
 
