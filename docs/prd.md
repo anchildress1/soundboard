@@ -202,7 +202,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution, and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
-  - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation, vocals).
+  - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
 - **Right pane, the label:**
   - Title in a white speech bubble with a live `n / 100` counter.
   - Description textarea, labeled "model draft", ending in the picked hashtags.
