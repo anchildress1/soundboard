@@ -202,7 +202,7 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
     sourceSec: short.sourceDurationSec,
   });
   const hook: Hook = { window, startSec, lengthSec, reason };
-  return ok({ state: 'RENDER', short: { ...short, hook, modelMs: result.ms } });
+  return ok({ state: 'RENDER', short: { ...short, hook, modelMs: short.modelMs + result.ms } });
 }
 
 /**

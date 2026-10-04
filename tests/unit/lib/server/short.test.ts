@@ -485,6 +485,20 @@ describe('hookStep', () => {
     ]);
   });
 
+  it('adds each re-pick to the model time already spent on the Short', async () => {
+    seedChunks(6);
+    let calls = 0;
+    fetchMock.mockImplementation(async () => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' }));
+    });
+    const patch = await hookStep(shortJob({}, { modelMs: 40_000 }));
+    expect(calls).toBe(1);
+    expect(patch.short!.modelMs).toBeGreaterThanOrEqual(40_005);
+    expect(patch.short!.modelMs).toBeLessThan(41_000);
+  });
+
   it('scans from zero and stops at the end for the first and only window', async () => {
     store.set('jobs/p1/chunks/0000', chunk(0));
     runs.loudness = { stderr: step(0, 30, 8) };
