@@ -1,6 +1,7 @@
 <footer>
   <p>
-    Built for Nathan by <b>Ashley Childress</b> · Hacktoberfest Weekend Challenge: Build for a Friend
+    Built for Flies Like Robots by <b>Ashley Childress</b> · Hacktoberfest Weekend Challenge: Build for
+    a Friend
   </p>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). The app runs inside the DEV iframe,

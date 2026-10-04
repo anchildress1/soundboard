@@ -215,7 +215,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - **YouTube** (done once verified): "Check before uploading" flags first, then the title as a plain field with a live `n / 100` counter, the description ("model draft", ending in the picked hashtags), tags in mono with a live `n / 500` counter (Approve disables past 500), and Visibility fixed at **Private**. Actions sit together: Discard, Re-run model, Approve & upload (magenta, offset shadow).
   - **Bandcamp** (done once every field is copied): track name, About, credits, and tags with a Copy button each, and Bandcamp's new-track page opened in its own window.
   - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
-- **Under 820px:** one column in reading order: the video and status, the tabs, then "What the model heard". The actions stack as one block, Approve first.
+- **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
 - **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
 - **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.

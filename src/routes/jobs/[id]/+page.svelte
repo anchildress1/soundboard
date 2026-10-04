@@ -133,6 +133,10 @@
       height={job.probe?.height}
     />
     <Track {status} {model} />
+    <Heard tags={heardTags(view)} measurements={job.measurements} />
+    {#if data.live && view.pick}
+      <Diff live={data.live} pick={view.pick} />
+    {/if}
     {#if job.state === 'VERIFIED' && job.videoId}
       <p class="verified">
         Verified · private · <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
@@ -216,52 +220,25 @@
     {/if}
     <p class="toast" aria-live="polite">{message}</p>
   </div>
-
-  <!-- After the tabs in reading order, so phones reach the review first; desktop places it under the video. -->
-  <section class="details" aria-label="What the model heard">
-    <Heard tags={heardTags(view)} measurements={job.measurements} />
-    {#if data.live && view.pick}
-      <Diff live={data.live} pick={view.pick} />
-    {/if}
-  </section>
 </main>
 
 <style>
   main {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    grid-template-areas:
-      'tape right'
-      'details right';
-    grid-template-rows: auto 1fr;
     gap: 20px;
     align-items: start;
   }
 
-  .tape {
-    grid-area: tape;
-  }
-
-  .right {
-    grid-area: right;
-  }
-
-  .details {
-    grid-area: details;
-  }
-
-  /* Phones read top to bottom: the video, then the review, then what the model heard. */
+  /* Phones read top to bottom: the video and what the model heard, then the tabs. */
   @media (max-width: 820px) {
     main {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: 'tape' 'right' 'details';
-      grid-template-rows: auto;
     }
   }
 
   .tape,
-  .right,
-  .details {
+  .right {
     display: flex;
     flex-direction: column;
     gap: 14px;
