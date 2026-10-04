@@ -137,19 +137,20 @@ make dev
 
 Values live in `.env` for local development and in Secret Manager or Cloud Run environment variables when deployed. Do not commit real values.
 
-| Variable                                                | Purpose                                                                             |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                               |
-| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)      |
-| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar            |
-| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`                      |
-| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads          |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                    |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                     |
-| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                        |
-| `DEMO_EMAILS`                                           | Comma-separated demo accounts: run like Nathan, upload to the sandbox, save nothing |
-| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                    |
-| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                       |
+| Variable                                                | Purpose                                                                                  |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                                    |
+| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)           |
+| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar                 |
+| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`                           |
+| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads               |
+| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                         |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                          |
+| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                             |
+| `DEMO_EMAILS`                                           | Comma-separated demo accounts: run like Nathan, upload to the sandbox, save nothing      |
+| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                         |
+| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                            |
+| `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only |
 
 ---
 
