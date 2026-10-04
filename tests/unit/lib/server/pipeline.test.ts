@@ -713,6 +713,18 @@ describe('runStep: PICK', () => {
     expect(saved().error).toBe('The model reply did not parse as a recommendation.');
     expect(store.has('jobs/j1/pick/0001')).toBe(false);
   });
+
+  it('keeps the genre search when the model fails, so the retry does not search again', async () => {
+    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    await runStep(seed({ state: 'PICK' }));
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+    expect(saved().audience).toMatchObject({ hashtags: ['#synthwave', '#retrowave', '#newmusic'] });
+
+    on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
+    await runStep(saved());
+    expect(saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+  });
 });
 
 describe('runStep: PUBLISHING', () => {

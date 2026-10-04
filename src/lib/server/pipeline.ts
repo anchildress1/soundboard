@@ -4,7 +4,7 @@ import { approvedBrand } from './brand';
 import { analyzeChunk } from './chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from './ffmpeg';
 import { objectInfo, signedReadUrl } from './gcs';
-import { audienceEvidence } from './hashtags';
+import { audienceEvidence, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
   fail,
@@ -37,6 +37,16 @@ type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
 type StepOutput = Patch & { pick?: Pick; chunk?: Chunk };
 const ok = (patch: Patch): Patch => ({ ...patch, consecutiveFailures: 0, error: null });
+
+/** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
+class StepFailure extends Error {
+  constructor(
+    cause: unknown,
+    readonly keep: Patch,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
 
 async function prep(job: JobDoc): Promise<Patch> {
   const info = await objectInfo(job.object);
@@ -102,6 +112,15 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   return invokeAgent('smart-pick', async (span) => {
     const audience =
       job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
+    try {
+      return await pickWith(audience, span);
+    } catch (error) {
+      // The genre search is one per job; a failed model call must not spend it again on retry.
+      throw new StepFailure(error, { audience });
+    }
+  });
+
+  async function pickWith(audience: AudienceEvidence, span: Sentry.Span): Promise<StepOutput> {
     const [facts, feedback, brand] = nathan
       ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
       : [PUBLIC_FACTS, [], null];
@@ -136,7 +155,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       }),
       pick: { ...result.pick, version, modelMs: result.ms },
     };
-  });
+  }
 }
 
 const sessionGone = (error: unknown) =>
@@ -299,8 +318,9 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
       () => handler(job),
     );
   } catch (error) {
-    Sentry.captureException(error, { tags: { step: job.state } });
-    output = failurePatch(job, error);
+    const failure = error instanceof StepFailure ? error : null;
+    Sentry.captureException(failure ? failure.cause : error, { tags: { step: job.state } });
+    output = { ...failurePatch(job, error), ...failure?.keep };
   }
   const { pick: newPick, chunk, ...patch } = output;
   if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
