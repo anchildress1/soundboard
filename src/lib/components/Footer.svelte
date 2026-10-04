@@ -1,6 +1,13 @@
 <footer>
   <p>
-    Built for <b>Flies Like Robots</b> by <b>Ashley Childress</b><br />
+    Built for
+    <a
+      class="artist"
+      href="https://flieslikerobots.bandcamp.com"
+      target="_blank"
+      rel="noopener noreferrer"><b>Flies Like Robots</b></a
+    >
+    by <b>Ashley Childress</b><br />
     Hacktoberfest Weekend Challenge: Build for a Friend
   </p>
   <nav class="links" aria-label="Ashley Childress">
@@ -97,6 +104,15 @@
   b {
     color: var(--ink);
     font-weight: 500;
+  }
+
+  .artist {
+    color: inherit;
+  }
+
+  .artist:hover,
+  .artist:focus-visible {
+    color: var(--magenta);
   }
 
   .links {

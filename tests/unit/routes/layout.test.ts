@@ -63,6 +63,11 @@ describe('layout', () => {
       'Built for Flies Like Robots by Ashley Childress Hacktoberfest Weekend Challenge: Build for a Friend',
     );
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
+    const artist = within(screen.getByRole('contentinfo')).getByRole('link', {
+      name: 'Flies Like Robots',
+    });
+    expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
+    expect(artist).toHaveAttribute('target', '_blank');
   });
 
   it("links Ashley's site and socials in the footer, opening new tabs", () => {
