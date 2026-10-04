@@ -8,12 +8,15 @@ SEPARATOR="=================================================="
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
 command -v envsubst > /dev/null || { echo "Error: envsubst (gettext) is not installed." >&2; exit 1; }
 
-if [[ -f ".env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ".env"
-  set +a
-fi
+# .env.sentry-build-plugin holds the Sentry source-map upload token; it's optional.
+for file in .env .env.sentry-build-plugin; do
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$file"
+    set +a
+  fi
+done
 
 require_env() {
   local name=$1
@@ -113,8 +116,9 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
 
 # App secrets come from .env on first deploy (or when the value changes) and live only in Secret
 # Manager after that. The runtime identity reads them; it never sees them on disk.
+# Third argument: who reads the secret; the runtime identity unless named.
 sync_secret() {
-  local secret=$1 value=${!2:-}
+  local secret=$1 value=${!2:-} member=${3:-serviceAccount:${SERVICE_ACCOUNT}}
   if ! gcloud secrets describe "$secret" --project "$GCP_PROJECT_ID" &> /dev/null; then
     [[ -n "$value" ]] || { echo "Error: secret '$secret' is missing; set $2 in .env." >&2; exit 1; }
     gcloud secrets create "$secret" --replication-policy automatic --project "$GCP_PROJECT_ID" --quiet
@@ -125,8 +129,7 @@ sync_secret() {
       --project "$GCP_PROJECT_ID" --quiet > /dev/null
   fi
   gcloud secrets add-iam-policy-binding "$secret" --project "$GCP_PROJECT_ID" \
-    --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/secretmanager.secretAccessor \
-    --quiet > /dev/null
+    --member "$member" --role roles/secretmanager.secretAccessor --quiet > /dev/null
 }
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
@@ -145,7 +148,18 @@ for channel in nathan sandbox; do
   done
 done
 
-gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
+# With a Sentry token, the build uploads source maps for this commit's release. Only Cloud Build's
+# identity reads the token; the running service never sees it.
+if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
+  BUILD_ACCOUNT="$(gcloud builds get-default-service-account --project "$GCP_PROJECT_ID" \
+    --format 'value(serviceAccountEmail)')"
+  sync_secret soundboard-sentry-auth-token SENTRY_AUTH_TOKEN "serviceAccount:${BUILD_ACCOUNT##*/}"
+  gcloud builds submit . --config cloudbuild.yaml --project "$GCP_PROJECT_ID" \
+    --substitutions "_IMAGE=${APP_IMAGE},_RELEASE=${GIT_SHA}"
+else
+  echo "No SENTRY_AUTH_TOKEN: building without source-map upload." >&2
+  gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
+fi
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT

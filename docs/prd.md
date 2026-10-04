@@ -160,6 +160,7 @@
 - The hashtag search is an `execute_tool hashtag_search` span inside `smart-pick`, with the query and candidate count.
 - Audio and images are recorded as placeholders, keeping Nathan's audio out of Sentry.
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
+- Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
 - [ ] Screenshots for the post: a full trace and a failed run.
 
