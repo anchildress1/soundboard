@@ -40,7 +40,7 @@ describe('layout', () => {
     setup();
     const nav = screen.getByRole('navigation', { name: 'Ashley Childress' });
     const links = within(nav).getAllByRole('link');
-    expect(links.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+    expect(links.map((l) => [l.getAttribute('aria-label'), l.getAttribute('href')])).toEqual([
       ['anchildress1.dev', 'https://anchildress1.dev'],
       ['GitHub', 'https://github.com/anchildress1'],
       ['DEV', 'https://dev.to/anchildress1'],
@@ -48,6 +48,7 @@ describe('layout', () => {
       ['X', 'https://x.com/anchildress1'],
     ]);
     for (const link of links) {
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     }
@@ -56,6 +57,7 @@ describe('layout', () => {
 
   it('shows FLR channel stats when available', () => {
     setup({ channel });
+    expect(screen.getByText('Public channel stats')).toBeInTheDocument();
     expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
     expect(screen.getByText(/12 videos · 340 subs/)).toHaveTextContent('last upload today');
   });
