@@ -21,6 +21,10 @@ export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
       };
     case 'PICK':
       return { tone: 'info', text: 'Smart pick', progress: 92 };
+    case 'HOOK':
+      return { tone: 'info', text: 'Picking the hook', progress: 30 };
+    case 'RENDER':
+      return { tone: 'info', text: 'Cutting the Short', progress: 60 };
     case 'REVIEW':
       return { tone: 'warn', text: 'Needs review', progress: 100 };
     case 'PUBLISHING': {
@@ -68,8 +72,10 @@ export function heardTags(view: JobView, limit = 8): string[] {
     .map(([tag]) => tag);
 }
 
-/** Seconds of the last model call, for the `gemma-4-12b-it · 12s` label. */
+/** Seconds of the last model call, for the `gemma-4-12b-it · 12s` label. A Short's is its hook pick. */
 export function lastModelSeconds(view: JobView): number | null {
-  const ms = view.pick?.modelMs ?? view.chunks.at(-1)?.modelMs;
+  const ms = view.job.short
+    ? view.job.short.modelMs
+    : (view.pick?.modelMs ?? view.chunks.at(-1)?.modelMs);
   return ms ? Math.round(ms / 1000) : null;
 }

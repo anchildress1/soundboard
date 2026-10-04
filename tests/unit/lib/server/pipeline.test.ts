@@ -271,6 +271,9 @@ function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     finalFields: null,
     pickVersion: null,
     verifyAttempts: 0,
+    shortId: null,
+    short: null,
+    sourceObject: null,
     createdAt: 1,
     updatedAt: 1,
     ...patch,
@@ -1009,5 +1012,132 @@ describe('runStep: claim safety', () => {
     expect(saved().state).toBe('DISCARDED');
     expect(saved().claim).toBeNull();
     expect(store.has('jobs/j1/pick/0001')).toBe(false);
+  });
+});
+
+describe('runStep: Short', () => {
+  const SHORT = {
+    parentId: 'p1',
+    sourceDurationSec: 180,
+    reframe: 'blur' as const,
+    hook: null,
+    skipped: [],
+    renders: 0,
+    modelMs: 0,
+  };
+  const hookReply = (hook: unknown) =>
+    on(/\/v1\/chat\/completions$/, () => completion(JSON.stringify(hook)));
+
+  const loudLines = (from: number, to: number, at: number) => {
+    const lines: string[] = [];
+    for (let t = 0.1; from + t <= to + 1e-9; t = Math.round((t + 0.1) * 10) / 10) {
+      lines.push(`t: ${t}  TARGET:-23 LUFS    M: ${from + t <= at ? -40 : -12} S: -20`);
+    }
+    return lines.join('\n');
+  };
+
+  beforeEach(() => {
+    for (let i = 0; i < 6; i++) {
+      store.set(`jobs/p1/chunks/${String(i).padStart(4, '0')}`, {
+        index: i,
+        startSec: i * 29.5,
+        durationSec: 29.5,
+        measurements: MEASURED,
+        analysis: ANALYSIS,
+        raw: null,
+        modelMs: 1,
+      });
+    }
+    h.objects.set('uploads/p1', { size: '9000', contentType: 'video/mp4' });
+    h.spawn.mockImplementation((command: string, args: string[]) => {
+      if (command === 'ffprobe') {
+        return child({
+          stdout: JSON.stringify({
+            format: { duration: '30' },
+            streams: [{ codec_type: 'video', width: 720, height: 1280 }, { codec_type: 'audio' }],
+          }),
+        });
+      }
+      if (args.includes('-method')) {
+        h.objects.set(args.at(-1)!.split('/bkt/')[1]!.split('?')[0]!, { size: '4000' });
+        return child({});
+      }
+      return child({ stderr: loudLines(56, 90.5, 70) });
+    });
+  });
+
+  it('runs HOOK then RENDER into REVIEW, one step per call', async () => {
+    hookReply({ window: 2, lengthSec: 30, reason: 'The chorus lands.' });
+    const job = seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1', pickVersion: 1 });
+
+    expect(await runStep(job)).toEqual({});
+    expect(saved().state).toBe('RENDER');
+    expect(saved().short!.hook).toEqual({
+      window: 2,
+      startSec: 70,
+      lengthSec: 30,
+      reason: 'The chorus lands.',
+    });
+    expect(chatBodies().at(-1)).toMatchObject({
+      response_format: { json_schema: { name: 'hook_pick' } },
+    });
+
+    expect(await runStep(saved())).toEqual({});
+    expect(saved()).toMatchObject({
+      state: 'REVIEW',
+      object: 'uploads/j1-1',
+      probe: { width: 720, height: 1280 },
+      short: { renders: 1 },
+      claim: null,
+    });
+  });
+
+  it('waits for the model before picking the hook', async () => {
+    on(/\/health$/, () => new Response('loading', { status: 503 }));
+    const result = await runStep(seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1' }));
+    expect(result).toEqual({ wait: 'waking model' });
+    expect(saved().state).toBe('HOOK');
+    expect(saved().claim).toBeNull();
+  });
+
+  it('renders without waiting on the model, which it does not use', async () => {
+    on(/\/health$/, () => new Response('loading', { status: 503 }));
+    const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
+    await runStep(seed({ state: 'RENDER', short: { ...SHORT, hook }, sourceObject: 'uploads/p1' }));
+    expect(called(/\/health$/)).toHaveLength(0);
+    expect(saved().state).toBe('REVIEW');
+  });
+
+  it('fails at HOOK after two unparsed replies in a row, ready for a retry', async () => {
+    on(/\/v1\/chat\/completions$/, () => completion('nope'));
+    seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1' });
+    await runStep(saved());
+    expect(saved()).toMatchObject({ state: 'HOOK', consecutiveFailures: 1 });
+    await runStep(saved());
+    expect(saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'HOOK',
+      error: 'The model reply did not parse as a hook.',
+    });
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), {
+      tags: { step: 'HOOK' },
+    });
+  });
+
+  it('fails the render when the PUT never reached storage', async () => {
+    h.spawn.mockImplementation(() => child({}));
+    const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
+    const job = seed({
+      state: 'RENDER',
+      short: { ...SHORT, hook },
+      sourceObject: 'uploads/p1',
+      consecutiveFailures: 1,
+    });
+    await runStep(job);
+    expect(saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'RENDER',
+      error: 'The rendered Short never reached storage.',
+    });
   });
 });

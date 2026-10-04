@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { isHttpError } from '@sveltejs/kit';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../../helpers/fake-firestore';
 import { resetClients } from '$lib/server/clients';
@@ -27,6 +27,7 @@ vi.mock('@google-cloud/storage', () => ({
 type Event = Parameters<typeof load>[0];
 type Data = {
   view: JobView;
+  short: JobView | null;
   playbackUrl: string | null;
   live: LiveMetadata | null;
   trace: { sentryTrace: string; baggage: string } | null;
@@ -139,5 +140,52 @@ describe('job page load', () => {
   it("serves Nathan's job to an allowlisted session", async () => {
     seed('n', { owner: 'nathan' });
     expect((await run('n', true)).data.view.job.owner).toBe('nathan');
+  });
+});
+
+describe('job page load: Short', () => {
+  const SHORT = {
+    parentId: 'j',
+    sourceDurationSec: 180,
+    reframe: 'blur',
+    hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'x' },
+    skipped: [],
+    renders: 1,
+    modelMs: 1,
+  };
+
+  it("loads the video's Short with its rendered playback", async () => {
+    seed('j', { state: 'REVIEW', shortId: 's' });
+    seed('s', { state: 'REVIEW', object: 'uploads/s-1', short: SHORT });
+    const { data } = await run('j');
+    expect(data.short?.job.id).toBe('s');
+    expect(data.short?.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s-1?sig=read');
+  });
+
+  it('shows no Short when there is none, or it was discarded or is gone', async () => {
+    seed('j', { state: 'REVIEW' });
+    expect((await run('j')).data.short).toBeNull();
+    seed('j', { state: 'REVIEW', shortId: 's' });
+    expect((await run('j')).data.short).toBeNull();
+    seed('s', { state: 'DISCARDED', short: SHORT });
+    expect((await run('j')).data.short).toBeNull();
+  });
+
+  it("sends a Short's own URL to its video's page", async () => {
+    seed('s', { state: 'REVIEW', short: SHORT });
+    const locals: App.Locals = { session: null };
+    const error = await Promise.resolve(
+      load({ params: { id: 's' }, locals } as unknown as Event),
+    ).catch((e: unknown) => e);
+    expect(isRedirect(error) && [error.status, error.location]).toEqual([307, '/jobs/j']);
+    expect(locals.jobTrace).toBeUndefined();
+  });
+
+  it("404s Nathan's Short for a non-allowlisted session instead of redirecting", async () => {
+    seed('s', { owner: 'nathan', state: 'REVIEW', short: SHORT });
+    const error = await Promise.resolve(
+      load({ params: { id: 's' }, locals: { session: null } } as unknown as Event),
+    ).catch((e: unknown) => e);
+    expect(isHttpError(error) && error.status).toBe(404);
   });
 });

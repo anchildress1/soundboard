@@ -49,6 +49,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 | Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                    |
 | Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change                                                          |
 | Brand guide              | Reads the channel's 30 latest videos and 10 thumbnails and proposes keep / fix / drop rules; once Nathan approves them, every draft for his channel follows them |
+| Short                    | Gemma picks the hook, ffmpeg's loudness places the cut, and ffmpeg fits it to 9:16 for review and the same private, verified upload; no generated frames         |
 | Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                                                                                      |
 
 ---
@@ -99,7 +100,7 @@ flowchart LR
 ```
 
 - The app and the model run as two containers in one Cloud Run instance and communicate over `localhost`. The service runs at most one instance and scales to zero when idle.
-- The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft). Reloading the page resumes from the next unfinished step.
+- The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft; a Short adds a hook pick and a render). Reloading the page resumes from the next unfinished step.
 - The full design is in [docs/prd.md](docs/prd.md).
 
 ---

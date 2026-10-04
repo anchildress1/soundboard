@@ -23,6 +23,8 @@ const view = (state: JobState, wait?: Wait): JobView => ({
     videoId: null,
     payload: null,
     hashtagCandidates: null,
+    shortId: null,
+    short: null,
     createdAt: 0,
   },
   chunks: [],

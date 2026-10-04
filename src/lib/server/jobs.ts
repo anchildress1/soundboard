@@ -25,6 +25,8 @@ export type JobDoc = PublicJob & {
   /** The genre search behind the pick; re-runs reuse it. */
   audience: AudienceEvidence | null;
   verifyAttempts: number;
+  /** A Short job's source video object; null on video jobs. */
+  sourceObject: string | null;
   updatedAt: number;
 };
 
@@ -51,9 +53,8 @@ const jobs = () => db().collection('jobs');
 const pad = (n: number) => String(n).padStart(4, '0');
 export const jobRef = (id: string) => jobs().doc(id);
 
-export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
-  const now = Date.now();
-  const doc: JobDoc = {
+export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
+  return {
     id,
     state: input.object ? 'PREP' : 'AWAITING_UPLOAD',
     owner: input.owner,
@@ -84,9 +85,16 @@ export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc>
     finalFields: null,
     pickVersion: null,
     verifyAttempts: 0,
+    shortId: null,
+    short: null,
+    sourceObject: null,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
+  const doc = newJobDoc(input, id);
   await jobs().doc(id).set(doc);
   return doc;
 }
@@ -239,6 +247,8 @@ export function toPublic(doc: JobDoc): PublicJob {
     videoId: doc.videoId,
     payload: doc.payload,
     hashtagCandidates: doc.hashtagCandidates,
+    shortId: doc.shortId,
+    short: doc.short,
     createdAt: doc.createdAt,
   };
 }
@@ -248,6 +258,77 @@ export function canAccess(doc: { owner: JobOwner }, allowlisted: boolean): boole
   return doc.owner !== 'nathan' || allowlisted;
 }
 
+/** A step that succeeded: the failure streak and the shown error reset. */
+export const ok = (patch: Partial<JobDoc>): Partial<JobDoc> => ({
+  ...patch,
+  consecutiveFailures: 0,
+  error: null,
+});
+
 export function fail(state: JobState, message: string): Partial<JobDoc> {
   return { state: 'FAILED', failedState: state, error: message };
+}
+
+/**
+ * Cuts a Short job from a video job: the parent's reviewed metadata becomes the Short's pick v1, its
+ * candidate lists come along so approve holds the same rules, and its trace is shared, so the Short
+ * lands in the video's trace. One live Short per video: an existing one that isn't discarded is
+ * returned instead. Null when the parent left `states` before the transaction ran.
+ */
+export async function createShort(
+  parent: JobDoc,
+  pick: Pick,
+  states: readonly JobState[],
+  id = newJobId(),
+): Promise<string | null> {
+  const parentRef = jobs().doc(parent.id);
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(parentRef);
+    const current = snap.exists ? (snap.data() as JobDoc) : null;
+    if (!current || !states.includes(current.state)) return null;
+    if (current.shortId) {
+      const existing = await tx.get(jobs().doc(current.shortId));
+      if (existing.exists && (existing.data() as JobDoc).state !== 'DISCARDED') {
+        return current.shortId;
+      }
+    }
+    const base = newJobDoc(
+      {
+        owner: current.owner,
+        channel: current.channel,
+        songTitle: current.songTitle,
+        notes: current.notes,
+        filename: `${current.filename.replace(/\.[^.]+$/, '')} (Short).mp4`,
+        contentType: 'video/mp4',
+        object: null,
+        sampleId: current.sampleId,
+        liveVideoId: null,
+        ipHash: current.ipHash,
+        trace: current.trace,
+      },
+      id,
+    );
+    const doc: JobDoc = {
+      ...base,
+      state: 'HOOK',
+      hashtagCandidates: current.hashtagCandidates,
+      audience: current.audience,
+      pickVersion: 1,
+      sourceObject: current.object,
+      short: {
+        parentId: current.id,
+        sourceDurationSec: current.probe?.durationSec ?? 0,
+        reframe: 'blur',
+        hook: null,
+        skipped: [],
+        renders: 0,
+        modelMs: 0,
+      },
+    };
+    const stored: StoredPick = { ...pick, version: 1, skipped: false };
+    tx.set(jobs().doc(id), doc);
+    tx.set(jobs().doc(id).collection('pick').doc(pad(1)), stored);
+    tx.update(parentRef, { shortId: id, updatedAt: Date.now() });
+    return id;
+  });
 }

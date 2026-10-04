@@ -5,7 +5,7 @@ export const PROVIDER = 'llama.cpp';
 /** Groups every agent, model, and tool span under one pipeline in Sentry's AI views. */
 export const PIPELINE = 'soundboard';
 
-export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide';
+export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-pick';
 
 type Part =
   | { type: 'text'; text: string }

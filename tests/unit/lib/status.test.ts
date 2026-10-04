@@ -21,6 +21,8 @@ const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   videoId: null,
   payload: null,
   hashtagCandidates: null,
+  shortId: null,
+  short: null,
   createdAt: 0,
   ...patch,
 });
@@ -121,6 +123,8 @@ describe('jobStatus', () => {
     const expected: [JobState, string, string, number][] = [
       ['PREP', 'info', 'Measuring audio', 4],
       ['PICK', 'info', 'Smart pick', 92],
+      ['HOOK', 'info', 'Picking the hook', 30],
+      ['RENDER', 'info', 'Cutting the Short', 60],
       ['REVIEW', 'warn', 'Needs review', 100],
       ['PAYLOAD', 'warn', 'Payload ready', 100],
       ['FAILED', 'err', 'Failed', 6 + 21],
@@ -228,6 +232,20 @@ describe('lastModelSeconds', () => {
     expect(
       lastModelSeconds(view({}, { chunks: [chunk(0, null, 3000), chunk(1, null, 7600)] })),
     ).toBe(8);
+  });
+
+  it("uses a Short's hook pick, not the video pick it copied", () => {
+    const short = {
+      parentId: 'p',
+      sourceDurationSec: 180,
+      reframe: 'blur' as const,
+      hook: null,
+      skipped: [],
+      renders: 0,
+      modelMs: 4_600,
+    };
+    expect(lastModelSeconds(view({ short }, { pick }))).toBe(5);
+    expect(lastModelSeconds(view({ short: { ...short, modelMs: 0 } }, { pick }))).toBeNull();
   });
 
   it('is null with no model call or a zero duration', () => {

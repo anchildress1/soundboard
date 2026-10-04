@@ -11,12 +11,14 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  ok,
   releaseJob,
   transitionJob,
   type JobDoc,
 } from './jobs';
 import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from './memory';
 import { modelStatus, stepDeadline } from './model';
+import { hookStep, renderStep } from './short';
 import { runPick } from './smart-pick';
 import { accessToken } from './tokens';
 import { invokeAgent } from './tracing';
@@ -36,7 +38,6 @@ const RECENT_COUNT = 5;
 type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
 type StepOutput = Patch & { pick?: Pick; chunk?: Chunk };
-const ok = (patch: Patch): Patch => ({ ...patch, consecutiveFailures: 0, error: null });
 
 /** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
 class StepFailure extends Error {
@@ -262,11 +263,13 @@ const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> 
   PREP: prep,
   ANALYZE: analyze,
   PICK: pick,
+  HOOK: hookStep,
+  RENDER: renderStep,
   PUBLISHING: publishing,
   CLAIMED_COMPLETE: verify,
 };
 
-const NEEDS_MODEL: readonly JobState[] = ['ANALYZE', 'PICK'];
+const NEEDS_MODEL: readonly JobState[] = ['ANALYZE', 'PICK', 'HOOK'];
 
 /** A step that throws counts as a failure; two in a row stop the job at that step for a retry. */
 export function failurePatch(job: JobDoc, error: unknown): Patch {

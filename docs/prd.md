@@ -168,6 +168,19 @@
 
 **R12 · Brand guide** — reads up to 30 FLR videos + 10 thumbnails, proposes one brand statement with keep / fix / drop rules. Nathan approves it; smart pick uses it.
 
+**R13 · Short**
+
+- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request from a video in review or later. No video-generation model: every frame is Nathan's.
+- The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
+- **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
+- **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start.
+- **render:** ffmpeg cuts and fits to 720×1280, blur fill (default) or center crop, and PUTs a fragmented MP4 straight to GCS by signed URL. Each render is a new object, read back before review: ffmpeg exits 0 on a refused PUT.
+- **Review tab:** the video page gets Video / Short tabs. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
+- Approve uploads through R6 (private, read-back verified) and takes an upload slot. A Short writes no feedback: its pick is the video's.
+- [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
+- [ ] A 60 s Short renders inside one step on the app container.
+- [ ] A Short is `VERIFIED` only by read-back.
+
 ## System Design
 
 One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
@@ -188,13 +201,15 @@ One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
   - **prep:** probe and measure the whole file.
   - **analyze:** cut and analyze one 29.5s window per call.
   - **pick:** hashtag search, then smart pick → job to `REVIEW`.
+  - **hook** (Short jobs): pick the hook window, place the cut from loudness.
+  - **render** (Short jobs): cut and reframe to 9:16 into GCS → job to `REVIEW`.
 - Each step claims the job in a Firestore transaction with a 3-minute expiry, so a second tab waits instead of double-running.
 
 ### Firestore
 
 | Path                                     | Holds                                                                                                                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jobs/{id}`                              | state, chunk progress, trace headers, hashtag candidates                                                                                                                              |
+| `jobs/{id}`                              | state, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` (hook, framing, renders) on a Short                                                           |
 | `jobs/{id}/chunks/{n}`, `jobs/{id}/pick` | step results                                                                                                                                                                          |
 | `artists/{id}/facts`                     | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy. |
 | `artists/{id}/feedback`                  | EDITED · SKIPPED · ACCEPTED                                                                                                                                                           |
@@ -215,6 +230,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - Tags in mono with a live `n / 500` counter. Approve disables past 500.
   - Visibility shown as **Private** (fixed: uploads are private).
   - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
+- **Review tabs:** once a video reaches review, Video and Short tabs sit above the panes. The Short tab plays the 9:16 render and holds its cut (start, length, blur fill / center crop) and its own label.
 - **Under 820px:** panes stack, tape first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
 - **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.

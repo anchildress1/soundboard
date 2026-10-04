@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/clients';
-import { objectInfo, signedReadUrl, signedUploadUrl, uploadObjectName } from '$lib/server/gcs';
+import {
+  objectInfo,
+  signedReadUrl,
+  signedRenderUrl,
+  signedUploadUrl,
+  uploadObjectName,
+} from '$lib/server/gcs';
 
 const gcs = vi.hoisted(() => ({
   storageOptions: [] as unknown[],
@@ -83,6 +89,25 @@ describe('signedUploadUrl', () => {
   it('propagates a signing failure', async () => {
     gcs.getSignedUrl.mockRejectedValueOnce(new Error('no signer'));
     await expect(signedUploadUrl('a', 'video/mp4')).rejects.toThrow('no signer');
+  });
+});
+
+describe('signedRenderUrl', () => {
+  it('signs a 15-minute v4 write with the content type and no length-range header', async () => {
+    gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/render']);
+    expect(await signedRenderUrl('uploads/s1-1', 'video/mp4')).toBe('https://storage/render');
+    expect(gcs.files).toEqual(['uploads/s1-1']);
+    expect(gcs.getSignedUrl).toHaveBeenCalledWith({
+      version: 'v4',
+      action: 'write',
+      expires: NOW + 15 * 60 * 1000,
+      contentType: 'video/mp4',
+    });
+  });
+
+  it('propagates a signing failure', async () => {
+    gcs.getSignedUrl.mockRejectedValueOnce(new Error('no signer'));
+    await expect(signedRenderUrl('a', 'video/mp4')).rejects.toThrow('no signer');
   });
 });
 

@@ -1,7 +1,22 @@
+import { cutErrors, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
-import type { JobState, Pick, PickFields } from '$lib/types';
+import {
+  SHORT_SOURCE_STATES,
+  type JobState,
+  type Pick,
+  type PickFields,
+  type Reframe,
+} from '$lib/types';
 import { db } from './clients';
-import { jobRef, latestPick, pickKey, skipAndRepick, transitionJob, type JobDoc } from './jobs';
+import {
+  createShort,
+  jobRef,
+  latestPick,
+  pickKey,
+  skipAndRepick,
+  transitionJob,
+  type JobDoc,
+} from './jobs';
 import { approvalFeedback, ARTIST_NAME, writeFeedback } from './memory';
 import { takeUploadSlot } from './quota';
 import { getRefreshToken } from './tokens';
@@ -88,16 +103,18 @@ export async function approve(
       patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
     } else patch = payload("Today's upload quota is used up.");
 
-    writeFeedback(
-      tx,
-      approvalFeedback(proposed, final, {
-        jobId: job.id,
-        songTitle: job.songTitle,
-        pickVersion: proposed.version,
-        at: Date.now(),
-      }),
-      { allowlisted: allowlistedFor(job), jobId: job.id },
-    );
+    // A Short reuses the video's pick, so approving it again would count the same choice twice.
+    if (!job.short)
+      writeFeedback(
+        tx,
+        approvalFeedback(proposed, final, {
+          jobId: job.id,
+          songTitle: job.songTitle,
+          pickVersion: proposed.version,
+          at: Date.now(),
+        }),
+        { allowlisted: allowlistedFor(job), jobId: job.id },
+      );
     tx.update(ref, { ...patch, updatedAt: Date.now() });
     return 'approved';
   });
@@ -107,9 +124,26 @@ export async function approve(
   }
 }
 
-/** Skips the current recommendation and queues a new smart pick, recording the skip atomically. */
+/**
+ * Skips the current recommendation and queues a new smart pick, recording the skip atomically. On a
+ * Short it re-picks the hook instead, away from the current one; the metadata stays.
+ */
 export async function rerun(job: JobDoc): Promise<void> {
   requireState(job, ['REVIEW']);
+  if (job.short) {
+    const { short } = job;
+    const skipped = short.hook
+      ? [...short.skipped, { window: short.hook.window, lengthSec: short.hook.lengthSec }]
+      : short.skipped;
+    const moved = await transitionJob(job.id, ['REVIEW'], {
+      state: 'HOOK',
+      short: { ...short, hook: null, skipped },
+      consecutiveFailures: 0,
+      error: null,
+    });
+    if (!moved) throw new ActionError(409, 'This Short was already handled.');
+    return;
+  }
   const current = await latestPick(job.id);
   const skipped = await skipAndRepick(job.id, current?.version ?? null, (tx) => {
     if (!current) return;
@@ -136,6 +170,8 @@ const DISCARDABLE: JobState[] = [
   'PREP',
   'ANALYZE',
   'PICK',
+  'HOOK',
+  'RENDER',
   'REVIEW',
   'FAILED',
   'PAYLOAD',
@@ -164,4 +200,57 @@ export async function retry(job: JobDoc): Promise<void> {
     ...(job.failedState === 'PUBLISHING' ? { upload: null, uploadProgress: null } : {}),
   });
   if (!resumed) throw new ActionError(409, 'The job is no longer failed.');
+}
+
+/**
+ * Starts a Short from a video whose analysis is done, or returns the live one it already has. Its
+ * metadata starts from what the artist approved, else the recommendation on screen.
+ */
+export async function makeShort(job: JobDoc): Promise<string> {
+  if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
+  requireState(job, [...SHORT_SOURCE_STATES]);
+  if (!(job.probe && job.probe.durationSec > 0)) {
+    throw new ActionError(409, "This video's length is unknown.");
+  }
+  const pick = await latestPick(job.id);
+  if (!pick) throw new ActionError(409, 'This video has no recommendation to start from.');
+  const id = await createShort(job, { ...pick, ...(job.finalFields ?? {}) }, SHORT_SOURCE_STATES);
+  if (!id) throw new ActionError(409, 'The video moved on before the Short could start.');
+  return id;
+}
+
+export const REFRAMES: readonly Reframe[] = ['blur', 'crop'];
+
+/**
+ * Re-renders the Short with the artist's start, length, and framing; no model call. Moving the cut
+ * clears the model's reason, since it no longer describes what's on screen.
+ */
+export async function recut(
+  job: JobDoc,
+  input: { startSec: number; lengthSec: number; reframe: string },
+): Promise<void> {
+  const { short } = job;
+  if (!short?.hook) throw new ActionError(409, 'Only a cut Short can be re-cut.');
+  requireState(job, ['REVIEW']);
+  const { hook } = short;
+  if (!REFRAMES.includes(input.reframe as Reframe)) {
+    throw new ActionError(400, 'Pick blur fill or center crop.');
+  }
+  const startSec = tenth(input.startSec);
+  const lengthSec = tenth(input.lengthSec);
+  const errors = cutErrors({ startSec, lengthSec }, short.sourceDurationSec);
+  const problem = errors.lengthSec ?? errors.startSec;
+  if (problem) throw new ActionError(400, problem);
+  const moved = startSec !== hook.startSec || lengthSec !== hook.lengthSec;
+  const recutTo = await transitionJob(job.id, ['REVIEW'], {
+    state: 'RENDER',
+    short: {
+      ...short,
+      reframe: input.reframe as Reframe,
+      hook: { ...hook, startSec, lengthSec, reason: moved ? '' : hook.reason },
+    },
+    consecutiveFailures: 0,
+    error: null,
+  });
+  if (!recutTo) throw new ActionError(409, 'This Short was already handled.');
 }

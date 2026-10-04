@@ -5,6 +5,7 @@ import {
   claimJob,
   CLAIM_TTL_MS,
   createJob,
+  createShort,
   fail,
   getJob,
   latestPick,
@@ -12,7 +13,9 @@ import {
   listPicks,
   skipAndRepick,
   transitionJob,
+  newJobDoc,
   newJobId,
+  ok,
   releaseJob,
   saveChunk,
   savePick,
@@ -21,7 +24,7 @@ import {
   type NewJob,
 } from '$lib/server/jobs';
 import { resetClients } from '$lib/server/clients';
-import type { Chunk, Pick } from '$lib/types';
+import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -218,7 +221,126 @@ describe('skipAndRepick', () => {
   });
 });
 
+describe('newJobDoc', () => {
+  it('builds a video job with no Short attached', () => {
+    const doc = newJobDoc(input, 'j', 5);
+    expect(doc).toMatchObject({
+      id: 'j',
+      state: 'AWAITING_UPLOAD',
+      object: 'uploads/j',
+      shortId: null,
+      short: null,
+      sourceObject: null,
+      createdAt: 5,
+      updatedAt: 5,
+    });
+  });
+});
+
+describe('createShort', () => {
+  async function parent(patch: Record<string, unknown> = {}) {
+    await createJob({ ...input, owner: 'nathan', channel: 'nathan', object: 'samples/a.mp4' }, 'p');
+    await updateJob('p', {
+      state: 'REVIEW',
+      probe: { durationSec: 180, width: 1920, height: 1080, hasAudio: true },
+      hashtagCandidates: ['#synthwave'],
+      audience: {
+        query: 'q',
+        hashtags: ['#synthwave'],
+        tags: [{ tag: 'synthwave', usedBy: 2 }],
+        top: [],
+      },
+      ...patch,
+    });
+    return (await getJob('p'))!;
+  }
+
+  it("creates a HOOK job carrying the parent's pick, candidates, trace, and owner", async () => {
+    const job = await parent();
+    expect(await createShort(job, pick(3), SHORT_SOURCE_STATES, 's1')).toBe('s1');
+    const short = (await getJob('s1'))!;
+    expect(short).toMatchObject({
+      state: 'HOOK',
+      owner: 'nathan',
+      channel: 'nathan',
+      songTitle: 'PeekaBoo',
+      filename: 'peekaboo (Short).mp4',
+      contentType: 'video/mp4',
+      object: 'uploads/s1',
+      sourceObject: 'samples/a.mp4',
+      hashtagCandidates: ['#synthwave'],
+      audience: { tags: [{ tag: 'synthwave', usedBy: 2 }] },
+      pickVersion: 1,
+      trace: { sentryTrace: 't-s-1', baggage: 'b' },
+      shortId: null,
+      short: {
+        parentId: 'p',
+        sourceDurationSec: 180,
+        reframe: 'blur',
+        hook: null,
+        skipped: [],
+        renders: 0,
+        modelMs: 0,
+      },
+    });
+    const picks = await listPicks('s1');
+    expect(picks).toEqual([{ ...pick(3), version: 1, skipped: false }]);
+    expect((await getJob('p'))!.shortId).toBe('s1');
+  });
+
+  it('returns the live Short instead of starting a second one', async () => {
+    const job = await parent();
+    await createShort(job, pick(1), SHORT_SOURCE_STATES, 's1');
+    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, 's2')).toBe('s1');
+    expect(store.has('jobs/s2')).toBe(false);
+  });
+
+  it('starts a new Short once the old one was discarded', async () => {
+    const job = await parent();
+    await createShort(job, pick(1), SHORT_SOURCE_STATES, 's1');
+    await updateJob('s1', { state: 'DISCARDED' });
+    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, 's2')).toBe('s2');
+    expect((await getJob('p'))!.shortId).toBe('s2');
+  });
+
+  it('starts a new Short when the recorded one is gone', async () => {
+    const job = await parent({ shortId: 'vanished' });
+    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, 's3')).toBe('s3');
+  });
+
+  it('refuses a parent that left the allowed states, or is missing', async () => {
+    const job = await parent({ state: 'DISCARDED' });
+    expect(await createShort(job, pick(1), SHORT_SOURCE_STATES, 's1')).toBeNull();
+    expect(store.has('jobs/s1')).toBe(false);
+    expect(await createShort({ ...job, id: 'ghost' }, pick(1), SHORT_SOURCE_STATES)).toBeNull();
+  });
+
+  it('keeps a filename without an extension readable', async () => {
+    const job = await parent({ filename: 'master take' });
+    await createShort(job, pick(1), SHORT_SOURCE_STATES, 's1');
+    expect((await getJob('s1'))!.filename).toBe('master take (Short).mp4');
+  });
+});
+
+describe('ok', () => {
+  it('resets the failure streak and the shown error', () => {
+    expect(ok({ state: 'RENDER' })).toEqual({
+      state: 'RENDER',
+      consecutiveFailures: 0,
+      error: null,
+    });
+  });
+});
+
 describe('toPublic', () => {
+  it('passes the Short link and cut through, but not the source object', async () => {
+    const job = await createJob(input, 'j');
+    const pub = toPublic({ ...job, shortId: 's1', sourceObject: 'uploads/p' });
+    expect(pub.shortId).toBe('s1');
+    expect(pub.short).toBeNull();
+    expect(pub).not.toHaveProperty('sourceObject');
+  });
+
   it('drops server-only fields', async () => {
     const job = await createJob(input, 'j');
     const pub = toPublic({

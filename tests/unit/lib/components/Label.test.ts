@@ -153,3 +153,31 @@ describe('Label: read-only', () => {
     expect(screen.getByRole('button', { name: 'Re-run model' })).toBeDisabled();
   });
 });
+
+describe('Label: a second label on the page', () => {
+  it('prefixes field ids so labels stay tied to their own fields', () => {
+    const { container } = setup({ idPrefix: 'short-' });
+    expect(title().id).toBe('short-title');
+    expect(description().id).toBe('short-desc');
+    expect(tags().id).toBe('short-tags');
+    expect(container.querySelector('#title')).toBeNull();
+  });
+
+  it('keeps the plain ids by default', () => {
+    setup();
+    expect(title().id).toBe('title');
+  });
+
+  it('takes its own region name and re-run label', async () => {
+    const { onrerun } = setup({
+      name: 'What goes to YouTube with the Short',
+      rerunLabel: 'Re-pick hook',
+    });
+    expect(
+      screen.getByRole('region', { name: 'What goes to YouTube with the Short' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Re-run model' })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Re-pick hook' }));
+    expect(onrerun).toHaveBeenCalledOnce();
+  });
+});

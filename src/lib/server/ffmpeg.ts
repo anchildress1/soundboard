@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import * as Sentry from '@sentry/sveltekit';
-import type { Measurements, Probe } from '$lib/types';
+import type { Measurements, Probe, Reframe } from '$lib/types';
 
 /** Gemma's audio input caps at 30 s; each analyze step reads one window this long. */
 export const WINDOW_SEC = 29.5;
@@ -14,7 +14,7 @@ const MEASURE_FILTER = `ebur128=peak=true:framelog=verbose,aformat=sample_fmts=s
 
 type RunResult = { stdout: Buffer; stderr: string; fd3: Buffer };
 
-type Task = 'probe' | 'measure' | 'window';
+type Task = 'probe' | 'measure' | 'window' | 'loudness' | 'render';
 
 /**
  * Runs ffmpeg or ffprobe inside a span named for the task. The arguments carry the signed source URL,
@@ -227,4 +227,129 @@ export async function extractWindow(
 /** Window count covering the file; a trailing sliver under a second is not worth a model call. */
 export function chunkCount(durationSec: number): number {
   return Math.max(1, Math.ceil((durationSec - 1) / WINDOW_SEC));
+}
+
+export type LoudnessPoint = { t: number; m: number };
+
+/** ebur128's per-100 ms lines: time and momentary loudness, shifted to file time by `offsetSec`. */
+export function parseLoudness(stderr: string, offsetSec: number): LoudnessPoint[] {
+  const points: LoudnessPoint[] = [];
+  for (const match of stderr.matchAll(/\bt:\s*([\d.]+)\s+TARGET:.*?\bM:\s*(-?[\d.]+|-?inf)/g)) {
+    const m = Number(match[2]);
+    if (Number.isFinite(m)) points.push({ t: round(offsetSec + Number(match[1])), m });
+  }
+  return points;
+}
+
+/** Momentary loudness every 100 ms across one stretch of the source, read by range requests. */
+export async function loudnessCurve(
+  url: string,
+  startSec: number,
+  durationSec: number,
+): Promise<LoudnessPoint[]> {
+  const { stderr } = await run(
+    'loudness',
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-nostats',
+      '-ss',
+      startSec.toFixed(3),
+      '-t',
+      durationSec.toFixed(3),
+      '-vn',
+      '-i',
+      url,
+      '-filter_complex',
+      '[0:a:0]ebur128',
+      '-f',
+      'null',
+      '-',
+    ],
+    30_000,
+  );
+  return parseLoudness(stderr, startSec);
+}
+
+/**
+ * 720x1280 keeps a 60-second render on the app container's 2 vCPUs well inside the step budget;
+ * 1080x1920 takes about twice as long.
+ */
+export const SHORT_WIDTH = 720;
+export const SHORT_HEIGHT = 1280;
+const SHORT_FPS = 30;
+
+/**
+ * Filter graph fitting any frame to 9:16. Blur fill keeps the whole frame over a blurred copy of
+ * itself (blurred at quarter size, which is cheap and looks the same); crop fills the frame from
+ * its center.
+ */
+export function shortFilter(reframe: Reframe): string {
+  const [w, h] = [SHORT_WIDTH, SHORT_HEIGHT];
+  const fill = (sw: number, sh: number) =>
+    `scale=${sw}:${sh}:force_original_aspect_ratio=increase,crop=${sw}:${sh}`;
+  if (reframe === 'crop') return `[0:v:0]fps=${SHORT_FPS},${fill(w, h)},setsar=1[v]`;
+  return [
+    `[0:v:0]fps=${SHORT_FPS},split=2[bg][fg]`,
+    `[bg]${fill(w / 4, h / 4)},boxblur=8:2,scale=${w}:${h},setsar=1[b]`,
+    `[fg]scale=${w}:${h}:force_original_aspect_ratio=decrease,setsar=1[f]`,
+    `[b][f]overlay=(W-w)/2:(H-h)/2[v]`,
+  ].join(';');
+}
+
+/**
+ * Cuts and reframes the Short from the source URL straight into a signed GCS PUT, so neither the
+ * source nor the render passes through the app. An HTTP output can't seek back to write the index,
+ * so the MP4 is fragmented. ffmpeg exits 0 even when the PUT is refused: the caller must read the
+ * object back.
+ */
+export async function renderShort(
+  sourceUrl: string,
+  targetUrl: string,
+  cut: { startSec: number; lengthSec: number; reframe: Reframe },
+): Promise<void> {
+  await run(
+    'render',
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-nostats',
+      '-loglevel',
+      'error',
+      '-ss',
+      cut.startSec.toFixed(3),
+      '-t',
+      cut.lengthSec.toFixed(3),
+      '-i',
+      sourceUrl,
+      '-filter_complex',
+      shortFilter(cut.reframe),
+      '-map',
+      '[v]',
+      '-map',
+      '0:a:0',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '21',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '192k',
+      '-movflags',
+      '+frag_keyframe+empty_moov+default_base_moof',
+      '-f',
+      'mp4',
+      '-method',
+      'PUT',
+      '-content_type',
+      'video/mp4',
+      targetUrl,
+    ],
+    100_000,
+  );
 }

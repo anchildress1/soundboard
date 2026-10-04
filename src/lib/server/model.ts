@@ -45,6 +45,7 @@ const AGENT_FOR_SCHEMA = {
   chunk_analysis: 'chunk-analyst',
   smart_pick: 'smart-pick',
   brand_guide: 'brand-guide',
+  hook_pick: 'hook-pick',
 } as const satisfies Record<string, AgentName>;
 
 export type SchemaName = keyof typeof AGENT_FOR_SCHEMA;

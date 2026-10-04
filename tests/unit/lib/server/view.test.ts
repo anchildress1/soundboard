@@ -5,11 +5,33 @@ import { resetStore, store } from '../../../helpers/fake-firestore';
 import { resetClients } from '$lib/server/clients';
 import { createJob, saveChunk, savePick, type NewJob } from '$lib/server/jobs';
 import { authorizedJob, buildView } from '$lib/server/view';
-import type { Chunk, Pick } from '$lib/types';
+import type { Chunk, JobState, Pick, Short } from '$lib/types';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
 );
+
+vi.mock('@google-cloud/storage', () => ({
+  Storage: class {
+    bucket(name: string) {
+      return {
+        file: (object: string) => ({
+          getSignedUrl: async () => [`https://storage.googleapis.com/${name}/${object}?sig=read`],
+        }),
+      };
+    }
+  },
+}));
+
+const SHORT: Short = {
+  parentId: 'v',
+  sourceDurationSec: 180,
+  reframe: 'blur',
+  hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'x' },
+  skipped: [],
+  renders: 1,
+  modelMs: 1,
+};
 
 const input = (owner: NewJob['owner']): NewJob => ({
   owner,
@@ -55,6 +77,7 @@ const pick = (version: number): Pick => ({
 
 beforeEach(() => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
+  vi.stubEnv('GCS_BUCKET', 'bkt');
   resetStore();
   resetClients();
 });
@@ -119,5 +142,35 @@ describe('buildView', () => {
     await saveChunk('other', chunk(0));
     expect((await buildView(job)).chunks).toEqual([]);
     expect(store.has('jobs/other/chunks/0000')).toBe(true);
+  });
+});
+
+describe('buildView for a Short', () => {
+  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'PAYLOAD'] as JobState[])(
+    'signs playback of the rendered object in %s',
+    async (state) => {
+      const job = await createJob(input('visitor'), 's');
+      const view = await buildView({ ...job, state, object: 'uploads/s-1', short: SHORT });
+      expect(view.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s-1?sig=read');
+    },
+  );
+
+  it.each(['HOOK', 'RENDER', 'FAILED'] as JobState[])(
+    'leaves playback out while the Short is %s',
+    async (state) => {
+      const job = await createJob(input('visitor'), 's');
+      expect(await buildView({ ...job, state, short: SHORT })).not.toHaveProperty('playbackUrl');
+    },
+  );
+
+  it('leaves playback out before the first render', async () => {
+    const job = await createJob(input('visitor'), 's');
+    const view = await buildView({ ...job, state: 'REVIEW', short: { ...SHORT, renders: 0 } });
+    expect(view).not.toHaveProperty('playbackUrl');
+  });
+
+  it('never signs playback for a video job', async () => {
+    const job = await createJob(input('visitor'), 'v');
+    expect(await buildView({ ...job, state: 'REVIEW' })).not.toHaveProperty('playbackUrl');
   });
 });
