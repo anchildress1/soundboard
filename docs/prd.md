@@ -96,7 +96,7 @@
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
 - Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description.
-- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. Never the song title.
+- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10 and fills only up to 3 from the top candidates, because the top of the pool is the generic filler the selection rule exists to avoid. Never the song title.
 - `why` names the evidence behind each field.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
