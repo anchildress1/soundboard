@@ -7,12 +7,12 @@ export default defineConfig({
   resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.ts'],
-    setupFiles: ['./src/vitest-setup.ts'],
+    include: ['tests/unit/**/*.test.ts'],
+    setupFiles: ['./tests/vitest-setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,svelte}'],
-      exclude: ['src/**/*.test.ts', 'src/**/*.d.ts', 'src/vitest-setup.ts'],
+      exclude: ['src/**/*.d.ts'],
       reporter: ['text', 'html', 'lcov'],
       thresholds: {
         lines: 85,

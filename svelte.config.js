@@ -7,6 +7,8 @@ const config = {
   },
   kit: {
     adapter: adapter(),
+    // Lets tests under tests/ import route modules without deep relative paths.
+    alias: { $routes: 'src/routes' },
   },
 };
 
