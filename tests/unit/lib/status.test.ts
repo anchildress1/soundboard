@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { heardTags, jobStatus, lastModelSeconds } from '$lib/status';
+import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
 import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
 
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
@@ -207,7 +207,7 @@ describe('heardTags', () => {
   });
 });
 
-describe('lastModelSeconds', () => {
+describe('modelSeconds', () => {
   const pick: Pick = {
     version: 1,
     title: 't',
@@ -221,18 +221,41 @@ describe('lastModelSeconds', () => {
     modelMs: 12_400,
   };
 
-  it('prefers the pick over the last chunk', () => {
-    expect(lastModelSeconds(view({}, { pick, chunks: [chunk(0, null, 3000)] }))).toBe(12);
+  it('adds the pick to every chunk', () => {
+    expect(modelSeconds(view({}, { pick, chunks: [chunk(0, null, 3000)] }))).toBe(15);
   });
 
-  it('falls back to the last chunk', () => {
-    expect(
-      lastModelSeconds(view({}, { chunks: [chunk(0, null, 3000), chunk(1, null, 7600)] })),
-    ).toBe(8);
+  it('sums the chunks before the pick exists', () => {
+    expect(modelSeconds(view({}, { chunks: [chunk(0, null, 3000), chunk(1, null, 7600)] }))).toBe(
+      11,
+    );
+  });
+
+  it('adds the running call and drops the pick being replaced', () => {
+    const picking = view({ state: 'PICK' }, { pick, chunks: [chunk(0, null, 3000)] });
+    expect(modelSeconds(picking)).toBe(3);
+    expect(modelSeconds(picking, 2400)).toBe(5);
+  });
+
+  it('counts a pick with no chunks loaded', () => {
+    expect(modelSeconds(view({}, { pick }))).toBe(12);
   });
 
   it('is null with no model call or a zero duration', () => {
-    expect(lastModelSeconds(view())).toBeNull();
-    expect(lastModelSeconds(view({}, { chunks: [chunk(0, null, 0)] }))).toBeNull();
+    expect(modelSeconds(view())).toBeNull();
+    expect(modelSeconds(view({}, { chunks: [chunk(0, null, 0)] }))).toBeNull();
+  });
+});
+
+describe('modelWorking', () => {
+  it('is true while a chunk or the pick runs', () => {
+    expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(true);
+    expect(modelWorking(view({ state: 'PICK' }))).toBe(true);
+  });
+
+  it('is false while the model loads or outside model states', () => {
+    expect(modelWorking(view({ state: 'PICK' }, { wait: 'waking model' }))).toBe(false);
+    expect(modelWorking(view({ state: 'PREP' }))).toBe(false);
+    expect(modelWorking(view({ state: 'REVIEW' }))).toBe(false);
   });
 });

@@ -68,8 +68,19 @@ export function heardTags(view: JobView, limit = 8): string[] {
     .map(([tag]) => tag);
 }
 
-/** Seconds of the last model call, for the `gemma-4-12b-it · 12s` label. */
-export function lastModelSeconds(view: JobView): number | null {
-  const ms = view.pick?.modelMs ?? view.chunks.at(-1)?.modelMs;
+/** Whether a model call is running now: a chunk or the pick, not waiting on the model to load. */
+export function modelWorking(view: JobView): boolean {
+  return (view.job.state === 'ANALYZE' || view.job.state === 'PICK') && !view.wait;
+}
+
+/**
+ * Seconds the model has spent on this job (every chunk plus the current pick), for the
+ * `gemma-4-12b-it · 52s` label. `runningMs` adds the call still in flight so the label keeps counting.
+ */
+export function modelSeconds(view: JobView, runningMs = 0): number | null {
+  // During PICK the stored pick is the one being replaced, so only the running call counts.
+  const pickMs = view.job.state === 'PICK' ? 0 : (view.pick?.modelMs ?? 0);
+  const done = view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, pickMs);
+  const ms = done + runningMs;
   return ms ? Math.round(ms / 1000) : null;
 }

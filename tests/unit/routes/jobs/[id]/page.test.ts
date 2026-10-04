@@ -150,6 +150,32 @@ afterEach(() => {
 });
 
 describe('job page: status chip', () => {
+  it('keeps the model clock counting while the pick runs, then stops in review', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      fetchMock.mockImplementation(hang);
+      setup(view({ state: 'PICK' }, { pick: PICK, chunks: [chunk(0)] }));
+      // The stored pick is being replaced, so only the chunk counts at first.
+      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(screen.getByText('gemma-4-12b-it · 7s')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count while the model is loading', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      fetchMock.mockImplementation(hang);
+      setup(view({ state: 'ANALYZE' }, { chunks: [chunk(0)], wait: 'waking model' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows chunk progress and drives the next step with the job trace', async () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 }, { chunks: [chunk(0)] }));
@@ -181,7 +207,7 @@ describe('job page: status chip', () => {
     expect(screen.getByText('Silence 80.0s to 83.0s')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Check before uploading' })).toBeInTheDocument();
     expect(screen.queryByText('Keeps the naming pattern.')).toBeNull();
-    expect(screen.getByText('gemma-4-12b-it · 12s')).toBeInTheDocument();
+    expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('To do');
     await fireEvent.click(screen.getByRole('tab', { name: /Bandcamp/ }));
     expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeVisible();

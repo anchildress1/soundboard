@@ -13,7 +13,7 @@
   import { drive, sleep } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
-  import { heardTags, jobStatus, lastModelSeconds } from '$lib/status';
+  import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
   import { DRIVEN_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -27,12 +27,16 @@
   let message = $state('');
   let serverErrors = $state<FieldErrors>({});
   let bandcampDone = $state(false);
+  // Finished calls only land in the view when their step returns, so the clock covers the gap.
+  let stepStartedAt = $state(Date.now());
+  let now = $state(Date.now());
   let stopped = false;
   let driving = false;
 
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
-  const seconds = $derived(lastModelSeconds(view));
+  const working = $derived(modelWorking(view));
+  const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
     job.payload ??
@@ -47,6 +51,17 @@
   );
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
+
+  $effect(() => {
+    void view;
+    stepStartedAt = now = Date.now();
+  });
+
+  $effect(() => {
+    if (!working) return;
+    const tick = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(tick);
+  });
 
   async function run() {
     if (driving) return;

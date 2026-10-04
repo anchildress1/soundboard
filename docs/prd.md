@@ -209,7 +209,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution, and timecode overlays.
-  - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
+  - State chip + magenta progress bar + model label (`gemma-4-12b-it · 52s`, total model time for the job).
   - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
 - **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
   - Above both tabs, "Check before uploading" lists the flags as a warning (⚠, yellow outline), since an audio or video problem matters wherever the song goes.
