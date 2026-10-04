@@ -1,7 +1,7 @@
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { lengthBounds, tenth } from '$lib/short';
+import { floorTenth, lengthBounds, tenth } from '$lib/short';
 import type { Chunk, Hook, Short } from '$lib/types';
 import {
   LOUDNESS_TIMEOUT_MS,
@@ -90,7 +90,7 @@ export function buildHookMessages(ctx: HookContext): ChatMessage[] {
 export function settleHook(raw: RawHook, ctx: HookContext): RawHook {
   const { min, max } = lengthBounds(ctx.sourceDurationSec);
   const window = clamp(Math.round(raw.window), 0, Math.max(0, ctx.chunks.length - 1));
-  const room = Math.floor((ctx.sourceDurationSec - window * WINDOW_SEC) * 10) / 10;
+  const room = floorTenth(ctx.sourceDurationSec - window * WINDOW_SEC);
   return {
     window,
     lengthSec: tenth(clamp(raw.lengthSec, min, Math.max(min, Math.min(max, room)))),
@@ -180,7 +180,7 @@ export function placeCut(
     const lead = curve.filter((p) => p.t >= onset - 1 && p.t <= onset);
     onset = lead.reduce((low, p) => (p.m < low.m ? p : low), lead.at(-1)!).t;
   }
-  return tenth(clamp(onset, 0, latest));
+  return Math.max(0, Math.min(tenth(onset), floorTenth(latest)));
 }
 
 /** HOOK step: the model picks the window and length, then ffmpeg's loudness places the start. */

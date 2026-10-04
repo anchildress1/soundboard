@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canCutShort,
   cutErrors,
+  floorTenth,
   lengthBounds,
   SHORT_MAX_SEC,
   SHORT_MIN_SEC,
@@ -16,6 +17,20 @@ describe('tenth', () => {
   });
 });
 
+describe('floorTenth', () => {
+  it('rounds down to a tenth', () => {
+    expect(floorTenth(30.06)).toBe(30);
+    expect(floorTenth(30.09)).toBe(30);
+    expect(floorTenth(30)).toBe(30);
+  });
+
+  it('keeps a tenth that floating point stores just under itself', () => {
+    expect(floorTenth(2.3)).toBe(2.3);
+    expect(floorTenth(180 - 147.5)).toBe(32.5);
+    expect(floorTenth(0.3)).toBe(0.3);
+  });
+});
+
 describe('lengthBounds', () => {
   it('is 15 to 60 seconds for a full-length video', () => {
     expect(lengthBounds(240)).toEqual({ min: SHORT_MIN_SEC, max: SHORT_MAX_SEC });
@@ -23,6 +38,8 @@ describe('lengthBounds', () => {
 
   it('caps the length at the source for a 30-second sample', () => {
     expect(lengthBounds(30.04)).toEqual({ min: 15, max: 30 });
+    // Rounding to nearest would allow 30.1 s, past the end of the source.
+    expect(lengthBounds(30.06)).toEqual({ min: 15, max: 30 });
   });
 
   it('is exactly 60 at a 60-second source', () => {
@@ -51,6 +68,16 @@ describe('cutErrors', () => {
   it('accepts a cut ending exactly at the end of the source', () => {
     expect(cutErrors({ startSec: 150, lengthSec: 30 }, 180)).toEqual({});
     expect(cutErrors({ startSec: 0, lengthSec: 15 }, 15)).toEqual({});
+    expect(cutErrors({ startSec: 15, lengthSec: 15 }, 30.06)).toEqual({});
+  });
+
+  it('refuses a start that rounds the cut past the end of the source', () => {
+    expect(cutErrors({ startSec: 15.1, lengthSec: 15 }, 30.06)).toEqual({
+      startSec: 'Start must be 0 to 15 seconds for that length.',
+    });
+    expect(cutErrors({ startSec: 0, lengthSec: 30.1 }, 30.06)).toEqual({
+      lengthSec: 'Length must be 15 to 30 seconds.',
+    });
   });
 
   it('rejects a length outside the bounds', () => {

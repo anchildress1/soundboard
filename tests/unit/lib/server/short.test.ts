@@ -473,6 +473,17 @@ describe('placeCut', () => {
     expect(placeCut(pts(156, 180, 170), { ...cut, windowStart: 147.5, windowEnd: 180 })).toBe(150);
   });
 
+  it('never ends the cut past a source whose length is not on the tenth', () => {
+    const start = placeCut(pts(0, 30, 28), {
+      windowStart: 0,
+      windowEnd: 29.5,
+      lengthSec: 15,
+      sourceSec: 30.06,
+    });
+    expect(start).toBe(15);
+    expect(start + 15).toBeLessThanOrEqual(30.06);
+  });
+
   it('starts at zero when the source is no longer than the Short', () => {
     expect(
       placeCut(pts(0, 30, 10), { windowStart: 0, windowEnd: 30, lengthSec: 30, sourceSec: 30 }),
