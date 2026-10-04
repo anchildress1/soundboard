@@ -171,6 +171,7 @@ The MIT license covers this repository's code only. **Gemma's weights are not MI
 ## Acknowledgements
 
 - **Nathan**, for making the music and letting a robot critique it.
+- **DEV** and **MLH**, for the Hacktoberfest Weekend Challenge that finally made me build the thing.
 - **Google DeepMind** for Gemma, and the **llama.cpp** maintainers for making a 12B multimodal model run on one GPU.
 
 ---
