@@ -83,6 +83,7 @@ export type Pick = PickFields & {
   brandCheck: string;
   why: { title: string; description: string; tags: string };
   bandcamp: BandcampDraft;
+  /** Model time across every pick run for this job, this one included. */
   modelMs: number;
 };
 

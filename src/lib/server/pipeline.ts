@@ -160,7 +160,8 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         audience,
         pickVersion: version,
       }),
-      pick: { ...result.pick, version, modelMs: result.ms },
+      // Each stored pick carries the running total, so a re-run never loses earlier pick time.
+      pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
     };
   }
 }

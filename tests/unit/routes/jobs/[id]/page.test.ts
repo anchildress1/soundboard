@@ -155,10 +155,10 @@ describe('job page: status chip', () => {
     try {
       fetchMock.mockImplementation(hang);
       setup(view({ state: 'PICK' }, { pick: PICK, chunks: [chunk(0)] }));
-      // The stored pick is being replaced, so only the chunk counts at first.
-      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+      // A re-run keeps the earlier pick's 12s and counts the new call on top.
+      expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(3000);
-      expect(screen.getByText('gemma-4-12b-it · 7s')).toBeInTheDocument();
+      expect(screen.getByText('gemma-4-12b-it · 19s')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

@@ -231,10 +231,10 @@ describe('modelSeconds', () => {
     );
   });
 
-  it('adds the running call and drops the pick being replaced', () => {
+  it('keeps earlier pick runs and adds the running call during a re-run', () => {
     const picking = view({ state: 'PICK' }, { pick, chunks: [chunk(0, null, 3000)] });
-    expect(modelSeconds(picking)).toBe(3);
-    expect(modelSeconds(picking, 2400)).toBe(5);
+    expect(modelSeconds(picking)).toBe(15);
+    expect(modelSeconds(picking, 2400)).toBe(18);
   });
 
   it('counts a pick with no chunks loaded', () => {

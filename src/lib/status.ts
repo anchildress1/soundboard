@@ -82,9 +82,7 @@ export function modelWorking(view: JobView): boolean {
  * `gemma-4-12b-it · 52s` label. `runningMs` adds the call still in flight so the label keeps counting.
  */
 export function modelSeconds(view: JobView, runningMs = 0): number | null {
-  // During PICK the stored pick is the one being replaced, so only the running call counts.
-  const pickMs = view.job.state === 'PICK' ? 0 : (view.pick?.modelMs ?? 0);
-  const done = view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, pickMs);
+  const done = view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, view.pick?.modelMs ?? 0);
   const ms = done + runningMs;
   return ms ? Math.round(ms / 1000) : null;
 }

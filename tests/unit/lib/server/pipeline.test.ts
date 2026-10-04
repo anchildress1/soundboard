@@ -675,7 +675,13 @@ describe('runStep: PICK', () => {
       version: 1,
       skipped: true,
     });
-    store.set('jobs/j1/pick/0002', { ...RAW_PICK, title: 'Second', version: 2, skipped: false });
+    store.set('jobs/j1/pick/0002', {
+      ...RAW_PICK,
+      title: 'Second',
+      version: 2,
+      skipped: false,
+      modelMs: 50_000,
+    });
     await runStep(
       seed({
         state: 'PICK',
@@ -694,7 +700,10 @@ describe('runStep: PICK', () => {
       }),
     );
     expect(saved().state).toBe('REVIEW');
-    expect(store.get('jobs/j1/pick/0003')).toMatchObject({ version: 3 });
+    const third = store.get('jobs/j1/pick/0003') as { version: number; modelMs: number };
+    expect(third.version).toBe(3);
+    // The stored time carries the earlier runs, so a re-run never drops them from the total.
+    expect(third.modelMs).toBeGreaterThanOrEqual(50_000);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');
