@@ -85,7 +85,7 @@
 
 **R4 · Smart pick**
 
-- Chunk results + audience evidence + FLR's 5 most recent videos (identity only) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
+- Chunk results + audience evidence + FLR's 3 most recent videos (identity only; 3 keeps the pick inside the model's 8K context) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
   - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.

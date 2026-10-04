@@ -31,7 +31,7 @@ import {
 } from './youtube';
 
 export const VERIFY_ATTEMPTS = 10;
-const RECENT_COUNT = 5;
+const RECENT_COUNT = 3;
 
 type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
