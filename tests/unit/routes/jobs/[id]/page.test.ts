@@ -209,6 +209,8 @@ describe('job page: status chip', () => {
     const link = screen.getByRole('link', { name: 'youtu.be/vid1' });
     expect(link).toHaveAttribute('href', 'https://youtu.be/vid1');
     expect(screen.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
+    expect(screen.getByText(/Uploaded to YouTube · private/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('Done');
   });
 
   it('shows the would-be payload for PAYLOAD', () => {

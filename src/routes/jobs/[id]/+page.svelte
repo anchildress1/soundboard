@@ -137,13 +137,6 @@
     {#if data.live && view.pick}
       <Diff live={data.live} pick={view.pick} />
     {/if}
-    {#if job.state === 'VERIFIED' && job.videoId}
-      <p class="verified">
-        Verified · private · <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
-          >youtu.be/{job.videoId}</a
-        >
-      </p>
-    {/if}
   </section>
 
   <div class="right">
@@ -160,6 +153,17 @@
       {/if}
       <Destinations youtubeDone={job.state === 'VERIFIED'} {bandcampDone}>
         {#snippet youtube()}
+          {#if job.state === 'VERIFIED' && job.videoId}
+            <p class="uploaded">
+              <span class="check" aria-hidden="true">✓</span>
+              <span
+                >Uploaded to YouTube · private ·
+                <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
+                  >youtu.be/{job.videoId}</a
+                ></span
+              >
+            </p>
+          {/if}
           {#key pick.version}
             <Label
               {fields}
@@ -245,9 +249,32 @@
     min-width: 0;
   }
 
-  .verified {
+  .uploaded {
     margin: 0;
-    font: 500 13px/1.4 var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--green);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--green) 8%, var(--panel));
+    font: 600 14px/1.4 var(--sans);
+    color: var(--ink);
+  }
+
+  .uploaded .check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--green);
+    color: var(--ground);
+    font-size: 14px;
+  }
+
+  .uploaded a {
     color: var(--green);
   }
 
