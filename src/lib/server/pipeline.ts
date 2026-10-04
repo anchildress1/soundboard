@@ -111,7 +111,8 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   );
   return invokeAgent('smart-pick', async (span) => {
     const audience =
-      job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
+      job.audience ??
+      (await audienceEvidence(chunks, job.probe?.durationSec ?? null, job.liveVideoId));
     try {
       return await pickWith(audience, span);
     } catch (error) {

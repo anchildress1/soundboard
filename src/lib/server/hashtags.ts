@@ -28,14 +28,29 @@ export type AudienceEvidence = {
   top: AudienceVideo[];
 };
 
-/** The chunk analyst's most frequent genre terms, which seed the genre search. */
+const asWords = (term: string) => ` ${term} `;
+
+/**
+ * The chunk analyst's most frequent genre terms, which seed the genre search. A term that sits
+ * inside a longer heard term ("electronic" in "industrial electronic") folds its count into the
+ * longer one, so umbrella genres can't crowd out the specific genre of the track.
+ */
 export function genreTerms(chunks: Chunk[], limit = 2): string[] {
   const counts = new Map<string, number>();
   for (const chunk of chunks) {
     for (const genre of chunk.analysis?.music.genre ?? []) {
-      const term = genre.trim().toLowerCase();
+      const term = genre.trim().toLowerCase().replaceAll(/\s+/g, ' ');
       if (term) counts.set(term, (counts.get(term) ?? 0) + 1);
     }
+  }
+  // Shortest first, so a chain like "electronic" → "industrial electronic" → longer folds all the way.
+  for (const term of [...counts.keys()].sort((a, b) => a.length - b.length)) {
+    const wider = [...counts.keys()]
+      .filter((other) => other !== term && asWords(other).includes(asWords(term)))
+      .sort((a, b) => counts.get(b)! - counts.get(a)!)[0];
+    if (wider === undefined) continue;
+    counts.set(wider, counts.get(wider)! + counts.get(term)!);
+    counts.delete(term);
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -111,8 +126,11 @@ export function durationBucket(seconds: number): VideoDuration | undefined {
   return low === bucketOf(seconds + LENGTH_TOLERANCE_SEC) ? low : undefined;
 }
 
+/** Results within a minute of the upload's length; unknown lengths (0) never count. */
 export function similarLength(videos: CatalogVideo[], seconds: number): CatalogVideo[] {
-  return videos.filter((v) => Math.abs(v.durationSec - seconds) <= LENGTH_TOLERANCE_SEC);
+  return videos.filter(
+    (v) => v.durationSec > 0 && Math.abs(v.durationSec - seconds) <= LENGTH_TOLERANCE_SEC,
+  );
 }
 
 /**
@@ -122,6 +140,8 @@ export function similarLength(videos: CatalogVideo[], seconds: number): CatalogV
 export async function audienceEvidence(
   chunks: Chunk[],
   durationSec: number | null,
+  /** A sample's own live video, kept out so the pick can't copy what it's compared against (R4). */
+  excludeId: string | null = null,
 ): Promise<AudienceEvidence> {
   const query = searchQuery(chunks);
   return toolSpan('smart-pick', 'hashtag_search', { query }, async (span) => {
@@ -130,7 +150,7 @@ export async function audienceEvidence(
       SEARCH_RESULTS,
       durationSec === null ? undefined : durationBucket(durationSec),
     );
-    const results = await videosByIds(ids);
+    const results = await videosByIds(ids.filter((id) => id !== excludeId));
     const found = durationSec === null ? results : similarLength(results, durationSec);
     const evidence: AudienceEvidence = {
       query,

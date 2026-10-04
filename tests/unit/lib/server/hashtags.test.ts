@@ -66,6 +66,29 @@ describe('genreTerms', () => {
     expect(genreTerms(chunks, 3)).toEqual(['synthwave', 'darkwave', 'indie']);
   });
 
+  it('folds an umbrella genre into the more specific heard genre that contains it', () => {
+    const chunks = [
+      chunk(['electronic', 'synthwave']),
+      chunk(['electronic', 'industrial electronic']),
+      chunk(['Electronic', 'lo-fi']),
+    ];
+    expect(genreTerms(chunks)).toEqual(['industrial electronic', 'synthwave']);
+  });
+
+  it('folds through a chain of more specific genres', () => {
+    const chunks = [
+      chunk(['rock']),
+      chunk(['indie rock']),
+      chunk(['lo-fi indie rock']),
+      chunk(['pop']),
+    ];
+    expect(genreTerms(chunks, 3)).toEqual(['lo-fi indie rock', 'pop']);
+  });
+
+  it('only folds whole words, so "pop" stays apart from "synthpop"', () => {
+    expect(genreTerms([chunk(['pop', 'synthpop']), chunk(['pop'])])).toEqual(['pop', 'synthpop']);
+  });
+
   it('skips blank genres and chunks without analysis', () => {
     expect(genreTerms([chunk(null), chunk(['  ', ''])])).toEqual([]);
     expect(genreTerms([])).toEqual([]);
@@ -148,6 +171,10 @@ describe('similarLength', () => {
       video('mix', 1, [], '', 3600),
     ];
     expect(similarLength(videos, 120).map((v) => v.videoId)).toEqual(['lo', 'same', 'hi']);
+  });
+
+  it('never counts a result whose length is unknown', () => {
+    expect(similarLength([video('unknown', 1, [], '', 0)], 30)).toEqual([]);
   });
 });
 
@@ -290,6 +317,17 @@ describe('audienceEvidence', () => {
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.hashtags).toEqual(['#industrial']);
     expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
+  });
+
+  it("leaves a sample's own live video out of the evidence", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        json({ items: [{ id: { videoId: 'live' } }, { id: { videoId: 'v1' } }] }),
+      )
+      .mockResolvedValueOnce(json({ items: [] }));
+    await audienceEvidence([chunk(['synthwave'])], null, 'live');
+    const videosUrl = new URL(fetchMock.mock.calls[1]![0] as string);
+    expect(videosUrl.searchParams.get('id')).toBe('v1');
   });
 
   it('searches every length when the window crosses a bucket edge', async () => {
