@@ -22,7 +22,8 @@
   let uploadPct = $state(0);
   let localUrl = $state<string | null>(null);
   let busy = $state(false);
-  let message = $state('');
+  // svelte-ignore state_referenced_locally
+  let message = $state(data.view.job.error ?? '');
   let serverErrors = $state<FieldErrors>({});
   let stopped = false;
   let driving = false;

@@ -233,6 +233,14 @@ describe('job page: status chip', () => {
   });
 });
 
+describe('job page: reload', () => {
+  it("shows a failed job's error on load, not only after a step", () => {
+    setup(view({ state: 'FAILED', failedState: 'ANALYZE', error: 'ffmpeg exited 1' }));
+    expect(screen.getByText('ffmpeg exited 1')).toBeInTheDocument();
+    expect(chip()).toHaveTextContent('Failed');
+  });
+});
+
 describe('job page: driving', () => {
   it('moves to review when the steps finish', async () => {
     fetchMock.mockResolvedValueOnce(json(view({ state: 'REVIEW' }, { pick: PICK })));
