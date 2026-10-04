@@ -82,10 +82,10 @@
     padding-top: 14px;
     border-top: 1px solid var(--well);
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px 24px;
+    gap: 6px;
+    text-align: center;
     font: 500 11px/1.5 var(--mono);
     color: var(--muted);
   }
@@ -103,7 +103,6 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-right: -10px;
   }
 
   .links a {
