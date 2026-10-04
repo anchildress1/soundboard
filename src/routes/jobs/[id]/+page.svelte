@@ -147,7 +147,7 @@
           {busy}
           {done}
           {serverErrors}
-          onapprove={(f) => act('approve', f)}
+          onapprove={(f) => act('approve', { ...f, pickVersion: view.pick?.version })}
           onrerun={() => act('rerun')}
           ondiscard={() => act('discard')}
         />

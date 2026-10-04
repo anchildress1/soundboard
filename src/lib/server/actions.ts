@@ -1,8 +1,8 @@
 import { parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
-import type { JobState, PickFields } from '$lib/types';
+import type { JobState, Pick, PickFields } from '$lib/types';
 import { db } from './clients';
-import { jobRef, latestPick, skipAndRepick, transitionJob, type JobDoc } from './jobs';
-import { approvalFeedback, recordFeedback } from './memory';
+import { jobRef, latestPick, pickKey, skipAndRepick, transitionJob, type JobDoc } from './jobs';
+import { approvalFeedback, writeFeedback } from './memory';
 import { takeUploadSlot } from './quota';
 import { getRefreshToken } from './tokens';
 
@@ -24,21 +24,23 @@ function requireState(job: JobDoc, states: JobState[]): void {
 const allowlistedFor = (job: JobDoc) => job.owner === 'nathan';
 
 /**
- * Approves the edited fields. One transaction re-checks REVIEW, takes the day's upload slot, and
- * moves the job, so a double submit can't approve twice. Without a channel, token, or slot the run
- * ends at the would-be payload.
+ * Approves the edited fields of the recommendation on screen. One transaction re-checks REVIEW and
+ * the pick version, takes the day's upload slot, moves the job, and records the feedback, so a
+ * double submit or a stale tab can't approve twice or approve an older pick. Without a channel,
+ * token, or slot the run ends at the would-be payload.
  */
 export async function approve(
   job: JobDoc,
-  input: { title: string; description: string; tags: string[] },
+  input: { title: string; description: string; tags: string[]; pickVersion: number },
 ): Promise<void> {
   requireState(job, ['REVIEW']);
-  const proposed = await latestPick(job.id);
-  if (!proposed) throw new ActionError(409, 'There is no recommendation to approve.');
   const candidates = job.hashtagCandidates ?? [];
   const errors = validateFields(input, candidates);
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
+  if (!Number.isInteger(input.pickVersion)) {
+    throw new ActionError(400, 'Name the recommendation version being approved.');
+  }
 
   const byLower = new Map(candidates.map((c) => [c.toLowerCase(), c]));
   const final: PickFields = {
@@ -48,10 +50,17 @@ export async function approve(
     tags: input.tags,
   };
   const connected = job.channel ? Boolean(await getRefreshToken(job.channel)) : false;
+  const ref = jobRef(job.id);
 
-  const won = await db().runTransaction(async (tx) => {
-    const snap = await tx.get(jobRef(job.id));
-    if (!snap.exists || (snap.data() as JobDoc).state !== 'REVIEW') return false;
+  const outcome = await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists ? (snap.data() as JobDoc) : null;
+    if (current?.state !== 'REVIEW') return 'handled';
+    if (current.pickVersion !== input.pickVersion) return 'stale';
+    const pickSnap = await tx.get(ref.collection('pick').doc(pickKey(input.pickVersion)));
+    if (!pickSnap.exists) return 'stale';
+    const proposed = pickSnap.data() as Pick;
+
     const payload = (error: string | null): Partial<JobDoc> => ({
       state: 'PAYLOAD',
       payload: final,
@@ -64,31 +73,34 @@ export async function approve(
     else if (await takeUploadSlot(tx, job.owner === 'visitor')) {
       patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
     } else patch = payload("Today's upload quota is used up.");
-    tx.update(jobRef(job.id), { ...patch, updatedAt: Date.now() });
-    return true;
-  });
-  if (!won) throw new ActionError(409, 'This recommendation was already handled.');
 
-  await recordFeedback(
-    approvalFeedback(proposed, final, {
-      jobId: job.id,
-      songTitle: job.songTitle,
-      pickVersion: proposed.version,
-      at: Date.now(),
-    }),
-    { allowlisted: allowlistedFor(job), jobId: job.id },
-  );
+    writeFeedback(
+      tx,
+      approvalFeedback(proposed, final, {
+        jobId: job.id,
+        songTitle: job.songTitle,
+        pickVersion: proposed.version,
+        at: Date.now(),
+      }),
+      { allowlisted: allowlistedFor(job), jobId: job.id },
+    );
+    tx.update(ref, { ...patch, updatedAt: Date.now() });
+    return 'approved';
+  });
+  if (outcome === 'handled') throw new ActionError(409, 'This recommendation was already handled.');
+  if (outcome === 'stale') {
+    throw new ActionError(409, 'A newer recommendation replaced this one. Review it first.');
+  }
 }
 
-/** Skips the current recommendation and queues a new smart pick for this job. */
+/** Skips the current recommendation and queues a new smart pick, recording the skip atomically. */
 export async function rerun(job: JobDoc): Promise<void> {
   requireState(job, ['REVIEW']);
   const current = await latestPick(job.id);
-  if (!(await skipAndRepick(job.id, current?.version ?? null))) {
-    throw new ActionError(409, 'This recommendation was already handled.');
-  }
-  if (current) {
-    await recordFeedback(
+  const skipped = await skipAndRepick(job.id, current?.version ?? null, (tx) => {
+    if (!current) return;
+    writeFeedback(
+      tx,
       [
         {
           kind: 'SKIPPED',
@@ -101,7 +113,8 @@ export async function rerun(job: JobDoc): Promise<void> {
       ],
       { allowlisted: allowlistedFor(job), jobId: job.id },
     );
-  }
+  });
+  if (!skipped) throw new ActionError(409, 'This recommendation was already handled.');
 }
 
 const DISCARDABLE: JobState[] = [

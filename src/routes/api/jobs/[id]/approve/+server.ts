@@ -16,6 +16,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
       title: String(body.title ?? ''),
       description: String(body.description ?? ''),
       tags,
+      pickVersion: Number(body.pickVersion),
     });
     return buildView((await getJob(job.id)) ?? job);
   });

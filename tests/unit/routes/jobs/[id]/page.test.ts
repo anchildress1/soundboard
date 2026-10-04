@@ -274,6 +274,7 @@ describe('job page: actions', () => {
       title: PICK.title,
       description: PICK.description,
       tags: PICK.tags,
+      pickVersion: PICK.version,
     });
   });
 

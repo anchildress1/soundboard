@@ -45,6 +45,7 @@ function seed(id: string, patch: Record<string, unknown> = {}) {
     songTitle: 'PeekaBoo',
     hashtagCandidates: CANDIDATES,
     consecutiveFailures: 0,
+    pickVersion: 1,
     ...patch,
   });
   store.set(`jobs/${id}/pick/0001`, {
@@ -66,6 +67,7 @@ const fields = {
   title: 'PeekaBoo (Official Video)',
   description: 'Night drive. #synthwave #retrowave',
   tags: 'synthwave, PeekaBoo',
+  pickVersion: 1,
 };
 
 beforeEach(() => {

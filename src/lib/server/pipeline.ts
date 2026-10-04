@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/sveltekit';
-import { DRIVEN_STATES, type JobState, type Pick, type Wait } from '$lib/types';
+import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
 import { analyzeChunk } from './chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from './ffmpeg';
 import { objectInfo, signedReadUrl } from './gcs';
@@ -11,7 +11,6 @@ import {
   listChunks,
   listPicks,
   releaseJob,
-  saveChunk,
   transitionJob,
   type JobDoc,
 } from './jobs';
@@ -34,8 +33,8 @@ export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 5;
 
 type Patch = Partial<JobDoc>;
-/** A step's job patch, plus a pick to store only if the claim is still valid at release. */
-type StepOutput = Patch & { pick?: Pick };
+/** A step's job patch, plus output to store only if the claim is still valid at release. */
+type StepOutput = Patch & { pick?: Pick; chunk?: Chunk };
 const ok = (patch: Patch): Patch => ({ ...patch, consecutiveFailures: 0, error: null });
 
 async function prep(job: JobDoc): Promise<Patch> {
@@ -65,7 +64,7 @@ async function prep(job: JobDoc): Promise<Patch> {
   });
 }
 
-async function analyze(job: JobDoc): Promise<Patch> {
+async function analyze(job: JobDoc): Promise<StepOutput> {
   const index = job.chunkIndex;
   const startSec = index * WINDOW_SEC;
   const duration = job.probe?.durationSec ?? 0;
@@ -77,9 +76,11 @@ async function analyze(job: JobDoc): Promise<Patch> {
     songTitle: job.songTitle,
     notes: job.notes,
   });
-  await saveChunk(job.id, chunk);
   const next = index + 1;
-  return ok({ chunkIndex: next, state: next >= job.chunkCount ? 'PICK' : 'ANALYZE' });
+  return {
+    ...ok({ chunkIndex: next, state: next >= job.chunkCount ? 'PICK' : 'ANALYZE' }),
+    chunk,
+  };
 }
 
 async function pick(job: JobDoc): Promise<StepOutput> {
@@ -128,7 +129,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
     return {
-      ...ok({ state: 'REVIEW', hashtagCandidates: candidates }),
+      ...ok({ state: 'REVIEW', hashtagCandidates: candidates, pickVersion: version }),
       pick: { ...result.pick, version, modelMs: result.ms },
     };
   });
@@ -297,8 +298,8 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
     Sentry.captureException(error, { tags: { step: job.state } });
     output = failurePatch(job, error);
   }
-  const { pick: newPick, ...patch } = output;
-  if (!(await releaseJob(job.id, token, job.state, patch, newPick))) {
+  const { pick: newPick, chunk, ...patch } = output;
+  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
     Sentry.captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },

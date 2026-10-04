@@ -96,6 +96,10 @@ export async function create(
     'sampleId' in input
       ? await sampleJob(input.sampleId, who.allowlisted)
       : uploadJob(input, who.allowlisted);
+  // Signing can fail (IAM); do it before a visitor run is charged or a job is stored.
+  const uploadUrl = job.object
+    ? null
+    : await signedUploadUrl(uploadObjectName(id), job.contentType);
   if (!who.allowlisted) {
     job.ipHash = hashIp(who.ip);
     const blocked = await reserveVisitorRun(job.ipHash);
@@ -103,8 +107,5 @@ export async function create(
   }
   job.trace = startJobTrace(id);
   const doc = await createJob(job, id);
-  const uploadUrl = job.object
-    ? null
-    : await signedUploadUrl(uploadObjectName(id), job.contentType);
   return { id: doc.id, uploadUrl };
 }

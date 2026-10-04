@@ -74,18 +74,23 @@ async function makeJob(
     id,
   );
   for (let v = 1; v <= (opts.picks ?? 1); v++) await savePick(id, pick(v));
+  const picks = opts.picks ?? 1;
   await updateJob(id, {
     state: opts.state ?? 'REVIEW',
     hashtagCandidates: candidates,
+    pickVersion: picks > 0 ? picks : null,
     ...opts.patch,
   });
   return (await getJob(id))!;
 }
 
-const input = (over: Partial<{ title: string; description: string; tags: string[] }> = {}) => ({
+const input = (
+  over: Partial<{ title: string; description: string; tags: string[]; pickVersion: number }> = {},
+) => ({
   title: 'Title 1',
   description: 'A bright synth track.\n\n#synthwave #retrowave',
   tags: ['synthwave', 'PeekaBoo'],
+  pickVersion: 1,
   ...over,
 });
 
@@ -128,11 +133,33 @@ describe('approve', () => {
     expect(error.message).toBe('Not allowed while the job is ANALYZE.');
   });
 
-  it('requires a recommendation', async () => {
+  it('refuses an approval with no recommendation on the job', async () => {
+    connected();
     const job = await makeJob({ picks: 0 });
     const error = await rejection(approve(job, input()));
     expect(error.status).toBe(409);
-    expect(error.message).toBe('There is no recommendation to approve.');
+    expect(error.message).toMatch(/newer recommendation/);
+  });
+
+  it('refuses an approval that names an older pick', async () => {
+    connected();
+    const job = await makeJob({ picks: 2 });
+    const error = await rejection(approve(job, input({ pickVersion: 1 })));
+    expect(error.status).toBe(409);
+    expect(error.message).toMatch(/newer recommendation/);
+    expect((await getJob('job1'))!.state).toBe('REVIEW');
+    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+  });
+
+  it('refuses an approval with no pick version', async () => {
+    const job = await makeJob();
+    expect((await rejection(approve(job, input({ pickVersion: Number.NaN })))).status).toBe(400);
+  });
+
+  it('refuses when the job names a pick version that was never stored', async () => {
+    connected();
+    const job = await makeJob({ patch: { pickVersion: 7 } });
+    expect((await rejection(approve(job, input({ pickVersion: 7 })))).status).toBe(409);
   });
 
   it('rejects a stray hashtag with 422 field errors and records nothing', async () => {
@@ -262,7 +289,7 @@ describe('approve', () => {
   it("writes Nathan's feedback to the artist's memory", async () => {
     connected();
     const job = await makeJob({ owner: 'nathan', channel: 'nathan', picks: 2 });
-    await approve(job, input({ title: 'Title 2' }));
+    await approve(job, input({ title: 'Title 2', pickVersion: 2 }));
     const rows = feedbackRows('artists/flr/feedback/');
     expect(rows).toEqual([
       expect.objectContaining({

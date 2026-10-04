@@ -79,7 +79,7 @@ class Query {
 }
 
 export class CollectionRef extends Query {
-  doc(id: string) {
+  doc(id: string = `auto${++autoId}`) {
     return new DocRef(`${this.path}/${id}`);
   }
   async add(data: Data) {

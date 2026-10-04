@@ -1,3 +1,4 @@
+import type { Transaction } from '@google-cloud/firestore';
 import type { PickFields } from '$lib/types';
 import { db } from './clients';
 
@@ -40,15 +41,19 @@ export async function listFacts(): Promise<Fact[]> {
   return SEED_FACTS;
 }
 
-/** Allowlisted feedback goes to the artist; visitor feedback stays on its job. */
-export async function recordFeedback(
+/**
+ * Queues feedback rows in the caller's transaction, so they commit with the state change they
+ * describe. Allowlisted feedback goes to the artist; visitor feedback stays on its job.
+ */
+export function writeFeedback(
+  tx: Transaction,
   entries: Feedback[],
   target: { allowlisted: boolean; jobId: string },
-): Promise<void> {
+): void {
   const col = target.allowlisted
     ? artist().collection('feedback')
     : db().collection('jobs').doc(target.jobId).collection('feedback');
-  await Promise.all(entries.map((entry) => col.add(entry)));
+  for (const entry of entries) tx.set(col.doc(), entry);
 }
 
 /** Allowlisted callers only: Nathan's latest feedback, newest first. */

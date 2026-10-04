@@ -197,6 +197,15 @@ describe('create from an own video', () => {
   });
 });
 
+describe('signing failures', () => {
+  it('charges no visitor run and stores no job when the upload URL cannot be signed', async () => {
+    gcs.getSignedUrl.mockRejectedValueOnce(new Error('iam.serviceAccounts.signBlob denied'));
+    await expect(create(upload(), visitor)).rejects.toThrow('signBlob');
+    expect(quota()).toBeUndefined();
+    expect([...store.keys()].some((k) => k.startsWith('jobs/'))).toBe(false);
+  });
+});
+
 describe('visitor caps', () => {
   it('returns 429 after 5 runs from one IP', async () => {
     for (let i = 0; i < 5; i++) await create({ sampleId: 'peek' }, visitor);

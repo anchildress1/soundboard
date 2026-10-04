@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { Transaction } from '@google-cloud/firestore';
 import type { Channel, Chunk, JobOwner, JobState, Pick, PickFields, PublicJob } from '$lib/types';
 import { db } from './clients';
 
@@ -18,6 +19,8 @@ export type JobDoc = PublicJob & {
   trace: { sentryTrace: string; baggage: string } | null;
   upload: { sessionUri: string; total: number } | null;
   finalFields: PickFields | null;
+  /** Version of the recommendation on screen; approve must name it. */
+  pickVersion: number | null;
   verifyAttempts: number;
   updatedAt: number;
 };
@@ -75,6 +78,7 @@ export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc>
     hashtagCandidates: null,
     upload: null,
     finalFields: null,
+    pickVersion: null,
     verifyAttempts: 0,
     createdAt: now,
     updatedAt: now,
@@ -124,7 +128,7 @@ export async function releaseJob(
   token: string,
   claimedState: JobState,
   patch: Partial<JobDoc> = {},
-  pick?: Pick,
+  writes: { pick?: Pick; chunk?: Chunk } = {},
 ): Promise<boolean> {
   const ref = jobs().doc(id);
   return db().runTransaction(async (tx) => {
@@ -136,11 +140,12 @@ export async function releaseJob(
       tx.update(ref, { claim: null, updatedAt: Date.now() });
       return false;
     }
-    // The pick lands in the same transaction, so a worker that lost its claim persists nothing.
-    if (pick) {
-      const stored: StoredPick = { ...pick, skipped: false };
-      tx.set(ref.collection('pick').doc(pad(pick.version)), stored);
+    // Step output lands in the same transaction, so a worker that lost its claim persists nothing.
+    if (writes.pick) {
+      const stored: StoredPick = { ...writes.pick, skipped: false };
+      tx.set(ref.collection('pick').doc(pad(writes.pick.version)), stored);
     }
+    if (writes.chunk) tx.set(ref.collection('chunks').doc(pad(writes.chunk.index)), writes.chunk);
     tx.update(ref, { ...patch, claim: null, updatedAt: Date.now() });
     return true;
   });
@@ -177,17 +182,28 @@ export async function savePick(id: string, pick: Pick): Promise<void> {
   await jobs().doc(id).collection('pick').doc(pad(pick.version)).set(stored);
 }
 
-/** Marks the pick skipped and queues a new pick in one step; false if the job already left REVIEW. */
-export async function skipAndRepick(id: string, version: number | null): Promise<boolean> {
+/**
+ * Marks the pick skipped, queues a new pick, and commits `alsoWrite` (the SKIPPED feedback) in one
+ * transaction; false if the job already left REVIEW.
+ */
+export async function skipAndRepick(
+  id: string,
+  version: number | null,
+  alsoWrite: (tx: Transaction) => void = () => {},
+): Promise<boolean> {
   const ref = jobs().doc(id);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists || (snap.data() as JobDoc).state !== 'REVIEW') return false;
     if (version !== null) tx.update(ref.collection('pick').doc(pad(version)), { skipped: true });
+    alsoWrite(tx);
     tx.update(ref, { state: 'PICK', consecutiveFailures: 0, error: null, updatedAt: Date.now() });
     return true;
   });
 }
+
+/** Firestore key for a pick version, zero-padded so keys sort in version order. */
+export const pickKey = (version: number) => pad(version);
 
 export async function listPicks(id: string): Promise<StoredPick[]> {
   const snap = await jobs().doc(id).collection('pick').get();

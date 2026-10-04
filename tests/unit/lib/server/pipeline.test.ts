@@ -267,6 +267,7 @@ function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     hashtagCandidates: null,
     upload: null,
     finalFields: null,
+    pickVersion: null,
     verifyAttempts: 0,
     createdAt: 1,
     updatedAt: 1,
@@ -495,6 +496,17 @@ describe('runStep: PREP', () => {
 });
 
 describe('runStep: ANALYZE', () => {
+  it('stores no chunk when the job was discarded mid-analysis', async () => {
+    const job = seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 });
+    on(/v1\/chat\/completions$/, () => {
+      store.set('jobs/j1', { ...(store.get('jobs/j1') as JobDoc), state: 'DISCARDED' });
+      return completion(JSON.stringify(ANALYSIS));
+    });
+    await runStep(job);
+    expect(saved().state).toBe('DISCARDED');
+    expect(store.has('jobs/j1/chunks/0000')).toBe(false);
+  });
+
   it('saves the chunk and advances to the next window', async () => {
     const result = await runStep(
       seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 }),

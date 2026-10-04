@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/clients';
+import { db, resetClients } from '$lib/server/clients';
 import {
   approvalFeedback,
   ARTIST_ID,
@@ -9,12 +9,17 @@ import {
   listFacts,
   PUBLIC_FACTS,
   recentFeedback,
-  recordFeedback,
+  writeFeedback,
   recordPublish,
   SEED_FACTS,
   type Feedback,
 } from '$lib/server/memory';
 import type { PickFields } from '$lib/types';
+
+const recordFeedback = (
+  entries: Parameters<typeof writeFeedback>[1],
+  target: Parameters<typeof writeFeedback>[2],
+) => db().runTransaction(async (tx) => writeFeedback(tx, entries, target));
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -85,7 +90,7 @@ describe('listFacts', () => {
   });
 });
 
-describe('recordFeedback', () => {
+describe('writeFeedback', () => {
   it("routes allowlisted feedback to the artist's memory", async () => {
     await recordFeedback([entry(1), entry(2, 'EDITED')], { allowlisted: true, jobId: 'job1' });
     expect(keysUnder('artists/flr/feedback/')).toHaveLength(2);
