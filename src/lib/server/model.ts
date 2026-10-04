@@ -1,5 +1,5 @@
 import { modelUrl } from './env';
-import { chatSpan, MODEL_NAME, type ChatMessage, type Usage } from './tracing';
+import { chatSpan, MODEL_NAME, type AgentName, type ChatMessage, type ChatReply } from './tracing';
 
 export const TEMPERATURE = 0.2;
 /** Thinking tokens count against this budget, so it stays well above the reply size. */
@@ -38,21 +38,39 @@ export async function modelStatus(): Promise<ModelStatus> {
   }
 }
 
-export type ChatResult = { content: string; reasoning: string; usage: Usage; ms: number };
+export type ChatResult = ChatReply & { ms: number };
+
+/** Each JSON schema belongs to one agent, which names its model spans. */
+const AGENT_FOR_SCHEMA = {
+  chunk_analysis: 'chunk-analyst',
+  smart_pick: 'smart-pick',
+  brand_guide: 'brand-guide',
+} as const satisfies Record<string, AgentName>;
+
+export type SchemaName = keyof typeof AGENT_FOR_SCHEMA;
 
 type CompletionResponse = {
-  choices?: { message?: { content?: string | null; reasoning_content?: string | null } }[];
-  usage?: Usage;
+  id?: string;
+  choices?: {
+    finish_reason?: string | null;
+    message?: { content?: string | null; reasoning_content?: string | null };
+  }[];
+  usage?: ChatReply['usage'];
 };
 
 /** One schema-constrained chat completion. The answer is `content`; `reasoning_content` is the think block. */
 export async function chat(
   messages: ChatMessage[],
-  schemaName: string,
+  schemaName: SchemaName,
   schema: Record<string, unknown>,
   deadline = Date.now() + CALL_TIMEOUT_MS,
 ): Promise<ChatResult> {
-  return chatSpan(messages, { temperature: TEMPERATURE, maxTokens: MAX_TOKENS }, async () => {
+  const params = {
+    agent: AGENT_FOR_SCHEMA[schemaName],
+    temperature: TEMPERATURE,
+    maxTokens: MAX_TOKENS,
+  };
+  return chatSpan(messages, params, async () => {
     const started = Date.now();
     const timeout = Math.min(CALL_TIMEOUT_MS, deadline - started);
     if (timeout <= 0) throw new Error('The step ran out of time for the model.');
@@ -75,11 +93,13 @@ export async function chat(
       throw new Error(`llama-server ${response.status}: ${(await response.text()).slice(0, 200)}`);
     }
     const body = (await response.json()) as CompletionResponse;
-    const message = body.choices?.[0]?.message;
+    const choice = body.choices?.[0];
     return {
-      content: message?.content ?? '',
-      reasoning: message?.reasoning_content ?? '',
+      content: choice?.message?.content ?? '',
+      reasoning: choice?.message?.reasoning_content ?? '',
       usage: body.usage ?? {},
+      finishReason: choice?.finish_reason ?? null,
+      responseId: body.id ?? null,
       ms: Date.now() - started,
     };
   });
@@ -91,7 +111,7 @@ export async function chat(
  */
 export async function chatJson<T>(
   messages: ChatMessage[],
-  schemaName: string,
+  schemaName: SchemaName,
   schema: Record<string, unknown>,
   validate: (value: unknown) => value is T,
   deadline = stepDeadline(),

@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { startSpan } from '../../../mocks/sentry';
 import {
   chunkCount,
   extractWindow,
@@ -262,6 +263,32 @@ describe('probe', () => {
   it('tolerates a child without piped streams', async () => {
     nextRun({ noPipes: true });
     await expect(probe('u')).rejects.toThrow(SyntaxError);
+  });
+});
+
+describe('ffmpeg spans', () => {
+  const PROBE_JSON = JSON.stringify({ format: { duration: '10' }, streams: [] });
+
+  it('opens one span per task, named for it, without the signed URL', async () => {
+    startSpan.mockClear();
+    nextRun({ stdout: Buffer.from(PROBE_JSON) });
+    nextRun({ stderr: '' });
+    nextRun({ stderr: '' });
+    await probe('https://storage.example/obj?X-Goog-Signature=secret');
+    await measureFile('https://storage.example/obj?X-Goog-Signature=secret', 10);
+    await extractWindow('https://storage.example/obj?X-Goog-Signature=secret', 0, 10);
+    const spans = startSpan.mock.calls.map(([options]) => options as { op: string; name: string });
+    expect(spans.map((s) => [s.op, s.name])).toEqual([
+      ['process.ffmpeg', 'ffprobe probe'],
+      ['process.ffmpeg', 'ffmpeg measure'],
+      ['process.ffmpeg', 'ffmpeg window'],
+    ]);
+    expect(JSON.stringify(spans)).not.toContain('Signature');
+  });
+
+  it('lets a failed run reject through its span', async () => {
+    nextRun({ code: 1, stderr: 'boom' });
+    await expect(measureFile('u', 10)).rejects.toThrow();
   });
 });
 
