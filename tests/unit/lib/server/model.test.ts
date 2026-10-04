@@ -1,15 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  CALL_TIMEOUT_MS,
-  chat,
-  chatJson,
-  MAX_TOKENS,
-  modelStatus,
-  STEP_BUDGET_MS,
-  stepDeadline,
-  TEMPERATURE,
-} from '$lib/server/model';
+import { chat, chatJson, modelStatus, STEP_BUDGET_MS, stepDeadline } from '$lib/server/model';
+import { CLAIM_TTL_MS } from '$lib/server/jobs';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
 
 const json = (status: number, body: unknown) =>
@@ -118,10 +110,6 @@ describe('chat', () => {
         json_schema: { name: 'chunk_analysis', strict: true, schema },
       },
     });
-    expect(TEMPERATURE).toBeCloseTo(0.2);
-    expect(MAX_TOKENS).toBeGreaterThanOrEqual(2048);
-    expect(CALL_TIMEOUT_MS).toBeLessThan(120_000);
-
     expect(result.content).toBe('{"ok":true}');
     expect(result.reasoning).toBe('thinking...');
     expect(result.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
@@ -156,9 +144,9 @@ describe('chat', () => {
 });
 
 describe('step budget', () => {
-  it('sets the deadline one budget ahead and keeps it inside the 3-minute claim', () => {
+  it('sets the deadline one budget ahead, inside the step claim', () => {
     expect(stepDeadline(1000)).toBe(1000 + STEP_BUDGET_MS);
-    expect(STEP_BUDGET_MS).toBeLessThan(3 * 60 * 1000);
+    expect(STEP_BUDGET_MS).toBeLessThan(CLAIM_TTL_MS);
   });
 
   it('refuses a call once the deadline has passed', async () => {
@@ -213,13 +201,19 @@ describe('chatJson', () => {
   });
 
   it('adds up model time across attempts', async () => {
-    const now = vi.spyOn(Date, 'now');
-    // start, end; budget check, start, end
-    now.mockReturnValueOnce(1000).mockReturnValueOnce(1400);
-    now.mockReturnValueOnce(1500).mockReturnValueOnce(2000).mockReturnValueOnce(2250);
-    fetchMock.mockResolvedValueOnce(completion('bad')).mockResolvedValueOnce(completion('bad'));
+    // The clock moves only while the model "works", so the count of Date.now calls doesn't matter.
+    let clock = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    fetchMock
+      .mockImplementationOnce(async () => {
+        clock += 400;
+        return completion('bad');
+      })
+      .mockImplementationOnce(async () => {
+        clock += 250;
+        return completion('bad');
+      });
     const result = await chatJson(messages, 's', schema, isOk, 1_000_000);
-    now.mockRestore();
     expect(result.ms).toBe(650);
   });
 

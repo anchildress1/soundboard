@@ -11,7 +11,6 @@ import {
   parseProbe,
   probe,
   splitJpegs,
-  WINDOW_SEC,
 } from '$lib/server/ffmpeg';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
@@ -212,7 +211,8 @@ describe('splitJpegs', () => {
 
 describe('chunkCount', () => {
   it('covers the file in 29.5 s windows', () => {
-    expect(WINDOW_SEC).toBe(29.5);
+    // 30.6 s needs two 29.5 s windows; a 30 s window would cover it in one.
+    expect(chunkCount(30.6)).toBe(2);
     expect(chunkCount(60)).toBe(2);
     expect(chunkCount(183)).toBe(7);
   });

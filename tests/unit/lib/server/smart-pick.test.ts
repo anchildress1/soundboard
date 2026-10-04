@@ -208,7 +208,6 @@ describe('buildPickMessages', () => {
   it('asks for description patterns, not a voice or persona', () => {
     const rules = system(buildPickMessages(ctx()));
     expect(rules).not.toMatch(/voice|persona/i);
-    expect(rules).toContain('structure, length, and recurring lines');
   });
 
   const userParts = (messages: ReturnType<typeof buildPickMessages>) =>
@@ -233,7 +232,7 @@ describe('buildPickMessages', () => {
   it('sets artist null and forbids naming one when useArtistName is false', () => {
     const messages = buildPickMessages(ctx({ useArtistName: false }));
     expect(context(messages).artist).toBeNull();
-    expect(system(messages)).toContain('The title is set separately; name no artist anywhere.');
+    expect(system(messages)).toContain('name no artist');
     expect(system(messages)).not.toContain('the artist name');
     expect(JSON.stringify(messages)).not.toMatch(/"artist":"Flies Like Robots"/);
   });

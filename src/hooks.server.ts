@@ -33,7 +33,7 @@ const session: Handle = ({ event, resolve }) => {
 };
 
 /** The DEV post embeds the app; everything else is refused as a frame parent. */
-export const FRAME_ANCESTORS = "frame-ancestors 'self' https://dev.to https://*.dev.to";
+const FRAME_ANCESTORS = "frame-ancestors 'self' https://dev.to https://*.dev.to";
 
 const securityHeaders: Handle = async ({ event, resolve }) => {
   const response = await resolve(event);

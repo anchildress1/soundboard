@@ -1,13 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/clients';
-import {
-  CONTENT_LENGTH_RANGE,
-  objectInfo,
-  signedReadUrl,
-  signedUploadUrl,
-  uploadObjectName,
-} from '$lib/server/gcs';
+import { objectInfo, signedReadUrl, signedUploadUrl, uploadObjectName } from '$lib/server/gcs';
 
 const gcs = vi.hoisted(() => ({
   storageOptions: [] as unknown[],
@@ -72,7 +66,6 @@ describe('signedUploadUrl', () => {
       contentType: 'video/mp4',
       extensionHeaders: { 'x-goog-content-length-range': '1,2147483648' },
     });
-    expect(CONTENT_LENGTH_RANGE).toBe('1,2147483648');
   });
 
   it('reuses the storage client across calls', async () => {

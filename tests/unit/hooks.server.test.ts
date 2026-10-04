@@ -3,7 +3,7 @@ import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FRAME_ANCESTORS, handle, replaceTraceMeta } from '$lib/../hooks.server';
+import { handle, replaceTraceMeta } from '$lib/../hooks.server';
 import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth';
 
 const PAGE =
@@ -109,10 +109,11 @@ describe('replaceTraceMeta', () => {
 
 describe('handle', () => {
   it('lets the DEV post frame the app and nothing else', async () => {
-    expect(FRAME_ANCESTORS).toBe("frame-ancestors 'self' https://dev.to https://*.dev.to");
     const { resolve } = renderer();
     const response = await run(event(), resolve);
-    expect(response.headers.get('content-security-policy')).toBe(FRAME_ANCESTORS);
+    expect(response.headers.get('content-security-policy')).toBe(
+      "frame-ancestors 'self' https://dev.to https://*.dev.to",
+    );
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
   });

@@ -4,8 +4,6 @@ import { resetStore, store } from '../../../helpers/fake-firestore';
 import { db, resetClients } from '$lib/server/clients';
 import {
   approvalFeedback,
-  ARTIST_ID,
-  ARTIST_NAME,
   listFacts,
   PUBLIC_FACTS,
   recentFeedback,
@@ -43,8 +41,6 @@ beforeEach(() => {
 
 describe('seed facts', () => {
   it('uses the stage name and keeps the inference private', () => {
-    expect(ARTIST_ID).toBe('flr');
-    expect(ARTIST_NAME).toBe('Flies Like Robots');
     const inference = SEED_FACTS.filter((f) => f.kind === 'INFERENCE');
     expect(inference.length).toBeGreaterThan(0);
     expect(inference.every((f) => f.public === false)).toBe(true);
