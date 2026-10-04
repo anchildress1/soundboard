@@ -1,8 +1,9 @@
 import { parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
 import type { JobState, PickFields } from '$lib/types';
-import { latestPick, markPickSkipped, updateJob, type JobDoc } from './jobs';
+import { db } from './clients';
+import { jobRef, latestPick, skipAndRepick, transitionJob, type JobDoc } from './jobs';
 import { approvalFeedback, recordFeedback } from './memory';
-import { reserveUpload } from './quota';
+import { takeUploadSlot } from './quota';
 import { getRefreshToken } from './tokens';
 
 export class ActionError extends Error {
@@ -23,8 +24,9 @@ function requireState(job: JobDoc, states: JobState[]): void {
 const allowlistedFor = (job: JobDoc) => job.owner === 'nathan';
 
 /**
- * Approves the edited fields. Uploads go to the job's channel when a slot and a token exist;
- * otherwise the run ends at the would-be payload.
+ * Approves the edited fields. One transaction re-checks REVIEW, takes the day's upload slot, and
+ * moves the job, so a double submit can't approve twice. Without a channel, token, or slot the run
+ * ends at the would-be payload.
  */
 export async function approve(
   job: JobDoc,
@@ -45,6 +47,28 @@ export async function approve(
     hashtags: parseHashtags(input.description).map((t) => byLower.get(t) ?? t),
     tags: input.tags,
   };
+  const connected = job.channel ? Boolean(await getRefreshToken(job.channel)) : false;
+
+  const won = await db().runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef(job.id));
+    if (!snap.exists || (snap.data() as JobDoc).state !== 'REVIEW') return false;
+    const payload = (error: string | null): Partial<JobDoc> => ({
+      state: 'PAYLOAD',
+      payload: final,
+      finalFields: final,
+      error,
+    });
+    let patch: Partial<JobDoc>;
+    if (!job.channel) patch = payload(null);
+    else if (!connected) patch = payload('The upload channel is not connected.');
+    else if (await takeUploadSlot(tx, job.owner === 'visitor')) {
+      patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
+    } else patch = payload("Today's upload quota is used up.");
+    tx.update(jobRef(job.id), { ...patch, updatedAt: Date.now() });
+    return true;
+  });
+  if (!won) throw new ActionError(409, 'This recommendation was already handled.');
+
   await recordFeedback(
     approvalFeedback(proposed, final, {
       jobId: job.id,
@@ -54,43 +78,16 @@ export async function approve(
     }),
     { allowlisted: allowlistedFor(job), jobId: job.id },
   );
-
-  if (!job.channel) {
-    await updateJob(job.id, { state: 'PAYLOAD', payload: final, finalFields: final });
-    return;
-  }
-  if (!(await getRefreshToken(job.channel))) {
-    await updateJob(job.id, {
-      state: 'PAYLOAD',
-      payload: final,
-      finalFields: final,
-      error: 'The upload channel is not connected.',
-    });
-    return;
-  }
-  if (!(await reserveUpload(job.owner === 'visitor'))) {
-    await updateJob(job.id, {
-      state: 'PAYLOAD',
-      payload: final,
-      finalFields: final,
-      error: "Today's upload quota is used up.",
-    });
-    return;
-  }
-  await updateJob(job.id, {
-    state: 'PUBLISHING',
-    finalFields: final,
-    consecutiveFailures: 0,
-    error: null,
-  });
 }
 
 /** Skips the current recommendation and queues a new smart pick for this job. */
 export async function rerun(job: JobDoc): Promise<void> {
   requireState(job, ['REVIEW']);
   const current = await latestPick(job.id);
+  if (!(await skipAndRepick(job.id, current?.version ?? null))) {
+    throw new ActionError(409, 'This recommendation was already handled.');
+  }
   if (current) {
-    await markPickSkipped(job.id, current.version);
     await recordFeedback(
       [
         {
@@ -105,23 +102,39 @@ export async function rerun(job: JobDoc): Promise<void> {
       { allowlisted: allowlistedFor(job), jobId: job.id },
     );
   }
-  await updateJob(job.id, { state: 'PICK', consecutiveFailures: 0, error: null });
 }
 
-/** Ends the job. Nothing is learned from a discard. */
+const DISCARDABLE: JobState[] = [
+  'AWAITING_UPLOAD',
+  'PREP',
+  'ANALYZE',
+  'PICK',
+  'REVIEW',
+  'FAILED',
+  'PAYLOAD',
+];
+
+/** Ends the job. Nothing is learned from a discard; a step still running drops its result. */
 export async function discard(job: JobDoc): Promise<void> {
-  requireState(job, ['AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'REVIEW', 'FAILED', 'PAYLOAD']);
-  await updateJob(job.id, { state: 'DISCARDED' });
+  requireState(job, DISCARDABLE);
+  if (!(await transitionJob(job.id, DISCARDABLE, { state: 'DISCARDED' }))) {
+    throw new ActionError(409, 'The job moved on before it could be discarded.');
+  }
 }
 
-/** Resumes a failed job at the step that failed, keeping finished chunks. */
+/**
+ * Resumes a failed job at the step that failed, keeping finished chunks. A failed upload starts a
+ * fresh resumable session, since the old one may have expired.
+ */
 export async function retry(job: JobDoc): Promise<void> {
   requireState(job, ['FAILED']);
-  await updateJob(job.id, {
+  const resumed = await transitionJob(job.id, ['FAILED'], {
     state: job.failedState ?? 'PREP',
     failedState: null,
     consecutiveFailures: 0,
     verifyAttempts: 0,
     error: null,
+    ...(job.failedState === 'PUBLISHING' ? { upload: null, uploadProgress: null } : {}),
   });
+  if (!resumed) throw new ActionError(409, 'The job is no longer failed.');
 }

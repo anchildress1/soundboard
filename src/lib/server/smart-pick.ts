@@ -303,8 +303,10 @@ export const sameTitle = (a: string, b: string) =>
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the
  * model's reply never parses.
  */
-export async function runPick(ctx: PickContext): Promise<{ pick: RawPick; ms: number } | null> {
-  const deadline = stepDeadline();
+export async function runPick(
+  ctx: PickContext,
+  deadline = stepDeadline(),
+): Promise<{ pick: RawPick; ms: number } | null> {
   let ms = 0;
   let messages = buildPickMessages(ctx);
   for (let attempt = 0; attempt < 2; attempt++) {

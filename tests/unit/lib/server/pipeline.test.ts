@@ -195,7 +195,11 @@ function defaultHandlers(): Handler[] {
       test: /com\/youtube\/v3\/videos\?/,
       reply: (url, init) => {
         const id = new URL(url).searchParams.get('id') ?? '';
-        if (headers(init).authorization) return json({ items: [{ id, snippet: { title: 't' } }] });
+        if (headers(init).authorization) {
+          return json({
+            items: [{ id, snippet: { title: 't' }, status: { uploadStatus: 'processed' } }],
+          });
+        }
         return json({
           items: id.split(',').map((vid, i) => ({
             id: vid,
@@ -436,6 +440,13 @@ describe('runStep: PREP', () => {
     await runStep(seed({ state: 'PREP' }));
     expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
     expect(saved().error).toMatch(/never reached storage/);
+  });
+
+  it.each([Number.NaN, 0])('fails a video whose duration reads as %s', async (duration) => {
+    tools.probe = { stdout: probeJson(duration) };
+    await runStep(seed({ state: 'PREP' }));
+    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
+    expect(saved().error).toMatch(/duration/);
   });
 
   it('fails a video with no audio track', async () => {
@@ -737,6 +748,12 @@ describe('runStep: PUBLISHING', () => {
     });
   });
 
+  it('drops an expired upload session so the next step opens a fresh one', async () => {
+    on(/upload\.example\/s1/, () => new Response('gone', { status: 404 }));
+    await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
+    expect(saved()).toMatchObject({ state: 'PUBLISHING', upload: null, uploadProgress: null });
+  });
+
   it('skips the range read when YouTube already holds every byte', async () => {
     on(/upload\.example\/s1/, () => json({ id: 'vid2' }));
     await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
@@ -780,6 +797,21 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     await runStep(claimed({ owner: 'visitor', channel: 'sandbox' }));
     expect(saved().state).toBe('VERIFIED');
     expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
+  });
+
+  it('fails when YouTube rejected the upload', async () => {
+    on(/com\/youtube\/v3\/videos\?/, () =>
+      json({ items: [{ id: 'vid1', status: { uploadStatus: 'rejected' } }] }),
+    );
+    await runStep(claimed());
+    expect(saved()).toMatchObject({ state: 'FAILED', error: 'YouTube rejected the upload.' });
+    expect(store.has('artists/flr/publishes/vid1')).toBe(false);
+  });
+
+  it('keeps waiting while a listed upload has no accepted status yet', async () => {
+    on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status: {} }] }));
+    expect(await runStep(claimed())).toEqual({ wait: 'waiting on YouTube' });
+    expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
   });
 
   it('waits on YouTube while the video is not listed yet', async () => {
@@ -832,5 +864,27 @@ describe('failurePatch', () => {
 
   it('stringifies non-Error throws', () => {
     expect(failurePatch(jobDoc(), 42).error).toBe('42');
+  });
+});
+
+describe('runStep: claim safety', () => {
+  it('runs the step on the job read inside the claim, not the caller snapshot', async () => {
+    const stale = seed({ state: 'PICK' });
+    store.set('jobs/j1', { ...stale, state: 'REVIEW' });
+    expect(await runStep(stale)).toEqual({});
+    expect(saved().state).toBe('REVIEW');
+    expect(saved().claim).toBeNull();
+    expect(chatBodies()).toHaveLength(0);
+  });
+
+  it('drops the step result when the job was discarded mid-step', async () => {
+    const job = seed({ state: 'PICK', owner: 'visitor', sampleId: 's1' });
+    on(/v1\/chat\/completions$/, () => {
+      store.set('jobs/j1', { ...(store.get('jobs/j1') as JobDoc), state: 'DISCARDED' });
+      return completion(JSON.stringify(RAW_PICK));
+    });
+    await runStep(job);
+    expect(saved().state).toBe('DISCARDED');
+    expect(saved().claim).toBeNull();
   });
 });

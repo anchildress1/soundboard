@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Transaction } from '@google-cloud/firestore';
 import { db } from './clients';
 import { required } from './env';
 
@@ -45,19 +46,24 @@ export async function reserveVisitorRun(ipHash: string, now = new Date()): Promi
   });
 }
 
-/** Takes one upload slot. Visitors stop at four, so two always remain for Nathan. */
-export async function reserveUpload(visitor: boolean, now = new Date()): Promise<boolean> {
+/**
+ * Takes one upload slot inside the caller's transaction, after the caller's own reads. Visitors stop
+ * at four, so two always remain for Nathan.
+ */
+export async function takeUploadSlot(
+  tx: Transaction,
+  visitor: boolean,
+  now = new Date(),
+): Promise<boolean> {
   const ref = db().collection('quota').doc(quotaDay(now));
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const doc = snap.exists ? (snap.data() as QuotaDoc) : empty();
-    if (doc.uploads >= UPLOADS_PER_DAY) return false;
-    if (visitor && doc.visitorUploads >= VISITOR_UPLOADS_PER_DAY) return false;
-    tx.set(ref, {
-      ...doc,
-      uploads: doc.uploads + 1,
-      visitorUploads: doc.visitorUploads + (visitor ? 1 : 0),
-    });
-    return true;
+  const snap = await tx.get(ref);
+  const doc = snap.exists ? (snap.data() as QuotaDoc) : empty();
+  if (doc.uploads >= UPLOADS_PER_DAY) return false;
+  if (visitor && doc.visitorUploads >= VISITOR_UPLOADS_PER_DAY) return false;
+  tx.set(ref, {
+    ...doc,
+    uploads: doc.uploads + 1,
+    visitorUploads: doc.visitorUploads + (visitor ? 1 : 0),
   });
+  return true;
 }

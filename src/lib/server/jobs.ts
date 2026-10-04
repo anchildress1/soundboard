@@ -42,6 +42,7 @@ export function newJobId(): string {
 }
 
 const jobs = () => db().collection('jobs');
+export const jobRef = (id: string) => jobs().doc(id);
 
 export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
   const now = Date.now();
@@ -93,33 +94,62 @@ export async function updateJob(id: string, patch: Partial<JobDoc>): Promise<voi
 }
 
 /**
- * Claims the job for one step. Returns a token, or null while another request holds an unexpired
- * claim, so a second tab waits instead of double-running the step.
+ * Claims the job for one step and returns the job as read inside the claim, so the step never runs
+ * on a snapshot another request already moved past. Returns null while another request holds an
+ * unexpired claim, so a second tab waits instead of double-running the step.
  */
-export async function claimJob(id: string, now = Date.now()): Promise<string | null> {
+export async function claimJob(
+  id: string,
+  now = Date.now(),
+): Promise<{ token: string; job: JobDoc } | null> {
   const ref = jobs().doc(id);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
-    const { claim } = snap.data() as JobDoc;
-    if (claim && claim.until > now) return null;
+    const job = snap.data() as JobDoc;
+    if (job.claim && job.claim.until > now) return null;
     const token = randomBytes(8).toString('hex');
     tx.update(ref, { claim: { token, until: now + CLAIM_TTL_MS } });
-    return token;
+    return { token, job };
   });
 }
 
-/** Applies the step's result and drops the claim, unless the claim already lapsed to someone else. */
+/**
+ * Applies the step's result and drops the claim. The patch is skipped when the claim lapsed to
+ * someone else or an action (discard, re-run) moved the job off the state the step started from.
+ */
 export async function releaseJob(
   id: string,
   token: string,
+  claimedState: JobState,
   patch: Partial<JobDoc> = {},
 ): Promise<boolean> {
   const ref = jobs().doc(id);
   return db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists || (snap.data() as JobDoc).claim?.token !== token) return false;
+    if (!snap.exists) return false;
+    const job = snap.data() as JobDoc;
+    if (job.claim?.token !== token) return false;
+    if (job.state !== claimedState) {
+      tx.update(ref, { claim: null, updatedAt: Date.now() });
+      return false;
+    }
     tx.update(ref, { ...patch, claim: null, updatedAt: Date.now() });
+    return true;
+  });
+}
+
+/** Moves the job to a new state only if it is still in one of `from`; false when it already moved. */
+export async function transitionJob(
+  id: string,
+  from: readonly JobState[],
+  patch: Partial<JobDoc>,
+): Promise<boolean> {
+  const ref = jobs().doc(id);
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || !from.includes((snap.data() as JobDoc).state)) return false;
+    tx.update(ref, { ...patch, updatedAt: Date.now() });
     return true;
   });
 }
@@ -142,8 +172,16 @@ export async function savePick(id: string, pick: Pick): Promise<void> {
   await jobs().doc(id).collection('pick').doc(pad(pick.version)).set(stored);
 }
 
-export async function markPickSkipped(id: string, version: number): Promise<void> {
-  await jobs().doc(id).collection('pick').doc(pad(version)).update({ skipped: true });
+/** Marks the pick skipped and queues a new pick in one step; false if the job already left REVIEW. */
+export async function skipAndRepick(id: string, version: number | null): Promise<boolean> {
+  const ref = jobs().doc(id);
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || (snap.data() as JobDoc).state !== 'REVIEW') return false;
+    if (version !== null) tx.update(ref.collection('pick').doc(pad(version)), { skipped: true });
+    tx.update(ref, { state: 'PICK', consecutiveFailures: 0, error: null, updatedAt: Date.now() });
+    return true;
+  });
 }
 
 export async function listPicks(id: string): Promise<StoredPick[]> {

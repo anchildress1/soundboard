@@ -321,6 +321,42 @@ describe('rerun', () => {
   });
 });
 
+describe('concurrent actions', () => {
+  it('approves once when the same recommendation is submitted twice', async () => {
+    connected();
+    const job = await makeJob();
+    await approve(job, input());
+    const second = await rejection(approve(job, input()));
+    expect(second.status).toBe(409);
+    const quota = [...store.entries()].find(([k]) => k.startsWith('quota/'))![1] as {
+      uploads: number;
+    };
+    expect(quota.uploads).toBe(1);
+    expect(feedbackRows('jobs/job1/feedback/').filter((r) => r.kind === 'ACCEPTED')).toHaveLength(
+      1,
+    );
+  });
+
+  it('refuses a re-run once the job already left review', async () => {
+    const job = await makeJob();
+    await updateJob('job1', { state: 'DISCARDED' });
+    expect((await rejection(rerun(job))).status).toBe(409);
+    expect((await getJob('job1'))!.state).toBe('DISCARDED');
+  });
+
+  it('refuses a discard once the job moved past discardable states', async () => {
+    const job = await makeJob({ state: 'REVIEW' });
+    await updateJob('job1', { state: 'PUBLISHING' });
+    expect((await rejection(discard(job))).status).toBe(409);
+  });
+
+  it('refuses a retry once the job is no longer failed', async () => {
+    const job = await makeJob({ state: 'FAILED', patch: { failedState: 'ANALYZE' } });
+    await updateJob('job1', { state: 'ANALYZE' });
+    expect((await rejection(retry(job))).status).toBe(409);
+  });
+});
+
 describe('discard', () => {
   it.each<JobState>(['AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'REVIEW', 'FAILED', 'PAYLOAD'])(
     'discards a %s job',
@@ -362,6 +398,23 @@ describe('retry', () => {
       consecutiveFailures: 0,
       verifyAttempts: 0,
       error: null,
+    });
+  });
+
+  it('starts a fresh upload session when the upload failed', async () => {
+    const job = await makeJob({
+      state: 'FAILED',
+      patch: {
+        failedState: 'PUBLISHING',
+        upload: { sessionUri: 'https://upload.example/dead', total: 10 },
+        uploadProgress: { sent: 5, total: 10 },
+      },
+    });
+    await retry(job);
+    expect(await getJob('job1')).toMatchObject({
+      state: 'PUBLISHING',
+      upload: null,
+      uploadProgress: null,
     });
   });
 

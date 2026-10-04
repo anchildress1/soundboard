@@ -6,8 +6,8 @@ export const TEMPERATURE = 0.2;
 export const MAX_TOKENS = 2048;
 /** Per-call timeout, counted only once the model reports ready. */
 export const CALL_TIMEOUT_MS = 90_000;
-/** Whole-step budget for model work, kept inside the 3-minute claim so a step never outlives it. */
-export const STEP_BUDGET_MS = 150_000;
+/** Whole-step budget, started when the step begins: under the ~2-minute step target and well inside the 3-minute claim. */
+export const STEP_BUDGET_MS = 110_000;
 /** A retry is only worth starting with at least this much budget left. */
 const MIN_CALL_MS = 15_000;
 

@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/clients';
+import { db, resetClients } from '$lib/server/clients';
 import {
   hashIp,
   quotaDay,
-  reserveUpload,
   reserveVisitorRun,
   RUNS_PER_DAY,
   RUNS_PER_IP,
+  takeUploadSlot,
   UPLOADS_PER_DAY,
   VISITOR_UPLOADS_PER_DAY,
 } from '$lib/server/quota';
@@ -18,6 +18,9 @@ vi.mock('@google-cloud/firestore', async () =>
 );
 
 const NOW = new Date('2026-10-04T18:00:00Z');
+
+const reserveUpload = (visitor: boolean, now?: Date) =>
+  db().runTransaction((tx) => takeUploadSlot(tx, visitor, now));
 
 beforeEach(() => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
@@ -109,7 +112,7 @@ describe('reserveVisitorRun', () => {
   });
 });
 
-describe('reserveUpload', () => {
+describe('takeUploadSlot', () => {
   it(`gives visitors at most ${VISITOR_UPLOADS_PER_DAY} uploads`, async () => {
     for (let i = 0; i < VISITOR_UPLOADS_PER_DAY; i++)
       expect(await reserveUpload(true, NOW)).toBe(true);

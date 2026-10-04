@@ -10,7 +10,8 @@ import {
   latestPick,
   listChunks,
   listPicks,
-  markPickSkipped,
+  skipAndRepick,
+  transitionJob,
   newJobId,
   releaseJob,
   saveChunk,
@@ -127,24 +128,54 @@ describe('claimJob / releaseJob', () => {
     expect(await claimJob('ghost')).toBeNull();
   });
 
+  it('returns the job as read inside the claim', async () => {
+    await createJob({ ...input, object: 'samples/a.mp4' }, 'j');
+    const claimed = await claimJob('j');
+    expect(claimed?.job.state).toBe('PREP');
+    expect(claimed?.token).toMatch(/^[0-9a-f]{16}$/);
+  });
+
   it('applies the patch and clears the claim for the holder', async () => {
     await createJob(input, 'j');
-    const token = (await claimJob('j'))!;
-    expect(await releaseJob('j', token, { state: 'PICK' })).toBe(true);
+    const { token } = (await claimJob('j'))!;
+    expect(await releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(true);
     const job = await getJob('j');
     expect(job?.state).toBe('PICK');
+    expect(job?.claim).toBeNull();
+  });
+
+  it('drops the patch but frees the job when an action moved it during the step', async () => {
+    await createJob(input, 'j');
+    const { token } = (await claimJob('j'))!;
+    await updateJob('j', { state: 'DISCARDED' });
+    expect(await releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(false);
+    const job = await getJob('j');
+    expect(job?.state).toBe('DISCARDED');
     expect(job?.claim).toBeNull();
   });
 
   it('refuses a stale token', async () => {
     await createJob(input, 'j');
     await claimJob('j');
-    expect(await releaseJob('j', 'stale', { state: 'PICK' })).toBe(false);
+    expect(await releaseJob('j', 'stale', 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(false);
     expect((await getJob('j'))?.state).toBe('AWAITING_UPLOAD');
   });
 
   it('refuses a missing job', async () => {
-    expect(await releaseJob('ghost', 't')).toBe(false);
+    expect(await releaseJob('ghost', 't', 'PREP')).toBe(false);
+  });
+});
+
+describe('transitionJob', () => {
+  it('moves the job only from an allowed state', async () => {
+    await createJob(input, 'j');
+    expect(await transitionJob('j', ['REVIEW'], { state: 'DISCARDED' })).toBe(false);
+    expect(await transitionJob('j', ['AWAITING_UPLOAD'], { state: 'PREP' })).toBe(true);
+    expect((await getJob('j'))?.state).toBe('PREP');
+  });
+
+  it('refuses a missing job', async () => {
+    expect(await transitionJob('ghost', ['PREP'], { state: 'ANALYZE' })).toBe(false);
   });
 });
 
@@ -158,16 +189,32 @@ describe('chunks and picks', () => {
 
   it('tracks pick versions and skips', async () => {
     await createJob(input, 'j');
+    await updateJob('j', { state: 'REVIEW' });
     expect(await latestPick('j')).toBeNull();
     await savePick('j', pick(1));
     await savePick('j', pick(2));
-    await markPickSkipped('j', 1);
+    expect(await skipAndRepick('j', 1)).toBe(true);
+    expect((await getJob('j'))?.state).toBe('PICK');
+    expect(await skipAndRepick('j', 2)).toBe(false);
     const picks = await listPicks('j');
     expect(picks.map((p) => [p.version, p.skipped])).toEqual([
       [1, true],
       [2, false],
     ]);
     expect((await latestPick('j'))?.version).toBe(2);
+  });
+});
+
+describe('skipAndRepick', () => {
+  it('queues a pick with nothing to skip', async () => {
+    await createJob(input, 'j');
+    await updateJob('j', { state: 'REVIEW' });
+    expect(await skipAndRepick('j', null)).toBe(true);
+    expect((await getJob('j'))?.state).toBe('PICK');
+  });
+
+  it('refuses a missing job', async () => {
+    expect(await skipAndRepick('ghost', 1)).toBe(false);
   });
 });
 

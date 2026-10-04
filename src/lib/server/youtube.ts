@@ -261,7 +261,9 @@ export async function uploadChunk(
 }
 
 /** Reads the video back from the target channel; only this result can mark a publish verified. */
-export async function readBack(accessToken: string, videoId: string): Promise<LiveMetadata | null> {
+export type ReadBack = LiveMetadata & { uploadStatus: string | null };
+
+export async function readBack(accessToken: string, videoId: string): Promise<ReadBack | null> {
   const query = new URLSearchParams({ part: 'snippet,status', id: videoId });
   const body = await readJson<ListResponse<VideoItem>>(
     await fetch(`${API}/videos?${query}`, {
@@ -271,5 +273,5 @@ export async function readBack(accessToken: string, videoId: string): Promise<Li
     'videos.list',
   );
   const item = body.items?.[0];
-  return item ? toCatalog(item) : null;
+  return item ? { ...toCatalog(item), uploadStatus: item.status?.uploadStatus ?? null } : null;
 }

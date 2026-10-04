@@ -13,11 +13,11 @@ import {
   releaseJob,
   saveChunk,
   savePick,
-  updateJob,
+  transitionJob,
   type JobDoc,
 } from './jobs';
 import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from './memory';
-import { modelStatus } from './model';
+import { modelStatus, stepDeadline } from './model';
 import { runPick } from './smart-pick';
 import { accessToken } from './tokens';
 import { invokeAgent } from './tracing';
@@ -43,6 +43,9 @@ async function prep(job: JobDoc): Promise<Patch> {
   const url = await signedReadUrl(job.object);
   const probed = await probe(url);
   if (!probed.hasAudio) return fail('PREP', 'This video has no audio track.');
+  if (!Number.isFinite(probed.durationSec) || probed.durationSec <= 0) {
+    return fail('PREP', "Couldn't read this video's duration. Re-export it and try again.");
+  }
   const limit = MAX_MINUTES[job.owner];
   if (probed.durationSec > limit * 60) {
     return fail(
@@ -79,6 +82,8 @@ async function analyze(job: JobDoc): Promise<Patch> {
 }
 
 async function pick(job: JobDoc): Promise<Patch> {
+  // The budget covers the catalog and search reads too, not only the model calls.
+  const deadline = stepDeadline();
   const nathan = job.owner === 'nathan';
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
@@ -101,20 +106,23 @@ async function pick(job: JobDoc): Promise<Patch> {
     const [facts, feedback] = nathan
       ? await Promise.all([listFacts(), recentFeedback()])
       : [PUBLIC_FACTS, []];
-    const result = await runPick({
-      songTitle: job.songTitle,
-      notes: job.notes,
-      useArtistName: nathan || job.sampleId !== null,
-      chunks,
-      measurements: job.measurements,
-      recent: withThumbs,
-      candidates,
-      facts,
-      feedback,
-      skipped: picks
-        .filter((p) => p.skipped)
-        .map(({ title, description }) => ({ title, description })),
-    });
+    const result = await runPick(
+      {
+        songTitle: job.songTitle,
+        notes: job.notes,
+        useArtistName: nathan || job.sampleId !== null,
+        chunks,
+        measurements: job.measurements,
+        recent: withThumbs,
+        candidates,
+        facts,
+        feedback,
+        skipped: picks
+          .filter((p) => p.skipped)
+          .map(({ title, description }) => ({ title, description })),
+      },
+      deadline,
+    );
     if (!result) throw new Error('The model reply did not parse as a recommendation.');
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
@@ -122,6 +130,9 @@ async function pick(job: JobDoc): Promise<Patch> {
     return ok({ state: 'REVIEW', hashtagCandidates: candidates });
   });
 }
+
+const sessionGone = (error: unknown) =>
+  error instanceof YouTubeError && (error.status === 404 || error.status === 410);
 
 const quotaSpent = (error: unknown) =>
   error instanceof YouTubeError && error.status === 403 && /quota/i.test(error.message);
@@ -162,7 +173,14 @@ async function publishing(job: JobDoc): Promise<Patch> {
     }
   }
   const { sessionUri, total } = job.upload;
-  const status = await uploadOffset(sessionUri, total);
+  let status: Awaited<ReturnType<typeof uploadOffset>>;
+  try {
+    status = await uploadOffset(sessionUri, total);
+  } catch (error) {
+    // An expired or invalidated session can't resume; the next step opens a fresh one.
+    if (sessionGone(error)) return ok({ upload: null, uploadProgress: null });
+    throw error;
+  }
   const result = status.done
     ? status
     : await uploadChunk(sessionUri, await signedReadUrl(job.object), status.next, total);
@@ -177,11 +195,18 @@ async function publishing(job: JobDoc): Promise<Patch> {
   return ok({ uploadProgress: { sent: result.next, total } });
 }
 
+// Only an upload YouTube kept counts as verified; `uploaded` is still processing but kept.
+const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
+const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
+
 async function verify(job: JobDoc): Promise<Patch> {
   const token = job.channel ? await accessToken(job.channel) : null;
   if (!token || !job.videoId) return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   const video = await readBack(token, job.videoId);
-  if (video) {
+  if (video && REJECTED_UPLOADS.has(video.uploadStatus ?? '')) {
+    return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
+  }
+  if (video && ACCEPTED_UPLOADS.has(video.uploadStatus ?? '')) {
     if (job.owner === 'nathan' && job.finalFields) {
       await recordPublish({
         videoId: job.videoId,
@@ -224,22 +249,29 @@ export type StepResult = { wait?: Wait };
  * Runs exactly one pipeline step for the job. Model loading or busy returns a wait at once, without
  * claiming the job; otherwise the step claims the job, runs, and releases it with its result.
  */
-export async function runStep(job: JobDoc): Promise<StepResult> {
-  if (job.state === 'AWAITING_UPLOAD') {
-    if (await objectInfo(job.object)) await updateJob(job.id, { state: 'PREP' });
+export async function runStep(snapshot: JobDoc): Promise<StepResult> {
+  if (snapshot.state === 'AWAITING_UPLOAD') {
+    if (await objectInfo(snapshot.object)) {
+      await transitionJob(snapshot.id, ['AWAITING_UPLOAD'], { state: 'PREP' });
+    }
     return {};
   }
-  const handler = HANDLERS[job.state];
-  if (!handler || !DRIVEN_STATES.includes(job.state)) return {};
+  if (!HANDLERS[snapshot.state] || !DRIVEN_STATES.includes(snapshot.state)) return {};
 
-  if (NEEDS_MODEL.includes(job.state)) {
+  if (NEEDS_MODEL.includes(snapshot.state)) {
     const status = await modelStatus();
     if (status === 'loading') return { wait: 'waking model' };
     if (status === 'busy') return { wait: 'waiting on another run' };
   }
 
-  const token = await claimJob(job.id);
-  if (!token) return { wait: 'step running in another tab' };
+  const claimed = await claimJob(snapshot.id);
+  if (!claimed) return { wait: 'step running in another tab' };
+  const { token, job } = claimed;
+  const handler = HANDLERS[job.state];
+  if (!handler || !DRIVEN_STATES.includes(job.state)) {
+    await releaseJob(job.id, token, job.state);
+    return {};
+  }
 
   let patch: Patch;
   try {
@@ -255,7 +287,12 @@ export async function runStep(job: JobDoc): Promise<StepResult> {
     Sentry.captureException(error, { tags: { step: job.state } });
     patch = failurePatch(job, error);
   }
-  await releaseJob(job.id, token, patch);
+  if (!(await releaseJob(job.id, token, job.state, patch))) {
+    Sentry.captureMessage('Step result dropped: the claim lapsed or the job moved on', {
+      level: 'warning',
+      tags: { step: job.state },
+    });
+  }
   return job.state === 'CLAIMED_COMPLETE' && patch.state === undefined
     ? { wait: 'waiting on YouTube' }
     : {};
