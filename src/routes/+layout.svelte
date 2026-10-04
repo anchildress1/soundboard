@@ -43,7 +43,7 @@
 
   <header>
     <h1 class="wordmark">
-      <a href={resolve('/')}>Soundboard</a><small>Release agent · Flies Like Robots</small>
+      <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->

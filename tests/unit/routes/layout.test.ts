@@ -53,7 +53,7 @@ describe('layout', () => {
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading).toHaveTextContent('Soundboard');
     expect(screen.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    expect(heading).toHaveTextContent('Release agent · Flies Like Robots');
+    expect(heading).toHaveTextContent('Flies Like Robots · Release agent');
   });
 
   it('renders the page between header and footer', () => {
