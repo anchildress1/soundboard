@@ -6,6 +6,7 @@ export const PROVIDER = 'llama.cpp';
 export const PIPELINE = 'soundboard';
 
 export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-pick';
+export type AgentSpan = Sentry.Span;
 
 type Part =
   | { type: 'text'; text: string }
@@ -86,6 +87,31 @@ export type ChatReply = {
 const textParts = (messages: ChatMessage[]) =>
   (redactMessages(messages) as { parts: unknown[] }[]).flatMap((m) => m.parts);
 
+/** System prompt as `gen_ai.system_instructions`, the rest of the redacted request as input. */
+function messageAttributes(messages: ChatMessage[]): Record<string, string> {
+  const system = messages.filter((m) => m.role === 'system');
+  const rest = messages.filter((m) => m.role !== 'system');
+  return {
+    ...(system.length > 0
+      ? { 'gen_ai.system_instructions': JSON.stringify(textParts(system)) }
+      : {}),
+    'gen_ai.input.messages': JSON.stringify(redactMessages(rest)),
+  };
+}
+
+/** The agent's task on its `invoke_agent` span; Sentry shows an agent's input only from here. */
+export function agentInput(span: AgentSpan, messages: ChatMessage[]): void {
+  span.setAttributes(messageAttributes(messages));
+}
+
+/** The agent's final answer on its `invoke_agent` span. */
+export function agentOutput(span: AgentSpan, content: string): void {
+  span.setAttribute(
+    'gen_ai.output.messages',
+    JSON.stringify([{ role: 'assistant', parts: [{ type: 'text', content }] }]),
+  );
+}
+
 /**
  * `chat` span: system prompt as `gen_ai.system_instructions`, the rest of the redacted request as
  * input, the reply and its think block as output, plus finish reason and token counts.
@@ -95,8 +121,6 @@ export function chatSpan<T extends ChatReply>(
   params: { agent: AgentName; temperature: number; maxTokens: number },
   fn: () => Promise<T>,
 ): Promise<T> {
-  const system = messages.filter((m) => m.role === 'system');
-  const rest = messages.filter((m) => m.role !== 'system');
   return Sentry.startSpan(
     {
       op: 'gen_ai.chat',
@@ -109,10 +133,7 @@ export function chatSpan<T extends ChatReply>(
         'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.request.temperature': params.temperature,
         'gen_ai.request.max_tokens': params.maxTokens,
-        ...(system.length > 0
-          ? { 'gen_ai.system_instructions': JSON.stringify(textParts(system)) }
-          : {}),
-        'gen_ai.input.messages': JSON.stringify(redactMessages(rest)),
+        ...messageAttributes(messages),
       },
     },
     async (span) => {

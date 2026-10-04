@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
+import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 import { captureException } from '../../../mocks/sentry';
 import { resetClients } from '$lib/server/clients';
 import { MAX_MINUTES, type JobDoc } from '$lib/server/jobs';
@@ -626,6 +627,16 @@ describe('runStep: PICK', () => {
     expect(called(/playlistItems/).length).toBeGreaterThan(0);
     expect(ctx.recentUploads).toHaveLength(3);
     expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
+  });
+
+  it('records the pick request and the stored pick on the smart-pick agent span', async () => {
+    clearAgentSpan();
+    await runStep(seed({ state: 'PICK', measurements: MEASURED }));
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    expect(input[0]!['gen_ai.input.messages']).toContain('recentUploads');
+    const stored = store.get('jobs/j1/pick/0001') as Record<string, unknown>;
+    expect(JSON.parse(output[0]!)).toMatchObject({ title: stored.title });
   });
 
   it('names the artist for a sample and leaves its live video out of the comparison set', async () => {

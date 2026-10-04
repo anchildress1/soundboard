@@ -20,6 +20,9 @@ import {
   type RawPick,
 } from '$lib/server/smart-pick';
 import type { Chunk, Measurements, Probe } from '$lib/types';
+import type { AgentSpan } from '$lib/server/tracing';
+import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
+import { span } from '../../../mocks/sentry';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
   title: 'PeekaBoo',
@@ -825,12 +828,42 @@ describe('runPick', () => {
     );
 
   beforeEach(() => {
+    clearAgentSpan();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('records the first request and the finalized pick on the agent span', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Fresh Title' }))));
+    const result = await runPick(
+      ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }),
+      undefined,
+      span as unknown as AgentSpan,
+    );
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    expect(input[0]!['gen_ai.input.messages']).not.toContain('repeats a skipped version');
+    expect(input[0]!['gen_ai.system_instructions']).toBeDefined();
+    expect(output).toEqual([JSON.stringify(result!.pick)]);
+  });
+
+  it('records no agent output when the pick fails', async () => {
+    fetchMock.mockImplementation(async () => reply('not json'));
+    expect(await runPick(ctx(), undefined, span as unknown as AgentSpan)).toBeNull();
+    expect(agentSpanIO().input).toHaveLength(1);
+    expect(agentSpanIO().output).toEqual([]);
+  });
+
+  it('records nothing on a span when none is given', async () => {
+    fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
+    await runPick(ctx());
+    expect(agentSpanIO()).toEqual({ input: [], output: [] });
   });
 
   it('returns the finalized pick from one call', async () => {

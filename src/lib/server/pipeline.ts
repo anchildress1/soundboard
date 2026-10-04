@@ -150,6 +150,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         brand,
       },
       deadline,
+      span,
     );
     if (!result) throw new Error('The model reply did not parse as a recommendation.');
     const version = (picks.at(-1)?.version ?? 0) + 1;
