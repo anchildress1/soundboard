@@ -81,16 +81,16 @@ const RECENT_DESCRIPTION_CHARS = 700;
 
 /**
  * How the artist writes, distilled from his own YouTube descriptions and comments (2024 on).
- * Applies to the description on runs that may name him; the audience evidence still sets its
- * structure and length.
+ * Applies to every run's description; the audience evidence still sets its structure and length.
  */
 export const ARTIST_VOICE = [
   'Write the description the way the artist writes his own:',
   '- Short, plain, literal. Open with "<song> by Flies Like Robots".',
-  '- At most one sentence about the song, said straight ("The lyrics are based on the premise that ...").',
+  '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
   '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
-  '- Keep his contact line from recentUploads.',
+  '- His contact line only if one appears in recentUploads; otherwise leave it out.',
+  '- Never write placeholders, brackets, or notes about missing information.',
   '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
   '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
   '- Quoted phrases here show his style. Never copy them word for word, except the credit line.',
@@ -126,7 +126,11 @@ export function weighFeedback(feedback: Feedback[]) {
 
 /** Tags the pick may use: the genre search's tags plus the artist name. */
 export function tagPool(fix: { tagCandidates: TagCandidate[] }): TagCandidate[] {
-  return [...fix.tagCandidates, { tag: ARTIST_NAME, usedBy: 0 }];
+  const artist = ARTIST_NAME.toLowerCase();
+  return [
+    ...fix.tagCandidates.filter((c) => c.tag.toLowerCase() !== artist),
+    { tag: ARTIST_NAME, usedBy: 0 },
+  ];
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
@@ -266,6 +270,17 @@ function pickHashtags(draft: RawPick, pool: string[]): string[] {
 }
 
 const MIN_TAGS = 3;
+
+const words = (text: string) =>
+  ` ${text
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()} `;
+/** Whole-word containment, so the title "Pop" rules out "pop music" but not "synthpop". */
+const containsWords = (text: string, phrase: string) => words(text).includes(words(phrase));
+
+/** A line that is only a bracketed note, like "[Contact line: none provided]". */
+const PLACEHOLDER_LINE = /^\s*\[[^\]\n]*\]\s*$/gmu;
 const MAX_TAGS = 10;
 
 /**
@@ -275,7 +290,7 @@ const MAX_TAGS = 10;
 function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
   const byLower = new Map(pool.map((t) => [t.toLowerCase(), t]));
   const title = songTitle.trim().toLowerCase();
-  const allowed = (key: string) => byLower.has(key) && !(title && key.includes(title));
+  const allowed = (key: string) => byLower.has(key) && !(title && containsWords(key, title));
   const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))]
     .filter(allowed)
     .slice(0, MAX_TAGS);
@@ -300,7 +315,12 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const hashtags = pickHashtags(draft, fix.candidates);
 
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
-  let body = tidy(tidy(allowedLinks(draft.description, fix.facts)).replaceAll(BODY_HASHTAG, ''));
+  let body = tidy(
+    tidy(allowedLinks(draft.description, fix.facts).replaceAll(PLACEHOLDER_LINE, '')).replaceAll(
+      BODY_HASHTAG,
+      '',
+    ),
+  );
   const closing = hashtags.join(' ');
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);
   const description = closing ? `${body}\n\n${closing}`.trim() : body;

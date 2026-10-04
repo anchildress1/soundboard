@@ -216,6 +216,9 @@ describe('buildPickMessages', () => {
     expect(rules).toContain('hacked and slashed');
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
+    expect(rules).toContain('Never claim what the lyrics say.');
+    expect(rules).toContain('Never write placeholders');
+    expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);
   });
@@ -576,6 +579,39 @@ describe('finalizePick', () => {
     );
     expect(pick.tags.some((t) => t.toLowerCase().includes('peekaboo'))).toBe(false);
     expect(pick.tags[0]).toBe('synthwave');
+  });
+
+  it('rejects tags holding the title as whole words but keeps words that merely contain it', () => {
+    const names = ['synthpop', 'pop music', 'Pop', 'hyperpop'];
+    const pick = finalizePick(
+      raw({ tags: names }),
+      fix({ songTitle: 'Pop', tagCandidates: cands(...names) }),
+    );
+    expect(pick.tags).toEqual(['synthpop', 'hyperpop', 'Flies Like Robots']);
+  });
+
+  it('lists the artist name once even when the search returned it', () => {
+    const messages = buildPickMessages(
+      ctx({ tagCandidates: cands('synthwave', 'flies like robots') }),
+    );
+    const parts = messages[1]!.content as { text?: string }[];
+    expect(JSON.parse(parts[0]!.text!).candidateTags).toEqual([
+      { tag: 'synthwave', usedBy: 1 },
+      { tag: 'Flies Like Robots', usedBy: 0 },
+    ]);
+  });
+
+  it('drops bracketed placeholder lines the model writes into the description', () => {
+    const pick = finalizePick(
+      raw({
+        description:
+          'Vaporgram by Flies Like Robots\n\n[Contact line from recentUploads: None provided]\n\nKeep [this] inline.',
+      }),
+      fix(),
+    );
+    expect(pick.description).not.toContain('Contact line');
+    expect(pick.description).toContain('Keep [this] inline.');
+    expect(pick.description.startsWith('Vaporgram by Flies Like Robots\n\nKeep')).toBe(true);
   });
 
   it('pads to 3 from the top of the pool when the model picks nothing usable', () => {
