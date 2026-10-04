@@ -128,14 +128,17 @@ describe('brand guide', () => {
     fetchMock.mockImplementation(async () => json(200, {}));
     const guide = { statement: 's', keep: ['k'], fix: [], drop: [] };
     await proposeBrand();
-    await approveBrand(guide);
+    await approveBrand(guide, 42);
     await discardBrandProposal();
     expect(fetchMock.mock.calls.map((c) => [c[0], (c[1] as RequestInit).method])).toEqual([
       ['/api/brand/propose', 'POST'],
       ['/api/brand/approve', 'POST'],
       ['/api/brand/discard', 'POST'],
     ]);
-    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual(guide);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({
+      ...guide,
+      proposedAt: 42,
+    });
   });
 });
 

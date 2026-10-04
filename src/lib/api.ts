@@ -79,10 +79,11 @@ export function proposeBrand() {
   });
 }
 
-export function approveBrand(guide: BrandGuide) {
+/** `proposedAt` is the reviewed proposal's `createdAt`, so a replaced proposal can't be approved. */
+export function approveBrand(guide: BrandGuide, proposedAt: number) {
   return call<{ approved: StoredBrand }>('/api/brand/approve', {
     method: 'POST',
-    body: JSON.stringify(guide),
+    body: JSON.stringify({ ...guide, proposedAt }),
   });
 }
 

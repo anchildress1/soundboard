@@ -38,6 +38,8 @@
   let approved = $state<StoredBrand | null>(data.approved);
   // svelte-ignore state_referenced_locally
   let draft = $state<Draft | null>(toDraft(data.proposal));
+  // svelte-ignore state_referenced_locally
+  let proposedAt = $state<number | null>(data.proposal?.createdAt ?? null);
   let wait = $state<Wait | null>(null);
   let busy = $state(false);
   let message = $state('');
@@ -65,6 +67,7 @@
         const result = await proposeBrand();
         if ('proposal' in result) {
           draft = toDraft(result.proposal);
+          proposedAt = result.proposal.createdAt;
           return;
         }
         wait = result.wait;
@@ -81,11 +84,11 @@
 
   async function approve(event: SubmitEvent) {
     event.preventDefault();
-    if (!guide || problem) return;
+    if (!guide || problem || proposedAt === null) return;
     busy = true;
     message = '';
     try {
-      approved = (await approveBrand(guide)).approved;
+      approved = (await approveBrand(guide, proposedAt)).approved;
       draft = null;
     } catch (error) {
       message = error instanceof Error ? error.message : 'Approval failed';

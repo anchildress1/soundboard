@@ -188,11 +188,15 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
 
 /**
  * Approves the guide as edited, replacing any earlier one. The proposal is re-read in the same
- * transaction, so a discard in another tab can't be approved after the fact.
+ * transaction and must be the one under review (`proposedAt` is its `createdAt`), so a discard or
+ * a newer proposal from another tab can't be approved with stale text.
  */
 export async function approveBrand(input: unknown): Promise<StoredBrand> {
   if (!isBrandGuide(input))
     throw new ActionError(400, 'Expected a statement and keep, fix, drop lists.');
+  const { proposedAt } = input as { proposedAt?: unknown };
+  if (typeof proposedAt !== 'number')
+    throw new ActionError(400, 'Name the proposal being approved.');
   const trim = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
   const guide: BrandGuide = {
     statement: input.statement.trim(),
@@ -206,6 +210,9 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
     const snap = await tx.get(brand().doc('proposal'));
     if (!snap.exists) throw new ActionError(409, 'There is no proposal to approve.');
     const proposal = snap.data() as StoredBrand;
+    if (proposal.createdAt !== proposedAt) {
+      throw new ActionError(409, 'A newer proposal replaced this one. Reload to review it.');
+    }
     const approved: StoredBrand = {
       ...guide,
       status: 'APPROVED',

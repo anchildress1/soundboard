@@ -235,6 +235,7 @@ describe('approveBrand', () => {
       keep: [' Keep this ', '   '],
       fix: [],
       drop: ['Drop this'],
+      proposedAt: PROPOSAL.createdAt,
     });
     expect(approved).toMatchObject({
       statement: 'Edited statement.',
@@ -251,7 +252,7 @@ describe('approveBrand', () => {
 
   it('replaces an earlier approved guide', async () => {
     store.set('artists/flr/brand/approved', { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
-    await approveBrand(GUIDE);
+    await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt });
     expect((store.get('artists/flr/brand/approved') as StoredBrand).statement).toBe(
       GUIDE.statement,
     );
@@ -262,7 +263,9 @@ describe('approveBrand', () => {
   });
 
   it('422s on an invalid guide and writes nothing', async () => {
-    await expect(approveBrand({ ...GUIDE, statement: '   ' })).rejects.toMatchObject({
+    await expect(
+      approveBrand({ ...GUIDE, statement: '   ', proposedAt: PROPOSAL.createdAt }),
+    ).rejects.toMatchObject({
       status: 422,
     });
     expect(store.has('artists/flr/brand/approved')).toBe(false);
@@ -271,10 +274,28 @@ describe('approveBrand', () => {
 
   it('409s once the proposal is gone', async () => {
     await discardBrandProposal();
-    const error = await approveBrand(GUIDE).catch((e: unknown) => e);
+    const error = await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(ActionError);
     expect((error as ActionError).status).toBe(409);
     expect(store.has('artists/flr/brand/approved')).toBe(false);
+  });
+
+  it('400s without the reviewed proposal named', async () => {
+    await expect(approveBrand(GUIDE)).rejects.toMatchObject({ status: 400 });
+    expect(store.has('artists/flr/brand/proposal')).toBe(true);
+  });
+
+  it('409s on stale text when another tab replaced the proposal, changing neither guide', async () => {
+    const newer = { ...PROPOSAL, statement: 'Newer proposal.', createdAt: PROPOSAL.createdAt + 1 };
+    store.set('artists/flr/brand/proposal', newer);
+    const error = await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ status: 409 });
+    expect(store.has('artists/flr/brand/approved')).toBe(false);
+    expect(store.get('artists/flr/brand/proposal')).toEqual(newer);
   });
 });
 

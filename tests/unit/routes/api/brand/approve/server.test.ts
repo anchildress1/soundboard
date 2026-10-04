@@ -34,14 +34,14 @@ beforeEach(() => {
 describe('POST /api/brand/approve', () => {
   it('404s for a non-allowlisted session and leaves the proposal', async () => {
     const error = await Promise.resolve()
-      .then(() => approve(JSON.stringify(GUIDE), false))
+      .then(() => approve(JSON.stringify({ ...GUIDE, proposedAt: 1 }), false))
       .catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
     expect(store.has('artists/flr/brand/proposal')).toBe(true);
   });
 
   it('approves the posted guide', async () => {
-    const response = await approve(JSON.stringify(GUIDE));
+    const response = await approve(JSON.stringify({ ...GUIDE, proposedAt: 1 }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ approved: { ...GUIDE, status: 'APPROVED' } });
     expect(store.has('artists/flr/brand/approved')).toBe(true);
@@ -52,7 +52,7 @@ describe('POST /api/brand/approve', () => {
   });
 
   it('422s with the validation message', async () => {
-    const response = await approve(JSON.stringify({ ...GUIDE, statement: '' }));
+    const response = await approve(JSON.stringify({ ...GUIDE, statement: '', proposedAt: 1 }));
     expect(response.status).toBe(422);
     expect(((await response.json()) as { error: string }).error).toMatch(/statement/);
   });

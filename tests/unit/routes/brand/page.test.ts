@@ -99,6 +99,7 @@ describe('brand page: reviewing a proposal', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
       ...GUIDE,
       keep: ['Song title alone', 'Lowercase hashtags'],
+      proposedAt: Date.UTC(2026, 9, 1),
     });
     expect(screen.queryByLabelText(/^Statement/)).toBeNull();
   });
