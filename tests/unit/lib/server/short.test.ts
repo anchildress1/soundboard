@@ -332,7 +332,7 @@ describe('runHook', () => {
       .mockResolvedValueOnce(completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })))
       .mockResolvedValueOnce(completion(JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })));
     const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }));
-    expect(result?.hook.window).toBe(4);
+    expect(result?.hook?.window).toBe(4);
     const second = chatBodies()[1]!;
     expect(second.messages.at(-1)!.content).toBe(
       'That repeats a skipped hook. Pick a different one.',
@@ -343,7 +343,8 @@ describe('runHook', () => {
     fetchMock.mockImplementation(async () =>
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })),
     );
-    expect(await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }))).toBeNull();
+    const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }));
+    expect(result).toEqual({ hook: null, ms: expect.any(Number) });
     expect(chatBodies()).toHaveLength(2);
   });
 
@@ -351,7 +352,7 @@ describe('runHook', () => {
     fetchMock.mockImplementation(async () =>
       completion(JSON.stringify({ window: 7, lengthSec: 90, reason: 'a' })),
     );
-    expect(await runHook(ctx({ skipped: [{ window: 5, lengthSec: 60 }] }))).toBeNull();
+    expect((await runHook(ctx({ skipped: [{ window: 5, lengthSec: 60 }] })))?.hook).toBeNull();
   });
 
   it('returns null when the reply never parses', async () => {
@@ -538,6 +539,24 @@ describe('hookStep', () => {
     seedChunks(6);
     fetchMock.mockImplementation(async () => completion('{"window": "two"}'));
     await expect(hookStep(shortJob())).rejects.toThrow('The model reply did not parse as a hook.');
+    expect(h.spawn).not.toHaveBeenCalled();
+  });
+
+  it('fails at HOOK for good when the retry repeats a skipped hook too', async () => {
+    seedChunks(6);
+    fetchMock.mockImplementation(async () =>
+      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
+    );
+    const skipped = [{ window: 2, lengthSec: 30 }];
+    const patch = await hookStep(shortJob({}, { skipped, modelMs: 40_000 }));
+    expect(patch).toMatchObject({
+      state: 'FAILED',
+      failedState: 'HOOK',
+      error: 'The model kept picking a skipped hook.',
+      short: { hook: null, skipped },
+    });
+    expect(patch.short!.modelMs).toBeGreaterThanOrEqual(40_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(h.spawn).not.toHaveBeenCalled();
   });
 

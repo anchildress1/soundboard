@@ -5,7 +5,7 @@ import { lengthBounds, tenth } from '$lib/short';
 import type { Chunk, Hook, Short } from '$lib/types';
 import { loudnessCurve, probe, renderShort, WINDOW_SEC, type LoudnessPoint } from './ffmpeg';
 import { signedReadUrl, uploadFile } from './gcs';
-import { listChunks, ok, type JobDoc } from './jobs';
+import { fail, listChunks, ok, type JobDoc } from './jobs';
 import { chatJson, stepDeadline } from './model';
 import { stripNumerics } from './numerics';
 import { isFiniteNumber, isString, shape } from './shape';
@@ -87,14 +87,14 @@ const repeats = (hook: RawHook, skipped: Short['skipped']) =>
 
 /**
  * Asks the model for the hook, retrying once when it repeats a skipped one. Null when the reply
- * never parses or the retry repeats too. With `span`, records the first request and the settled
- * hook on the agent span.
+ * never parses; `hook: null` when the retry repeats too. With `span`, records the first request and
+ * the settled hook on the agent span.
  */
 export async function runHook(
   ctx: HookContext,
   deadline = stepDeadline(),
   span?: AgentSpan,
-): Promise<{ hook: RawHook; ms: number } | null> {
+): Promise<{ hook: RawHook | null; ms: number } | null> {
   let ms = 0;
   let messages = buildHookMessages(ctx);
   if (span) agentInput(span, messages);
@@ -113,7 +113,7 @@ export async function runHook(
       if (span) agentOutput(span, JSON.stringify(hook));
       return { hook, ms };
     }
-    if (attempt === 1) return null;
+    if (attempt === 1) return { hook: null, ms };
     messages = [
       ...messages,
       { role: 'assistant', content: JSON.stringify(value) },
@@ -181,10 +181,18 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
   };
   const result = await invokeAgent('hook-pick', async (span) => {
     const picked = await runHook(ctx, stepDeadline() - LOUDNESS_RESERVE_MS, span);
-    if (picked) span.setAttribute('short.window', picked.hook.window);
+    if (picked?.hook) span.setAttribute('short.window', picked.hook.window);
     return picked;
   });
   if (!result) throw new Error('The model reply did not parse as a hook.');
+  const modelMs = short.modelMs + result.ms;
+  // Re-driving the step would only replay the same refusals, so the artist decides what's next.
+  if (!result.hook) {
+    return {
+      ...fail('HOOK', 'The model kept picking a skipped hook.'),
+      short: { ...short, modelMs },
+    };
+  }
   const { window, lengthSec, reason } = result.hook;
   const windowStart = window * WINDOW_SEC;
   const windowEnd = Math.min(short.sourceDurationSec, windowStart + WINDOW_SEC);
@@ -201,7 +209,7 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
     sourceSec: short.sourceDurationSec,
   });
   const hook: Hook = { window, startSec, lengthSec, reason };
-  return ok({ state: 'RENDER', short: { ...short, hook, modelMs: short.modelMs + result.ms } });
+  return ok({ state: 'RENDER', short: { ...short, hook, modelMs } });
 }
 
 /**

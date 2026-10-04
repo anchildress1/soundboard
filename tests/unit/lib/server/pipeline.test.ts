@@ -974,6 +974,22 @@ describe('runStep: Short', () => {
     });
   });
 
+  it('fails at HOOK in one step when the model keeps repeating a skipped hook', async () => {
+    on(/\/v1\/chat\/completions$/, () =>
+      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
+    );
+    const skipped = [{ window: 2, lengthSec: 30 }];
+    seed({ state: 'HOOK', short: { ...SHORT, skipped }, sourceObject: SOURCE_OBJECT });
+    await runStep(saved());
+    expect(saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'HOOK',
+      error: 'The model kept picking a skipped hook.',
+      claim: null,
+    });
+    expect(called(/\/v1\/chat\/completions$/)).toHaveLength(2);
+  });
+
   it('fails the render when the upload to storage is refused', async () => {
     h.upload.mockRejectedValue(new Error('403 Forbidden'));
     const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
