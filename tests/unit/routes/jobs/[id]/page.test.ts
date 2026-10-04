@@ -4,6 +4,9 @@ import { setPending } from '$lib/pending';
 import type { Chunk, JobView, LiveMetadata, Pick, PublicJob } from '$lib/types';
 import Page from '$routes/jobs/[id]/+page.svelte';
 
+const h = vi.hoisted(() => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: h.goto }));
+
 const TRACE = { sentryTrace: 'trace-1', baggage: 'bag-1' };
 
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
@@ -132,6 +135,7 @@ class FakeXhr {
 }
 
 beforeEach(() => {
+  h.goto.mockReset();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   xhr.status = 200;
@@ -314,11 +318,21 @@ describe('job page: actions', () => {
     expect(paths()).toEqual(['/api/jobs/j1/rerun', '/api/jobs/j1/step']);
   });
 
-  it('discards from review', async () => {
+  it('discards from review and returns to a clean home page', async () => {
     fetchMock.mockResolvedValueOnce(json(view({ state: 'DISCARDED' }, { pick: PICK })));
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
     await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    await waitFor(() => expect(chip()).toHaveTextContent('Discarded'));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
+    expect(paths()).toEqual(['/api/jobs/j1/discard']);
+  });
+
+  it('stays on the job when a discard is rejected', async () => {
+    fetchMock.mockResolvedValueOnce(json({ error: 'The job moved on.' }, 409));
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.getByText('The job moved on.')).toBeInTheDocument());
+    expect(h.goto).not.toHaveBeenCalled();
+    expect(chip()).toHaveTextContent('Needs review');
   });
 
   it('offers retry and discard on a failed job and resumes on retry', async () => {
@@ -337,7 +351,7 @@ describe('job page: actions', () => {
     fetchMock.mockResolvedValueOnce(json(view({ state: 'DISCARDED' })));
     setup(view({ state: 'FAILED', failedState: 'PREP' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    await waitFor(() => expect(chip()).toHaveTextContent('Discarded'));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
   });
 
   it('shows a network failure on an action', async () => {
