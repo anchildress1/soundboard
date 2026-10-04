@@ -4,6 +4,7 @@ import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from 
 import type { Fact, Feedback } from '$lib/server/memory';
 import {
   allowedLinks,
+  ARTIST_VOICE,
   buildPickMessages,
   digestChunks,
   finalizePick,
@@ -210,9 +211,19 @@ describe('weighFeedback', () => {
 });
 
 describe('buildPickMessages', () => {
-  it('asks for description patterns, not a voice or persona', () => {
+  it("writes the description in the artist's own voice on runs that may name him", () => {
     const rules = system(buildPickMessages(ctx()));
-    expect(rules).not.toMatch(/voice|persona/i);
+    expect(rules).toContain(ARTIST_VOICE);
+    expect(rules).toContain('hacked and slashed');
+    expect(rules).toContain('Hyperpop? You tell me.');
+    expect(rules).toContain('wording follows the artist voice below');
+    expect(rules).not.toMatch(/persona/i);
+  });
+
+  it('leaves the artist voice out of signed-out own-video runs', () => {
+    const rules = system(buildPickMessages(ctx({ useArtistName: false })));
+    expect(rules).not.toContain(ARTIST_VOICE);
+    expect(rules).not.toContain('artist voice');
   });
 
   const userParts = (messages: ReturnType<typeof buildPickMessages>) =>

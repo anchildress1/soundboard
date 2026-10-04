@@ -81,6 +81,23 @@ export type PickContext = {
 
 const RECENT_DESCRIPTION_CHARS = 700;
 
+/**
+ * How the artist writes, distilled from his own YouTube descriptions and comments (2024 on).
+ * Applies to the description on runs that may name him; the audience evidence still sets its
+ * structure and length.
+ */
+export const ARTIST_VOICE = [
+  'Write the description the way the artist writes his own:',
+  '- Short, plain, literal. Open with "<song> by Flies Like Robots".',
+  '- At most one sentence about the song, said straight ("The lyrics are based on the premise that ...").',
+  '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
+  '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
+  '- Keep his contact line from recentUploads.',
+  '- Dry, self-mocking humor: offhand labels ("official visualization thingy"), genre doubt out loud ("Hyperpop? You tell me.").',
+  '- At most one aside like "hehe" or "Har! Har!", and at most one word in caps for emphasis.',
+  '- No marketing copy: no "explores", "journey", "sonic", "soundscape", "for fans of", no calls to like or subscribe, no emoji.',
+].join('\n');
+
 /** Condenses the chunk results into what the pick needs, keeping the prompt inside the context window. */
 export function digestChunks(chunks: Chunk[]) {
   return chunks.map((chunk) => ({
@@ -133,7 +150,8 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       ? "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags."
       : '',
     `title: at most ${TITLE_MAX} characters.${artist ? '' : ' The title is set separately; name no artist anywhere.'}`,
-    `description: plain text structured like the audienceTopVideos descriptions${artist ? ", keeping the artist's credit lines from recentUploads" : ''}. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
+    `description: plain text whose structure and length follow the audienceTopVideos descriptions${artist ? '; its wording follows the artist voice below' : ''}. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
+    artist ? ARTIST_VOICE : '',
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
     `tags: pick 5 to 15, copied exactly from candidateTags. Never the song title. Never invent one. Under ${TAGS_MAX} characters combined.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',

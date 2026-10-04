@@ -94,6 +94,7 @@
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
   - Stored on the job, so re-runs reuse it.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied. Signed-out own-video runs get none of them.
+- On runs that may name him, the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name when the run may name him. Never the song title.
 - `why` names the evidence behind each field.
