@@ -1,5 +1,7 @@
 <footer>
-  <p>Built for Nathan by Ashley Childress · Hacktoberfest Weekend Challenge: Build for a Friend</p>
+  <p>
+    Built for Nathan by <b>Ashley Childress</b> · Hacktoberfest Weekend Challenge: Build for a Friend
+  </p>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). The app runs inside the DEV iframe,
          so links open a new tab instead of replacing it. -->
@@ -91,6 +93,11 @@
     margin: 0;
   }
 
+  b {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
   .links {
     display: flex;
     align-items: center;
@@ -116,7 +123,7 @@
 
   .links a:hover,
   .links a:focus-visible {
-    color: var(--blue);
+    color: var(--ink);
     transform: translateY(-2px);
   }
 

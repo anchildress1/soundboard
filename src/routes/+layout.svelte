@@ -1,11 +1,22 @@
 <script lang="ts">
   import '../app.css';
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import Footer from '$lib/components/Footer.svelte';
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  const CHANNELS: Record<string, string> = { nathan: "Nathan's", sandbox: 'The sandbox' };
+  const notice = $derived.by(() => {
+    const query = page.url.searchParams;
+    if (query.get('signin') === 'denied') {
+      return "That Google account isn't on the allowlist, so you're still signed out. Demo runs work without signing in.";
+    }
+    const connected = CHANNELS[query.get('connected') ?? ''];
+    return connected ? `${connected} channel is connected.` : null;
+  });
 </script>
 
 <svelte:head>
@@ -24,33 +35,35 @@
     <h1 class="wordmark">
       <a href={resolve('/')}>Soundboard</a><small>Release agent · Flies Like Robots</small>
     </h1>
-    <div class="channel">
-      {#if data.channel}
-        <p class="stats">
-          <svg class="yt" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    <div class="bar">
+      <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
+      {#if data.channel && data.session?.allowlisted}
+        <p class="chip">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
             ><path
               d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"
             /></svg
-          ><b>{data.channel.handle}</b>
+          >
+          <b>{data.channel.handle}</b>
           <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
         </p>
       {/if}
-      <div class="who">
-        {#if data.session}
-          {#if data.session.allowlisted}
-            <a class="admin" href={resolve('/brand')}>Brand guide</a>
-          {/if}
-          <form method="POST" action="/auth/logout">
-            <button class="btn ghost small" type="submit" title={data.session.email}
-              >Sign out</button
-            >
-          </form>
-        {:else}
-          <a class="btn ghost small" href={resolve('/auth/login')} data-sveltekit-reload>Sign in</a>
-        {/if}
-      </div>
+      {#if data.session?.allowlisted}
+        <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>
+      {/if}
+      {#if data.session}
+        <form method="POST" action="/auth/logout">
+          <button class="btn ghost small" type="submit" title={data.session.email}>Sign out</button>
+        </form>
+      {:else}
+        <a class="btn ghost small" href={resolve('/auth/login')} data-sveltekit-reload>Sign in</a>
+      {/if}
     </div>
   </header>
+
+  {#if notice}
+    <p class="notice" role="status">{notice}</p>
+  {/if}
 
   <div id="content" class="content" tabindex="-1">
     {@render children()}
@@ -99,9 +112,9 @@
 
   header {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 16px 24px;
     flex-wrap: wrap;
   }
 
@@ -130,48 +143,45 @@
     margin: 8px 0 0 6px;
   }
 
-  .channel {
-    font: 500 13px/1.4 var(--mono);
-    color: var(--muted);
-    text-align: right;
-  }
-
-  .stats {
-    margin: 0;
+  .bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px 8px;
+    gap: 10px;
   }
 
-  .stats b {
+  .bar form {
+    margin: 0;
+  }
+
+  .chip {
+    margin: 0;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    font: 500 12px/1 var(--mono);
+    color: var(--muted);
+  }
+
+  .chip svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .chip b {
     color: var(--ink);
     font-weight: 500;
   }
 
-  .yt {
-    width: 16px;
-    height: 16px;
-    color: var(--red-text);
-  }
-
-  .who {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    justify-content: flex-end;
-    align-items: center;
-    margin-top: 10px;
-    font-size: 12px;
-  }
-
-  .who form {
+  .notice {
     margin: 0;
-  }
-
-  .admin {
-    color: var(--info);
+    padding: 10px 14px;
+    border-left: 3px solid var(--info);
+    background: var(--panel);
+    font-size: 14px;
   }
 
   .content {

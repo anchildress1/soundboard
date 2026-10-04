@@ -1,6 +1,9 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+const h = vi.hoisted(() => ({ page: { url: new URL('https://soundboard.test/') } }));
+vi.mock('$app/state', () => ({ page: h.page }));
+
 import Layout from '$routes/+layout.svelte';
 
 type Props = { data: { channel: unknown; session: unknown }; children: unknown };
@@ -21,7 +24,30 @@ const channel = {
   lastUploadAt: new Date().toISOString(),
 };
 
+beforeEach(() => {
+  h.page.url = new URL('https://soundboard.test/');
+});
+
 describe('layout', () => {
+  it('says why a denied sign-in left the visitor signed out', () => {
+    h.page.url = new URL('https://soundboard.test/?signin=denied');
+    setup();
+    expect(screen.getByRole('status')).toHaveTextContent("isn't on the allowlist");
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('confirms a connected channel', () => {
+    h.page.url = new URL('https://soundboard.test/?connected=nathan');
+    setup({ session: { email: 'nathan@example.com', allowlisted: true } });
+    expect(screen.getByRole('status')).toHaveTextContent("Nathan's channel is connected.");
+  });
+
+  it('shows no notice for an unknown connected value or a plain visit', () => {
+    h.page.url = new URL('https://soundboard.test/?connected=elsewhere');
+    setup();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('renders the wordmark as a home link with its subtitle', () => {
     setup();
     const heading = screen.getByRole('heading', { level: 1 });
@@ -58,11 +84,17 @@ describe('layout', () => {
     expect(nav.closest('footer')).not.toBeNull();
   });
 
-  it('shows FLR channel stats when available', () => {
-    setup({ channel });
+  it("shows FLR channel stats to Nathan's session", () => {
+    setup({ channel, session: { email: 'nathan@example.com', allowlisted: true } });
     expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
     expect(screen.getByText('12 videos · 340 subs')).toBeInTheDocument();
     expect(screen.queryByText(/last upload/)).toBeNull();
+  });
+
+  it('hides channel stats from signed-out and non-allowlisted visitors', () => {
+    setup({ channel });
+    expect(screen.queryByText('@flieslikerobots')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
   });
 
   it('renders without stats', () => {
@@ -110,7 +142,10 @@ describe('layout', () => {
   });
 
   it('never prints "undefined" for a partial stats record', () => {
-    setup({ channel: { handle: '@flieslikerobots', lastUploadAt: null } });
+    setup({
+      channel: { handle: '@flieslikerobots', lastUploadAt: null },
+      session: { email: 'nathan@example.com', allowlisted: true },
+    });
     expect(screen.getByText(/videos ·/).textContent).not.toContain('undefined');
   });
 });

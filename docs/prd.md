@@ -201,7 +201,7 @@ One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
 
 Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg). One screen, dark only.
 
-- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and the FLR channel stats from `channels.list` top right.
+- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution, and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
@@ -214,8 +214,9 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
 - **Under 820px:** panes stack, tape first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
-- **Header:** the channel handle (YouTube icon) and video and subscriber counts, then Sign in as a button, or Brand guide (Nathan) and Sign out. Channel connect links live on the Brand guide page.
-- **Footer:** one row: credits, then icon links to Ashley's site and socials.
+- **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
+- **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.
+- **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
 - **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.
 - **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #2e8cff` (neon), `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
