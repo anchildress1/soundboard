@@ -38,7 +38,7 @@ describe('optional', () => {
 });
 
 describe('modelUrl', () => {
-  it('defaults to the llama-server sidecar on loopback', () => {
+  it('defaults to a local llama-server', () => {
     vi.stubEnv('MODEL_URL', undefined);
     expect(modelUrl()).toBe('http://127.0.0.1:8081');
   });

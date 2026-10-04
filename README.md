@@ -65,7 +65,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 | App           | SvelteKit 2 + Svelte 5, TypeScript, Node 24                                                             |
 | Model         | Gemma 4 12B-it, Google's official QAT Q4_0 GGUF + vision/audio projector, on `llama-server` (llama.cpp) |
 | Media         | ffmpeg                                                                                                  |
-| Hosting       | One Cloud Run service with an NVIDIA L4 GPU, us-central1                                                |
+| Hosting       | Cloud Run (app) + a Vertex AI endpoint with one NVIDIA L4 (model), us-central1                          |
 | Data          | Firestore, Cloud Storage, Secret Manager                                                                |
 | YouTube       | YouTube Data API v3                                                                                     |
 | Observability | Sentry (AI agent tracing)                                                                               |
@@ -79,7 +79,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 %%{init: {"theme": "default"}}%%
 flowchart LR
   accTitle: Soundboard architecture
-  accDescr: The browser uploads the video to Cloud Storage, then drives the pipeline one step at a time through the SvelteKit app. The app runs ffmpeg, calls Gemma on a llama-server sidecar over localhost, stores state in Firestore, reads YouTube with an API key, uploads with OAuth, and sends traces to Sentry.
+  accDescr: The browser uploads the video to Cloud Storage, then drives the pipeline one step at a time through the SvelteKit app. The app runs ffmpeg, calls Gemma on llama-server behind a Vertex AI endpoint, stores state in Firestore, reads YouTube with an API key, uploads with OAuth, and sends traces to Sentry.
 
   B["Browser<br/>status page drives each step"]
   GCS[("Cloud Storage<br/>uploads/")]
@@ -87,15 +87,15 @@ flowchart LR
   YT["YouTube Data API"]
   S["Sentry<br/>one trace per job"]
 
-  subgraph CR["Cloud Run service · 1× NVIDIA L4 · us-central1"]
-    APP["app container<br/>SvelteKit + ffmpeg"]
-    LLM["model sidecar<br/>llama-server + Gemma 4 12B"]
+  subgraph GCP["Google Cloud project · us-central1"]
+    APP["Cloud Run app<br/>SvelteKit + ffmpeg"]
+    LLM["Vertex AI endpoint · 1× NVIDIA L4<br/>llama-server + Gemma 4 12B"]
   end
 
   B -- "signed PUT" --> GCS
   B -- "POST /api/jobs/:id/step" --> APP
   APP -- "range reads" --> GCS
-  APP -- "localhost: audio + frames" --> LLM
+  APP -- "invoke: audio + frames" --> LLM
   APP <--> FS
   APP -- "search + catalog: API key" --> YT
   APP -- "insert + verify: OAuth" --> YT
@@ -103,7 +103,7 @@ flowchart LR
   APP -. "gen_ai spans" .-> S
 ```
 
-- The app and the model run as two containers in one Cloud Run instance and communicate over `localhost`. The service runs at most one instance and scales to zero when idle.
+- The app runs on Cloud Run with no GPU. The model runs on a Vertex AI dedicated endpoint, which the app calls with its service account. Both run at most one instance and scale to zero when idle; the first call to a sleeping model wakes it, and the page shows "waking model" until it answers.
 - The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft; a Short adds a hook pick and a render). Reloading the page resumes from the next unfinished step.
 - The full design is in [docs/prd.md](docs/prd.md).
 
@@ -121,13 +121,13 @@ make install
 make dev
 ```
 
-| Command            | What it does                                                                     |
-| ------------------ | -------------------------------------------------------------------------------- |
-| `make dev`         | Start the dev server                                                             |
-| `make ai-checks`   | Format, lint, typecheck, test, build                                             |
-| `make e2e`         | Playwright end-to-end tests                                                      |
-| `make deploy`      | Build and deploy to Cloud Run (requires a clean working tree)                    |
-| `make model-image` | Build the Gemma 4 sidecar image on Cloud Build; skipped if `model/` is unchanged |
+| Command            | What it does                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `make dev`         | Start the dev server                                                                                          |
+| `make ai-checks`   | Format, lint, typecheck, test, build                                                                          |
+| `make e2e`         | Playwright end-to-end tests                                                                                   |
+| `make deploy`      | Deploy the model endpoint if its image changed, then build and deploy the app (requires a clean working tree) |
+| `make model-image` | Build the Gemma 4 model image on Cloud Build; skipped if `model/` is unchanged                                |
 
 ### Operating it
 
@@ -142,26 +142,26 @@ make dev
 
 Values live in `.env` for local development and in Secret Manager or Cloud Run environment variables when deployed. Do not commit real values.
 
-| Variable                                                | Purpose                                                                                  |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                                    |
-| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)           |
-| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar                 |
-| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`                           |
-| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads               |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                         |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                          |
-| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                             |
-| `DEMO_EMAILS`                                           | Comma-separated demo accounts: run like Nathan, upload to the sandbox, save nothing      |
-| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                         |
-| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                            |
-| `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only |
+| Variable                                                | Purpose                                                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                                            |
+| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)                   |
+| `MODEL_URL`                                             | `llama-server` base URL for local development; `deploy.sh` sets the Vertex endpoint's invoke URL |
+| `MODEL_IMAGE`                                           | Model container image from `make model-image`; required by `deploy.sh`                           |
+| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
+| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                                 |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
+| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                                     |
+| `DEMO_EMAILS`                                           | Comma-separated demo accounts: run like Nathan, upload to the sandbox, save nothing              |
+| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                                 |
+| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                                    |
+| `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only         |
 
 ---
 
 ## Security
 
-- Video and audio are stored only in Cloud Storage and processed only by the model running in the same Cloud Run instance. Sentry receives text, with audio and images replaced by size-only placeholders.
+- Video and audio are stored only in Cloud Storage and processed only by the model running on a Vertex AI endpoint in the same project. Sentry receives text, with audio and images replaced by size-only placeholders.
 - Signed-out visitors run against a separate test channel. Only allowlisted Google accounts can upload to Nathan's channel or read his jobs and stored preferences.
 - Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server.
 - Firestore denies all client access; only the app's service account reads and writes.

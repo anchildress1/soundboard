@@ -1,5 +1,5 @@
-# Cloud Run service: one instance, one L4. The app container takes ingress; the model sidecar
-# holds the GPU (Cloud Run attaches a GPU to exactly one container). Rendered by deploy.sh.
+# Cloud Run service: one app instance, no GPU. The model runs on a Vertex AI endpoint; deploy.sh
+# renders its invoke URL into MODEL_URL.
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
@@ -12,17 +12,11 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: '0'
         autoscaling.knative.dev/maxScale: '1'
-        # GPUs require instance-based billing.
-        run.googleapis.com/cpu-throttling: 'false'
-        run.googleapis.com/gpu-zonal-redundancy-disabled: 'true'
         run.googleapis.com/startup-cpu-boost: 'true'
-        run.googleapis.com/container-dependencies: '{"app":["model"]}'
     spec:
       serviceAccountName: ${SERVICE_ACCOUNT}
       containerConcurrency: 80
       timeoutSeconds: 3600
-      nodeSelector:
-        run.googleapis.com/accelerator: nvidia-l4
       containers:
         - name: app
           image: ${APP_IMAGE}
@@ -30,7 +24,7 @@ spec:
             - containerPort: 8080
           env:
             - name: MODEL_URL
-              value: http://127.0.0.1:8081
+              value: ${MODEL_URL}
             - name: GCP_PROJECT_ID
               value: ${GCP_PROJECT_ID}
             - name: GCS_BUCKET
@@ -68,18 +62,3 @@ spec:
             limits:
               cpu: '2'
               memory: 8Gi
-        - name: model
-          image: ${MODEL_IMAGE}
-          resources:
-            limits:
-              # The L4 minimum (4 CPU / 16 GiB) is met by the GPU container on its own.
-              cpu: '4'
-              memory: 16Gi
-              nvidia.com/gpu: '1'
-          # TCP, not /health: the port opens before weights finish loading, so the page serves
-          # while the app reports "waking model".
-          startupProbe:
-            tcpSocket:
-              port: 8081
-            periodSeconds: 5
-            failureThreshold: 48

@@ -1,3 +1,4 @@
+import { GoogleAuth } from 'google-auth-library';
 import { modelUrl } from './env';
 import { chatSpan, MODEL_NAME, type AgentName, type ChatMessage, type ChatReply } from './tracing';
 
@@ -17,19 +18,39 @@ export type ModelStatus = 'ready' | 'loading' | 'busy';
 
 type Slot = { is_processing?: boolean };
 
+let auth: GoogleAuth | undefined;
+
+/** The Vertex endpoint (https) takes the runtime identity's token; a local `llama-server` takes none. */
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!modelUrl().startsWith('https://')) return {};
+  auth ??= new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error('No access token for the model endpoint.');
+  return { authorization: `Bearer ${token}` };
+}
+
 /**
- * `/health` answers 503 while weights load (and refuses connections before the sidecar listens);
- * `/slots` shows whether the single slot is taken by another run.
+ * The endpoint answers 429 while scaled to zero (the request starts a replica), and `/health`
+ * answers 503 while weights load; either reads as loading. `/slots` shows whether the single slot
+ * is taken by another run.
  */
 export async function modelStatus(): Promise<ModelStatus> {
+  // Outside the try: a missing credential is a deploy fault, not a model still waking.
+  const headers = await authHeaders();
   try {
-    const health = await fetch(`${modelUrl()}/health`, { signal: AbortSignal.timeout(3000) });
+    const health = await fetch(`${modelUrl()}/health`, {
+      headers,
+      signal: AbortSignal.timeout(3000),
+    });
     if (!health.ok) return 'loading';
   } catch {
     return 'loading';
   }
   try {
-    const slots = await fetch(`${modelUrl()}/slots`, { signal: AbortSignal.timeout(3000) });
+    const slots = await fetch(`${modelUrl()}/slots`, {
+      headers,
+      signal: AbortSignal.timeout(3000),
+    });
     if (!slots.ok) return 'ready';
     const list = (await slots.json()) as Slot[];
     return list.length > 0 && list.every((slot) => slot.is_processing) ? 'busy' : 'ready';
@@ -77,7 +98,7 @@ export async function chat(
     if (timeout <= 0) throw new Error('The step ran out of time for the model.');
     const response = await fetch(`${modelUrl()}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(await authHeaders()) },
       signal: AbortSignal.timeout(timeout),
       body: JSON.stringify({
         model: MODEL_NAME,

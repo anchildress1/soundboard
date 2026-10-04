@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds the llama-server + Gemma 4 sidecar image on Cloud Build (amd64 CUDA) and pushes it as
+# Builds the llama-server + Gemma 4 model image on Cloud Build (amd64 CUDA) and pushes it as
 # package `model`, which the Artifact Registry cleanup policy caps at 2 versions.
 
 SERVICE="soundboard"

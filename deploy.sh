@@ -7,6 +7,7 @@ SEPARATOR="=================================================="
 
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
 command -v envsubst > /dev/null || { echo "Error: envsubst (gettext) is not installed." >&2; exit 1; }
+command -v curl > /dev/null || { echo "Error: curl is not installed." >&2; exit 1; }
 
 # .env.sentry-build-plugin holds the Sentry source-map upload token; it's optional.
 for file in .env .env.sentry-build-plugin; do
@@ -57,7 +58,7 @@ echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com firestore.googleapis.com \
-  secretmanager.googleapis.com --project "$GCP_PROJECT_ID" --quiet
+  secretmanager.googleapis.com aiplatform.googleapis.com --project "$GCP_PROJECT_ID" --quiet
 
 # Runtime identity: create it once, and let the deploying account attach it to the service
 # (Cloud Run requires iam.serviceAccounts.actAs on a user-managed service account).
@@ -148,6 +149,95 @@ for channel in nathan sandbox; do
   done
 done
 
+# Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
+# image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
+MODEL_ENDPOINT="soundboard-model"
+MODEL_NAME="soundboard-model-${MODEL_IMAGE##*:}"
+VERTEX="https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_ID}/locations/${REGION}"
+
+vertex_post() {
+  curl -fsS -X POST "${VERTEX}/$1" -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" -d "$2" > /dev/null
+}
+
+# Polls a list command until the resource it filters for exists (creation is a long-running op).
+await_resource() {
+  local found=""
+  for _ in $(seq 60); do
+    found="$("$@")"
+    [[ -n "$found" ]] && { echo "$found"; return; }
+    sleep 5
+  done
+  echo "Error: timed out waiting for: $*" >&2
+  exit 1
+}
+
+endpoint_id() {
+  gcloud ai endpoints list --region "$REGION" --project "$GCP_PROJECT_ID" \
+    --filter "display_name=${MODEL_ENDPOINT}" --format 'value(name.basename())' 2> /dev/null
+}
+model_id() {
+  gcloud ai models list --region "$REGION" --project "$GCP_PROJECT_ID" \
+    --filter "display_name=${MODEL_NAME}" --format 'value(name.basename())' 2> /dev/null
+}
+
+# Scale to zero needs a dedicated endpoint, which gcloud can't create; the REST API can.
+if [[ -z "$(endpoint_id)" ]]; then
+  vertex_post endpoints "{\"displayName\": \"${MODEL_ENDPOINT}\", \"dedicatedEndpointEnabled\": true}"
+fi
+ENDPOINT_ID="$(await_resource endpoint_id)"
+
+# invokeRoutePrefix passes llama-server's own paths through (/invoke/health → /health); gcloud has
+# no flag for it. The deployment timeout covers loading ~7 GB of weights onto the GPU.
+if [[ -z "$(model_id)" ]]; then
+  vertex_post models:upload "$(cat << MODEL
+{"model": {"displayName": "${MODEL_NAME}", "containerSpec": {
+  "imageUri": "${MODEL_IMAGE}", "ports": [{"containerPort": 8081}],
+  "healthRoute": "/health", "invokeRoutePrefix": "/*", "deploymentTimeout": "1800s"}}}
+MODEL
+)"
+fi
+MODEL_ID="$(await_resource model_id)"
+
+DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
+  --project "$GCP_PROJECT_ID" --format 'value(deployedModels.model)')"
+if [[ "${DEPLOYED};" != *"/models/${MODEL_ID};"* ]]; then
+  # One L4, scale to zero after 5 idle minutes (the floor for both periods).
+  gcloud beta ai endpoints deploy-model "$ENDPOINT_ID" --region "$REGION" \
+    --project "$GCP_PROJECT_ID" --model "$MODEL_ID" --display-name "$MODEL_NAME" \
+    --machine-type g2-standard-4 --accelerator type=nvidia-l4,count=1 \
+    --min-replica-count 0 --max-replica-count 1 \
+    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100
+  for old in $(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
+    --project "$GCP_PROJECT_ID" --format json | python3 -c '
+import json, sys
+model = sys.argv[1]
+for deployed in json.load(sys.stdin).get("deployedModels", []):
+    if not deployed["model"].endswith("/" + model):
+        print(deployed["id"])' "$MODEL_ID"); do
+    gcloud ai endpoints undeploy-model "$ENDPOINT_ID" --region "$REGION" \
+      --project "$GCP_PROJECT_ID" --deployed-model-id "$old" --quiet
+  done
+fi
+
+ENDPOINT_FIELDS="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
+  --project "$GCP_PROJECT_ID" --format 'value(dedicatedEndpointDns,name)')"
+read -r ENDPOINT_DNS ENDPOINT_NAME <<< "$ENDPOINT_FIELDS"
+MODEL_URL="https://${ENDPOINT_DNS}/v1/${ENDPOINT_NAME}/invoke"
+export MODEL_URL
+echo "Model URL: $MODEL_URL"
+
+# The runtime identity may call the endpoint and nothing else in Vertex: aiplatform.user would
+# also let it create and deploy GPU resources.
+INVOKER_ROLE="soundboardModelInvoker"
+if ! gcloud iam roles describe "$INVOKER_ROLE" --project "$GCP_PROJECT_ID" &> /dev/null; then
+  gcloud iam roles create "$INVOKER_ROLE" --project "$GCP_PROJECT_ID" \
+    --title "Soundboard model invoker" --permissions aiplatform.endpoints.predict --quiet > /dev/null
+fi
+gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
+  --member "serviceAccount:${SERVICE_ACCOUNT}" \
+  --role "projects/${GCP_PROJECT_ID}/roles/${INVOKER_ROLE}" --condition None --quiet > /dev/null
+
 # With a Sentry token, the build uploads source maps for this commit's release. Only Cloud Build's
 # identity reads the token; the running service never sees it.
 if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
@@ -165,7 +255,7 @@ rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
-envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${MODEL_IMAGE} ${GCP_PROJECT_ID} ${GCS_BUCKET}
+envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${MODEL_URL} ${GCP_PROJECT_ID} ${GCS_BUCKET}
   ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${ALLOWLIST_EMAILS} ${DEMO_EMAILS} ${PUBLIC_SENTRY_DSN}' \
   < service.yaml > "$rendered"
 
