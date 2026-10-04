@@ -10,6 +10,10 @@ import {
 } from '$lib/metadata';
 
 describe('parseHashtags', () => {
+  it('ignores URL fragments and mid-word #', () => {
+    expect(parseHashtags('See https://x.example/page#top and a#b, then #real')).toEqual(['#real']);
+  });
+
   it('returns lowercased hashtags in first-seen order without duplicates', () => {
     expect(parseHashtags('New one #Synthwave #indie and #synthwave again #FLR')).toEqual([
       '#synthwave',

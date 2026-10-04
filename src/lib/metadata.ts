@@ -2,7 +2,8 @@ export const TITLE_MAX = 100;
 export const TAGS_MAX = 500;
 export const DESCRIPTION_MAX = 5000;
 
-const HASHTAG = /#([\p{L}\p{N}_]+)/gu;
+// A hashtag starts the text or follows whitespace, so URL fragments (`page#top`) don't count.
+const HASHTAG = /(?<!\S)#([\p{L}\p{N}_]+)/gu;
 
 /** Every `#hashtag` in a text, lowercased, in order of first appearance. */
 export function parseHashtags(text: string): string[] {
