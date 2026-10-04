@@ -103,7 +103,7 @@
 **R5 · Review**
 
 - One recommendation. Every field is editable in place. Actions: **Approve & upload**, **Re-run model**, **Discard**.
-- Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
+- Re-run model reruns smart pick only, with this job's skipped versions in the prompt. Signed-out own-video runs keep their fixed title (R8); their re-runs refresh description, tags, and hashtags.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
 - [ ] Each re-run produces a new title.
@@ -125,7 +125,7 @@
 **R8 · Public home page**
 
 - The home page is the app. Signed out: zero cookies, 30-second FLR samples cut from the strongest part of each song (one tap) plus own-video upload.
-- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload, titled by song only, without the FLR name.
+- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload, titled `<song title> (Official Video)`, without the FLR name.
 - Caps: 40 runs/day, 5 per IP. When upload quota is spent, runs end at the would-be payload.
 - DEV embeds Cloud Run through `{% embed https://<service>.run.app %}` and nothing else from an arbitrary domain, so the post uses the default `run.app` URL ([DEV editor guide](https://dev.to/p/editor_guide)).
 - [ ] Embeds in a DEV draft with `frame-ancestors 'self' https://dev.to https://*.dev.to` and completes a sample run on a phone.

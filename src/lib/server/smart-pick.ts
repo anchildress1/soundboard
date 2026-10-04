@@ -99,19 +99,26 @@ export function weighFeedback(feedback: Feedback[]) {
   }));
 }
 
+function skippedRule(ctx: PickContext): string {
+  if (ctx.skipped.length === 0) return '';
+  return ctx.useArtistName
+    ? 'Do not repeat any skipped version; write a different title.'
+    : 'Do not repeat any skipped version; write a different description and tags.';
+}
+
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
   const artist = ctx.useArtistName ? ARTIST_NAME : null;
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     'Keep what already works in the recent uploads (naming pattern, tone, recurring lines); improve only what is weak.',
-    `title: at most ${TITLE_MAX} characters.${artist ? '' : ' Use the song title only; name no artist.'}`,
+    `title: at most ${TITLE_MAX} characters.${artist ? '' : ' The title is set separately; name no artist anywhere.'}`,
     "description: plain text in the channel's voice, no hashtags inside it; they are appended separately. Only include links listed in facts.",
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
     `tags: plain search terms without #: genres, the song title${artist ? ', the artist name' : ''}. Under ${TAGS_MAX} characters combined.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     'brandCheck: one sentence on how the proposal matches or departs from the recent uploads.',
     'why: one short reason per field for the choice made.',
-    ctx.skipped.length > 0 ? 'Do not repeat any skipped version; write a different title.' : '',
+    skippedRule(ctx),
   ].filter(Boolean);
   const context = {
     artist,
@@ -218,6 +225,13 @@ function clip(text: string, max: number): string {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).trim();
 }
 
+const VISITOR_SUFFIX = ' (Official Video)';
+
+/** Signed-out own-video payloads carry a fixed title: the song, then "(Official Video)" (R8). */
+export function visitorTitle(songTitle: string): string {
+  return `${clip(tidy(songTitle), TITLE_MAX - VISITOR_SUFFIX.length)}${VISITOR_SUFFIX}`;
+}
+
 export type PickFixups = {
   songTitle: string;
   candidates: string[];
@@ -281,8 +295,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   }
 
   return {
-    // Signed-out own-video payloads are titled by the song alone (R8).
-    title: clip(tidy(fix.useArtistName ? draft.title : fix.songTitle), TITLE_MAX),
+    title: fix.useArtistName ? clip(tidy(draft.title), TITLE_MAX) : visitorTitle(fix.songTitle),
     description,
     hashtags,
     tags,
@@ -320,7 +333,8 @@ export async function runPick(
     ms += took;
     if (!value) return null;
     const pick = finalizePick(value, ctx);
-    const repeats = ctx.skipped.some((s) => sameTitle(s.title, pick.title));
+    // A fixed visitor title can't change, so only model-written titles must differ on a re-run.
+    const repeats = ctx.useArtistName && ctx.skipped.some((s) => sameTitle(s.title, pick.title));
     if (!repeats) return { pick, ms };
     // A re-run must produce a new title; a second repeat fails the pick so the step retries.
     if (attempt === 1) return null;

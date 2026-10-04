@@ -15,6 +15,7 @@ import {
   type PickContext,
   type PickFixups,
   type RawPick,
+  visitorTitle,
 } from '$lib/server/smart-pick';
 import type { Chunk, Measurements } from '$lib/types';
 
@@ -226,7 +227,7 @@ describe('buildPickMessages', () => {
   it('sets artist null and forbids naming one when useArtistName is false', () => {
     const messages = buildPickMessages(ctx({ useArtistName: false }));
     expect(context(messages).artist).toBeNull();
-    expect(system(messages)).toContain('Use the song title only; name no artist.');
+    expect(system(messages)).toContain('The title is set separately; name no artist anywhere.');
     expect(system(messages)).not.toContain('the artist name');
     expect(JSON.stringify(messages)).not.toMatch(/"artist":"Flies Like Robots"/);
   });
@@ -567,7 +568,7 @@ describe('finalizePick', () => {
       }),
       fix({ useArtistName: false }),
     );
-    expect(pick.title).toBe('PeekaBoo');
+    expect(pick.title).toBe('PeekaBoo (Official Video)');
     expect(pick.description).not.toMatch(/flies\s+like\s+robots|\bflr\b/i);
     expect(pick.tags).toEqual(['PeekaBoo', 'synthwave']);
   });
@@ -581,12 +582,12 @@ describe('finalizePick', () => {
     expect(pick.tags).toEqual(['Flies Like Robots']);
   });
 
-  it('leaves only the song title when the artist leads the title', () => {
+  it('ignores a model title that leads with the artist', () => {
     const pick = finalizePick(
       raw({ title: 'Flies Like Robots - PeekaBoo' }),
       fix({ useArtistName: false }),
     );
-    expect(pick.title).toBe('PeekaBoo');
+    expect(pick.title).toBe('PeekaBoo (Official Video)');
   });
 
   it('keeps paragraph breaks when dropping the artist from a description', () => {
@@ -597,12 +598,18 @@ describe('finalizePick', () => {
     expect(pick.description).toMatch(/^First line by\.\n\nSecond paragraph\.\n\n#/);
   });
 
-  it('titles signed-out own-video picks by the song alone', () => {
+  it('titles signed-out own-video picks "<song> (Official Video)"', () => {
     const pick = finalizePick(
       raw({ title: 'PeekaBoo - Flies Like Robots (Official Music Video)' }),
       fix({ useArtistName: false, songTitle: 'PeekaBoo' }),
     );
-    expect(pick.title).toBe('PeekaBoo');
+    expect(pick.title).toBe('PeekaBoo (Official Video)');
+  });
+
+  it('shortens a long song title so the visitor title stays within 100 characters', () => {
+    const title = visitorTitle('word '.repeat(30));
+    expect(title.length).toBeLessThanOrEqual(100);
+    expect(title.endsWith(' (Official Video)')).toBe(true);
   });
 
   it('scrubs the artist from flags, brand check, and reasons when the name is off', () => {
@@ -696,6 +703,21 @@ describe('runPick', () => {
       role: 'user',
       content: '"Old Title" was already skipped. Write a different title.',
     });
+  });
+
+  it('lets a signed-out own-video re-run keep its fixed title', async () => {
+    fetchMock.mockImplementation(async () => reply(JSON.stringify(raw())));
+    const result = await runPick(
+      ctx({
+        useArtistName: false,
+        skipped: [{ title: 'PeekaBoo (Official Video)', description: 'old' }],
+      }),
+    );
+    expect(result!.pick.title).toBe('PeekaBoo (Official Video)');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(fetchMock.mock.calls[0])).toContain(
+      'write a different description and tags',
+    );
   });
 
   it('fails the pick when the retry repeats a skipped title again', async () => {
