@@ -1,23 +1,11 @@
-node_modules
-.git
-.github
-.svelte-kit
-build
-coverage
-playwright-report
-test-results
-.lighthouseci
-docs
-tests
-# Secrets never enter the build context
-.env
-.env.*
-*.env
-*.pem
-*.key
-# Media and weights
-*.mp4
-*.mov
-*.webm
-*.wav
-*.gguf
+# Allowlist: the build context holds only what the Dockerfile reads.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.npmrc
+!svelte.config.js
+!vite.config.ts
+!tsconfig.json
+!src/
+!static/
