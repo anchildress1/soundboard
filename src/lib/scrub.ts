@@ -54,3 +54,28 @@ export function scrubEvent<T extends EventLike>(event: T): T {
   }
   return event;
 }
+
+type StreamedSpanLike = { name: string; attributes: Record<string, unknown> };
+
+/**
+ * Span streaming (the SDK default) sends spans one by one instead of in a transaction event, so this
+ * is where span names and attributes lose their query strings. Every string attribute is checked:
+ * a signed URL can sit in any of them, including the serialized model messages.
+ */
+export function scrubSpan<T extends StreamedSpanLike>(span: T): T {
+  span.name = scrubUrl(span.name);
+  for (const [key, value] of Object.entries(span.attributes)) {
+    span.attributes[key] = scrubAttribute(key, value);
+  }
+  return span;
+}
+
+/** Raw attributes can be a string, a string array, or a `{ value, unit }` object. */
+function scrubAttribute(key: string, value: unknown): unknown {
+  if (typeof value === 'string') return key.endsWith('query') ? '[redacted]' : scrubUrl(value);
+  if (Array.isArray(value)) return value.map((item) => scrubAttribute(key, item));
+  if (typeof value === 'object' && value !== null && 'value' in value) {
+    return { ...value, value: scrubAttribute(key, value.value) };
+  }
+  return value;
+}

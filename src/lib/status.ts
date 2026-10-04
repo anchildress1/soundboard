@@ -68,8 +68,21 @@ export function heardTags(view: JobView, limit = 8): string[] {
     .map(([tag]) => tag);
 }
 
-/** Seconds of the last model call, for the `gemma-4-12b-it · 12s` label. */
-export function lastModelSeconds(view: JobView): number | null {
-  const ms = view.pick?.modelMs ?? view.chunks.at(-1)?.modelMs;
+/**
+ * Whether the pick's model call is running now. Only the pick ticks live: a pick step is almost all
+ * model time, while a chunk step also spends seconds in ffmpeg and GCS, so a live clock there would
+ * overshoot and jump back when the chunk's measured time lands.
+ */
+export function modelWorking(view: JobView): boolean {
+  return view.job.state === 'PICK' && !view.wait;
+}
+
+/**
+ * Seconds the model has spent on this job (every chunk plus the current pick), for the
+ * `gemma-4-12b-it · 52s` label. `runningMs` adds the call still in flight so the label keeps counting.
+ */
+export function modelSeconds(view: JobView, runningMs = 0): number | null {
+  const done = view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, view.pick?.modelMs ?? 0);
+  const ms = done + runningMs;
   return ms ? Math.round(ms / 1000) : null;
 }

@@ -43,7 +43,7 @@
 
   <header>
     <h1 class="wordmark">
-      <a href={resolve('/')}>Soundboard</a><small>Release agent · Flies Like Robots</small>
+      <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
@@ -70,6 +70,14 @@
       {/if}
     </div>
   </header>
+
+  {#if data.session?.demo}
+    <!-- Every page, not just the form: a demo run must never be mistaken for one on Nathan's channel. -->
+    <aside class="demo" aria-label="Demo account">
+      <strong>Demo account</strong>
+      <span>Uploads go private to the sandbox channel. Nothing is saved to Nathan's memory.</span>
+    </aside>
+  {/if}
 
   {#if notice}
     <p class="notice" role="status">{notice}</p>
@@ -203,6 +211,26 @@
   .chip b {
     color: var(--ink);
     font-weight: 500;
+  }
+
+  .demo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    padding: 12px 16px;
+    border: 2px solid var(--info);
+    background: color-mix(in srgb, var(--info) 14%, var(--panel));
+    font-size: 14px;
+  }
+
+  .demo strong {
+    padding: 4px 10px;
+    background: var(--info);
+    color: var(--ground);
+    font: 900 12px/1 var(--display);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
 
   .notice {

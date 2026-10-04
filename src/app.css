@@ -13,8 +13,6 @@
   --red: #d8281a;
   --red-text: #ff6a52;
   --info: #7fb2ff;
-  --bubble: #ffffff;
-  --bubble-ink: #0a0a0a;
   --script: 'Mr Dafoe', cursive;
   --display: 'Rubik', system-ui, sans-serif;
   --sans: 'Inter', system-ui, sans-serif;
@@ -114,12 +112,6 @@ a {
 .btn.ghost {
   border-color: var(--line);
   color: var(--muted);
-}
-
-.btn.danger {
-  border-color: transparent;
-  color: var(--red-text);
-  padding-left: 0;
 }
 
 .field {

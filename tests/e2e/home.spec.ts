@@ -7,7 +7,7 @@ test.describe('home page', () => {
     const heading = page.getByRole('heading', { level: 1 });
     await expect(heading).toContainText('Soundboard');
     await expect(heading.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    await expect(page.getByText('Release agent · Flies Like Robots')).toBeVisible();
+    await expect(page.getByText('Flies Like Robots · Release agent')).toBeVisible();
   });
 
   test('keeps Analyze disabled with no file picked', async ({ page }) => {
@@ -40,6 +40,8 @@ test.describe('home page', () => {
   test('stacks the tape above the form on phones and side by side on desktop', async ({
     page,
   }, testInfo) => {
+    // Measure the settled layout: the sections ease in on load, a beat apart.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
     const tape = await page.getByRole('region', { name: 'The video' }).boundingBox();
     const form = await page.getByRole('form', { name: 'Start a run' }).boundingBox();

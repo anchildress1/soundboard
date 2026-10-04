@@ -4,18 +4,24 @@
   let {
     src = null,
     filename = '',
+    width = null,
     height = null,
     duration = $bindable(0),
   }: {
     src?: string | null;
     filename?: string;
+    width?: number | null;
     height?: number | null;
     duration?: number;
   } = $props();
 
   let currentTime = $state(0);
+  let videoWidth = $state(0);
   let videoHeight = $state(0);
-  const label = $derived(resolution(height ?? (videoHeight || null)));
+  // The probe applies the file's rotation; the decoded size is only a fallback before it lands.
+  const label = $derived(
+    height ? resolution(width, height) : resolution(videoWidth || null, videoHeight || null),
+  );
 </script>
 
 <div class="monitor">
@@ -29,6 +35,7 @@
       preload="metadata"
       bind:currentTime
       bind:duration
+      bind:videoWidth
       bind:videoHeight
     ></video>
   {:else}

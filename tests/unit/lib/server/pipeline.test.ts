@@ -124,6 +124,7 @@ const RAW_PICK = {
   flags: [],
   brandCheck: 'Keeps the channel naming pattern.',
   why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
 };
 
 type Handler = {
@@ -618,7 +619,7 @@ describe('runStep: PICK', () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
     // Visitor runs read like Nathan too, so his uploads supply the credits.
     expect(called(/playlistItems/).length).toBeGreaterThan(0);
-    expect(ctx.recentUploads).toHaveLength(5);
+    expect(ctx.recentUploads).toHaveLength(3);
     expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
   });
 
@@ -629,8 +630,9 @@ describe('runStep: PICK', () => {
       new URL(c.url).searchParams.get('id'),
     );
     expect(catalog[0]).toBe('v1,v3,v4,v5,v6');
-    // Four of the five recent videos carry a thumbnail; the one without is sent as text only.
-    expect(called(/i\.ytimg\.com/)).toHaveLength(4);
+    // Only the three newest uploads go to the model, each with its thumbnail.
+    expect(context().recentUploads).toHaveLength(3);
+    expect(called(/i\.ytimg\.com/)).toHaveLength(3);
   });
 
   it("reads Nathan's memory for a demo job without writing any of it", async () => {
@@ -673,7 +675,13 @@ describe('runStep: PICK', () => {
       version: 1,
       skipped: true,
     });
-    store.set('jobs/j1/pick/0002', { ...RAW_PICK, title: 'Second', version: 2, skipped: false });
+    store.set('jobs/j1/pick/0002', {
+      ...RAW_PICK,
+      title: 'Second',
+      version: 2,
+      skipped: false,
+      modelMs: 50_000,
+    });
     await runStep(
       seed({
         state: 'PICK',
@@ -692,7 +700,10 @@ describe('runStep: PICK', () => {
       }),
     );
     expect(saved().state).toBe('REVIEW');
-    expect(store.get('jobs/j1/pick/0003')).toMatchObject({ version: 3 });
+    const third = store.get('jobs/j1/pick/0003') as { version: number; modelMs: number };
+    expect(third.version).toBe(3);
+    // The stored time carries the earlier runs, so a re-run never drops them from the total.
+    expect(third.modelMs).toBeGreaterThanOrEqual(50_000);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');

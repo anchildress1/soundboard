@@ -3,6 +3,8 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { action, ApiError, step, uploadToGcs } from '$lib/api';
+  import Bandcamp from '$lib/components/Bandcamp.svelte';
+  import Destinations from '$lib/components/Destinations.svelte';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
@@ -11,7 +13,7 @@
   import { drive, sleep } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
-  import { heardTags, jobStatus, lastModelSeconds } from '$lib/status';
+  import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
   import { DRIVEN_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -24,12 +26,17 @@
   let busy = $state(false);
   let message = $state('');
   let serverErrors = $state<FieldErrors>({});
+  let bandcampDone = $state(false);
+  // Finished calls only land in the view when their step returns, so the clock covers the gap.
+  let stepStartedAt = $state(Date.now());
+  let now = $state(Date.now());
   let stopped = false;
   let driving = false;
 
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
-  const seconds = $derived(lastModelSeconds(view));
+  const working = $derived(modelWorking(view));
+  const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
     job.payload ??
@@ -44,6 +51,17 @@
   );
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
+
+  $effect(() => {
+    void view;
+    stepStartedAt = now = Date.now();
+  });
+
+  $effect(() => {
+    if (!working) return;
+    const tick = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(tick);
+  });
 
   async function run() {
     if (driving) return;
@@ -127,16 +145,10 @@
     <Monitor
       src={localUrl ?? data.playbackUrl}
       filename={job.filename}
+      width={job.probe?.width}
       height={job.probe?.height}
     />
     <Track {status} {model} />
-    {#if job.state === 'VERIFIED' && job.videoId}
-      <p class="verified">
-        Verified · private · <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
-          >youtu.be/{job.videoId}</a
-        >
-      </p>
-    {/if}
     <Heard tags={heardTags(view)} measurements={job.measurements} />
     {#if data.live && view.pick}
       <Diff live={data.live} pick={view.pick} />
@@ -145,56 +157,75 @@
 
   <div class="right">
     {#if fields && view.pick}
-      {#key view.pick.version}
-        <Label
-          {fields}
-          candidates={job.hashtagCandidates ?? []}
-          {editable}
-          {busy}
-          {done}
-          {serverErrors}
-          onapprove={(f) => act('approve', { ...f, pickVersion: view.pick?.version })}
-          onrerun={() => act('rerun')}
-          ondiscard={() => act('discard')}
-        />
-      {/key}
-      {#if view.pick.flags.length > 0 || view.pick.brandCheck}
-        <div class="notes">
-          {#if view.pick.flags.length > 0}
-            <h2>Flags</h2>
-            <ul>
-              {#each view.pick.flags as flag (flag)}<li>{flag}</li>{/each}
-            </ul>
-          {/if}
-          {#if view.pick.brandCheck}
-            <h2>Brand check</h2>
-            <p>{view.pick.brandCheck}</p>
-          {/if}
-        </div>
+      {@const pick = view.pick}
+      {#if pick.flags.length > 0}
+        <!-- Above both tabs: an audio or video problem matters wherever the song goes. -->
+        <section class="warning" aria-labelledby="warning-title">
+          <h2 id="warning-title"><span aria-hidden="true">⚠</span> Check before uploading</h2>
+          <ul>
+            {#each pick.flags as flag (flag)}<li>{flag}</li>{/each}
+          </ul>
+        </section>
       {/if}
+      <Destinations youtubeDone={job.state === 'VERIFIED'} {bandcampDone}>
+        {#snippet youtube()}
+          {#if job.state === 'VERIFIED' && job.videoId}
+            <p class="uploaded">
+              <span class="check" aria-hidden="true">✓</span>
+              <span
+                >Uploaded to YouTube · private ·
+                <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
+                  >youtu.be/{job.videoId}</a
+                ></span
+              >
+            </p>
+          {/if}
+          {#key pick.version}
+            <Label
+              {fields}
+              candidates={job.hashtagCandidates ?? []}
+              {editable}
+              {busy}
+              {done}
+              {serverErrors}
+              onapprove={(f) => act('approve', { ...f, pickVersion: pick.version })}
+              onrerun={() => act('rerun')}
+              ondiscard={() => act('discard')}
+            />
+          {/key}
+          {#if job.state === 'PAYLOAD' && job.payload}
+            <section class="payload" aria-label="Would-be upload payload">
+              <h2>Would-be payload</h2>
+              <pre>{JSON.stringify(
+                  {
+                    snippet: {
+                      title: job.payload.title,
+                      description: job.payload.description,
+                      tags: job.payload.tags,
+                      categoryId: '10',
+                    },
+                    status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
+                  },
+                  null,
+                  2,
+                )}</pre>
+            </section>
+          {/if}
+        {/snippet}
+        {#snippet bandcamp()}
+          <Bandcamp
+            jobId={job.id}
+            songTitle={job.songTitle}
+            {pick}
+            tags={fields.tags}
+            ondone={(d) => (bandcampDone = d)}
+          />
+        {/snippet}
+      </Destinations>
     {:else}
       <section class="placeholder" aria-label="What goes to YouTube">
         <h2>{job.songTitle}</h2>
         <p>The recommendation appears here once every chunk is analyzed.</p>
-      </section>
-    {/if}
-
-    {#if job.state === 'PAYLOAD' && job.payload}
-      <section class="payload" aria-label="Would-be upload payload">
-        <h2>Would-be payload</h2>
-        <pre>{JSON.stringify(
-            {
-              snippet: {
-                title: job.payload.title,
-                description: job.payload.description,
-                tags: job.payload.tags,
-                categoryId: '10',
-              },
-              status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-            },
-            null,
-            2,
-          )}</pre>
       </section>
     {/if}
 
@@ -220,9 +251,10 @@
     align-items: start;
   }
 
+  /* Phones read top to bottom: the video and what the model heard, then the tabs. */
   @media (max-width: 820px) {
     main {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 
@@ -234,17 +266,66 @@
     min-width: 0;
   }
 
-  .verified {
+  .uploaded {
     margin: 0;
-    font: 500 13px/1.4 var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--green);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--green) 8%, var(--panel));
+    font: 600 14px/1.4 var(--sans);
+    color: var(--ink);
+  }
+
+  .uploaded .check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--green);
+    color: var(--ground);
+    font-size: 14px;
+  }
+
+  .uploaded a {
     color: var(--green);
   }
 
   .placeholder,
-  .notes,
   .payload {
     background: var(--panel);
     padding: 12px 14px;
+  }
+
+  /* Yellow is the "needs attention" state color; it stays clear of the orange panel labels. */
+  .warning {
+    padding: 12px 14px;
+    border: 1px solid var(--yellow);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
+  }
+
+  .warning h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--yellow);
+  }
+
+  .warning h2 span {
+    font-size: 16px;
+    letter-spacing: 0;
+  }
+
+  .warning ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--ink);
   }
 
   h2 {
@@ -262,19 +343,6 @@
   }
 
   .placeholder p,
-  .notes p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 13px;
-  }
-
-  .notes ul {
-    margin: 0 0 10px;
-    padding-left: 18px;
-    font-size: 13px;
-    color: var(--yellow);
-  }
-
   .payload pre {
     margin: 0;
     white-space: pre-wrap;

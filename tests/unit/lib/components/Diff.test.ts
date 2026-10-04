@@ -23,6 +23,7 @@ const pick: Pick = {
     description: 'Fills the empty field.',
     tags: 'Adds the artist.',
   },
+  bandcamp: { about: 'Night drive.', credits: 'Written by Nathan.' },
   modelMs: 1,
 };
 

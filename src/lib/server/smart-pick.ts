@@ -7,7 +7,7 @@ import {
   TAGS_MAX,
   TITLE_MAX,
 } from '$lib/metadata';
-import type { Chunk, Measurements, Pick } from '$lib/types';
+import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
@@ -20,7 +20,7 @@ const stringArray = { type: 'array', items: { type: 'string' } };
 export const PICK_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'description', 'hashtags', 'tags', 'flags', 'brandCheck', 'why'],
+  required: ['title', 'description', 'hashtags', 'tags', 'flags', 'brandCheck', 'why', 'bandcamp'],
   properties: {
     title: { type: 'string' },
     description: { type: 'string' },
@@ -36,6 +36,15 @@ export const PICK_SCHEMA = {
         title: { type: 'string' },
         description: { type: 'string' },
         tags: { type: 'string' },
+      },
+    },
+    bandcamp: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['about', 'credits'],
+      properties: {
+        about: { type: 'string' },
+        credits: { type: 'string' },
       },
     },
   },
@@ -61,7 +70,11 @@ export function isRawPick(value: unknown): value is RawPick {
     v.why !== null &&
     typeof v.why.title === 'string' &&
     typeof v.why.description === 'string' &&
-    typeof v.why.tags === 'string'
+    typeof v.why.tags === 'string' &&
+    typeof v.bandcamp === 'object' &&
+    v.bandcamp !== null &&
+    typeof v.bandcamp.about === 'string' &&
+    typeof v.bandcamp.credits === 'string'
   );
 }
 
@@ -70,6 +83,7 @@ export type PickContext = {
   notes: string;
   chunks: Chunk[];
   measurements: Measurements | null;
+  probe: Probe | null;
   recent: (CatalogVideo & { thumbnail: string | null })[];
   /** Hashtag candidates from the genre search (R4). */
   candidates: string[];
@@ -94,7 +108,7 @@ export const CONTACT_LINE = 'Contact at flieslikerobots@gmail.com.';
 
 export const ARTIST_VOICE = [
   'Write the description the way the artist writes his own:',
-  '- Short, plain, literal. Open with "<song> by Flies Like Robots".',
+  '- Short, plain, literal.',
   '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
   '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
@@ -148,9 +162,10 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     "audienceTopVideos are the most-viewed music videos in this genre, ranked by views. They are the evidence for what reaches listeners: model the title format and the description's structure and length on them.",
     "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags.",
     `title: at most ${TITLE_MAX} characters.`,
-    `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
+    `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. Never open with or repeat the title: YouTube shows it right above. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
     ARTIST_VOICE,
-    'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
+    'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
+    'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
     `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones. Include "${ARTIST_NAME}". Never the song title. Never invent one.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     ctx.brand
@@ -158,6 +173,8 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       : '',
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
+    "bandcamp.about: the same song for Bandcamp's About field, in the artist voice, a few sentences at most. No hashtags, credits, or contact line.",
+    'bandcamp.credits: the credit line and contact line from the description, exactly as written there.',
     ctx.skipped.length > 0
       ? 'skippedVersions were rejected. Write a different title and a different description: new wording and a new angle, not a rearrangement of the skipped ones. The voice rules still apply.'
       : '',
@@ -245,7 +262,18 @@ export type PickFixups = {
   tagCandidates: TagCandidate[];
   facts: Fact[];
   measurements: Measurements | null;
+  probe: Probe | null;
 };
+
+const SHORT_MAX_SEC = 180;
+
+/** YouTube publishes any square or vertical video of 3 minutes or less as a Short. */
+export function shortFlag(probe: Probe | null): string[] {
+  if (!probe?.width || !probe.height) return [];
+  if (probe.height < probe.width || probe.durationSec > SHORT_MAX_SEC) return [];
+  const shape = probe.height === probe.width ? 'Square' : 'Vertical';
+  return [`${shape} and 3 minutes or shorter: YouTube will publish it as a Short`];
+}
 
 /** Measured problems, phrased from ffmpeg's numbers. */
 export function measuredFlags(m: Measurements | null): string[] {
@@ -262,14 +290,22 @@ export function measuredFlags(m: Measurements | null): string[] {
 }
 
 /** 3 to 5 hashtags from the pool: the model's picks first, padded from the top of the pool. */
-function pickHashtags(draft: RawPick, pool: string[]): string[] {
+/** A tag's hashtag form: "dark synth" → "#darksynth". */
+const asHashtag = (tag: string) => `#${tag.toLowerCase().replaceAll(/[^\p{L}\p{N}_]/gu, '')}`;
+
+/**
+ * 3 to 5 hashtags from the pool. Hashtags that match the chosen tags come first, so the description
+ * and the tags field agree; then the model's other picks; then the top of the pool.
+ */
+function pickHashtags(draft: RawPick, pool: string[], tags: string[]): string[] {
   const byLower = new Map(pool.map((c) => [c.toLowerCase(), c]));
   const picked = [
-    ...new Set(
-      [...draft.hashtags, ...parseHashtags(draft.description)].map((t) =>
+    ...new Set([
+      ...tags.map(asHashtag),
+      ...[...draft.hashtags, ...parseHashtags(draft.description)].map((t) =>
         (t.startsWith('#') ? t : `#${t}`).toLowerCase(),
       ),
-    ),
+    ]),
   ]
     .filter((t) => byLower.has(t))
     .slice(0, 5);
@@ -283,6 +319,15 @@ function pickHashtags(draft: RawPick, pool: string[]): string[] {
 /** A line that is only a bracketed note, like "[Contact line: none provided]". */
 const PLACEHOLDER_LINE = /^\s*\[[^\]\n]*\]\s*$/gmu;
 const MAX_TAGS = 10;
+
+/** Bandcamp fields follow the description's rules: fact links only, no hashtags, no placeholders. */
+const bandcampText = (text: string, facts: Fact[]) =>
+  clip(
+    tidy(
+      tidy(allowedLinks(text, facts).replaceAll(PLACEHOLDER_LINE, '')).replaceAll(BODY_HASHTAG, ''),
+    ),
+    DESCRIPTION_MAX,
+  );
 
 /**
  * The model's picks from the pool, never containing the song title, plus the artist name, at most
@@ -315,7 +360,12 @@ function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
  */
 export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const draft = stripDeep(raw);
-  const hashtags = pickHashtags(draft, fix.candidates);
+  const tags = pickTags(
+    draft.tags,
+    tagPool(fix).map((c) => c.tag),
+    fix.songTitle,
+  );
+  const hashtags = pickHashtags(draft, fix.candidates, tags);
 
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
   let body = tidy(
@@ -328,20 +378,22 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
 
-  const tags = pickTags(
-    draft.tags,
-    tagPool(fix).map((c) => c.tag),
-    fix.songTitle,
-  );
-
   return {
     title: clip(tidy(draft.title), TITLE_MAX),
     description,
     hashtags,
     tags,
-    flags: [...measuredFlags(fix.measurements), ...draft.flags.filter(Boolean)],
+    flags: [
+      ...measuredFlags(fix.measurements),
+      ...shortFlag(fix.probe),
+      ...draft.flags.filter(Boolean),
+    ],
     brandCheck: draft.brandCheck,
     why: draft.why,
+    bandcamp: {
+      about: bandcampText(draft.bandcamp.about, fix.facts),
+      credits: bandcampText(draft.bandcamp.credits, fix.facts),
+    },
   };
 }
 

@@ -72,7 +72,7 @@ describe('GET /auth/login', () => {
       const url = location(thrown);
       expect(url.searchParams.get('scope')).toContain('youtube.upload');
       expect(url.searchParams.get('access_type')).toBe('offline');
-      expect(url.searchParams.get('prompt')).toBe('consent');
+      expect(url.searchParams.get('prompt')).toBe('select_account consent');
       const state = unsign<OAuthState>(cookies.set.mock.calls[0]![1] as string);
       expect(state).toMatchObject({ purpose: 'connect', channel });
     },
