@@ -149,17 +149,17 @@
   <div class="right">
     {#if fields && view.pick}
       {@const pick = view.pick}
+      {#if pick.flags.length > 0}
+        <!-- Above both tabs: an audio or video problem matters wherever the song goes. -->
+        <section class="warning" aria-labelledby="warning-title">
+          <h2 id="warning-title"><span aria-hidden="true">⚠</span> Check before uploading</h2>
+          <ul>
+            {#each pick.flags as flag (flag)}<li>{flag}</li>{/each}
+          </ul>
+        </section>
+      {/if}
       <Destinations youtubeDone={job.state === 'VERIFIED'} {bandcampDone}>
         {#snippet youtube()}
-          {#if pick.flags.length > 0}
-            <!-- Checks come before the fields: they're what to fix or accept before uploading. -->
-            <div class="notes">
-              <h2>Check before uploading</h2>
-              <ul>
-                {#each pick.flags as flag (flag)}<li>{flag}</li>{/each}
-              </ul>
-            </div>
-          {/if}
           {#key pick.version}
             <Label
               {fields}
@@ -252,10 +252,36 @@
   }
 
   .placeholder,
-  .notes,
   .payload {
     background: var(--panel);
     padding: 12px 14px;
+  }
+
+  /* Yellow is the "needs attention" state color; it stays clear of the orange panel labels. */
+  .warning {
+    padding: 12px 14px;
+    border: 1px solid var(--yellow);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
+  }
+
+  .warning h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--yellow);
+  }
+
+  .warning h2 span {
+    font-size: 16px;
+    letter-spacing: 0;
+  }
+
+  .warning ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--ink);
   }
 
   h2 {
@@ -273,13 +299,6 @@
   }
 
   .placeholder p,
-  .notes ul {
-    margin: 0 0 10px;
-    padding-left: 18px;
-    font-size: 13px;
-    color: var(--yellow);
-  }
-
   .payload pre {
     margin: 0;
     white-space: pre-wrap;

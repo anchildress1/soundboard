@@ -185,6 +185,8 @@ describe('job page: status chip', () => {
     expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('To do');
     await fireEvent.click(screen.getByRole('tab', { name: /Bandcamp/ }));
     expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeVisible();
+    // The pre-upload warning sits above both tabs, so it stays visible on Bandcamp too.
+    expect(screen.getByRole('heading', { name: 'Check before uploading' })).toBeVisible();
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
   });
