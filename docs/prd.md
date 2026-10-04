@@ -114,7 +114,7 @@
 - Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
-- [ ] Each re-run produces a new title.
+- [ ] Each re-run produces a new title and a new description; a repeat of a skipped version is retried once, then fails the pick.
 
 **R6 · Upload and verify**
 

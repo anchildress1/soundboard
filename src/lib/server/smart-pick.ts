@@ -158,7 +158,9 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       : '',
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
-    ctx.skipped.length > 0 ? 'Do not repeat any skipped version; write a different title.' : '',
+    ctx.skipped.length > 0
+      ? 'skippedVersions were rejected. Write a different title and a different description: new wording and a new angle, not a rearrangement of the skipped ones. The voice rules still apply.'
+      : '',
   ].filter(Boolean);
   const context = {
     artist: ARTIST_NAME,
@@ -343,8 +345,12 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   };
 }
 
-export const sameTitle = (a: string, b: string) =>
-  a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Same words, ignoring case, spacing, and hashtags, so a reshuffled closing line doesn't count as new. */
+export const sameText = (a: string, b: string) => {
+  const norm = (t: string) =>
+    t.replaceAll(BODY_HASHTAG, '').replaceAll(/\s+/g, ' ').trim().toLowerCase();
+  return norm(a) === norm(b);
+};
 
 /**
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the
@@ -367,14 +373,23 @@ export async function runPick(
     ms += took;
     if (!value) return null;
     const pick = finalizePick(value, ctx);
-    const repeats = ctx.skipped.some((s) => sameTitle(s.title, pick.title));
-    if (!repeats) return { pick, ms };
-    // A re-run must produce a new title; a second repeat fails the pick so the step retries.
+    const repeated = ctx.skipped.flatMap((s) => [
+      ...(sameText(s.title, pick.title) ? ['title'] : []),
+      ...(sameText(s.description, pick.description) ? ['description'] : []),
+    ]);
+    if (repeated.length === 0) return { pick, ms };
+    // A re-run must produce a new title and description; a second repeat fails the pick so the step retries.
     if (attempt === 1) return null;
+    const unique = [...new Set(repeated)];
+    const fields = unique.join(' and ');
+    const verb = unique.length > 1 ? 'repeat' : 'repeats';
     messages = [
       ...messages,
       { role: 'assistant', content: JSON.stringify(value) },
-      { role: 'user', content: `"${pick.title}" was already skipped. Write a different title.` },
+      {
+        role: 'user',
+        content: `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
+      },
     ];
   }
   return null;

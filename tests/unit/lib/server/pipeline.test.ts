@@ -667,7 +667,13 @@ describe('runStep: PICK', () => {
       after: 'B',
       at: 5,
     });
-    store.set('jobs/j1/pick/0001', { ...RAW_PICK, title: 'Old Title', version: 1, skipped: true });
+    store.set('jobs/j1/pick/0001', {
+      ...RAW_PICK,
+      title: 'Old Title',
+      description: 'An older description.',
+      version: 1,
+      skipped: true,
+    });
     store.set('jobs/j1/pick/0002', { ...RAW_PICK, title: 'Second', version: 2, skipped: false });
     await runStep(
       seed({
@@ -703,7 +709,7 @@ describe('runStep: PICK', () => {
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     expect(ctx.feedback).toHaveLength(1);
     expect(ctx.skippedVersions).toEqual([
-      { title: 'Old Title', description: RAW_PICK.description },
+      { title: 'Old Title', description: 'An older description.' },
     ]);
     expect(store.has('artists/flr/facts/home')).toBe(true);
   });
