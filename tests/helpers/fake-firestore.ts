@@ -87,8 +87,14 @@ function nextAutoId(): string {
 }
 
 export class CollectionRef extends Query {
+  /** Rejects what the real SDK rejects: an empty id, or one whose slashes leave a collection path. */
   doc(id: string = nextAutoId()) {
-    return new DocRef(`${this.path}/${id}`);
+    const path = `${this.path}/${id}`;
+    const segments = path.split('/');
+    if (segments.includes('') || segments.length % 2 !== 0) {
+      throw new Error(`Value for argument "documentPath" must point to a document: ${path}`);
+    }
+    return new DocRef(path);
   }
   async add(data: Data) {
     const ref = this.doc(nextAutoId());

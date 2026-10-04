@@ -58,8 +58,12 @@ function ownerFor(who: Who): JobOwner {
   return who.demo ? 'demo' : 'visitor';
 }
 
-async function sampleJob(sampleId: string, owner: JobOwner): Promise<NewJob> {
-  const sample = await getSample(String(sampleId));
+/** Sample IDs come from `scripts/add-sample.sh`; anything else would be a Firestore path, not an ID. */
+const SAMPLE_ID = /^[\w-]+$/;
+
+async function sampleJob(sampleId: unknown, owner: JobOwner): Promise<NewJob> {
+  const id = text(sampleId);
+  const sample = SAMPLE_ID.test(id) ? await getSample(id) : null;
   if (!sample) throw new ActionError(404, 'That sample is gone.');
   return {
     owner,

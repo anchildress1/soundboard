@@ -109,6 +109,21 @@ describe('create from a sample', () => {
     expect(quota()).toBeUndefined();
   });
 
+  it.each([
+    ['an empty id', ''],
+    ['a path', 'peek/../peek'],
+    ['a nested path', 'peek/x'],
+    ['an object', { id: 'peek' }],
+    ['null', null],
+  ])(
+    'returns 404 for %s as the sample id, without reading a path from it',
+    async (_label, sampleId) => {
+      const error = await rejection(create({ sampleId } as CreateInput, visitor));
+      expect([error.status, error.message]).toEqual([404, 'That sample is gone.']);
+      expect(store.size).toBe(1);
+    },
+  );
+
   it('returns 404 for a missing sample', async () => {
     const error = await rejection(create({ sampleId: 'gone' }, visitor));
     expect(error.status).toBe(404);
