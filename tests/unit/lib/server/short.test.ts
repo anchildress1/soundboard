@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
-import { startSpan } from '../../../mocks/sentry';
+import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
+import { span, startSpan } from '../../../mocks/sentry';
 import { resetClients } from '$lib/server/clients';
 import type { JobDoc } from '$lib/server/jobs';
 import {
@@ -197,6 +198,7 @@ beforeEach(() => {
     h.objects.add(destination);
   });
   startSpan.mockClear();
+  clearAgentSpan();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   runs = {
@@ -353,6 +355,45 @@ describe('runHook', () => {
     expect(await runHook(ctx())).toBeNull();
   });
 
+  it('records the text-only request and the settled hook on the agent span', async () => {
+    fetchMock.mockResolvedValueOnce(
+      completion(JSON.stringify({ window: 9, lengthSec: 90, reason: 'Drop at -6 LUFS.' })),
+    );
+    const result = await runHook(ctx(), undefined, span as never);
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    expect(input[0]!['gen_ai.input.messages']).toContain('PeekaBoo');
+    expect(input[0]!['gen_ai.system_instructions']).toContain('Pick the hook');
+    expect(output).toEqual([JSON.stringify(result!.hook)]);
+    expect(output[0]).not.toContain('LUFS');
+  });
+
+  it('records the first request only, not the repeat nudge', async () => {
+    fetchMock
+      .mockResolvedValueOnce(completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })))
+      .mockResolvedValueOnce(completion(JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })));
+    await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }), undefined, span as never);
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    expect(input[0]!['gen_ai.input.messages']).not.toContain('repeats a skipped hook');
+    expect(output).toEqual([JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })]);
+  });
+
+  it('records no answer when the reply never parses', async () => {
+    fetchMock.mockImplementation(async () => completion('not json'));
+    await runHook(ctx(), undefined, span as never);
+    expect(agentSpanIO().input).toHaveLength(1);
+    expect(agentSpanIO().output).toEqual([]);
+  });
+
+  it('records nothing without a span', async () => {
+    fetchMock.mockResolvedValueOnce(
+      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
+    );
+    await runHook(ctx());
+    expect(agentSpanIO()).toEqual({ input: [], output: [] });
+  });
+
   it('propagates a model server error', async () => {
     fetchMock.mockResolvedValueOnce(new Response('overloaded', { status: 503 }));
     await expect(runHook(ctx())).rejects.toThrow('llama-server 503');
@@ -439,6 +480,9 @@ describe('hookStep', () => {
       ([o]) => (o as { name: string }).name === 'invoke_agent hook-pick',
     );
     expect(agent).toBeDefined();
+    expect(agentSpanIO().output).toEqual([
+      JSON.stringify({ window: 2, lengthSec: 30, reason: 'The chorus lands.' }),
+    ]);
   });
 
   it('scans from zero and stops at the end for the first and only window', async () => {

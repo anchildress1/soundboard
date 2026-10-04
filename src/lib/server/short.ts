@@ -9,7 +9,7 @@ import { listChunks, ok, type JobDoc } from './jobs';
 import { chatJson, stepDeadline } from './model';
 import { stripNumerics } from './numerics';
 import { digestChunks } from './smart-pick';
-import { invokeAgent, type ChatMessage } from './tracing';
+import { agentInput, agentOutput, invokeAgent, type AgentSpan, type ChatMessage } from './tracing';
 
 /** Time the hook step keeps after the model for the loudness pass. */
 const LOUDNESS_RESERVE_MS = 15_000;
@@ -91,14 +91,17 @@ const repeats = (hook: RawHook, skipped: Short['skipped']) =>
 
 /**
  * Asks the model for the hook, retrying once when it repeats a skipped one. Null when the reply
- * never parses or the retry repeats too.
+ * never parses or the retry repeats too. With `span`, records the first request and the settled
+ * hook on the agent span.
  */
 export async function runHook(
   ctx: HookContext,
   deadline = stepDeadline(),
+  span?: AgentSpan,
 ): Promise<{ hook: RawHook; ms: number } | null> {
   let ms = 0;
   let messages = buildHookMessages(ctx);
+  if (span) agentInput(span, messages);
   for (let attempt = 0; attempt < 2; attempt++) {
     const { value, ms: took } = await chatJson(
       messages,
@@ -110,7 +113,10 @@ export async function runHook(
     ms += took;
     if (!value) return null;
     const hook = settleHook(value, ctx);
-    if (!repeats(hook, ctx.skipped)) return { hook, ms };
+    if (!repeats(hook, ctx.skipped)) {
+      if (span) agentOutput(span, JSON.stringify(hook));
+      return { hook, ms };
+    }
     if (attempt === 1) return null;
     messages = [
       ...messages,
@@ -175,7 +181,7 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
     skipped: short.skipped,
   };
   const result = await invokeAgent('hook-pick', async (span) => {
-    const picked = await runHook(ctx, stepDeadline() - LOUDNESS_RESERVE_MS);
+    const picked = await runHook(ctx, stepDeadline() - LOUDNESS_RESERVE_MS, span);
     if (picked) span.setAttribute('short.window', picked.hook.window);
     return picked;
   });
