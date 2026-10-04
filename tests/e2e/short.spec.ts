@@ -39,6 +39,8 @@ test.describe('destination tabs', () => {
   });
 
   test('keeps the tab row inside the screen', async ({ page }) => {
+    // The load-in animation slides by fractions of a pixel; measure the settled layout.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(TABS_JOB);
     const width = page.viewportSize()!.width;
     for (const name of ['YouTube', 'Short', 'Bandcamp'] as const) {
