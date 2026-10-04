@@ -1,5 +1,6 @@
+import type { BrandGuide, StoredBrand } from './brand';
 import type { FieldErrors } from './metadata';
-import type { JobView } from './types';
+import type { JobView, Wait } from './types';
 
 export class ApiError extends Error {
   constructor(
@@ -70,6 +71,23 @@ export function action(
     headers: traceHeaders(trace),
     body: JSON.stringify(body),
   });
+}
+
+export function proposeBrand() {
+  return call<{ wait: Wait } | { proposal: StoredBrand }>('/api/brand/propose', {
+    method: 'POST',
+  });
+}
+
+export function approveBrand(guide: BrandGuide) {
+  return call<{ approved: StoredBrand }>('/api/brand/approve', {
+    method: 'POST',
+    body: JSON.stringify(guide),
+  });
+}
+
+export function discardBrandProposal() {
+  return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
 }
 
 /** Signed PUT straight to GCS, with progress. The headers must match what the URL was signed with. */

@@ -46,6 +46,9 @@ export class DocRef {
     if (!current) throw Object.assign(new Error(`NOT_FOUND: ${this.path}`), { code: 5 });
     store.set(this.path, { ...current, ...clone(data) });
   }
+  async delete() {
+    store.delete(this.path);
+  }
 }
 
 class Query {
@@ -98,6 +101,9 @@ class Transaction {
   }
   update(ref: DocRef, data: Data) {
     store.set(ref.path, { ...store.get(ref.path), ...clone(data) });
+  }
+  delete(ref: DocRef) {
+    store.delete(ref.path);
   }
 }
 

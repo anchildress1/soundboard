@@ -44,6 +44,7 @@
   <footer>
     <span>Built for Nathan. One file in, one upload out.</span>
     {#if data.session?.allowlisted}
+      <span><a href={resolve('/brand')}>Brand guide</a></span>
       <span>
         Connect channel:
         <a href="{resolve('/auth/login')}?connect=nathan" data-sveltekit-reload>Nathan</a> ·

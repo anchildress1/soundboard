@@ -1,3 +1,4 @@
+import type { BrandGuide } from '$lib/brand';
 import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '$lib/metadata';
 import type { Chunk, Measurements, Pick } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
@@ -68,6 +69,8 @@ export type PickContext = {
   facts: Fact[];
   feedback: Feedback[];
   skipped: { title: string; description: string }[];
+  /** Nathan's approved guide (R12); null for visitor jobs and before he approves one. */
+  brand: BrandGuide | null;
 };
 
 const RECENT_DESCRIPTION_CHARS = 700;
@@ -116,7 +119,10 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
     `tags: plain search terms without #: genres, the song title${artist ? ', the artist name' : ''}. Under ${TAGS_MAX} characters combined.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
-    'brandCheck: one sentence on how the proposal matches or departs from the recent uploads.',
+    ctx.brand
+      ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
+      : '',
+    `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field for the choice made.',
     skippedRule(ctx),
   ].filter(Boolean);
@@ -141,6 +147,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       tags: v.tags,
       publishedAt: v.publishedAt,
     })),
+    brandGuide: ctx.brand ?? undefined,
     candidateHashtags: ctx.candidates,
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,

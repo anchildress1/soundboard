@@ -44,7 +44,7 @@ export function redactMessages(messages: ChatMessage[]): unknown[] {
 
 /** `invoke_agent` span; model and tool spans started inside become its children. */
 export function invokeAgent<T>(
-  agent: 'chunk-analyst' | 'smart-pick',
+  agent: 'chunk-analyst' | 'smart-pick' | 'brand-guide',
   fn: (span: Sentry.Span) => Promise<T>,
 ): Promise<T> {
   return Sentry.startSpan(

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/sveltekit';
 import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
+import { approvedBrand } from './brand';
 import { analyzeChunk } from './chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from './ffmpeg';
 import { objectInfo, signedReadUrl } from './gcs';
@@ -105,9 +106,9 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         recent.map((v) => v.description),
         chunks,
       ));
-    const [facts, feedback] = nathan
-      ? await Promise.all([listFacts(), recentFeedback()])
-      : [PUBLIC_FACTS, []];
+    const [facts, feedback, brand] = nathan
+      ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
+      : [PUBLIC_FACTS, [], null];
     const result = await runPick(
       {
         songTitle: job.songTitle,
@@ -122,6 +123,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         skipped: picks
           .filter((p) => p.skipped)
           .map(({ title, description }) => ({ title, description })),
+        brand,
       },
       deadline,
     );

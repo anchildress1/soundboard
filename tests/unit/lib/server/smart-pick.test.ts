@@ -103,6 +103,7 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   facts,
   feedback: [],
   skipped: [],
+  brand: null,
   ...over,
 });
 
@@ -251,6 +252,19 @@ describe('buildPickMessages', () => {
     const withSkips = buildPickMessages(ctx({ skipped }));
     expect(system(withSkips)).toContain('Do not repeat any skipped version');
     expect(context(withSkips).skippedVersions).toEqual(skipped);
+  });
+
+  it('sends an approved brand guide and checks the proposal against it', () => {
+    const brand = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
+    const messages = buildPickMessages(ctx({ brand }));
+    expect(context(messages).brandGuide).toEqual(brand);
+    expect(system(messages)).toContain('brandGuide');
+  });
+
+  it('leaves the brand guide out until one is approved', () => {
+    const messages = buildPickMessages(ctx());
+    expect(context(messages)).not.toHaveProperty('brandGuide');
+    expect(system(messages)).not.toContain('brandGuide');
   });
 
   it('appends thumbnails as image parts after a caption, skipping missing ones', () => {

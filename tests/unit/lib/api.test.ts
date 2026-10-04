@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { action, ApiError, createJob, step, uploadToGcs } from '$lib/api';
+import {
+  action,
+  ApiError,
+  approveBrand,
+  createJob,
+  discardBrandProposal,
+  proposeBrand,
+  step,
+  uploadToGcs,
+} from '$lib/api';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -111,6 +120,22 @@ describe('action', () => {
     await action('j1', 'discard', { sentryTrace: 't', baggage: '' });
     expect(lastInit().body).toBe('{}');
     expect(lastInit().headers['sentry-trace']).toBe('t');
+  });
+});
+
+describe('brand guide', () => {
+  it('POSTs propose, approve with the guide, and discard to their routes', async () => {
+    fetchMock.mockImplementation(async () => json(200, {}));
+    const guide = { statement: 's', keep: ['k'], fix: [], drop: [] };
+    await proposeBrand();
+    await approveBrand(guide);
+    await discardBrandProposal();
+    expect(fetchMock.mock.calls.map((c) => [c[0], (c[1] as RequestInit).method])).toEqual([
+      ['/api/brand/propose', 'POST'],
+      ['/api/brand/approve', 'POST'],
+      ['/api/brand/discard', 'POST'],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual(guide);
   });
 });
 

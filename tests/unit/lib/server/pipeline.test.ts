@@ -585,6 +585,7 @@ describe('runStep: PICK', () => {
       feedback: unknown[];
       skippedVersions?: { title: string }[];
       candidateHashtags: string[];
+      brandGuide?: unknown;
     };
   };
 
@@ -656,6 +657,28 @@ describe('runStep: PICK', () => {
       { title: 'Old Title', description: RAW_PICK.description },
     ]);
     expect(store.has('artists/flr/facts/home')).toBe(true);
+  });
+
+  const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
+  const approveGuide = () =>
+    store.set('artists/flr/brand/approved', {
+      ...GUIDE,
+      status: 'APPROVED',
+      basedOn: ['v1'],
+      createdAt: 1,
+      approvedAt: 2,
+    });
+
+  it("follows Nathan's approved brand guide", async () => {
+    approveGuide();
+    await runStep(seed({ state: 'PICK', owner: 'nathan', channel: 'nathan' }));
+    expect(context().brandGuide).toEqual(GUIDE);
+  });
+
+  it('keeps the brand guide out of visitor jobs', async () => {
+    approveGuide();
+    await runStep(seed({ state: 'PICK', sampleId: 'smp', channel: 'sandbox' }));
+    expect(context()).not.toHaveProperty('brandGuide');
   });
 
   it('counts an unparseable recommendation as a failure', async () => {

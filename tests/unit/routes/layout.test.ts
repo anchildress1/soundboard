@@ -67,10 +67,12 @@ describe('layout', () => {
     expect(signOut.closest('form')).toHaveAttribute('method', 'POST');
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
     expect(screen.queryByText(/Connect channel/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Brand guide' })).toBeNull();
   });
 
   it('offers channel connect links to an allowlisted session', () => {
     setup({ session: { email: 'nathan@example.com', allowlisted: true } });
+    expect(screen.getByRole('link', { name: 'Brand guide' })).toHaveAttribute('href', '/brand');
     expect(screen.getByRole('link', { name: 'Nathan' })).toHaveAttribute(
       'href',
       '/auth/login?connect=nathan',
