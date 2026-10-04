@@ -34,7 +34,7 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
   title,
   description: 'A bright synth track.\n\n#synthwave #retrowave',
   hashtags: ['#synthwave', '#retrowave'],
-  tags: ['synthwave', 'PeekaBoo'],
+  tags: ['synthwave', 'outrun'],
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
@@ -79,6 +79,12 @@ async function makeJob(
     state: opts.state ?? 'REVIEW',
     hashtagCandidates: candidates,
     pickVersion: picks > 0 ? picks : null,
+    audience: {
+      query: 'synthwave music video',
+      hashtags: candidates,
+      tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag, usedBy: 1 })),
+      top: [],
+    },
     ...opts.patch,
   });
   return (await getJob(id))!;
@@ -89,7 +95,7 @@ const input = (
 ) => ({
   title: 'Title 1',
   description: 'A bright synth track.\n\n#synthwave #retrowave',
-  tags: ['synthwave', 'PeekaBoo'],
+  tags: ['synthwave', 'outrun'],
   pickVersion: 1,
   ...over,
 });
@@ -162,6 +168,43 @@ describe('approve', () => {
     expect((await rejection(approve(job, input({ pickVersion: 7 })))).status).toBe(409);
   });
 
+  it('rejects edited tags that contain the song title, as whole words', async () => {
+    const job = await makeJob();
+    const error = await approve(job, input({ tags: ['synthwave', 'peekaboo live'] })).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({
+      status: 422,
+      fields: { tags: "Tags can't contain the song title: peekaboo live" },
+    });
+    expect((await getJob('job1'))!.state).toBe('REVIEW');
+  });
+
+  it("rejects edited tags outside the job's tag list", async () => {
+    const job = await makeJob();
+    const error = await approve(job, input({ tags: ['synthwave', 'study music'] })).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({
+      status: 422,
+      fields: { tags: "Not in this job's tag list: study music" },
+    });
+  });
+
+  it('accepts the artist name and candidate tags in any case', async () => {
+    const job = await makeJob({ channel: null });
+    await approve(job, input({ tags: ['flies like robots', 'SYNTHWAVE'] }));
+    expect((await getJob('job1'))!.state).toBe('PAYLOAD');
+  });
+
+  it('reports a YouTube limit before the tag list', async () => {
+    const job = await makeJob();
+    const error = await approve(job, input({ tags: ['#synthwave'] })).catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      fields: { tags: 'Tags are plain terms; hashtags belong in the description.' },
+    });
+  });
+
   it('rejects a stray hashtag with 422 field errors and records nothing', async () => {
     const job = await makeJob();
     const error = await rejection(approve(job, input({ description: 'Out now #invented' })));
@@ -195,7 +238,7 @@ describe('approve', () => {
       title: 'Title 1',
       description: 'A bright synth track.\n\n#synthwave #retrowave',
       hashtags: ['#synthwave', '#retrowave'],
-      tags: ['synthwave', 'PeekaBoo'],
+      tags: ['synthwave', 'outrun'],
     });
     expect(after.finalFields).toEqual(after.payload);
     expect(sm.accessSecretVersion).not.toHaveBeenCalled();
@@ -266,7 +309,7 @@ describe('approve', () => {
       title: 'Title 1',
       description: 'Edited.\n\n#synthwave #newmusic',
       hashtags: ['#synthwave', '#NewMusic'],
-      tags: ['synthwave', 'PeekaBoo'],
+      tags: ['synthwave', 'outrun'],
     });
     expect(after.payload).toBeNull();
     expect(after.consecutiveFailures).toBe(0);

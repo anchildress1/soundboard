@@ -1,5 +1,12 @@
 import type { BrandGuide } from '$lib/brand';
-import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '$lib/metadata';
+import {
+  containsWords,
+  DESCRIPTION_MAX,
+  parseHashtags,
+  tagsLength,
+  TAGS_MAX,
+  TITLE_MAX,
+} from '$lib/metadata';
 import type { Chunk, Measurements, Pick } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
@@ -83,13 +90,15 @@ const RECENT_DESCRIPTION_CHARS = 700;
  * How the artist writes, distilled from his own YouTube descriptions and comments (2024 on).
  * Applies to every run's description; the audience evidence still sets its structure and length.
  */
+export const CONTACT_LINE = 'Contact at flieslikerobots@gmail.com.';
+
 export const ARTIST_VOICE = [
   'Write the description the way the artist writes his own:',
   '- Short, plain, literal. Open with "<song> by Flies Like Robots".',
   '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
   '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
-  '- His contact line only if one appears in recentUploads; otherwise leave it out.',
+  `- After the credit line, his contact line exactly: "${CONTACT_LINE}"`,
   '- Never write placeholders, brackets, or notes about missing information.',
   '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
   '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
@@ -269,36 +278,28 @@ function pickHashtags(draft: RawPick, pool: string[]): string[] {
   return picked.map((t) => byLower.get(t)!);
 }
 
-const MIN_TAGS = 3;
-
-const words = (text: string) =>
-  ` ${text
-    .toLowerCase()
-    .replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()} `;
-/** Whole-word containment, so the title "Pop" rules out "pop music" but not "synthpop". */
-const containsWords = (text: string, phrase: string) => words(text).includes(words(phrase));
-
 /** A line that is only a bracketed note, like "[Contact line: none provided]". */
 const PLACEHOLDER_LINE = /^\s*\[[^\]\n]*\]\s*$/gmu;
 const MAX_TAGS = 10;
 
 /**
- * Tags only from the pool, never containing the song title: the model's picks first (at most 10),
- * padded to 3 from the top of the pool, within YouTube's 500-character total.
+ * The model's picks from the pool, never containing the song title, plus the artist name, at most
+ * 10 within YouTube's 500-character total. Nothing is filled from the pool: search membership alone
+ * doesn't show the tag was heard.
  */
 function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
   const byLower = new Map(pool.map((t) => [t.toLowerCase(), t]));
-  const title = songTitle.trim().toLowerCase();
-  const allowed = (key: string) => byLower.has(key) && !(title && containsWords(key, title));
-  const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))]
-    .filter(allowed)
-    .slice(0, MAX_TAGS);
-  for (const candidate of pool) {
-    if (keys.length >= MIN_TAGS) break;
-    const key = candidate.toLowerCase();
-    if (allowed(key) && !keys.includes(key)) keys.push(key);
-  }
+  const artist = ARTIST_NAME.toLowerCase();
+  const allowed = (key: string) => byLower.has(key) && !containsWords(key, songTitle);
+  const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))].filter(
+    allowed,
+  );
+  if (!keys.includes(artist)) keys.push(artist);
+  while (keys.length > MAX_TAGS)
+    keys.splice(
+      keys.findLastIndex((k) => k !== artist),
+      1,
+    );
   const tags: string[] = [];
   for (const tag of keys.map((key) => byLower.get(key)!)) {
     if (tagsLength([...tags, tag]) <= TAGS_MAX) tags.push(tag);

@@ -88,15 +88,16 @@
 - Chunk results + audience evidence + FLR's 5 most recent videos (identity only) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
-  - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence.
+  - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.
+  - Genre terms fold into the more specific heard genre that contains them ("electronic" into "industrial electronic") before the top two seed the query.
   - Hashtag candidates: every `#hashtag` in those descriptions, ranked by frequency; top 30.
-  - Tag candidates: their tags, ranked by how many videos use them, then by those videos' views; top 40.
+  - Tag candidates: their tags and description hashtags, ranked by how many videos use them, then by those videos' views; top 40.
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
   - Stored on the job, so re-runs reuse it.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
 - Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description.
-- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10 and fills only up to 3 from the top candidates, because the top of the pool is the generic filler the selection rule exists to avoid. Never the song title.
+- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
@@ -110,6 +111,7 @@
 
 - One recommendation. Every field is editable in place. Actions: **Approve & upload**, **Re-run model**, **Discard**.
 - Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
+- Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
 - [ ] Each re-run produces a new title.

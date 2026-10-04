@@ -5,6 +5,7 @@ import type { Fact, Feedback } from '$lib/server/memory';
 import {
   allowedLinks,
   ARTIST_VOICE,
+  CONTACT_LINE,
   buildPickMessages,
   digestChunks,
   finalizePick,
@@ -217,6 +218,8 @@ describe('buildPickMessages', () => {
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
     expect(rules).toContain('Never claim what the lyrics say.');
+    expect(rules).toContain(`his contact line exactly: "${CONTACT_LINE}"`);
+    expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
     expect(rules).toContain('Never write placeholders');
     expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
@@ -569,7 +572,7 @@ describe('finalizePick', () => {
       raw({ tags: ['#Synthwave', '##RETROWAVE', 'synthwave', 'synthpop', 'invented', '  '] }),
       fix(),
     );
-    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop']);
+    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', 'Flies Like Robots']);
   });
 
   it('never uses the song title as a tag, even when the search returns it', () => {
@@ -614,20 +617,20 @@ describe('finalizePick', () => {
     expect(pick.description.startsWith('Vaporgram by Flies Like Robots\n\nKeep')).toBe(true);
   });
 
-  it('pads to 3 from the top of the pool when the model picks nothing usable', () => {
+  it('never fills from the pool: the artist name alone when the model picks nothing usable', () => {
     const pick = finalizePick(raw({ tags: ['made up', 'PeekaBoo'] }), fix());
-    expect(pick.tags).toEqual(tagNames.slice(0, 3));
+    expect(pick.tags).toEqual(['Flies Like Robots']);
   });
 
-  it('keeps the model picks without padding once there are 3', () => {
-    const pick = finalizePick(raw({ tags: ['outrun', '80s', 'new music'] }), fix());
-    expect(pick.tags).toEqual(['outrun', '80s', 'new music']);
+  it('keeps the artist where the model placed it', () => {
+    const pick = finalizePick(raw({ tags: ['Flies Like Robots', 'outrun'] }), fix());
+    expect(pick.tags).toEqual(['Flies Like Robots', 'outrun']);
   });
 
-  it('caps the model picks at 10', () => {
+  it('caps tags at 10, keeping the artist name', () => {
     const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
     const pick = finalizePick(raw({ tags: names }), fix({ tagCandidates: cands(...names) }));
-    expect(pick.tags).toEqual(names.slice(0, 10));
+    expect(pick.tags).toEqual([...names.slice(0, 9), 'Flies Like Robots']);
   });
 
   it('falls back to the artist name alone when the search found no tags', () => {
@@ -647,7 +650,7 @@ describe('finalizePick', () => {
   it('skips one oversize tag but keeps later ones that fit', () => {
     const pool = ['a', 'x'.repeat(600), 'b'];
     const pick = finalizePick(raw({ tags: pool }), fix({ tagCandidates: cands(...pool) }));
-    expect(pick.tags).toEqual(['a', 'b']);
+    expect(pick.tags).toEqual(['a', 'b', 'Flies Like Robots']);
   });
 
   it('clips the title to 100 characters at a word boundary', () => {
