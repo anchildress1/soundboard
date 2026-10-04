@@ -635,6 +635,26 @@ describe('renderStep', () => {
   /** The render writes a real temp file, so the test can see it is cleaned up. */
   const writesFile = (args: string[]) => writeFileSync(args.at(-1)!, 'mp4');
 
+  it('splits one step budget across render, upload, and read-back', async () => {
+    runs.render.onRun = writesFile;
+    const clock = 1_000_000;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(clock);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    onTestFinished(() => {
+      now.mockRestore();
+      timeout.mockRestore();
+    });
+    await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }));
+    // 110 s budget: 20 s for the upload and 10 s for the read-back leave 80 s to render.
+    expect(timeout.mock.calls).toEqual([[80_000], [10_000]]);
+    expect(h.upload).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ timeout: 20_000 }),
+    );
+    const total = timeout.mock.calls.reduce((sum, [ms]) => sum + ms, 20_000);
+    expect(total).toBeLessThanOrEqual(110_000);
+  });
+
   it('renders to a temp file, uploads it to a fresh object, reads it back, and moves to REVIEW', async () => {
     runs.render.onRun = writesFile;
     const patch = await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, reframe: 'crop' }));
@@ -656,6 +676,8 @@ describe('renderStep', () => {
     expect(h.upload).toHaveBeenCalledWith(local, {
       destination: 'uploads/s1-1',
       contentType: 'video/mp4',
+      resumable: false,
+      timeout: 20_000,
     });
     const probeArgs = h.spawn.mock.calls[1]![1] as string[];
     expect(probeArgs.at(-1)).toContain('/uploads/s1-1?sig=read');

@@ -140,12 +140,12 @@ export function parseMeasurements(stderr: string, offsetSec: number, endSec: num
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-export async function probe(url: string): Promise<Probe> {
+export async function probe(url: string, timeoutMs = 60_000): Promise<Probe> {
   const { stdout } = await run(
     'probe',
     'ffprobe',
     ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', url],
-    60_000,
+    timeoutMs,
   );
   return parseProbe(stdout.toString('utf8'));
 }
@@ -320,6 +320,7 @@ export async function renderShort(
   sourceUrl: string,
   outPath: string,
   cut: { startSec: number; lengthSec: number; reframe: Reframe },
+  timeoutMs: number,
 ): Promise<void> {
   await run(
     'render',
@@ -357,6 +358,6 @@ export async function renderShort(
       '+faststart',
       outPath,
     ],
-    100_000,
+    timeoutMs,
   );
 }

@@ -24,8 +24,19 @@ export async function signedUploadUrl(object: string, contentType: string): Prom
 }
 
 /** Uploads a rendered file from local disk to the bucket. */
-export async function uploadFile(path: string, object: string, contentType: string): Promise<void> {
-  await bucket().upload(path, { destination: object, contentType });
+/** One request, not a resumable session: the SDK applies `timeout` only to a single request. */
+export async function uploadFile(
+  path: string,
+  object: string,
+  contentType: string,
+  timeoutMs: number,
+): Promise<void> {
+  await bucket().upload(path, {
+    contentType,
+    destination: object,
+    resumable: false,
+    timeout: timeoutMs,
+  });
 }
 
 /** Signed GET used by the monitor, ffmpeg, and the YouTube upload; GCS serves range requests on it. */

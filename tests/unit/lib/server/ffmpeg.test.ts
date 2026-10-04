@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { startSpan } from '../../../mocks/sentry';
 import {
   chunkCount,
@@ -24,6 +24,7 @@ const SIGNED_OBJECT_URL = 'https://storage.example/obj?X-Goog-Signature=secret';
 const FFMPEG_OP = 'process.ffmpeg';
 const OBJECT_URL = 'https://storage.example/obj';
 const FILTER_GRAPH = '-filter_complex';
+const RENDER_MS = 80_000;
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const spawnMock = vi.mocked(spawn);
@@ -281,6 +282,17 @@ describe('probe', () => {
     await expect(probe('u')).rejects.toThrow('ffprobe exited 1: line2 | line3 | line4');
   });
 
+  it('runs for up to 60 s by default, or for the limit it is given', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    onTestFinished(() => timeout.mockRestore());
+    const json = Buffer.from(JSON.stringify({ format: { duration: '1' }, streams: [] }));
+    nextRun({ stdout: json });
+    await probe('u');
+    nextRun({ stdout: json });
+    await probe('u', 10_000);
+    expect(timeout.mock.calls).toEqual([[60_000], [10_000]]);
+  });
+
   it('rejects when the process cannot spawn', async () => {
     nextRun({ error: new Error('spawn ffprobe ENOENT') });
     await expect(probe('u')).rejects.toThrow('ENOENT');
@@ -467,11 +479,12 @@ describe('shortFilter', () => {
 describe('renderShort', () => {
   it('cuts the hook into a local MP4 with its index up front', async () => {
     nextRun({});
-    await renderShort('https://storage.example/src', 'renders/short-s1-1.mp4', {
-      startSec: 40,
-      lengthSec: 30,
-      reframe: 'crop',
-    });
+    await renderShort(
+      'https://storage.example/src',
+      'renders/short-s1-1.mp4',
+      { startSec: 40, lengthSec: 30, reframe: 'crop' },
+      RENDER_MS,
+    );
     const [command, args] = spawnMock.mock.calls[0]!;
     expect(command).toBe('ffmpeg');
     expect(args![args!.indexOf('-ss') + 1]).toBe('40.000');
@@ -485,9 +498,17 @@ describe('renderShort', () => {
     expect(args!.at(-1)).toBe('renders/short-s1-1.mp4');
   });
 
+  it("gives ffmpeg the caller's time limit", async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    onTestFinished(() => timeout.mockRestore());
+    nextRun({});
+    await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, 42_000);
+    expect(timeout).toHaveBeenCalledWith(42_000);
+  });
+
   it('uses the blur graph for blur fill', async () => {
     nextRun({});
-    await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' });
+    await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS);
     const args = spawnMock.mock.calls[0]![1]!;
     expect(args[args.indexOf(FILTER_GRAPH) + 1]).toBe(shortFilter('blur'));
   });
@@ -495,14 +516,14 @@ describe('renderShort', () => {
   it('rejects when ffmpeg fails', async () => {
     nextRun({ stderr: 'Conversion failed!', code: 1 });
     await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }),
+      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS),
     ).rejects.toThrow('ffmpeg exited 1: Conversion failed!');
   });
 
   it('rejects when the process cannot start', async () => {
     nextRun({ error: new Error('spawn ffmpeg ENOENT') });
     await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'crop' }),
+      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'crop' }, RENDER_MS),
     ).rejects.toThrow('ENOENT');
   });
 });

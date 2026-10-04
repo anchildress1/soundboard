@@ -99,17 +99,22 @@ describe('signedUploadUrl', () => {
 describe('uploadFile', () => {
   it('uploads the local file to the object with its content type', async () => {
     gcs.upload.mockResolvedValueOnce([{}]);
-    await uploadFile('renders/short-s1-1.mp4', 'uploads/s1-1', 'video/mp4');
+    await uploadFile('renders/short-s1-1.mp4', 'uploads/s1-1', 'video/mp4', 20_000);
     expect(gcs.buckets).toEqual(['sb-media']);
+    // A single request, so the SDK applies the timeout; it ignores one on a resumable session.
     expect(gcs.upload).toHaveBeenCalledWith('renders/short-s1-1.mp4', {
       destination: 'uploads/s1-1',
       contentType: 'video/mp4',
+      resumable: false,
+      timeout: 20_000,
     });
   });
 
   it('propagates an upload failure', async () => {
     gcs.upload.mockRejectedValueOnce(new Error('403 Forbidden'));
-    await expect(uploadFile('renders/x.mp4', 'uploads/x', 'video/mp4')).rejects.toThrow('403');
+    await expect(uploadFile('renders/x.mp4', 'uploads/x', 'video/mp4', 20_000)).rejects.toThrow(
+      '403',
+    );
   });
 });
 

@@ -228,6 +228,10 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
   return ok({ state: 'RENDER', short: { ...short, hook, modelMs } });
 }
 
+/** What the render step keeps after ffmpeg: the upload, then the read-back probe. */
+const UPLOAD_TIMEOUT_MS = 20_000;
+const READBACK_TIMEOUT_MS = 10_000;
+
 /**
  * RENDER step: ffmpeg cuts and reframes the hook into a temp file, which goes to its own object and
  * is read back from storage before review. A new object per render means the player never shows a
@@ -239,18 +243,22 @@ export async function renderStep(job: JobDoc): Promise<Partial<JobDoc>> {
   const renders = short.renders + 1;
   const object = `uploads/${job.id}-${renders}`;
   const local = join(tmpdir(), `short-${job.id}-${renders}.mp4`);
+  // One deadline across render, upload, and read-back, so the step can't outlast its budget.
+  const renderBy = stepDeadline() - UPLOAD_TIMEOUT_MS - READBACK_TIMEOUT_MS;
   try {
-    await renderShort(await signedReadUrl(requireSource(job)), local, {
-      startSec: short.hook.startSec,
-      lengthSec: short.hook.lengthSec,
-      reframe: short.reframe,
-    });
-    await uploadFile(local, object, 'video/mp4');
+    const source = await signedReadUrl(requireSource(job));
+    await renderShort(
+      source,
+      local,
+      { startSec: short.hook.startSec, lengthSec: short.hook.lengthSec, reframe: short.reframe },
+      renderBy - Date.now(),
+    );
+    await uploadFile(local, object, 'video/mp4', UPLOAD_TIMEOUT_MS);
   } finally {
     // The container's disk is memory; a render left behind holds RAM until the instance stops.
     await rm(local, { force: true });
   }
-  const probed = await probe(await signedReadUrl(object));
+  const probed = await probe(await signedReadUrl(object), READBACK_TIMEOUT_MS);
   if (!Number.isFinite(probed.durationSec) || probed.durationSec <= 0) {
     throw new Error('The rendered Short has no playable video.');
   }
