@@ -1,4 +1,4 @@
-import { cutErrors, tenth } from '$lib/short';
+import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
 import {
   SHORT_SOURCE_STATES,
@@ -218,6 +218,9 @@ export async function makeShort(job: JobDoc): Promise<string> {
   requireState(job, [...SHORT_SOURCE_STATES]);
   if (!(job.probe && job.probe.durationSec > 0)) {
     throw new ActionError(409, "This video's length is unknown.");
+  }
+  if (!canCutShort(job.probe.durationSec)) {
+    throw new ActionError(409, `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`);
   }
   // A Short costs a model call and a render, so a signed-out visitor pays for it with a run.
   const ipHash = job.owner === 'visitor' ? job.ipHash : null;

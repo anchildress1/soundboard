@@ -607,6 +607,18 @@ describe('makeShort', () => {
     expect(await makeShort((await getJob('job1'))!)).toBe(first);
   });
 
+  it('refuses a video under 15 seconds and accepts one of exactly 15', async () => {
+    const short = await makeJob({ patch: { probe: { ...PROBE, durationSec: 14.9 } } });
+    const error = await rejection(makeShort(short));
+    expect([error.status, error.message]).toEqual([
+      409,
+      'A Short needs a video of at least 15 seconds.',
+    ]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+    await updateJob('job1', { probe: { ...PROBE, durationSec: 15 } });
+    expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
+  });
+
   it('refuses a video still being analyzed', async () => {
     const job = await makeJob({ state: 'ANALYZE', patch: { probe: PROBE } });
     const error = await rejection(makeShort(job));

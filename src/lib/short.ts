@@ -4,10 +4,12 @@ export const SHORT_MAX_SEC = 60;
 
 export const tenth = (n: number) => Math.round(n * 10) / 10;
 
-/** The Short's length bounds for a source: 15–60 s, or the whole source when it runs shorter. */
+/** A source under the minimum can't make a Short at all. */
+export const canCutShort = (sourceSec: number) => sourceSec >= SHORT_MIN_SEC;
+
+/** The Short's length bounds for a source of at least 15 s: 15 s up to 60 s or the whole source. */
 export function lengthBounds(sourceSec: number): { min: number; max: number } {
-  const max = tenth(Math.min(SHORT_MAX_SEC, sourceSec));
-  return { min: Math.min(SHORT_MIN_SEC, max), max };
+  return { min: SHORT_MIN_SEC, max: tenth(Math.min(SHORT_MAX_SEC, sourceSec)) };
 }
 
 export type CutErrors = Partial<Record<'startSec' | 'lengthSec', string>>;

@@ -16,6 +16,7 @@
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
   import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
+  import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
   import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -65,6 +66,7 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
+  const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
 
   // Reading `view` reruns this whenever a new view lands.
   $effect(() => {
@@ -298,7 +300,9 @@
                 ffmpeg cuts it and fits it to 9:16. It starts from this video's title, description,
                 and tags.
               </p>
-              {#if canMakeShort}
+              {#if tooShortForShort}
+                <p>A Short needs a video of at least {SHORT_MIN_SEC} seconds.</p>
+              {:else if canMakeShort}
                 <button
                   class="btn primary"
                   type="button"

@@ -554,6 +554,25 @@ describe('job page: Short tab', () => {
     },
   );
 
+  it('explains instead of offering a Short for a video under 15 seconds', async () => {
+    fetchMock.mockImplementation(hang);
+    const probe = { durationSec: 14.9, width: 1920, height: 1080, hasAudio: true };
+    setup(view({ state: 'REVIEW', probe }, { pick: PICK }));
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).queryByRole('button', { name: MAKE_SHORT })).toBeNull();
+    expect(
+      within(shortPanel()).getByText('A Short needs a video of at least 15 seconds.'),
+    ).toBeVisible();
+  });
+
+  it('offers a Short for a video of exactly 15 seconds', async () => {
+    fetchMock.mockImplementation(hang);
+    const probe = { durationSec: 15, width: 1920, height: 1080, hasAudio: true };
+    setup(view({ state: 'REVIEW', probe }, { pick: PICK }));
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('button', { name: MAKE_SHORT })).toBeVisible();
+  });
+
   it('explains instead of offering a Short while a new recommendation is being picked', async () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'PICK' }, { pick: PICK }));

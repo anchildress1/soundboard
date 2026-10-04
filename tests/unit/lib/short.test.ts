@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cutErrors, lengthBounds, SHORT_MAX_SEC, SHORT_MIN_SEC, tenth } from '$lib/short';
+import {
+  canCutShort,
+  cutErrors,
+  lengthBounds,
+  SHORT_MAX_SEC,
+  SHORT_MIN_SEC,
+  tenth,
+} from '$lib/short';
 
 describe('tenth', () => {
   it('rounds to a tenth of a second', () => {
@@ -18,12 +25,21 @@ describe('lengthBounds', () => {
     expect(lengthBounds(30.04)).toEqual({ min: 15, max: 30 });
   });
 
-  it('is the whole source when the source runs under 15 seconds', () => {
-    expect(lengthBounds(9.96)).toEqual({ min: 10, max: 10 });
-  });
-
   it('is exactly 60 at a 60-second source', () => {
     expect(lengthBounds(60)).toEqual({ min: 15, max: 60 });
+  });
+});
+
+describe('canCutShort', () => {
+  it('takes a source of 15 seconds or more', () => {
+    expect(canCutShort(SHORT_MIN_SEC)).toBe(true);
+    expect(canCutShort(240)).toBe(true);
+  });
+
+  it('refuses a source under 15 seconds, or of no length', () => {
+    expect(canCutShort(14.9)).toBe(false);
+    expect(canCutShort(0)).toBe(false);
+    expect(canCutShort(Number.NaN)).toBe(false);
   });
 });
 
