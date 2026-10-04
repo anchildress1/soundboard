@@ -3,7 +3,7 @@
 # pointed at the container's preinstalled Chromium (the sandbox can't download browsers).
 set -euo pipefail
 
-if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then
   exit 0
 fi
 
@@ -24,7 +24,7 @@ pnpm install --frozen-lockfile
 {
   echo "export PATH=\"$NODE_BIN:\$PATH\""
   echo 'export COREPACK_ENABLE_DOWNLOAD_PROMPT=0'
-  if [ -x /opt/pw-browsers/chromium ]; then
+  if [[ -x /opt/pw-browsers/chromium ]]; then
     echo 'export PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium'
   fi
 } >> "$CLAUDE_ENV_FILE"
