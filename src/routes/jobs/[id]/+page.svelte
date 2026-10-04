@@ -145,6 +145,7 @@
     <Monitor
       src={localUrl ?? data.playbackUrl}
       filename={job.filename}
+      width={job.probe?.width}
       height={job.probe?.height}
     />
     <Track {status} {model} />

@@ -7,7 +7,7 @@ import {
   TAGS_MAX,
   TITLE_MAX,
 } from '$lib/metadata';
-import type { Chunk, Measurements, Pick } from '$lib/types';
+import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
@@ -83,6 +83,7 @@ export type PickContext = {
   notes: string;
   chunks: Chunk[];
   measurements: Measurements | null;
+  probe: Probe | null;
   recent: (CatalogVideo & { thumbnail: string | null })[];
   /** Hashtag candidates from the genre search (R4). */
   candidates: string[];
@@ -261,7 +262,18 @@ export type PickFixups = {
   tagCandidates: TagCandidate[];
   facts: Fact[];
   measurements: Measurements | null;
+  probe: Probe | null;
 };
+
+const SHORT_MAX_SEC = 180;
+
+/** YouTube publishes any square or vertical video of 3 minutes or less as a Short. */
+export function shortFlag(probe: Probe | null): string[] {
+  if (!probe?.width || !probe.height) return [];
+  if (probe.height < probe.width || probe.durationSec > SHORT_MAX_SEC) return [];
+  const shape = probe.height === probe.width ? 'Square' : 'Vertical';
+  return [`${shape} and 3 minutes or shorter: YouTube will publish it as a Short`];
+}
 
 /** Measured problems, phrased from ffmpeg's numbers. */
 export function measuredFlags(m: Measurements | null): string[] {
@@ -371,7 +383,11 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
     description,
     hashtags,
     tags,
-    flags: [...measuredFlags(fix.measurements), ...draft.flags.filter(Boolean)],
+    flags: [
+      ...measuredFlags(fix.measurements),
+      ...shortFlag(fix.probe),
+      ...draft.flags.filter(Boolean),
+    ],
     brandCheck: draft.brandCheck,
     why: draft.why,
     bandcamp: {

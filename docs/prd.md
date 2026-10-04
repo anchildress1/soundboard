@@ -73,7 +73,8 @@
 **R3 · Analysis**
 
 - ffmpeg reads the source from GCS through a signed URL (range requests, nothing copied into RAM).
-- Prep probes duration and measures the whole file: LUFS, true peak, clipping, silence.
+- Prep probes duration and the displayed video size (the file's rotation applied, since phones store portrait video as rotated landscape frames) and measures the whole file: LUFS, true peak, clipping, silence.
+- A square or vertical video of 3 minutes or less adds a flag: YouTube publishes it as a Short.
 - Each analyze step seeks to its own 29.5s window (under Gemma's 30s audio cap), extracts 8 frames at 360p + 16 kHz mono WAV in memory, and measures that window.
 - One Gemma call per chunk: audio + frames + measurements + song title → visual, music, quality flags.
 - Call settings: temperature 0.2, `max_tokens` ≥ 2048, JSON schema. Parse `content`; `reasoning_content` is the think block.
@@ -208,7 +209,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 
 - **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
 - **Left pane, the tape:**
-  - Video monitor (R2), with filename, resolution, and timecode overlays.
+  - Video monitor (R2), with filename, resolution (short side, marked vertical when taller than wide), and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 52s`, total model time for the job; it ticks live while the pick runs).
   - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
 - **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).

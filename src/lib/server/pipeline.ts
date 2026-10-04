@@ -136,6 +136,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         notes: job.notes,
         chunks,
         measurements: job.measurements,
+        probe: job.probe,
         recent: withThumbs,
         candidates: audience.hashtags,
         tagCandidates: audience.tags,

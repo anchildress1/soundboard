@@ -59,18 +59,37 @@ function spawnRun(command: string, args: string[], timeoutMs: number): Promise<R
   });
 }
 
-type FfprobeJson = {
-  format?: { duration?: string };
-  streams?: { codec_type?: string; width?: number; height?: number }[];
+type FfprobeStream = {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
 };
+type FfprobeJson = { format?: { duration?: string }; streams?: FfprobeStream[] };
 
+/**
+ * Phones store portrait video as landscape frames plus a rotation that players and YouTube apply,
+ * so a quarter turn swaps the displayed width and height.
+ */
+function quarterTurned(video: FfprobeStream): boolean {
+  const rotation =
+    video.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ??
+    Number(video.tags?.rotate ?? 0);
+  return Math.abs(rotation) % 180 === 90;
+}
+
+/** Duration, displayed video size (rotation applied), and audio presence. */
 export function parseProbe(json: string): Probe {
   const data = JSON.parse(json) as FfprobeJson;
   const video = data.streams?.find((s) => s.codec_type === 'video');
+  const width = video?.width ?? null;
+  const height = video?.height ?? null;
+  const turned = video ? quarterTurned(video) : false;
   return {
     durationSec: Number(data.format?.duration ?? 0),
-    width: video?.width ?? null,
-    height: video?.height ?? null,
+    width: turned ? height : width,
+    height: turned ? width : height,
     hasAudio: Boolean(data.streams?.some((s) => s.codec_type === 'audio')),
   };
 }

@@ -11,6 +11,7 @@ import {
   finalizePick,
   isRawPick,
   measuredFlags,
+  shortFlag,
   runPick,
   sameText,
   weighFeedback,
@@ -18,7 +19,7 @@ import {
   type PickFixups,
   type RawPick,
 } from '$lib/server/smart-pick';
-import type { Chunk, Measurements } from '$lib/types';
+import type { Chunk, Measurements, Probe } from '$lib/types';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
   title: 'PeekaBoo',
@@ -55,6 +56,7 @@ const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   tagCandidates,
   facts,
   measurements: null,
+  probe: null,
   ...over,
 });
 
@@ -102,6 +104,7 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   notes: '',
   chunks: [chunk(0)],
   measurements: null,
+  probe: null,
   recent: [],
   candidates,
   tagCandidates,
@@ -416,6 +419,46 @@ describe('allowedLinks', () => {
 
   it('leaves text without links untouched', () => {
     expect(allowedLinks('no links here', facts)).toBe('no links here');
+  });
+});
+
+describe('shortFlag', () => {
+  const probe = (width: number, height: number, durationSec = 79): Probe => ({
+    durationSec,
+    width,
+    height,
+    hasAudio: true,
+  });
+
+  it('flags a vertical or square video of 3 minutes or less', () => {
+    expect(shortFlag(probe(720, 1280))).toEqual([
+      'Vertical and 3 minutes or shorter: YouTube will publish it as a Short',
+    ]);
+    expect(shortFlag(probe(1080, 1080, 180))).toEqual([
+      'Square and 3 minutes or shorter: YouTube will publish it as a Short',
+    ]);
+  });
+
+  it('leaves landscape and longer videos alone', () => {
+    expect(shortFlag(probe(1280, 720))).toEqual([]);
+    expect(shortFlag(probe(720, 1280, 180.5))).toEqual([]);
+  });
+
+  it('says nothing without a probe or a video size', () => {
+    expect(shortFlag(null)).toEqual([]);
+    expect(shortFlag({ durationSec: 60, width: null, height: null, hasAudio: true })).toEqual([]);
+  });
+
+  it('lands in the pick flags after the measured ones', () => {
+    const pick = finalizePick(
+      raw({ flags: ['Dark opening frames'] }),
+      fix({ probe: probe(720, 1280), measurements: measurements({ truePeakDbtp: -0.3 }) }),
+    );
+    expect(pick.flags).toEqual([
+      'True peak -0.3 dBTP, above the -1 dBTP ceiling',
+      'Vertical and 3 minutes or shorter: YouTube will publish it as a Short',
+      'Dark opening frames',
+    ]);
   });
 });
 

@@ -50,14 +50,23 @@ describe('ago', () => {
 });
 
 describe('resolution', () => {
-  it('labels the vertical resolution', () => {
-    expect(resolution(1080)).toBe('1080p');
+  it('labels the short side', () => {
+    expect(resolution(1920, 1080)).toBe('1080p');
+    expect(resolution(1080, 1080)).toBe('1080p');
+  });
+
+  it('marks a taller-than-wide video vertical', () => {
+    expect(resolution(720, 1280)).toBe('720p · vertical');
+  });
+
+  it('falls back to the height without a width', () => {
+    expect(resolution(null, 1080)).toBe('1080p');
   });
 
   it('is empty for missing or zero height', () => {
-    expect(resolution(null)).toBe('');
-    expect(resolution(undefined)).toBe('');
-    expect(resolution(0)).toBe('');
+    expect(resolution(1920, null)).toBe('');
+    expect(resolution(undefined, undefined)).toBe('');
+    expect(resolution(0, 0)).toBe('');
   });
 });
 
