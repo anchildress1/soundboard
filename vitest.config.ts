@@ -1,10 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import { defaultClientConditions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [sveltekit()],
   // Svelte 5 resolves its server build under Node; components need the browser entry to mount.
-  resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
+  resolve: { conditions: ['browser', ...defaultClientConditions] },
   test: {
     environment: 'jsdom',
     include: ['tests/unit/**/*.test.ts'],
