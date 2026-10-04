@@ -2,6 +2,10 @@ import * as Sentry from '@sentry/sveltekit';
 
 export const MODEL_NAME = 'gemma-4-12b-it';
 export const PROVIDER = 'llama.cpp';
+/** Groups every agent, model, and tool span under one pipeline in Sentry's AI views. */
+export const PIPELINE = 'soundboard';
+
+export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide';
 
 type Part =
   | { type: 'text'; text: string }
@@ -44,7 +48,7 @@ export function redactMessages(messages: ChatMessage[]): unknown[] {
 
 /** `invoke_agent` span; model and tool spans started inside become its children. */
 export function invokeAgent<T>(
-  agent: 'chunk-analyst' | 'smart-pick' | 'brand-guide',
+  agent: AgentName,
   fn: (span: Sentry.Span) => Promise<T>,
 ): Promise<T> {
   return Sentry.startSpan(
@@ -54,6 +58,7 @@ export function invokeAgent<T>(
       attributes: {
         'gen_ai.operation.name': 'invoke_agent',
         'gen_ai.agent.name': agent,
+        'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.request.model': MODEL_NAME,
         'gen_ai.provider.name': PROVIDER,
       },
@@ -62,14 +67,36 @@ export function invokeAgent<T>(
   );
 }
 
-export type Usage = { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+export type Usage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+};
 
-/** `chat` span carrying the redacted request, the reply text, and token counts. */
-export function chatSpan<T extends { content: string; usage: Usage }>(
+export type ChatReply = {
+  content: string;
+  reasoning: string;
+  usage: Usage;
+  finishReason: string | null;
+  responseId: string | null;
+};
+
+const textParts = (messages: ChatMessage[]) =>
+  (redactMessages(messages) as { parts: unknown[] }[]).flatMap((m) => m.parts);
+
+/**
+ * `chat` span: system prompt as `gen_ai.system_instructions`, the rest of the redacted request as
+ * input, the reply and its think block as output, plus finish reason and token counts.
+ */
+export function chatSpan<T extends ChatReply>(
   messages: ChatMessage[],
-  params: { temperature: number; maxTokens: number },
+  params: { agent: AgentName; temperature: number; maxTokens: number },
   fn: () => Promise<T>,
 ): Promise<T> {
+  const system = messages.filter((m) => m.role === 'system');
+  const rest = messages.filter((m) => m.role !== 'system');
   return Sentry.startSpan(
     {
       op: 'gen_ai.chat',
@@ -77,23 +104,47 @@ export function chatSpan<T extends { content: string; usage: Usage }>(
       attributes: {
         'gen_ai.operation.name': 'chat',
         'gen_ai.provider.name': PROVIDER,
-        'gen_ai.system': PROVIDER,
         'gen_ai.request.model': MODEL_NAME,
+        'gen_ai.agent.name': params.agent,
+        'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.request.temperature': params.temperature,
         'gen_ai.request.max_tokens': params.maxTokens,
-        'gen_ai.input.messages': JSON.stringify(redactMessages(messages)),
+        ...(system.length > 0
+          ? { 'gen_ai.system_instructions': JSON.stringify(textParts(system)) }
+          : {}),
+        'gen_ai.input.messages': JSON.stringify(redactMessages(rest)),
       },
     },
     async (span) => {
       const result = await fn();
+      const { usage } = result;
+      const parts = [
+        ...(result.reasoning ? [{ type: 'reasoning', content: result.reasoning }] : []),
+        { type: 'text', content: result.content },
+      ];
       span.setAttributes({
         'gen_ai.response.model': MODEL_NAME,
         'gen_ai.output.messages': JSON.stringify([
-          { role: 'assistant', parts: [{ type: 'text', content: result.content }] },
+          {
+            role: 'assistant',
+            parts,
+            ...(result.finishReason ? { finish_reason: result.finishReason } : {}),
+          },
         ]),
-        'gen_ai.usage.input_tokens': result.usage.prompt_tokens ?? 0,
-        'gen_ai.usage.output_tokens': result.usage.completion_tokens ?? 0,
-        'gen_ai.usage.total_tokens': result.usage.total_tokens ?? 0,
+        ...(result.finishReason ? { 'gen_ai.response.finish_reasons': [result.finishReason] } : {}),
+        ...(result.responseId ? { 'gen_ai.response.id': result.responseId } : {}),
+        'gen_ai.usage.input_tokens': usage.prompt_tokens ?? 0,
+        'gen_ai.usage.output_tokens': usage.completion_tokens ?? 0,
+        'gen_ai.usage.total_tokens': usage.total_tokens ?? 0,
+        ...(usage.prompt_tokens_details?.cached_tokens !== undefined
+          ? { 'gen_ai.usage.cache_read.input_tokens': usage.prompt_tokens_details.cached_tokens }
+          : {}),
+        ...(usage.completion_tokens_details?.reasoning_tokens !== undefined
+          ? {
+              'gen_ai.usage.reasoning.output_tokens':
+                usage.completion_tokens_details.reasoning_tokens,
+            }
+          : {}),
       });
       return result;
     },
@@ -114,6 +165,7 @@ export function toolSpan<T>(
       attributes: {
         'gen_ai.operation.name': 'execute_tool',
         'gen_ai.agent.name': agent,
+        'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.tool.name': tool,
         'gen_ai.tool.call.arguments': JSON.stringify(args),
       },

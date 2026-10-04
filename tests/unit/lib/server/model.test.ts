@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startSpan } from '../../../mocks/sentry';
 import { chat, chatJson, modelStatus, STEP_BUDGET_MS, stepDeadline } from '$lib/server/model';
 import { CLAIM_TTL_MS } from '$lib/server/jobs';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
@@ -116,11 +117,37 @@ describe('chat', () => {
     expect(result.ms).toBeGreaterThanOrEqual(0);
   });
 
+  it("reads the finish reason and id, and names the span for the schema's agent", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json(200, {
+        id: 'chatcmpl-9',
+        choices: [{ finish_reason: 'length', message: { content: '{}' } }],
+        usage: { prompt_tokens: 5, prompt_tokens_details: { cached_tokens: 2 } },
+      }),
+    );
+    const result = await chat(messages, 'chunk_analysis', schema);
+    expect(result).toMatchObject({
+      finishReason: 'length',
+      responseId: 'chatcmpl-9',
+      usage: { prompt_tokens: 5, prompt_tokens_details: { cached_tokens: 2 } },
+    });
+    const options = startSpan.mock.calls.at(-1)![0] as { attributes: Record<string, unknown> };
+    expect(options.attributes['gen_ai.agent.name']).toBe('chunk-analyst');
+  });
+
+  it('reports no finish reason or id when the server omits them', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { choices: [{ message: { content: '{}' } }] }));
+    expect(await chat(messages, 'brand_guide', schema)).toMatchObject({
+      finishReason: null,
+      responseId: null,
+    });
+  });
+
   it('never treats reasoning_content as the answer', async () => {
     fetchMock.mockResolvedValueOnce(
       json(200, { choices: [{ message: { content: null, reasoning_content: '{"a":1}' } }] }),
     );
-    const result = await chat(messages, 's', schema);
+    const result = await chat(messages, 'smart_pick', schema);
     expect(result.content).toBe('');
     expect(result.reasoning).toBe('{"a":1}');
     expect(result.usage).toEqual({});
@@ -128,18 +155,21 @@ describe('chat', () => {
 
   it('tolerates a response without choices', async () => {
     fetchMock.mockResolvedValueOnce(json(200, {}));
-    expect(await chat(messages, 's', schema)).toMatchObject({ content: '', reasoning: '' });
+    expect(await chat(messages, 'smart_pick', schema)).toMatchObject({
+      content: '',
+      reasoning: '',
+    });
   });
 
   it('throws with the status and a truncated body on a non-ok response', async () => {
     fetchMock.mockResolvedValueOnce(new Response('x'.repeat(500), { status: 500 }));
-    const err = (await chat(messages, 's', schema).catch((e: unknown) => e)) as Error;
+    const err = (await chat(messages, 'smart_pick', schema).catch((e: unknown) => e)) as Error;
     expect(err.message).toBe(`llama-server 500: ${'x'.repeat(200)}`);
   });
 
   it('propagates transport errors', async () => {
     fetchMock.mockRejectedValueOnce(new Error('timeout'));
-    await expect(chat(messages, 's', schema)).rejects.toThrow('timeout');
+    await expect(chat(messages, 'smart_pick', schema)).rejects.toThrow('timeout');
   });
 });
 
@@ -150,14 +180,16 @@ describe('step budget', () => {
   });
 
   it('refuses a call once the deadline has passed', async () => {
-    await expect(chat(messages, 's', schema, Date.now() - 1)).rejects.toThrow('ran out of time');
+    await expect(chat(messages, 'smart_pick', schema, Date.now() - 1)).rejects.toThrow(
+      'ran out of time',
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('skips the parse retry when too little budget is left', async () => {
     fetchMock.mockResolvedValueOnce(completion('bad'));
     const isObject = (v: unknown): v is object => typeof v === 'object';
-    const result = await chatJson(messages, 's', schema, isObject, Date.now() + 5_000);
+    const result = await chatJson(messages, 'smart_pick', schema, isObject, Date.now() + 5_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ value: null, raw: 'bad' });
   });
@@ -169,7 +201,7 @@ describe('chatJson', () => {
 
   it('returns the parsed value on the first valid reply', async () => {
     fetchMock.mockResolvedValueOnce(completion('{"ok":true}'));
-    const result = await chatJson(messages, 's', schema, isOk);
+    const result = await chatJson(messages, 'smart_pick', schema, isOk);
     expect(result.value).toEqual({ ok: true });
     expect(result.raw).toBe('{"ok":true}');
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -179,7 +211,7 @@ describe('chatJson', () => {
     fetchMock
       .mockResolvedValueOnce(completion('{"ok":tr'))
       .mockResolvedValueOnce(completion('{"ok":false}'));
-    const result = await chatJson(messages, 's', schema, isOk);
+    const result = await chatJson(messages, 'smart_pick', schema, isOk);
     expect(result.value).toEqual({ ok: false });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -188,14 +220,14 @@ describe('chatJson', () => {
     fetchMock
       .mockResolvedValueOnce(completion('{"ok":"yes"}'))
       .mockResolvedValueOnce(completion('{"ok":true}'));
-    expect((await chatJson(messages, 's', schema, isOk)).value).toEqual({ ok: true });
+    expect((await chatJson(messages, 'smart_pick', schema, isOk)).value).toEqual({ ok: true });
   });
 
   it('keeps the last raw text after two failures instead of throwing', async () => {
     fetchMock
       .mockResolvedValueOnce(completion('first bad'))
       .mockResolvedValueOnce(completion('second bad'));
-    const result = await chatJson(messages, 's', schema, isOk);
+    const result = await chatJson(messages, 'smart_pick', schema, isOk);
     expect(result).toMatchObject({ value: null, raw: 'second bad' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -213,13 +245,15 @@ describe('chatJson', () => {
         clock += 250;
         return completion('bad');
       });
-    const result = await chatJson(messages, 's', schema, isOk, 1_000_000);
+    const result = await chatJson(messages, 'smart_pick', schema, isOk, 1_000_000);
     expect(result.ms).toBe(650);
   });
 
   it('propagates a chat error rather than retrying it', async () => {
     fetchMock.mockResolvedValueOnce(new Response('busy', { status: 503 }));
-    await expect(chatJson(messages, 's', schema, isOk)).rejects.toThrow('llama-server 503');
+    await expect(chatJson(messages, 'smart_pick', schema, isOk)).rejects.toThrow(
+      'llama-server 503',
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

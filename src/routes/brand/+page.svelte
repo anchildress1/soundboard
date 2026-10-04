@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { resolve } from '$app/paths';
   import { approveBrand, discardBrandProposal, proposeBrand } from '$lib/api';
   import {
     BRAND_THUMBNAILS,
@@ -116,6 +117,22 @@
 <svelte:head><title>Brand guide · Soundboard</title></svelte:head>
 
 <main>
+  <section class="channels" aria-labelledby="channels">
+    <h2 id="channels">Upload channels <span>connect once</span></h2>
+    <p>
+      <a
+        class="btn ghost small"
+        href="{resolve('/auth/login')}?connect=nathan"
+        data-sveltekit-reload>Connect Nathan</a
+      >
+      <a
+        class="btn ghost small"
+        href="{resolve('/auth/login')}?connect=sandbox"
+        data-sveltekit-reload>Connect sandbox</a
+      >
+    </p>
+  </section>
+
   <section class="current" aria-labelledby="current">
     <h2 id="current">Approved guide <span>smart pick follows this</span></h2>
     {#if approved}
@@ -196,6 +213,25 @@
     main {
       grid-template-columns: 1fr;
     }
+  }
+
+  .channels {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+  }
+
+  .channels p {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .channels .btn {
+    text-decoration: none;
   }
 
   .current,

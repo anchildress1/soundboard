@@ -12,7 +12,7 @@ import {
   isRawPick,
   measuredFlags,
   runPick,
-  sameTitle,
+  sameText,
   weighFeedback,
   type PickContext,
   type PickFixups,
@@ -290,10 +290,12 @@ describe('buildPickMessages', () => {
 
   it('adds the skipped instruction only when there are skipped versions', () => {
     const without = buildPickMessages(ctx());
-    expect(system(without)).not.toContain('Do not repeat any skipped version');
+    expect(system(without)).not.toContain('skippedVersions were rejected');
     const skipped = [{ title: 'Old Title', description: 'old' }];
     const withSkips = buildPickMessages(ctx({ skipped }));
-    expect(system(withSkips)).toContain('Do not repeat any skipped version');
+    expect(system(withSkips)).toContain(
+      'skippedVersions were rejected. Write a different title and a different description',
+    );
     expect(context(withSkips).skippedVersions).toEqual(skipped);
   });
 
@@ -442,10 +444,15 @@ describe('measuredFlags', () => {
   });
 });
 
-describe('sameTitle', () => {
+describe('sameText', () => {
   it('ignores case and surrounding whitespace', () => {
-    expect(sameTitle(' PeekaBoo ', 'peekaboo')).toBe(true);
-    expect(sameTitle('PeekaBoo', 'PeekaBoo 2')).toBe(false);
+    expect(sameText(' PeekaBoo ', 'peekaboo')).toBe(true);
+    expect(sameText('PeekaBoo', 'PeekaBoo 2')).toBe(false);
+  });
+
+  it('ignores hashtags and inner spacing, so a reshuffled closing line is still a repeat', () => {
+    expect(sameText('Line one.\n\n#synthwave #retro', 'line  one.\n#retro')).toBe(true);
+    expect(sameText('Line one.', 'Line two.')).toBe(false);
   });
 });
 
@@ -774,7 +781,35 @@ describe('runPick', () => {
     expect(second.at(-2)!.role).toBe('assistant');
     expect(second.at(-1)).toEqual({
       role: 'user',
-      content: '"Old Title" was already skipped. Write a different title.',
+      content: 'That title repeats a skipped version. Write a different title.',
+    });
+  });
+
+  it('retries when only the description repeats a skipped version, hashtags aside', async () => {
+    const skippedDescription = 'A bright synth track.\n\n#synthwave #retrowave #newmusic';
+    fetchMock
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'New Title' }))))
+      .mockResolvedValueOnce(
+        reply(JSON.stringify(raw({ title: 'New Title', description: 'A darker take.' }))),
+      );
+    const result = await runPick(
+      ctx({ skipped: [{ title: 'Old Title', description: skippedDescription }] }),
+    );
+    expect(result!.pick.description.startsWith('A darker take.')).toBe(true);
+    expect(sentBodies()[1]!.messages.at(-1)).toEqual({
+      role: 'user',
+      content: 'That description repeats a skipped version. Write a different description.',
+    });
+  });
+
+  it('names both fields when the title and description both repeat', async () => {
+    fetchMock.mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
+    const skipped = [{ title: 'Old Title', description: 'A bright synth track.' }];
+    expect(await runPick(ctx({ skipped }))).toBeNull();
+    expect(sentBodies()[1]!.messages.at(-1)).toEqual({
+      role: 'user',
+      content:
+        'That title and description repeat a skipped version. Write a different title and description.',
     });
   });
 

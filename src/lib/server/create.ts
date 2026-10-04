@@ -1,4 +1,5 @@
 import { TITLE_MAX } from '$lib/metadata';
+import type { JobOwner } from '$lib/types';
 import { ActionError } from './actions';
 import { signedUploadUrl, uploadObjectName } from './gcs';
 import { createJob, MAX_MINUTES, newJobId, type NewJob } from './jobs';
@@ -48,12 +49,17 @@ function parseUpload(input: Exclude<CreateInput, { sampleId: string }>, maxMinut
   };
 }
 
-async function sampleJob(sampleId: string, allowlisted: boolean): Promise<NewJob> {
+export type Who = { allowlisted: boolean; demo: boolean; ip: string };
+
+const ownerFor = (who: Who): JobOwner =>
+  who.allowlisted ? 'nathan' : who.demo ? 'demo' : 'visitor';
+
+async function sampleJob(sampleId: string, owner: JobOwner): Promise<NewJob> {
   const sample = await getSample(String(sampleId));
   if (!sample) throw new ActionError(404, 'That sample is gone.');
   return {
-    owner: allowlisted ? 'nathan' : 'visitor',
-    channel: allowlisted ? 'nathan' : 'sandbox',
+    owner,
+    channel: owner === 'nathan' ? 'nathan' : 'sandbox',
     songTitle: sample.songTitle,
     notes: '',
     filename: `${sample.songTitle}.mp4`,
@@ -66,15 +72,14 @@ async function sampleJob(sampleId: string, allowlisted: boolean): Promise<NewJob
   };
 }
 
-function uploadJob(
-  input: Exclude<CreateInput, { sampleId: string }>,
-  allowlisted: boolean,
-): NewJob {
-  const owner = allowlisted ? 'nathan' : 'visitor';
+// Own videos: Nathan's go to his channel, demo runs to the sandbox, visitor runs nowhere.
+const UPLOAD_CHANNEL = { nathan: 'nathan', demo: 'sandbox', visitor: null } as const;
+
+function uploadJob(input: Exclude<CreateInput, { sampleId: string }>, owner: JobOwner): NewJob {
   return {
     ...parseUpload(input, MAX_MINUTES[owner]),
     owner,
-    channel: allowlisted ? 'nathan' : null,
+    channel: UPLOAD_CHANNEL[owner],
     object: null,
     sampleId: null,
     liveVideoId: null,
@@ -84,23 +89,20 @@ function uploadJob(
 }
 
 /**
- * Creates a job. Allowlisted sessions upload to Nathan's channel with no run caps. Signed-out samples
- * go to the sandbox channel; signed-out own videos end at the would-be payload.
+ * Creates a job. Allowlisted sessions upload to Nathan's channel and demo sessions to the sandbox,
+ * both with no run caps. Signed-out samples go to the sandbox channel; signed-out own videos end at
+ * the would-be payload.
  */
-export async function create(
-  input: CreateInput,
-  who: { allowlisted: boolean; ip: string },
-): Promise<Created> {
+export async function create(input: CreateInput, who: Who): Promise<Created> {
   const id = newJobId();
+  const owner = ownerFor(who);
   const job =
-    'sampleId' in input
-      ? await sampleJob(input.sampleId, who.allowlisted)
-      : uploadJob(input, who.allowlisted);
+    'sampleId' in input ? await sampleJob(input.sampleId, owner) : uploadJob(input, owner);
   // Signing can fail (IAM); do it before a visitor run is charged or a job is stored.
   const uploadUrl = job.object
     ? null
     : await signedUploadUrl(uploadObjectName(id), job.contentType);
-  if (!who.allowlisted) {
+  if (owner === 'visitor') {
     job.ipHash = hashIp(who.ip);
     const blocked = await reserveVisitorRun(job.ipHash);
     if (blocked) throw new ActionError(429, blocked);

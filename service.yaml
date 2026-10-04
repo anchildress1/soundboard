@@ -41,6 +41,8 @@ spec:
               value: ${GOOGLE_OAUTH_CLIENT_ID}
             - name: ALLOWLIST_EMAILS
               value: ${ALLOWLIST_EMAILS}
+            - name: DEMO_EMAILS
+              value: ${DEMO_EMAILS}
             - name: PUBLIC_SENTRY_DSN
               value: ${PUBLIC_SENTRY_DSN}
             # Cloud Run terminates TLS and appends the client to X-Forwarded-For; adapter-node reads

@@ -61,6 +61,14 @@
   li {
     padding: 5px 8px;
     background: var(--well);
+    animation: pop 0.3s ease-out both;
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
   }
 
   p {

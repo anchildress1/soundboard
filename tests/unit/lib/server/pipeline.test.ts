@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
+import { captureException } from '../../../mocks/sentry';
 import { resetClients } from '$lib/server/clients';
 import { MAX_MINUTES, type JobDoc } from '$lib/server/jobs';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline';
@@ -632,6 +633,28 @@ describe('runStep: PICK', () => {
     expect(called(/i\.ytimg\.com/)).toHaveLength(4);
   });
 
+  it("reads Nathan's memory for a demo job without writing any of it", async () => {
+    store.set('artists/flr/feedback/f1', {
+      kind: 'EDITED',
+      jobId: 'old',
+      songTitle: 'Earlier',
+      pickVersion: 1,
+      field: 'title',
+      before: 'A',
+      after: 'B',
+      at: 5,
+    });
+    const before = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    await runStep(seed({ state: 'PICK', owner: 'demo', channel: 'sandbox' }));
+    expect(saved().state).toBe('REVIEW');
+    const ctx = context();
+    expect(ctx.feedback).toHaveLength(1);
+    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
+    const after = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    expect(after).toEqual(before);
+    expect(store.has('artists/flr/facts/home')).toBe(false);
+  });
+
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
     store.set('artists/flr/feedback/f1', {
       kind: 'EDITED',
@@ -643,7 +666,13 @@ describe('runStep: PICK', () => {
       after: 'B',
       at: 5,
     });
-    store.set('jobs/j1/pick/0001', { ...RAW_PICK, title: 'Old Title', version: 1, skipped: true });
+    store.set('jobs/j1/pick/0001', {
+      ...RAW_PICK,
+      title: 'Old Title',
+      description: 'An older description.',
+      version: 1,
+      skipped: true,
+    });
     store.set('jobs/j1/pick/0002', { ...RAW_PICK, title: 'Second', version: 2, skipped: false });
     await runStep(
       seed({
@@ -679,7 +708,7 @@ describe('runStep: PICK', () => {
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     expect(ctx.feedback).toHaveLength(1);
     expect(ctx.skippedVersions).toEqual([
-      { title: 'Old Title', description: RAW_PICK.description },
+      { title: 'Old Title', description: 'An older description.' },
     ]);
     expect(store.has('artists/flr/facts/home')).toBe(true);
   });
@@ -712,6 +741,18 @@ describe('runStep: PICK', () => {
     expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect(saved().error).toBe('The model reply did not parse as a recommendation.');
     expect(store.has('jobs/j1/pick/0001')).toBe(false);
+  });
+
+  it('reports the original model error to Sentry, not the evidence-carrying wrapper', async () => {
+    captureException.mockClear();
+    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    await runStep(seed({ state: 'PICK' }));
+    expect(captureException).toHaveBeenCalledTimes(1);
+    const [reported, context] = captureException.mock.calls[0]!;
+    expect(reported).toBeInstanceOf(Error);
+    expect((reported as Error).constructor.name).toBe('Error');
+    expect((reported as Error).message).toBe('The model reply did not parse as a recommendation.');
+    expect(context).toEqual({ tags: { step: 'PICK' } });
   });
 
   it('keeps the genre search when the model fails, so the retry does not search again', async () => {

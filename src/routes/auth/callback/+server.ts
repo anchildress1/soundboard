@@ -2,6 +2,7 @@ import { error, redirect } from '@sveltejs/kit';
 import {
   exchangeCode,
   isAllowlisted,
+  isDemo,
   OAUTH_COOKIE,
   SESSION_COOKIE,
   SESSION_TTL_SEC,
@@ -32,7 +33,7 @@ export const GET: RequestHandler = async ({ url, cookies, locals }) => {
     redirect(303, `/?connected=${state.channel}`);
   }
 
-  if (!isAllowlisted(email)) redirect(303, '/?signin=denied');
+  if (!isAllowlisted(email) && !isDemo(email)) redirect(303, '/?signin=denied');
   cookies.set(SESSION_COOKIE, sessionCookie(email), {
     path: '/',
     httpOnly: true,

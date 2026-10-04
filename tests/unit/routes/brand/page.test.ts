@@ -42,6 +42,18 @@ afterEach(() => {
 });
 
 describe('brand page: approved guide', () => {
+  it('offers the one-time channel connect links', () => {
+    setup();
+    expect(screen.getByRole('link', { name: 'Connect Nathan' })).toHaveAttribute(
+      'href',
+      '/auth/login?connect=nathan',
+    );
+    expect(screen.getByRole('link', { name: 'Connect sandbox' })).toHaveAttribute(
+      'href',
+      '/auth/login?connect=sandbox',
+    );
+  });
+
   it('says smart pick follows the recent uploads until a guide is approved', () => {
     setup();
     expect(screen.getByText(/None yet/)).toBeInTheDocument();

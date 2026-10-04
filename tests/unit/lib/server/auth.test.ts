@@ -6,6 +6,7 @@ import {
   CHANNEL_SCOPES,
   exchangeCode,
   isAllowlisted,
+  isDemo,
   newOAuthState,
   oauthClient,
   readSession,
@@ -111,14 +112,38 @@ describe('isAllowlisted', () => {
   });
 });
 
+describe('isDemo', () => {
+  it('matches demo accounts case-insensitively, and allowlisting wins', () => {
+    vi.stubEnv('DEMO_EMAILS', 'Demo@Example.com, nathan@example.com');
+    expect(isDemo(' demo@example.COM ')).toBe(true);
+    expect(isDemo('nathan@example.com')).toBe(false);
+    expect(isDemo('stranger@example.com')).toBe(false);
+  });
+
+  it('has no demo accounts when DEMO_EMAILS is unset', () => {
+    vi.stubEnv('DEMO_EMAILS', '');
+    expect(isDemo('demo@example.com')).toBe(false);
+  });
+});
+
 describe('readSession', () => {
   const NOW = 1_800_000_000_000;
+
+  it('reads a demo session as demo, not allowlisted', () => {
+    vi.stubEnv('DEMO_EMAILS', 'demo@example.com');
+    expect(readSession(sessionCookie('demo@example.com', NOW), NOW)).toEqual({
+      email: 'demo@example.com',
+      allowlisted: false,
+      demo: true,
+    });
+  });
 
   it('reads a fresh allowlisted session', () => {
     const cookie = sessionCookie('Nathan@Example.com', NOW);
     expect(readSession(cookie, NOW + 1000)).toEqual({
       email: 'Nathan@Example.com',
       allowlisted: true,
+      demo: false,
     });
   });
 
@@ -126,6 +151,7 @@ describe('readSession', () => {
     expect(readSession(sessionCookie('v@example.com', NOW), NOW)).toEqual({
       email: 'v@example.com',
       allowlisted: false,
+      demo: false,
     });
   });
 

@@ -114,7 +114,7 @@
 - Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
-- [ ] Each re-run produces a new title.
+- [ ] Each re-run produces a new title and a new description; a repeat of a skipped version is retried once, then fails the pick.
 
 **R6 · Upload and verify**
 
@@ -145,6 +145,8 @@
 **R10 · Auth**
 
 - Google sign-in with an allowlist (Nathan, Ashley) targets Nathan's channel. YouTube refresh tokens live in Secret Manager.
+- Demo accounts (`DEMO_EMAILS`) sign in and run like Nathan: 15-minute videos, no visitor caps, picks that read his memory. They never write it: feedback stays on the job, nothing lands in `artists/*`. Approvals upload private to the sandbox channel on the visitor quota. No brand guide, channel connect, or access to Nathan's jobs.
+- Any other Google account is turned away with a notice and stays signed out.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays: Advanced → Continue (tell Nathan).
 - Redirect URI is set to the deployed URL after the first deploy.
 - Firestore security rules deny all client access; only the app's service account reads and writes.
@@ -158,6 +160,7 @@
 - The hashtag search is an `execute_tool hashtag_search` span inside `smart-pick`, with the query and candidate count.
 - Audio and images are recorded as placeholders, keeping Nathan's audio out of Sentry.
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
+- Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
 - [ ] Screenshots for the post: a full trace and a failed run.
 
@@ -201,7 +204,7 @@ One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
 
 Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg). One screen, dark only.
 
-- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and the FLR channel stats from `channels.list` top right.
+- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution, and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
@@ -213,8 +216,13 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - Visibility shown as **Private** (fixed: uploads are private).
   - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
 - **Under 820px:** panes stack, tape first.
+- **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
+- **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
+- **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.
+- **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
+- **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.
-- **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #1f6fe8`, `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
+- **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #2e8cff` (neon), `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
 - **Type:** Mr Dafoe wordmark, Rubik 700/900 labels and buttons, Inter body, JetBrains Mono for tags, counters, and metadata.
 - **Mockup copy that the build replaces:** hashtags in the tags field (they move to the description; tags are plain terms), "118 bpm" and lyric fragments in "What the model heard" (numbers come from ffmpeg; lyrics are a non-goal), "last 10 uploads" (the grounding is the genre search), the Public/Scheduled/Unlisted options, the Playlist picker, and "Live on YouTube".
 

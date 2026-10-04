@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import * as Sentry from '@sentry/sveltekit';
 import type { Measurements, Probe } from '$lib/types';
 
 /** Gemma's audio input caps at 30 s; each analyze step reads one window this long. */
@@ -13,7 +14,24 @@ const MEASURE_FILTER = `ebur128=peak=true:framelog=verbose,aformat=sample_fmts=s
 
 type RunResult = { stdout: Buffer; stderr: string; fd3: Buffer };
 
-function run(command: string, args: string[], timeoutMs: number): Promise<RunResult> {
+type Task = 'probe' | 'measure' | 'window';
+
+/**
+ * Runs ffmpeg or ffprobe inside a span named for the task. The arguments carry the signed source URL,
+ * so they never reach the span.
+ */
+function run(task: Task, command: string, args: string[], timeoutMs: number): Promise<RunResult> {
+  return Sentry.startSpan(
+    {
+      op: 'process.ffmpeg',
+      name: `${command} ${task}`,
+      attributes: { 'process.executable.name': command, 'ffmpeg.task': task },
+    },
+    () => spawnRun(command, args, timeoutMs),
+  );
+}
+
+function spawnRun(command: string, args: string[], timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
@@ -100,6 +118,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 export async function probe(url: string): Promise<Probe> {
   const { stdout } = await run(
+    'probe',
     'ffprobe',
     ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', url],
     60_000,
@@ -110,6 +129,7 @@ export async function probe(url: string): Promise<Probe> {
 /** Whole-file loudness, true peak, clipping, and silence, reading the source by range requests. */
 export async function measureFile(url: string, durationSec: number): Promise<Measurements> {
   const { stderr } = await run(
+    'measure',
     'ffmpeg',
     [
       '-hide_banner',
@@ -160,6 +180,7 @@ export async function extractWindow(
     `[0:v:0]fps=${fps},scale=-2:360[v]`,
   ].join(';');
   const { stdout, stderr, fd3 } = await run(
+    'window',
     'ffmpeg',
     [
       '-hide_banner',

@@ -64,12 +64,13 @@ describe('layout load', () => {
     expect((await run(null)).channel).toBeNull();
   });
 
-  it('passes only the email and allowlist flag of the session', async () => {
+  it('passes only the email, allowlist, and demo flags of the session', async () => {
     fetchMock.mockRejectedValue(new Error('offline'));
-    const session = { email: 'nathan@example.com', allowlisted: true, extra: 'x' };
+    const session = { email: 'nathan@example.com', allowlisted: true, demo: false, extra: 'x' };
     expect((await run(session as App.Locals['session'])).session).toEqual({
       email: 'nathan@example.com',
       allowlisted: true,
+      demo: false,
     });
   });
 });

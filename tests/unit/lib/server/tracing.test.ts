@@ -5,20 +5,16 @@ import {
   chatSpan,
   invokeAgent,
   MODEL_NAME,
+  PIPELINE,
   PROVIDER,
   redactMessages,
   startJobTrace,
   toolSpan,
   type ChatMessage,
+  type ChatReply,
 } from '$lib/server/tracing';
 
-const span = { setAttribute: vi.fn(), setAttributes: vi.fn() };
-
-vi.mock('@sentry/sveltekit', () => ({
-  startSpan: vi.fn((_options: unknown, fn: (s: unknown) => unknown) => fn(span)),
-  startNewTrace: vi.fn((fn: () => unknown) => fn()),
-  getTraceData: vi.fn(() => ({})),
-}));
+import { span } from '../../../mocks/sentry';
 
 const startSpan = vi.mocked(Sentry.startSpan);
 const getTraceData = vi.mocked(Sentry.getTraceData);
@@ -115,6 +111,7 @@ describe('invokeAgent', () => {
       attributes: {
         'gen_ai.operation.name': 'invoke_agent',
         'gen_ai.agent.name': 'chunk-analyst',
+        'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.request.model': MODEL_NAME,
         'gen_ai.provider.name': PROVIDER,
       },
@@ -131,11 +128,23 @@ describe('invokeAgent', () => {
 });
 
 describe('chatSpan', () => {
-  it('records redacted input, parameters, output, and token usage', async () => {
-    const result = await chatSpan(multimodal, { temperature: 0.2, maxTokens: 2048 }, async () => ({
-      content: '{"visual":"neon"}',
-      usage: { prompt_tokens: 900, completion_tokens: 120, total_tokens: 1020 },
-    }));
+  const PARAMS = { agent: 'chunk-analyst', temperature: 0.2, maxTokens: 2048 } as const;
+  const reply = (over: Partial<ChatReply> = {}): ChatReply => ({
+    content: '{"visual":"neon"}',
+    reasoning: '',
+    usage: {
+      prompt_tokens: 900,
+      completion_tokens: 120,
+      total_tokens: 1020,
+      prompt_tokens_details: { cached_tokens: 300 },
+    },
+    finishReason: 'stop',
+    responseId: 'chatcmpl-1',
+    ...over,
+  });
+
+  it('records the agent, parameters, system instructions, and redacted input', async () => {
+    const result = await chatSpan(multimodal, PARAMS, async () => reply());
     expect(result.content).toBe('{"visual":"neon"}');
 
     const options = lastOptions();
@@ -143,43 +152,72 @@ describe('chatSpan', () => {
     expect(options.name).toBe(`chat ${MODEL_NAME}`);
     expect(options.attributes).toMatchObject({
       'gen_ai.operation.name': 'chat',
+      'gen_ai.provider.name': PROVIDER,
+      'gen_ai.request.model': MODEL_NAME,
+      'gen_ai.agent.name': 'chunk-analyst',
+      'gen_ai.pipeline.name': PIPELINE,
       'gen_ai.request.temperature': 0.2,
       'gen_ai.request.max_tokens': 2048,
-      'gen_ai.request.model': MODEL_NAME,
     });
+    expect(options.attributes).not.toHaveProperty('gen_ai.system');
+    expect(JSON.parse(options.attributes['gen_ai.system_instructions'] as string)).toEqual([
+      { type: 'text', content: 'Instructions' },
+    ]);
     const input = options.attributes['gen_ai.input.messages'] as string;
-    expect(JSON.parse(input)).toEqual(redactMessages(multimodal));
+    expect(JSON.parse(input)).toEqual(redactMessages(multimodal.slice(1)));
+    expect(input).not.toContain('Instructions');
     expect(input).not.toContain(IMAGE_B64);
     expect(input).not.toContain(AUDIO_B64);
+  });
 
+  it('records the reply, think block, finish reason, id, and every token count', async () => {
+    await chatSpan(multimodal, PARAMS, async () =>
+      reply({
+        reasoning: 'thinking',
+        usage: { ...reply().usage, completion_tokens_details: { reasoning_tokens: 40 } },
+      }),
+    );
+    expect(span.setAttributes).toHaveBeenCalledWith({
+      'gen_ai.response.model': MODEL_NAME,
+      'gen_ai.output.messages': JSON.stringify([
+        {
+          role: 'assistant',
+          parts: [
+            { type: 'reasoning', content: 'thinking' },
+            { type: 'text', content: '{"visual":"neon"}' },
+          ],
+          finish_reason: 'stop',
+        },
+      ]),
+      'gen_ai.response.finish_reasons': ['stop'],
+      'gen_ai.response.id': 'chatcmpl-1',
+      'gen_ai.usage.input_tokens': 900,
+      'gen_ai.usage.output_tokens': 120,
+      'gen_ai.usage.total_tokens': 1020,
+      'gen_ai.usage.cache_read.input_tokens': 300,
+      'gen_ai.usage.reasoning.output_tokens': 40,
+    });
+  });
+
+  it('omits system instructions, finish reason, id, and token details the server did not send', async () => {
+    await chatSpan([{ role: 'user', content: 'hi' }], PARAMS, async () =>
+      reply({ usage: {}, finishReason: null, responseId: null }),
+    );
+    expect(lastOptions().attributes).not.toHaveProperty('gen_ai.system_instructions');
     expect(span.setAttributes).toHaveBeenCalledWith({
       'gen_ai.response.model': MODEL_NAME,
       'gen_ai.output.messages': JSON.stringify([
         { role: 'assistant', parts: [{ type: 'text', content: '{"visual":"neon"}' }] },
       ]),
-      'gen_ai.usage.input_tokens': 900,
-      'gen_ai.usage.output_tokens': 120,
-      'gen_ai.usage.total_tokens': 1020,
+      'gen_ai.usage.input_tokens': 0,
+      'gen_ai.usage.output_tokens': 0,
+      'gen_ai.usage.total_tokens': 0,
     });
-  });
-
-  it('records zero tokens when usage is missing', async () => {
-    await chatSpan([], { temperature: 0.2, maxTokens: 2048 }, async () => ({
-      content: '',
-      usage: {},
-    }));
-    expect(span.setAttributes).toHaveBeenCalledWith(
-      expect.objectContaining({
-        'gen_ai.usage.input_tokens': 0,
-        'gen_ai.usage.output_tokens': 0,
-        'gen_ai.usage.total_tokens': 0,
-      }),
-    );
   });
 
   it('sets no output attributes when the call fails', async () => {
     await expect(
-      chatSpan([], { temperature: 0.2, maxTokens: 2048 }, async () => {
+      chatSpan([], PARAMS, async () => {
         throw new Error('llama-server 500');
       }),
     ).rejects.toThrow('llama-server 500');
@@ -204,6 +242,7 @@ describe('toolSpan', () => {
       name: 'execute_tool hashtag_search',
       attributes: {
         'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.agent.name': 'smart-pick',
         'gen_ai.tool.name': 'hashtag_search',
         'gen_ai.tool.call.arguments': '{"query":"synthwave music video"}',

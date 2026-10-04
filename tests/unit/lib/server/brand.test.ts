@@ -323,7 +323,8 @@ describe('reads', () => {
 describe('requireAllowlisted', () => {
   it.each([
     ['signed out', null],
-    ['not allowlisted', { email: 'v@example.com', allowlisted: false }],
+    ['not allowlisted', { email: 'v@example.com', allowlisted: false, demo: false }],
+    ['a demo account', { email: 'd@example.com', allowlisted: false, demo: true }],
   ])('404s when %s', (_label, session) => {
     let thrown: unknown;
     try {
@@ -335,6 +336,8 @@ describe('requireAllowlisted', () => {
   });
 
   it('lets an allowlisted session through', () => {
-    expect(() => requireAllowlisted({ email: 'n@example.com', allowlisted: true })).not.toThrow();
+    expect(() =>
+      requireAllowlisted({ email: 'n@example.com', allowlisted: true, demo: false }),
+    ).not.toThrow();
   });
 });
