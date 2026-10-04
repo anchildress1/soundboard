@@ -29,7 +29,7 @@ function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
   return { ...utils, onapprove, onrerun, ondiscard };
 }
 
-const title = () => screen.getByLabelText('Title') as HTMLInputElement;
+const title = () => screen.getByLabelText(/^Title/) as HTMLInputElement;
 const description = () => screen.getByLabelText(/^Description/) as HTMLTextAreaElement;
 const tags = () => screen.getByLabelText(/^Tags/) as HTMLTextAreaElement;
 const approveButton = () => screen.getByRole('button', { name: 'Approve & upload' });
