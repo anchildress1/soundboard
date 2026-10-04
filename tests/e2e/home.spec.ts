@@ -40,6 +40,8 @@ test.describe('home page', () => {
   test('stacks the tape above the form on phones and side by side on desktop', async ({
     page,
   }, testInfo) => {
+    // Measure the settled layout: the sections ease in on load, a beat apart.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
     const tape = await page.getByRole('region', { name: 'The video' }).boundingBox();
     const form = await page.getByRole('form', { name: 'Start a run' }).boundingBox();
