@@ -52,5 +52,10 @@ export function validateFields(
 
   const length = tagsLength(fields.tags);
   if (length > TAGS_MAX) errors.tags = `Tags are ${length} / ${TAGS_MAX} characters.`;
+  else if (fields.tags.some((tag) => /[<>]/.test(tag)))
+    errors.tags = 'YouTube rejects < and > in tags.';
+  else if (fields.tags.some((tag) => tag.startsWith('#'))) {
+    errors.tags = 'Tags are plain terms; hashtags belong in the description.';
+  }
   return errors;
 }

@@ -10,7 +10,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
     const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
     const body = await readBody(request);
     const tags = Array.isArray(body.tags)
-      ? body.tags.map(String)
+      ? body.tags.map((tag) => String(tag).trim()).filter(Boolean)
       : splitTags(String(body.tags ?? ''));
     await approve(job, {
       title: String(body.title ?? ''),

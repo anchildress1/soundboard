@@ -5,20 +5,29 @@
 const AUDIO_NUMBER = /(?<![\d.,])[-+−]?\d+(?:[.,]\d+)? ?(?:db[a-z]{0,2}|lufs|lkfs|lu|bpm|k?hz)\b/gi;
 
 // Clipping and silence figures carry no unit of their own ("12 clipped samples", "silence from 4s
-// to 7s"), so any count or time in a string that mentions them is dropped too.
-const MEASURE_WORDS = /\b(?:clip|silen|dropout)/i;
-const COUNT_OR_TIME = /(?<![\w.,:])\d+(?:[.,:]\d+)? ?(?:ms|s|sec|seconds?|samples?)?\b/gi;
+// to 7s"), so counts and times are dropped from any sentence that is about them. "clipp" skips
+// "video clip"; the lookbehind leaves dates, versions, and URL paths alone.
+const MEASURE_WORDS = /\b(?:clipp|silen|dropout)/i;
+const COUNT_OR_TIME = /(?<![\w.,:/])\d+(?:[.,:]\d+)? ?(?:ms|s|sec|seconds?|samples?)?\b/gi;
+
+const stripMeasuredCounts = (sentence: string) =>
+  MEASURE_WORDS.test(sentence) ? sentence.replaceAll(COUNT_OR_TIME, '') : sentence;
 
 /** Removes model-emitted audio-engineering numbers from one string. */
 export function stripNumerics(text: string): string {
-  const united = text.replaceAll(AUDIO_NUMBER, '');
-  const measured = MEASURE_WORDS.test(united) ? united.replaceAll(COUNT_OR_TIME, '') : united;
-  return measured
-    .replaceAll('( )', '')
-    .replaceAll('()', '')
-    .replaceAll(/[ \t]{2,}/g, ' ')
-    .replaceAll(/ ([,.;:)])/g, '$1')
-    .trim();
+  return (
+    text
+      .replaceAll(AUDIO_NUMBER, '')
+      // Sentence ends need trailing whitespace, so decimals like 7.5 stay whole.
+      .split(/(?<=[.!?]\s|\n)/)
+      .map(stripMeasuredCounts)
+      .join('')
+      .replaceAll('( )', '')
+      .replaceAll('()', '')
+      .replaceAll(/[ \t]{2,}/g, ' ')
+      .replaceAll(/ ([,.;:)])/g, '$1')
+      .trim()
+  );
 }
 
 /** Applies `stripNumerics` to every string inside a JSON-shaped value. */

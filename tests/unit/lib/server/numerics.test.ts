@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { stripDeep, stripNumerics } from '$lib/server/numerics';
 
 describe('stripNumerics', () => {
+  it('leaves dates and URL paths alone when a sentence only says video clip', () => {
+    const text = 'Official video clip. Out 10/31/2024 at https://flr.example/2024/tour';
+    expect(stripNumerics(text)).toBe(text);
+  });
+
+  it('scopes clipping counts to their own sentence', () => {
+    expect(stripNumerics('Clipping at 0 dBFS. Shot in 2024 over 3 days.')).toBe(
+      'Clipping at. Shot in 2024 over 3 days.',
+    );
+  });
+
   it('drops counts and times from clipping and silence remarks', () => {
     expect(stripNumerics('12 clipped samples in the chorus')).toBe('clipped samples in the chorus');
     expect(stripNumerics('Silence from 4s to 7.5 s, dropout at 1:02')).toBe(
