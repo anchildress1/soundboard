@@ -426,24 +426,24 @@ describe('shortFilter', () => {
     expect(SHORT_WIDTH / SHORT_HEIGHT).toBeCloseTo(9 / 16);
     expect(graph).toContain('split=2[bg][fg]');
     expect(graph).toContain(
-      '[bg]scale=180:320:force_original_aspect_ratio=increase,crop=180:320,boxblur=8:2,scale=720:1280',
+      '[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8:2,scale=1080:1920',
     );
-    expect(graph).toContain('[fg]scale=720:1280:force_original_aspect_ratio=decrease');
+    expect(graph).toContain('[fg]scale=1080:1920:force_original_aspect_ratio=decrease');
     expect(graph).toContain('overlay=(W-w)/2:(H-h)/2[v]');
     expect(graph).toMatch(/^\[0:v:0\]fps=30,/);
   });
 
-  it('center crop fills 720x1280 from the middle of the frame', () => {
+  it('center crop fills 1080x1920 from the middle of the frame', () => {
     expect(shortFilter('crop')).toBe(
-      '[0:v:0]fps=30,scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1[v]',
+      '[0:v:0]fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v]',
     );
   });
 });
 
 describe('renderShort', () => {
-  it('cuts the hook and PUTs a fragmented MP4 straight to the signed URL', async () => {
+  it('cuts the hook into a local MP4 with its index up front', async () => {
     nextRun({});
-    await renderShort('https://storage.example/src', 'https://storage.example/put', {
+    await renderShort('https://storage.example/src', '/tmp/short-s1-1.mp4', {
       startSec: 40,
       lengthSec: 30,
       reframe: 'crop',
@@ -455,12 +455,10 @@ describe('renderShort', () => {
     expect(args![args!.indexOf('-i') + 1]).toBe('https://storage.example/src');
     expect(args![args!.indexOf('-filter_complex') + 1]).toBe(shortFilter('crop'));
     expect(args).toEqual(expect.arrayContaining(['-map', '[v]', '-map', '0:a:0']));
-    expect(args![args!.indexOf('-movflags') + 1]).toBe(
-      '+frag_keyframe+empty_moov+default_base_moof',
-    );
-    expect(args![args!.indexOf('-method') + 1]).toBe('PUT');
-    expect(args![args!.indexOf('-content_type') + 1]).toBe('video/mp4');
-    expect(args!.at(-1)).toBe('https://storage.example/put');
+    expect(args![args!.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(args![args!.indexOf('-preset') + 1]).toBe('veryfast');
+    expect(args).toContain('-y');
+    expect(args!.at(-1)).toBe('/tmp/short-s1-1.mp4');
   });
 
   it('uses the blur graph for blur fill', async () => {

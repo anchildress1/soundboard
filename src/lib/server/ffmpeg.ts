@@ -271,12 +271,9 @@ export async function loudnessCurve(
   return parseLoudness(stderr, startSec);
 }
 
-/**
- * 720x1280 keeps a 60-second render on the app container's 2 vCPUs well inside the step budget;
- * 1080x1920 takes about twice as long.
- */
-export const SHORT_WIDTH = 720;
-export const SHORT_HEIGHT = 1280;
+/** YouTube's recommended Shorts frame. */
+export const SHORT_WIDTH = 1080;
+export const SHORT_HEIGHT = 1920;
 const SHORT_FPS = 30;
 
 /**
@@ -298,14 +295,13 @@ export function shortFilter(reframe: Reframe): string {
 }
 
 /**
- * Cuts and reframes the Short from the source URL straight into a signed GCS PUT, so neither the
- * source nor the render passes through the app. An HTTP output can't seek back to write the index,
- * so the MP4 is fragmented. ffmpeg exits 0 even when the PUT is refused: the caller must read the
- * object back.
+ * Cuts and reframes the Short from the source URL into a local MP4 with its index up front, so it
+ * plays and seeks before it finishes loading. `veryfast` keeps a 60-second cut inside one step on
+ * the app container's 2 vCPUs.
  */
 export async function renderShort(
   sourceUrl: string,
-  targetUrl: string,
+  outPath: string,
   cut: { startSec: number; lengthSec: number; reframe: Reframe },
 ): Promise<void> {
   await run(
@@ -316,6 +312,7 @@ export async function renderShort(
       '-nostats',
       '-loglevel',
       'error',
+      '-y',
       '-ss',
       cut.startSec.toFixed(3),
       '-t',
@@ -341,14 +338,8 @@ export async function renderShort(
       '-b:a',
       '192k',
       '-movflags',
-      '+frag_keyframe+empty_moov+default_base_moof',
-      '-f',
-      'mp4',
-      '-method',
-      'PUT',
-      '-content_type',
-      'video/mp4',
-      targetUrl,
+      '+faststart',
+      outPath,
     ],
     100_000,
   );

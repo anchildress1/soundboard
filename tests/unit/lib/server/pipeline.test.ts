@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   objects: new Map<string, { size?: string; contentType?: string }>(),
   secrets: new Map<string, string>(),
   spawn: vi.fn(),
+  upload: vi.fn(),
 }));
 
 vi.mock('@google-cloud/firestore', async () =>
@@ -24,6 +25,7 @@ vi.mock('@google-cloud/storage', () => ({
   Storage: class {
     bucket(name: string) {
       return {
+        upload: h.upload,
         file: (object: string) => ({
           getSignedUrl: async ({ action }: { action: string }) => [
             `https://storage.googleapis.com/${name}/${object}?sig=${action}`,
@@ -1049,19 +1051,18 @@ describe('runStep: Short', () => {
       });
     }
     h.objects.set('uploads/p1', { size: '9000', contentType: 'video/mp4' });
+    h.upload.mockReset();
+    h.upload.mockResolvedValue([{}]);
     h.spawn.mockImplementation((command: string, args: string[]) => {
       if (command === 'ffprobe') {
         return child({
           stdout: JSON.stringify({
             format: { duration: '30' },
-            streams: [{ codec_type: 'video', width: 720, height: 1280 }, { codec_type: 'audio' }],
+            streams: [{ codec_type: 'video', width: 1080, height: 1920 }, { codec_type: 'audio' }],
           }),
         });
       }
-      if (args.includes('-method')) {
-        h.objects.set(args.at(-1)!.split('/bkt/')[1]!.split('?')[0]!, { size: '4000' });
-        return child({});
-      }
+      if (args.includes('-movflags')) return child({});
       return child({ stderr: loudLines(56, 90.5, 70) });
     });
   });
@@ -1086,7 +1087,7 @@ describe('runStep: Short', () => {
     expect(saved()).toMatchObject({
       state: 'REVIEW',
       object: 'uploads/j1-1',
-      probe: { width: 720, height: 1280 },
+      probe: { width: 1080, height: 1920 },
       short: { renders: 1 },
       claim: null,
     });
@@ -1124,8 +1125,8 @@ describe('runStep: Short', () => {
     });
   });
 
-  it('fails the render when the PUT never reached storage', async () => {
-    h.spawn.mockImplementation(() => child({}));
+  it('fails the render when the upload to storage is refused', async () => {
+    h.upload.mockRejectedValue(new Error('403 Forbidden'));
     const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
     const job = seed({
       state: 'RENDER',
@@ -1137,7 +1138,7 @@ describe('runStep: Short', () => {
     expect(saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'RENDER',
-      error: 'The rendered Short never reached storage.',
+      error: '403 Forbidden',
     });
   });
 });

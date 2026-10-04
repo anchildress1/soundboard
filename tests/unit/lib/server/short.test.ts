@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
+import { existsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
 import { startSpan } from '../../../mocks/sentry';
@@ -21,6 +24,7 @@ import type { Chunk, Short } from '$lib/types';
 const h = vi.hoisted(() => ({
   objects: new Set<string>(),
   spawn: vi.fn(),
+  upload: vi.fn(),
 }));
 
 vi.mock('@google-cloud/firestore', async () =>
@@ -31,6 +35,7 @@ vi.mock('@google-cloud/storage', () => ({
   Storage: class {
     bucket(name: string) {
       return {
+        upload: h.upload,
         file: (object: string) => ({
           getSignedUrl: async ({ action }: { action: string }) => [
             `https://storage.googleapis.com/${name}/${object}?sig=${action}`,
@@ -187,6 +192,10 @@ beforeEach(() => {
   resetStore();
   resetClients();
   h.objects.clear();
+  h.upload.mockReset();
+  h.upload.mockImplementation(async (_path: string, { destination }: { destination: string }) => {
+    h.objects.add(destination);
+  });
   startSpan.mockClear();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
@@ -196,14 +205,14 @@ beforeEach(() => {
     probe: {
       stdout: JSON.stringify({
         format: { duration: '30.07' },
-        streams: [{ codec_type: 'video', width: 720, height: 1280 }, { codec_type: 'audio' }],
+        streams: [{ codec_type: 'video', width: 1080, height: 1920 }, { codec_type: 'audio' }],
       }),
     },
   };
   h.spawn.mockReset();
   h.spawn.mockImplementation((command: string, args: string[]) => {
     const run =
-      command === 'ffprobe' ? runs.probe : args.includes('-method') ? runs.render : runs.loudness;
+      command === 'ffprobe' ? runs.probe : args.includes('-movflags') ? runs.render : runs.loudness;
     run.onRun?.(args);
     return child(run);
   });
@@ -480,54 +489,65 @@ describe('hookStep', () => {
 
 describe('renderStep', () => {
   const HOOK = { window: 2, startSec: 70, lengthSec: 30, reason: 'Chorus.' };
+  /** The render writes a real temp file, so the test can see it is cleaned up. */
+  const writesFile = (args: string[]) => writeFileSync(args.at(-1)!, 'mp4');
 
-  it('renders into a fresh object, reads it back, and moves to REVIEW', async () => {
-    runs.render.onRun = () => h.objects.add('uploads/s1-1');
+  it('renders to a temp file, uploads it to a fresh object, reads it back, and moves to REVIEW', async () => {
+    runs.render.onRun = writesFile;
     const patch = await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, reframe: 'crop' }));
     expect(patch).toMatchObject({
       state: 'REVIEW',
       object: 'uploads/s1-1',
-      probe: { durationSec: 30.07, width: 720, height: 1280, hasAudio: true },
+      probe: { durationSec: 30.07, width: 1080, height: 1920, hasAudio: true },
       short: { renders: 1, hook: HOOK, reframe: 'crop' },
       consecutiveFailures: 0,
       error: null,
     });
     const args = h.spawn.mock.calls[0]![1] as string[];
+    const local = args.at(-1)!;
+    expect(local).toBe(join(tmpdir(), 'short-s1-1.mp4'));
     expect(args[args.indexOf('-i') + 1]).toContain('/uploads/p1?sig=read');
-    expect(args.at(-1)).toContain('/uploads/s1-1?sig=write');
     expect(args[args.indexOf('-ss') + 1]).toBe('70.000');
     expect(args[args.indexOf('-t') + 1]).toBe('30.000');
-    expect(args[args.indexOf('-filter_complex') + 1]).toContain('crop=720:1280');
+    expect(args[args.indexOf('-filter_complex') + 1]).toContain('crop=1080:1920');
+    expect(h.upload).toHaveBeenCalledWith(local, {
+      destination: 'uploads/s1-1',
+      contentType: 'video/mp4',
+    });
+    const probeArgs = h.spawn.mock.calls[1]![1] as string[];
+    expect(probeArgs.at(-1)).toContain('/uploads/s1-1?sig=read');
+    expect(existsSync(local)).toBe(false);
   });
 
-  it('numbers each re-render, so an older render cannot pass the read-back', async () => {
-    h.objects.add('uploads/s1-1');
-    runs.render.onRun = () => h.objects.add('uploads/s1-2');
+  it('numbers each re-render, so the player never shows a cached earlier cut', async () => {
     const patch = await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, renders: 1 }));
     expect(patch.object).toBe('uploads/s1-2');
     expect(patch.short!.renders).toBe(2);
   });
 
-  it('fails when the PUT was refused and nothing reached storage', async () => {
-    h.objects.add('uploads/s1-1');
-    await expect(
-      renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, renders: 1 })),
-    ).rejects.toThrow('The rendered Short never reached storage.');
+  it('fails and cleans up the temp file when the upload is refused', async () => {
+    runs.render.onRun = writesFile;
+    h.upload.mockRejectedValueOnce(new Error('403 Forbidden'));
+    await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
+      '403 Forbidden',
+    );
+    expect(existsSync(join(tmpdir(), 'short-s1-1.mp4'))).toBe(false);
   });
 
   it('fails when the render reads back without playable video', async () => {
-    runs.render.onRun = () => h.objects.add('uploads/s1-1');
     runs.probe = { stdout: JSON.stringify({ format: {}, streams: [] }) };
     await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
       'The rendered Short has no playable video.',
     );
   });
 
-  it('propagates an ffmpeg failure', async () => {
-    runs.render = { stderr: 'Conversion failed!', code: 1 };
+  it('propagates an ffmpeg failure without uploading, and cleans up a partial file', async () => {
+    runs.render = { stderr: 'Conversion failed!', code: 1, onRun: writesFile };
     await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
       'ffmpeg exited 1: Conversion failed!',
     );
+    expect(h.upload).not.toHaveBeenCalled();
+    expect(existsSync(join(tmpdir(), 'short-s1-1.mp4'))).toBe(false);
   });
 
   it('refuses a Short without a hook', async () => {

@@ -4,8 +4,8 @@ import { resetClients } from '$lib/server/clients';
 import {
   objectInfo,
   signedReadUrl,
-  signedRenderUrl,
   signedUploadUrl,
+  uploadFile,
   uploadObjectName,
 } from '$lib/server/gcs';
 
@@ -16,6 +16,7 @@ const gcs = vi.hoisted(() => ({
   getSignedUrl: vi.fn(),
   exists: vi.fn(),
   getMetadata: vi.fn(),
+  upload: vi.fn(),
 }));
 
 vi.mock('@google-cloud/storage', () => ({
@@ -26,6 +27,7 @@ vi.mock('@google-cloud/storage', () => ({
     bucket(name: string) {
       gcs.buckets.push(name);
       return {
+        upload: gcs.upload,
         file(object: string) {
           gcs.files.push(object);
           return {
@@ -92,22 +94,20 @@ describe('signedUploadUrl', () => {
   });
 });
 
-describe('signedRenderUrl', () => {
-  it('signs a 15-minute v4 write with the content type and no length-range header', async () => {
-    gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/render']);
-    expect(await signedRenderUrl('uploads/s1-1', 'video/mp4')).toBe('https://storage/render');
-    expect(gcs.files).toEqual(['uploads/s1-1']);
-    expect(gcs.getSignedUrl).toHaveBeenCalledWith({
-      version: 'v4',
-      action: 'write',
-      expires: NOW + 15 * 60 * 1000,
+describe('uploadFile', () => {
+  it('uploads the local file to the object with its content type', async () => {
+    gcs.upload.mockResolvedValueOnce([{}]);
+    await uploadFile('/tmp/short-s1-1.mp4', 'uploads/s1-1', 'video/mp4');
+    expect(gcs.buckets).toEqual(['sb-media']);
+    expect(gcs.upload).toHaveBeenCalledWith('/tmp/short-s1-1.mp4', {
+      destination: 'uploads/s1-1',
       contentType: 'video/mp4',
     });
   });
 
-  it('propagates a signing failure', async () => {
-    gcs.getSignedUrl.mockRejectedValueOnce(new Error('no signer'));
-    await expect(signedRenderUrl('a', 'video/mp4')).rejects.toThrow('no signer');
+  it('propagates an upload failure', async () => {
+    gcs.upload.mockRejectedValueOnce(new Error('403 Forbidden'));
+    await expect(uploadFile('/tmp/x.mp4', 'uploads/x', 'video/mp4')).rejects.toThrow('403');
   });
 });
 

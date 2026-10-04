@@ -23,22 +23,9 @@ export async function signedUploadUrl(object: string, contentType: string): Prom
   return url;
 }
 
-const RENDER_TTL_MS = 15 * 60 * 1000;
-
-/**
- * Signed PUT ffmpeg writes a rendered Short to. ffmpeg streams it with chunked transfer encoding, so
- * the length isn't known up front and there is no length-range header to sign.
- */
-export async function signedRenderUrl(object: string, contentType: string): Promise<string> {
-  const [url] = await bucket()
-    .file(object)
-    .getSignedUrl({
-      version: 'v4',
-      action: 'write',
-      expires: Date.now() + RENDER_TTL_MS,
-      contentType,
-    });
-  return url;
+/** Uploads a rendered file from local disk to the bucket. */
+export async function uploadFile(path: string, object: string, contentType: string): Promise<void> {
+  await bucket().upload(path, { destination: object, contentType });
 }
 
 /** Signed GET used by the monitor, ffmpeg, and the YouTube upload; GCS serves range requests on it. */

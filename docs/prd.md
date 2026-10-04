@@ -174,7 +174,7 @@
 - The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
 - **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start.
-- **render:** ffmpeg cuts and fits to 720×1280, blur fill (default) or center crop, and PUTs a fragmented MP4 straight to GCS by signed URL. Each render is a new object, read back before review: ffmpeg exits 0 on a refused PUT.
+- **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
 - **Review tab:** the video page gets Video / Short tabs. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
 - Approve uploads through R6 (private, read-back verified) and takes an upload slot. A Short writes no feedback: its pick is the video's.
 - [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.

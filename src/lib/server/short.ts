@@ -1,7 +1,10 @@
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { lengthBounds, tenth } from '$lib/short';
 import type { Chunk, Hook, Short } from '$lib/types';
 import { loudnessCurve, probe, renderShort, WINDOW_SEC, type LoudnessPoint } from './ffmpeg';
-import { objectInfo, signedReadUrl, signedRenderUrl } from './gcs';
+import { signedReadUrl, uploadFile } from './gcs';
 import { listChunks, ok, type JobDoc } from './jobs';
 import { chatJson, stepDeadline } from './model';
 import { stripNumerics } from './numerics';
@@ -197,20 +200,27 @@ export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
 }
 
 /**
- * RENDER step: ffmpeg cuts and reframes the hook into a fresh object, then the object is read back.
- * Each render gets its own name, so an earlier render can't pass for a refused upload.
+ * RENDER step: ffmpeg cuts and reframes the hook into a temp file, which goes to its own object and
+ * is read back from storage before review. A new object per render means the player never shows a
+ * cached earlier cut.
  */
 export async function renderStep(job: JobDoc): Promise<Partial<JobDoc>> {
   const short = requireShort(job);
   if (!short.hook) throw new Error('The Short has no hook to cut.');
   const renders = short.renders + 1;
   const object = `uploads/${job.id}-${renders}`;
-  await renderShort(
-    await signedReadUrl(requireSource(job)),
-    await signedRenderUrl(object, 'video/mp4'),
-    { startSec: short.hook.startSec, lengthSec: short.hook.lengthSec, reframe: short.reframe },
-  );
-  if (!(await objectInfo(object))) throw new Error('The rendered Short never reached storage.');
+  const local = join(tmpdir(), `short-${job.id}-${renders}.mp4`);
+  try {
+    await renderShort(await signedReadUrl(requireSource(job)), local, {
+      startSec: short.hook.startSec,
+      lengthSec: short.hook.lengthSec,
+      reframe: short.reframe,
+    });
+    await uploadFile(local, object, 'video/mp4');
+  } finally {
+    // The container's disk is memory; a render left behind holds RAM until the instance stops.
+    await rm(local, { force: true });
+  }
   const probed = await probe(await signedReadUrl(object));
   if (!(probed.durationSec > 0)) throw new Error('The rendered Short has no playable video.');
   return ok({ state: 'REVIEW', object, probe: probed, short: { ...short, renders } });
