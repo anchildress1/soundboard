@@ -94,10 +94,13 @@
 
   [role='tab'] {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 4px 8px;
+    min-width: 0;
     min-height: 44px;
-    padding: 0 12px;
+    padding: 6px 12px;
     white-space: nowrap;
     background: none;
     border: 0;
@@ -145,6 +148,19 @@
 
   .done .state {
     color: var(--green);
+  }
+
+  /* Three tabs don't fit a phone side by side with their state; it drops under the name. */
+  @media (max-width: 520px) {
+    [role='tab'] {
+      flex: 1 1 0;
+      padding: 6px 4px;
+    }
+
+    .state {
+      flex-basis: 100%;
+      text-align: center;
+    }
   }
 
   [role='tabpanel'] {
