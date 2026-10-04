@@ -227,6 +227,7 @@ describe('buildPickMessages', () => {
     expect(rules).toContain(`his contact line exactly: "${CONTACT_LINE}"`);
     expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
     expect(rules).toContain('Never write placeholders');
+    expect(rules).toContain('Correct spelling, capitalization, and grammar');
     expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);

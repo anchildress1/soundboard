@@ -113,6 +113,7 @@ export const ARTIST_VOICE = [
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
   `- After the credit line, his contact line exactly: "${CONTACT_LINE}"`,
   '- Never write placeholders, brackets, or notes about missing information.',
+  '- Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
   '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
   '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
   '- Quoted phrases here show his style. Never copy them word for word, except the credit line.',
