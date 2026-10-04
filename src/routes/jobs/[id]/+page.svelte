@@ -400,6 +400,14 @@
     padding: 12px 14px;
   }
 
+  h2 {
+    margin: 0 0 6px;
+    font: 900 12px/1.2 var(--display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
   /* Yellow is the "needs attention" state color; it stays clear of the orange panel labels. */
   .warning {
     padding: 12px 14px;
@@ -425,14 +433,6 @@
     padding-left: 18px;
     font-size: 14px;
     color: var(--ink);
-  }
-
-  h2 {
-    margin: 0 0 6px;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--muted);
   }
 
   .placeholder h2 {
