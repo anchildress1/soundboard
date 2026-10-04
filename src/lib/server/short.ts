@@ -72,12 +72,18 @@ export function buildHookMessages(ctx: HookContext): ChatMessage[] {
   ];
 }
 
-/** Holds the model's pick to real windows and the length bounds, and strips audio numbers. */
+/**
+ * Holds the model's pick to real windows and the length bounds, and strips audio numbers. A late
+ * window caps the length at what's left of the source from its start, so the cut can start inside
+ * the window; only the last 15 s of a source start a full-length cut before their window.
+ */
 export function settleHook(raw: RawHook, ctx: HookContext): RawHook {
   const { min, max } = lengthBounds(ctx.sourceDurationSec);
+  const window = clamp(Math.round(raw.window), 0, Math.max(0, ctx.chunks.length - 1));
+  const room = Math.floor((ctx.sourceDurationSec - window * WINDOW_SEC) * 10) / 10;
   return {
-    window: clamp(Math.round(raw.window), 0, Math.max(0, ctx.chunks.length - 1)),
-    lengthSec: tenth(clamp(raw.lengthSec, min, max)),
+    window,
+    lengthSec: tenth(clamp(raw.lengthSec, min, Math.max(min, Math.min(max, room)))),
     reason: stripNumerics(raw.reason),
   };
 }

@@ -260,6 +260,17 @@ describe('settleHook', () => {
     expect(settleHook({ window: 0, lengthSec: 45, reason: '' }, sample).lengthSec).toBe(30);
   });
 
+  it("caps a late window's length at what's left of the source from its start", () => {
+    // Window 5 starts at 147.5 s of 180: 32.5 s of room, so the cut can start inside it.
+    expect(settleHook({ window: 5, lengthSec: 60, reason: '' }, ctx()).lengthSec).toBe(32.5);
+    expect(settleHook({ window: 5, lengthSec: 20, reason: '' }, ctx()).lengthSec).toBe(20);
+  });
+
+  it('keeps the 15 s minimum for a window in the last 15 s of the source', () => {
+    const tail = ctx({ sourceDurationSec: 155, chunks: [0, 1, 2, 3, 4, 5].map((i) => chunk(i)) });
+    expect(settleHook({ window: 5, lengthSec: 60, reason: '' }, tail).lengthSec).toBe(15);
+  });
+
   it('strips model-emitted loudness numbers from the reason', () => {
     const { reason } = settleHook(
       { window: 2, lengthSec: 30, reason: 'The drop hits at -6 LUFS and 128 BPM.' },
@@ -352,7 +363,7 @@ describe('runHook', () => {
     fetchMock.mockImplementation(async () =>
       completion(JSON.stringify({ window: 7, lengthSec: 90, reason: 'a' })),
     );
-    expect((await runHook(ctx({ skipped: [{ window: 5, lengthSec: 60 }] })))?.hook).toBeNull();
+    expect((await runHook(ctx({ skipped: [{ window: 5, lengthSec: 32.5 }] })))?.hook).toBeNull();
   });
 
   it('returns null when the reply never parses', async () => {
@@ -558,6 +569,18 @@ describe('hookStep', () => {
     expect(patch.short!.modelMs).toBeGreaterThanOrEqual(40_000);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(h.spawn).not.toHaveBeenCalled();
+  });
+
+  it('starts a long cut from a late window inside that window', async () => {
+    seedChunks(6);
+    runs.loudness = { stderr: step(144.5, 180, 165) };
+    fetchMock.mockResolvedValueOnce(
+      completion(JSON.stringify({ window: 5, lengthSec: 60, reason: 'Outro.' })),
+    );
+    const { hook } = (await hookStep(shortJob())).short!;
+    expect(hook).toMatchObject({ window: 5, startSec: 147.5, lengthSec: 32.5 });
+    expect(hook!.startSec).toBeGreaterThanOrEqual(5 * 29.5);
+    expect(hook!.startSec + hook!.lengthSec).toBeLessThanOrEqual(180);
   });
 
   it('propagates a failed loudness pass', async () => {
