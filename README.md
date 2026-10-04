@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://repository-images.githubusercontent.com/1403741741/0398d426-9953-4134-8e03-dcbfdb73fd4c" alt="Soundboard" width="100%" />
+</p>
+
 # 🎛️ Soundboard
 
 Soundboard analyzes a finished music video and drafts its YouTube title, description, hashtags, and tags. The artist approves, edits, or re-runs the draft; on approval, Soundboard uploads the video as private and confirms the upload through the YouTube API.
