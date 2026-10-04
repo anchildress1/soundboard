@@ -24,8 +24,12 @@ export default defineConfig({
     command: 'pnpm build && pnpm preview',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
-    // Fixed test identities, so header.spec.ts can sign session cookies for each kind of user.
+    // Fake Google Cloud clients seeded with fixture jobs (vite.config.ts), and fixed test identities
+    // so header.spec.ts can sign session cookies for each kind of user.
     env: {
+      E2E_FAKES: '1',
+      GCP_PROJECT_ID: 'e2e',
+      GCS_BUCKET: 'e2e',
       SESSION_SECRET: 'e2e-session-secret',
       ALLOWLIST_EMAILS: 'nathan@e2e.test',
       DEMO_EMAILS: 'demo@e2e.test',
