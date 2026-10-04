@@ -43,8 +43,9 @@ spec:
           image: ${MODEL_IMAGE}
           resources:
             limits:
-              cpu: '2'
-              memory: 8Gi
+              # The L4 minimum (4 CPU / 16 GiB) is met by the GPU container on its own.
+              cpu: '4'
+              memory: 16Gi
               nvidia.com/gpu: '1'
           # TCP, not /health: the port opens before weights finish loading, so the page serves
           # while the app reports "waking model".

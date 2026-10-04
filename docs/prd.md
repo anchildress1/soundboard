@@ -166,7 +166,7 @@ One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
 | `app` (ingress)                  | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                   |
 | `model` (sidecar, holds the GPU) | `llama-server` + Gemma 4 12B Q4_K_M + f16 mmproj, weights baked in, bound to `localhost`; `/props` reports `vision: true, audio: true` |
 
-- **Service:** 4 vCPU / 16 GiB (the L4 minimum), max 1, min 0, instance-based billing (required for GPUs), 60-min request timeout. Cloud Run gives the GPU to one container per instance ([GPU support for services](https://docs.cloud.google.com/run/docs/configuring/services/gpu)).
+- **Service:** model container 4 vCPU / 16 GiB (the L4 minimum) + app container 2 vCPU / 8 GiB, max 1, min 0, instance-based billing (required for GPUs), 60-min request timeout. Cloud Run gives the GPU to one container per instance ([GPU support for services](https://docs.cloud.google.com/run/docs/configuring/services/gpu)).
 - **Startup:** the `model` sidecar's startup probe is a TCP check, so the page serves within seconds while weights load; `/health` drives "waking model".
 - **Why one service:** both pieces live and die with the single instance anyway. One service drops the service-to-service IAM token, the second deploy, and Cloud Run's 429s; `llama-server` queues requests itself.
 - **Cost:** any visit wakes the GPU instance and bills it until it idles out (up to ~15 min). $0 when nobody visits. Scale by raising max instances.
