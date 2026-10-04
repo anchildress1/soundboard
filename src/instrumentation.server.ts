@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/sveltekit';
-import { scrubBreadcrumb, scrubEvent } from '$lib/scrub';
+import { scrubBreadcrumb, scrubEvent, scrubSpan } from '$lib/scrub';
 
 Sentry.init({
   dsn: process.env.PUBLIC_SENTRY_DSN,
@@ -7,5 +7,5 @@ Sentry.init({
   tracesSampleRate: 1,
   beforeBreadcrumb: scrubBreadcrumb,
   beforeSend: scrubEvent,
-  beforeSendTransaction: scrubEvent,
+  beforeSendSpan: scrubSpan,
 });

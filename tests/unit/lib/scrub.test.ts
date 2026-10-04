@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scrubBreadcrumb, scrubEvent, scrubUrl } from '$lib/scrub';
+import { scrubBreadcrumb, scrubEvent, scrubSpan, scrubUrl } from '$lib/scrub';
 
 const SIGNED =
   'https://storage.googleapis.com/bucket/uploads/j1?X-Goog-Signature=abc&X-Goog-Credential=svc';
@@ -99,5 +99,38 @@ describe('scrubEvent', () => {
       url: '',
       query_string: '',
     });
+  });
+});
+
+describe('scrubSpan', () => {
+  const SIGNED =
+    'https://storage.googleapis.com/b/uploads/j1?X-Goog-Signature=secret&X-Goog-Expires=600';
+
+  it('strips query strings from the span name and every string attribute', () => {
+    const span = scrubSpan({
+      name: `GET ${SIGNED}`,
+      attributes: {
+        'url.full': SIGNED,
+        'gen_ai.input.messages': JSON.stringify([{ content: `see ${SIGNED}` }]),
+        'http.query': 'key=AIza-secret',
+        'url.query': 'X-Goog-Signature=secret',
+        'gen_ai.usage.input_tokens': 900,
+        'job.ok': true,
+      },
+    });
+    expect(span.name).toBe('GET https://storage.googleapis.com/b/uploads/j1?[redacted]');
+    expect(span.attributes['url.full']).toBe(
+      'https://storage.googleapis.com/b/uploads/j1?[redacted]',
+    );
+    expect(span.attributes['gen_ai.input.messages']).not.toContain('secret');
+    expect(span.attributes['http.query']).toBe('[redacted]');
+    expect(span.attributes['url.query']).toBe('[redacted]');
+    expect(span.attributes['gen_ai.usage.input_tokens']).toBe(900);
+    expect(span.attributes['job.ok']).toBe(true);
+  });
+
+  it('leaves spans without credentials unchanged', () => {
+    const span = { name: 'chat gemma-4-12b-it', attributes: { 'gen_ai.agent.name': 'smart-pick' } };
+    expect(scrubSpan(structuredClone(span))).toEqual(span);
   });
 });
