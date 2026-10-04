@@ -231,6 +231,10 @@ describe('buildPickMessages', () => {
     expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
     expect(rules).toContain('Never write placeholders');
     expect(rules).toContain('Correct spelling, capitalization, and grammar');
+    expect(rules).toContain('Never open with or repeat the title');
+    // Format rules stay out of the voice, which changes only from evidence of how he writes.
+    expect(ARTIST_VOICE).not.toContain('Correct spelling');
+    expect(ARTIST_VOICE).not.toContain('repeat the title');
     expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);
