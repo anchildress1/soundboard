@@ -48,12 +48,17 @@ describe('Monitor', () => {
   it('tracks time, duration, and the decoded height', async () => {
     const { container } = render(Monitor, { src: 'https://storage.googleapis.com/b/o' });
     const video = container.querySelector('video')!;
-    media(video, { duration: 3725, currentTime: 65, videoHeight: 720 });
+    media(video, { duration: 3725, currentTime: 65, videoWidth: 1280, videoHeight: 720 });
     await fireEvent(video, new Event('durationchange'));
     await fireEvent(video, new Event('timeupdate'));
     await fireEvent(video, new Event('resize'));
     expect(screen.getByText('00:01:05 / 01:02:05')).toBeInTheDocument();
     expect(screen.getByText('720p')).toBeInTheDocument();
+  });
+
+  it('marks a probed vertical video', () => {
+    render(Monitor, { src: 'blob:x', width: 720, height: 1280 });
+    expect(screen.getByText('720p · vertical')).toBeInTheDocument();
   });
 
   it('prefers the probed height over the decoded one', async () => {

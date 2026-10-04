@@ -29,12 +29,18 @@ function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
   return { ...utils, onapprove, onrerun, ondiscard };
 }
 
-const title = () => screen.getByLabelText('Title') as HTMLInputElement;
+const title = () => screen.getByLabelText(/^Title/) as HTMLInputElement;
 const description = () => screen.getByLabelText(/^Description/) as HTMLTextAreaElement;
 const tags = () => screen.getByLabelText(/^Tags/) as HTMLTextAreaElement;
 const approveButton = () => screen.getByRole('button', { name: 'Approve & upload' });
 
 describe('Label: draft and counters', () => {
+  it('heads the panel like the Bandcamp tab', () => {
+    setup();
+    expect(screen.getByRole('region', { name: 'YouTube' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'YouTube' })).toBeInTheDocument();
+  });
+
   it('fills the fields from the draft with live counters', () => {
     setup();
     expect(title().value).toBe('PeekaBoo');
@@ -168,14 +174,18 @@ describe('Label: a second label on the page', () => {
     expect(title().id).toBe('title');
   });
 
-  it('takes its own region name and re-run label', async () => {
+  it('takes its own heading and re-run label, with a prefixed heading id', async () => {
     const { onrerun } = setup({
-      name: 'What goes to YouTube with the Short',
+      idPrefix: 'short-',
+      heading: 'YouTube Short',
       rerunLabel: 'Re-pick hook',
     });
-    expect(
-      screen.getByRole('region', { name: 'What goes to YouTube with the Short' }),
-    ).toBeInTheDocument();
+    const region = screen.getByRole('region', { name: 'YouTube Short' });
+    expect(region).toHaveAttribute('aria-labelledby', 'short-youtube-title');
+    expect(screen.getByRole('heading', { name: 'YouTube Short' })).toHaveAttribute(
+      'id',
+      'short-youtube-title',
+    );
     expect(screen.queryByRole('button', { name: 'Re-run model' })).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Re-pick hook' }));
     expect(onrerun).toHaveBeenCalledOnce();

@@ -1,6 +1,14 @@
 <footer>
   <p>
-    Built for Nathan by <b>Ashley Childress</b> · Hacktoberfest Weekend Challenge: Build for a Friend
+    Built for
+    <a
+      class="artist"
+      href="https://flieslikerobots.bandcamp.com"
+      target="_blank"
+      rel="noopener noreferrer"><b>Flies Like Robots</b></a
+    >
+    by <b>Ashley Childress</b><br />
+    Hacktoberfest Weekend Challenge: Build for a Friend
   </p>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). The app runs inside the DEV iframe,
@@ -81,10 +89,10 @@
     padding-top: 14px;
     border-top: 1px solid var(--well);
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px 24px;
+    gap: 6px;
+    text-align: center;
     font: 500 11px/1.5 var(--mono);
     color: var(--muted);
   }
@@ -98,11 +106,19 @@
     font-weight: 500;
   }
 
+  .artist {
+    color: inherit;
+  }
+
+  .artist:hover,
+  .artist:focus-visible {
+    color: var(--magenta);
+  }
+
   .links {
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-right: -10px;
   }
 
   .links a {

@@ -28,7 +28,6 @@
   {#if measured.length > 0}
     <p class="ffmpeg"><span>ffmpeg</span> {measured.join(' · ')}</p>
   {/if}
-  <p>Grounded in the most-viewed music videos for this genre.</p>
 </div>
 
 <style>

@@ -92,6 +92,26 @@ describe('parseProbe', () => {
     });
   });
 
+  it('applies a quarter-turn rotation from the display matrix or the rotate tag', () => {
+    const turned = (stream: object) =>
+      parseProbe(
+        JSON.stringify({
+          format: { duration: '79' },
+          streams: [{ codec_type: 'video', width: 1280, height: 720, ...stream }],
+        }),
+      );
+    expect(turned({ side_data_list: [{ rotation: -90 }] })).toMatchObject({
+      width: 720,
+      height: 1280,
+    });
+    expect(turned({ tags: { rotate: '270' } })).toMatchObject({ width: 720, height: 1280 });
+    expect(turned({ side_data_list: [{ rotation: 180 }] })).toMatchObject({
+      width: 1280,
+      height: 720,
+    });
+    expect(turned({ side_data_list: [{}] })).toMatchObject({ width: 1280, height: 720 });
+  });
+
   it('falls back to zero duration and null size when fields are missing', () => {
     expect(parseProbe('{}')).toEqual({
       durationSec: 0,

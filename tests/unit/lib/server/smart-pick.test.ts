@@ -11,6 +11,7 @@ import {
   finalizePick,
   isRawPick,
   measuredFlags,
+  shortFlag,
   runPick,
   sameText,
   weighFeedback,
@@ -18,7 +19,7 @@ import {
   type PickFixups,
   type RawPick,
 } from '$lib/server/smart-pick';
-import type { Chunk, Measurements } from '$lib/types';
+import type { Chunk, Measurements, Probe } from '$lib/types';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
   title: 'PeekaBoo',
@@ -28,6 +29,7 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   flags: [],
   brandCheck: 'Matches the recent uploads.',
   why: { title: 't', description: 'd', tags: 'g' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   ...over,
 });
 
@@ -54,6 +56,7 @@ const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   tagCandidates,
   facts,
   measurements: null,
+  probe: null,
   ...over,
 });
 
@@ -101,6 +104,7 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   notes: '',
   chunks: [chunk(0)],
   measurements: null,
+  probe: null,
   recent: [],
   candidates,
   tagCandidates,
@@ -133,6 +137,9 @@ describe('isRawPick', () => {
     ['brandCheck missing', { ...raw(), brandCheck: null }],
     ['why null', { ...raw(), why: null }],
     ['why a string', { ...raw(), why: 'because' }],
+    ['bandcamp missing', { ...raw(), bandcamp: undefined }],
+    ['bandcamp about not a string', { ...raw(), bandcamp: { about: 1, credits: '' } }],
+    ['bandcamp credits missing', { ...raw(), bandcamp: { about: '' } }],
     ['why.title missing', { ...raw(), why: { description: '', tags: '' } }],
     ['why.description missing', { ...raw(), why: { title: '', tags: '' } }],
     ['why.tags missing', { ...raw(), why: { title: '', description: '' } }],
@@ -218,9 +225,16 @@ describe('buildPickMessages', () => {
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
     expect(rules).toContain('Never claim what the lyrics say.');
+    expect(rules).toContain("bandcamp.about: the same song for Bandcamp's About field");
+    expect(rules).toContain('bandcamp.credits: the credit line and contact line');
     expect(rules).toContain(`his contact line exactly: "${CONTACT_LINE}"`);
     expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
     expect(rules).toContain('Never write placeholders');
+    expect(rules).toContain('Correct spelling, capitalization, and grammar');
+    expect(rules).toContain('Never open with or repeat the title');
+    // Format rules stay out of the voice, which changes only from evidence of how he writes.
+    expect(ARTIST_VOICE).not.toContain('Correct spelling');
+    expect(ARTIST_VOICE).not.toContain('repeat the title');
     expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);
@@ -412,6 +426,46 @@ describe('allowedLinks', () => {
   });
 });
 
+describe('shortFlag', () => {
+  const probe = (width: number, height: number, durationSec = 79): Probe => ({
+    durationSec,
+    width,
+    height,
+    hasAudio: true,
+  });
+
+  it('flags a vertical or square video of 3 minutes or less', () => {
+    expect(shortFlag(probe(720, 1280))).toEqual([
+      'Vertical and 3 minutes or shorter: YouTube will publish it as a Short',
+    ]);
+    expect(shortFlag(probe(1080, 1080, 180))).toEqual([
+      'Square and 3 minutes or shorter: YouTube will publish it as a Short',
+    ]);
+  });
+
+  it('leaves landscape and longer videos alone', () => {
+    expect(shortFlag(probe(1280, 720))).toEqual([]);
+    expect(shortFlag(probe(720, 1280, 180.5))).toEqual([]);
+  });
+
+  it('says nothing without a probe or a video size', () => {
+    expect(shortFlag(null)).toEqual([]);
+    expect(shortFlag({ durationSec: 60, width: null, height: null, hasAudio: true })).toEqual([]);
+  });
+
+  it('lands in the pick flags after the measured ones', () => {
+    const pick = finalizePick(
+      raw({ flags: ['Dark opening frames'] }),
+      fix({ probe: probe(720, 1280), measurements: measurements({ truePeakDbtp: -0.3 }) }),
+    );
+    expect(pick.flags).toEqual([
+      'True peak -0.3 dBTP, above the -1 dBTP ceiling',
+      'Vertical and 3 minutes or shorter: YouTube will publish it as a Short',
+      'Dark opening frames',
+    ]);
+  });
+});
+
 describe('measuredFlags', () => {
   it('returns nothing without measurements', () => {
     expect(measuredFlags(null)).toEqual([]);
@@ -492,6 +546,17 @@ describe('finalizePick', () => {
     expect(pick.description.endsWith('#SynthWave #indie #80s')).toBe(true);
   });
 
+  it('draws hashtags from the chosen tags first, so the description and tags agree', () => {
+    const pick = finalizePick(
+      raw({ tags: ['retrowave', 'new music', 'outrun'], hashtags: ['#indie', '#80s'] }),
+      fix({
+        candidates: ['#indie', '#80s', '#retrowave', '#newmusic'],
+        tagCandidates: cands('retrowave', 'new music', 'outrun'),
+      }),
+    );
+    expect(pick.hashtags).toEqual(['#retrowave', '#newmusic', '#indie', '#80s']);
+  });
+
   it('moves candidate hashtags from the body to the closing line and removes invented ones', () => {
     const pick = finalizePick(
       raw({
@@ -500,9 +565,9 @@ describe('finalizePick', () => {
       }),
       fix(),
     );
-    expect(pick.hashtags).toEqual(['#electronic', '#indie', '#synthwave']);
+    expect(pick.hashtags).toEqual(['#synthwave', '#electronic', '#indie']);
     expect(pick.description).toBe(
-      'Night drive vibes .\n\nMore soon\n\n#electronic #indie #synthwave',
+      'Night drive vibes .\n\nMore soon\n\n#synthwave #electronic #indie',
     );
     expect(allInCandidates(pick.description)).toBe(true);
   });
@@ -549,6 +614,20 @@ describe('finalizePick', () => {
   it('never lets angle-bracket stripping create a stray hashtag', () => {
     const pick = finalizePick(raw({ description: 'Out now #<invented>' }), fix());
     expect(allInCandidates(pick.description)).toBe(true);
+  });
+
+  it('cleans the Bandcamp draft like the description: fact links only, no hashtags or notes', () => {
+    const pick = finalizePick(
+      raw({
+        bandcamp: {
+          about: 'Dark synth. #synthwave\n[No contact line found]\nSee https://evil.example/x',
+          credits: 'Written by Nathan.  https://flr.bandcamp.com',
+        },
+      }),
+      fix(),
+    );
+    expect(pick.bandcamp.about).toBe('Dark synth.\n\nSee');
+    expect(pick.bandcamp.credits).toBe('Written by Nathan. https://flr.bandcamp.com');
   });
 
   it('keeps fact links and removes others from the description', () => {
@@ -687,6 +766,7 @@ describe('finalizePick', () => {
         flags: ['Too loud at -6 LUFS', '-3 dB'],
         brandCheck: 'Louder than usual by 3 dB.',
         why: { title: 'At -14 LUFS', description: 'd', tags: 't' },
+        bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
       }),
       fix({ measurements: measurements({ truePeakDbtp: -0.3 }) }),
     );

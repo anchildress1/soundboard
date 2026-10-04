@@ -53,16 +53,21 @@ describe('layout', () => {
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading).toHaveTextContent('Soundboard');
     expect(screen.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    expect(heading).toHaveTextContent('Release agent · Flies Like Robots');
+    expect(heading).toHaveTextContent('Flies Like Robots · Release agent');
   });
 
   it('renders the page between header and footer', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toHaveTextContent(
-      'Built for Nathan by Ashley Childress · Hacktoberfest Weekend Challenge: Build for a Friend',
+      'Built for Flies Like Robots by Ashley Childress Hacktoberfest Weekend Challenge: Build for a Friend',
     );
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
+    const artist = within(screen.getByRole('contentinfo')).getByRole('link', {
+      name: 'Flies Like Robots',
+    });
+    expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
+    expect(artist).toHaveAttribute('target', '_blank');
   });
 
   it("links Ashley's site and socials in the footer, opening new tabs", () => {
@@ -131,6 +136,18 @@ describe('layout', () => {
     expect(brand.closest('header')).not.toBeNull();
     expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+  });
+
+  it('flags a demo session on every page with a banner', () => {
+    setup({ session: { email: 'demo@example.com', allowlisted: false, demo: true } });
+    const banner = screen.getByRole('complementary', { name: 'Demo account' });
+    expect(banner).toHaveTextContent('Uploads go private to the sandbox channel.');
+    expect(banner).toHaveTextContent("Nothing is saved to Nathan's memory.");
+  });
+
+  it('shows no demo banner to Nathan or a signed-out visitor', () => {
+    setup({ session: { email: 'nathan@example.com', allowlisted: true, demo: false } });
+    expect(screen.queryByRole('complementary', { name: 'Demo account' })).toBeNull();
   });
 
   it('gives a demo account the stats and Sign out, without the brand guide', () => {

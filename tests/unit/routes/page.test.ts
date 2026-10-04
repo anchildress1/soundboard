@@ -94,13 +94,11 @@ describe('home page: form', () => {
     expect(screen.getByText(/^Signed out: your own video ends/)).toBeInTheDocument();
   });
 
-  it('tells the demo account where its uploads go, with 15 minutes like Nathan', () => {
+  it('gives the demo account 15 minutes and leaves the demo notice to the layout', () => {
     setup({ session: { email: 'demo@example.com', allowlisted: false, demo: true } });
-    expect(
-      screen.getByText(/^Demo account: approved uploads go private to the sandbox/),
-    ).toBeInTheDocument();
     expect(screen.getByText('up to 15 min')).toBeInTheDocument();
     expect(screen.queryByText(/Signed out/)).toBeNull();
+    expect(screen.queryByText(/sandbox channel/)).toBeNull();
   });
 
   it('allows Nathan 15 minutes and drops the signed-out note', async () => {

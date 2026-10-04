@@ -38,6 +38,7 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   modelMs: 1,
 });
 
@@ -311,7 +312,8 @@ describe('approve', () => {
       hashtags: ['#synthwave', '#NewMusic'],
       tags: ['synthwave', 'outrun'],
     });
-    expect(after.payload).toBeNull();
+    // The approved fields stay visible while publishing, so the page shows what was sent.
+    expect(after.payload).toEqual(after.finalFields);
     expect(after.consecutiveFailures).toBe(0);
     expect(after.error).toBeNull();
     expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1, visitorUploads: 1 });

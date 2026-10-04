@@ -33,7 +33,7 @@ import {
 } from './youtube';
 
 export const VERIFY_ATTEMPTS = 10;
-const RECENT_COUNT = 5;
+const RECENT_COUNT = 3;
 
 type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
@@ -137,6 +137,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         notes: job.notes,
         chunks,
         measurements: job.measurements,
+        probe: job.probe,
         recent: withThumbs,
         candidates: audience.hashtags,
         tagCandidates: audience.tags,
@@ -160,7 +161,8 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         audience,
         pickVersion: version,
       }),
-      pick: { ...result.pick, version, modelMs: result.ms },
+      // Each stored pick carries the running total, so a re-run never loses earlier pick time.
+      pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
     };
   }
 }

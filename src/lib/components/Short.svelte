@@ -2,7 +2,7 @@
   import { timecode } from '$lib/format';
   import type { FieldErrors } from '$lib/metadata';
   import { cutErrors, lengthBounds, tenth } from '$lib/short';
-  import { jobStatus, lastModelSeconds } from '$lib/status';
+  import { jobStatus, modelSeconds } from '$lib/status';
   import type { JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
@@ -40,7 +40,7 @@
   const short = $derived(job.short!);
   const hook = $derived(short.hook);
   const status = $derived(jobStatus(view, view.wait));
-  const seconds = $derived(lastModelSeconds(view));
+  const seconds = $derived(modelSeconds(view));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
@@ -79,16 +79,26 @@
 </script>
 
 <div class="short">
-  <section class="tape" aria-label="The Short">
-    <Monitor {src} filename={job.filename} height={job.probe?.height} vertical />
-    <Track {status} {model} />
-    {#if job.state === 'VERIFIED' && job.videoId}
-      <p class="verified">
-        Verified · private · <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
+  {#if job.state === 'VERIFIED' && job.videoId}
+    <p class="uploaded">
+      <span class="check" aria-hidden="true">✓</span>
+      <span
+        >Short uploaded to YouTube · private ·
+        <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
           >youtu.be/{job.videoId}</a
-        >
-      </p>
-    {/if}
+        ></span
+      >
+    </p>
+  {/if}
+  <section class="tape" aria-label="The Short">
+    <Monitor
+      {src}
+      filename={job.filename}
+      width={job.probe?.width}
+      height={job.probe?.height}
+      vertical
+    />
+    <Track {status} {model} />
 
     {#if hook}
       <section class="cut" aria-labelledby="short-cut-heading">
@@ -151,63 +161,71 @@
     {/if}
   </section>
 
-  <div class="right">
-    {#if fields}
-      {#key job.id}
-        <Label
-          {fields}
-          candidates={job.hashtagCandidates ?? []}
-          {editable}
-          {busy}
-          {done}
-          {serverErrors}
-          idPrefix="short-"
-          name="What goes to YouTube with the Short"
-          rerunLabel="Re-pick hook"
-          {onapprove}
-          {onrerun}
-          {ondiscard}
-        />
-      {/key}
-    {/if}
-    {#if job.state === 'PAYLOAD' && job.payload}
-      <Payload fields={job.payload} />
-    {/if}
-    {#if job.state === 'FAILED'}
-      <div class="actions">
-        <button class="btn ghost" type="button" disabled={busy} onclick={ondiscard}>Discard</button>
-        <button class="btn primary" type="button" disabled={busy} onclick={onretry}>Retry</button>
-      </div>
-    {/if}
-    <p class="toast" aria-live="polite">{message}</p>
-  </div>
+  {#if fields}
+    {#key job.id}
+      <Label
+        {fields}
+        candidates={job.hashtagCandidates ?? []}
+        {editable}
+        {busy}
+        {done}
+        {serverErrors}
+        idPrefix="short-"
+        heading="YouTube Short"
+        rerunLabel="Re-pick hook"
+        {onapprove}
+        {onrerun}
+        {ondiscard}
+      />
+    {/key}
+  {/if}
+  {#if job.state === 'PAYLOAD' && job.payload}
+    <Payload fields={job.payload} />
+  {/if}
+  {#if job.state === 'FAILED'}
+    <div class="actions">
+      <button class="btn ghost" type="button" disabled={busy} onclick={ondiscard}>Discard</button>
+      <button class="btn primary" type="button" disabled={busy} onclick={onretry}>Retry</button>
+    </div>
+  {/if}
+  <p class="toast" aria-live="polite">{message}</p>
 </div>
 
 <style>
-  .short {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: 20px;
-    align-items: start;
-  }
-
-  @media (max-width: 820px) {
-    .short {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .tape,
-  .right {
+  .short,
+  .tape {
     display: flex;
     flex-direction: column;
     gap: 14px;
     min-width: 0;
   }
 
-  .verified {
+  .uploaded {
     margin: 0;
-    font: 500 13px/1.4 var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--green);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--green) 8%, var(--panel));
+    font: 600 14px/1.4 var(--sans);
+    color: var(--ink);
+  }
+
+  .uploaded .check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--green);
+    color: var(--ground);
+    font-size: 14px;
+  }
+
+  .uploaded a {
     color: var(--green);
   }
 

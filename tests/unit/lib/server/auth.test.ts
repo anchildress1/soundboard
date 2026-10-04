@@ -213,14 +213,14 @@ describe('oauthClient / authUrl', () => {
     expect(SIGN_IN_SCOPES).not.toContain('https://www.googleapis.com/auth/youtube.upload');
   });
 
-  it('asks connect for upload scope offline with forced consent', () => {
+  it('asks connect for upload scope offline with the chooser and forced consent', () => {
     const state = newOAuthState('connect', 'nathan');
     authUrl(ORIGIN, state);
     expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
       scope: CHANNEL_SCOPES,
       state: state.nonce,
       access_type: 'offline',
-      prompt: 'consent',
+      prompt: 'select_account consent',
       include_granted_scopes: false,
     });
     expect(CHANNEL_SCOPES).toContain('https://www.googleapis.com/auth/youtube.upload');

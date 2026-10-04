@@ -44,11 +44,9 @@ describe('Heard', () => {
     expect(line.textContent).not.toContain('LUFS');
   });
 
-  it('names the comparison set', () => {
+  it('shows only what was heard and measured, no claims about the pick', () => {
     render(Heard, { tags: [], measurements: null });
-    expect(
-      screen.getByText('Grounded in the most-viewed music videos for this genre.'),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/most-viewed|grounded/i)).toBeNull();
   });
 
   it('fills in as chunks arrive', async () => {

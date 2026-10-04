@@ -37,7 +37,7 @@
 
 ## Non-Goals
 
-- Social posting, Bandcamp, website, email marketing, merch, content calendar.
+- Social posting, Bandcamp posting, website, email marketing, merch, content calendar. Bandcamp has no upload API for artist accounts and its editor refuses to be framed, so the app drafts Bandcamp copy and opens the editor instead (R4).
 - Playlists.
 - Lyrics transcription.
 - Competitor research beyond the genre search (R4).
@@ -73,7 +73,8 @@
 **R3 · Analysis**
 
 - ffmpeg reads the source from GCS through a signed URL (range requests, nothing copied into RAM).
-- Prep probes duration and measures the whole file: LUFS, true peak, clipping, silence.
+- Prep probes duration and the displayed video size (the file's rotation applied, since phones store portrait video as rotated landscape frames) and measures the whole file: LUFS, true peak, clipping, silence.
+- A square or vertical video of 3 minutes or less adds a flag: YouTube publishes it as a Short.
 - Each analyze step seeks to its own 29.5s window (under Gemma's 30s audio cap), extracts 8 frames at 360p + 16 kHz mono WAV in memory, and measures that window.
 - One Gemma call per chunk: audio + frames + measurements + song title → visual, music, quality flags.
 - Call settings: temperature 0.2, `max_tokens` ≥ 2048, JSON schema. Parse `content`; `reasoning_content` is the think block.
@@ -85,7 +86,7 @@
 
 **R4 · Smart pick**
 
-- Chunk results + audience evidence + FLR's 5 most recent videos (identity only) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
+- Chunk results + audience evidence + FLR's 3 most recent videos (identity only; 3 keeps the pick inside the model's 8K context) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
   - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.
@@ -95,10 +96,12 @@
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
   - Stored on the job, so re-runs reuse it.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
-- Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
-- The model picks 3–5 hashtags from the candidates; they close the description.
+- Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
+- The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
+- The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
+- The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.
@@ -145,7 +148,7 @@
 **R10 · Auth**
 
 - Google sign-in with an allowlist (Nathan, Ashley) targets Nathan's channel. YouTube refresh tokens live in Secret Manager.
-- Demo accounts (`DEMO_EMAILS`) sign in and run like Nathan: 15-minute videos, no visitor caps, picks that read his memory. They never write it: feedback stays on the job, nothing lands in `artists/*`. Approvals upload private to the sandbox channel on the visitor quota. No brand guide, channel connect, or access to Nathan's jobs.
+- Demo accounts (`DEMO_EMAILS`) sign in and run like Nathan: 15-minute videos, no visitor caps, picks that read his memory. They never write it: feedback stays on the job, nothing lands in `artists/*`. Approvals upload private to the sandbox channel on the visitor quota. No brand guide, channel connect, or access to Nathan's jobs. A "Demo account" banner under the header says so on every page.
 - Any other Google account is turned away with a notice and stays signed out.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays: Advanced → Continue (tell Nathan).
 - Redirect URI is set to the deployed URL after the first deploy.
@@ -175,7 +178,7 @@
 - **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start.
 - **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
-- **Review tab:** the video page gets Video / Short tabs. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
+- **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
 - Approve uploads through R6 (private, read-back verified) and takes an upload slot. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
 - A visitor's new Short counts as one run against R8's caps (one model call and one render); returning the live Short is free.
 - [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
@@ -222,17 +225,16 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 
 - **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
 - **Left pane, the tape:**
-  - Video monitor (R2), with filename, resolution, and timecode overlays.
-  - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
+  - Video monitor (R2), with filename, resolution (short side, marked vertical when taller than wide), and timecode overlays.
+  - State chip + magenta progress bar + model label (`gemma-4-12b-it · 52s`, total model time for the job; it ticks live while the pick runs).
   - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
-- **Right pane, the label:**
-  - Title in a white speech bubble with a live `n / 100` counter.
-  - Description textarea, labeled "model draft", ending in the picked hashtags.
-  - Tags in mono with a live `n / 500` counter. Approve disables past 500.
-  - Visibility shown as **Private** (fixed: uploads are private).
-  - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
-- **Review tabs:** once a video reaches review, Video and Short tabs sit above the panes. The Short tab plays the 9:16 render and holds its cut (start, length, blur fill / center crop) and its own label.
-- **Under 820px:** panes stack, tape first.
+- **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
+  - Above both tabs, "Check before uploading" lists the flags as a warning (⚠, yellow outline), since an audio or video problem matters wherever the song goes.
+  - **YouTube** (done once verified): the title as a plain field with a live `n / 100` counter, the description ("model draft", ending in the picked hashtags), tags in mono with a live `n / 500` counter (Approve disables past 500), and Visibility fixed at **Private**. Actions sit together: Discard, Re-run model, Approve & upload (magenta, offset shadow).
+  - **Short** (done once verified): "Make a Short" until one exists, then the 9:16 render, its cut (start, length, blur fill / center crop) with Re-cut, and its own YouTube fields with Re-pick hook in place of Re-run model.
+  - **Bandcamp** (done once every field is copied): track name, About, credits, and tags with a Copy button each, and Bandcamp's new-track page opened in its own window.
+  - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
+- **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
 - **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
 - **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.

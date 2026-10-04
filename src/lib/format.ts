@@ -17,8 +17,14 @@ export function ago(iso: string | null, now = Date.now()): string {
 }
 
 /** Vertical resolution label, e.g. `1080p`. */
-export function resolution(height: number | null | undefined): string {
-  return height ? `${height}p` : '';
+/** "720p" from the short side, the way video is named; a taller-than-wide video is marked vertical. */
+export function resolution(
+  width: number | null | undefined,
+  height: number | null | undefined,
+): string {
+  if (!height) return '';
+  if (!width) return `${height}p`;
+  return height > width ? `${width}p · vertical` : `${height}p`;
 }
 
 export function percent(part: number, whole: number): number {

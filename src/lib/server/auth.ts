@@ -81,7 +81,8 @@ export function oauthClient(origin: string): OAuth2Client {
 
 /**
  * Sign-in asks for identity only. Connecting a channel asks for upload and read scopes offline,
- * with forced consent so Google returns a refresh token.
+ * with forced consent so Google returns a refresh token. Both always show the account chooser:
+ * connecting binds whichever account is picked, and a browser's default account is rarely the channel.
  */
 export function authUrl(origin: string, state: OAuthState): string {
   const connect = state.purpose === 'connect';
@@ -89,7 +90,7 @@ export function authUrl(origin: string, state: OAuthState): string {
     scope: connect ? CHANNEL_SCOPES : SIGN_IN_SCOPES,
     state: state.nonce,
     access_type: connect ? 'offline' : 'online',
-    prompt: connect ? 'consent' : 'select_account',
+    prompt: connect ? 'select_account consent' : 'select_account',
     include_granted_scopes: false,
   });
 }

@@ -100,7 +100,14 @@ export async function approve(
     if (!job.channel) patch = payload(null);
     else if (!connected) patch = payload('The upload channel is not connected.');
     else if (await takeUploadSlot(tx, job.owner !== 'nathan')) {
-      patch = { state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null };
+      // payload is the approved fields wherever the job ends, so the page shows what was sent.
+      patch = {
+        state: 'PUBLISHING',
+        payload: final,
+        finalFields: final,
+        consecutiveFailures: 0,
+        error: null,
+      };
     } else patch = payload("Today's upload quota is used up.");
 
     const feedback = approvalFeedback(proposed, final, {

@@ -3,6 +3,8 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
+  import Bandcamp from '$lib/components/Bandcamp.svelte';
+  import Destinations from '$lib/components/Destinations.svelte';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
@@ -13,7 +15,7 @@
   import { drive, sleep } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
-  import { heardTags, jobStatus, lastModelSeconds } from '$lib/status';
+  import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
   import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -27,6 +29,10 @@
   // svelte-ignore state_referenced_locally
   let message = $state(data.view.job.error ?? '');
   let serverErrors = $state<FieldErrors>({});
+  let bandcampDone = $state(false);
+  // Finished calls only land in the view when their step returns, so the clock covers the gap.
+  let stepStartedAt = $state(Date.now());
+  let now = $state(Date.now());
   let stopped = false;
   let driving = false;
 
@@ -40,16 +46,10 @@
   let shortErrors = $state<FieldErrors>({});
   let drivingShort = false;
 
-  type Tab = 'video' | 'short';
-  const TABS: { id: Tab; label: string }[] = [
-    { id: 'video', label: 'Video' },
-    { id: 'short', label: 'Short' },
-  ];
-  let tab = $state<Tab>('video');
-
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
-  const seconds = $derived(lastModelSeconds(view));
+  const working = $derived(modelWorking(view));
+  const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
     job.payload ??
@@ -64,7 +64,18 @@
   );
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
-  const tabbed = $derived(SHORT_SOURCE_STATES.includes(job.state) || shortView !== null);
+  const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
+
+  $effect(() => {
+    void view;
+    stepStartedAt = now = Date.now();
+  });
+
+  $effect(() => {
+    if (!working) return;
+    const tick = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(tick);
+  });
 
   async function run() {
     if (driving) return;
@@ -138,26 +149,6 @@
     }
   }
 
-  function selectTab(next: Tab) {
-    tab = next;
-    document.getElementById(`tab-${next}`)?.focus();
-  }
-
-  /** Arrow keys, Home, and End move between tabs (WAI-ARIA tabs pattern, automatic activation). */
-  function tabKey(event: KeyboardEvent) {
-    const i = TABS.findIndex((t) => t.id === tab);
-    const moves: Record<string, number> = {
-      ArrowRight: (i + 1) % TABS.length,
-      ArrowLeft: (i - 1 + TABS.length) % TABS.length,
-      Home: 0,
-      End: TABS.length - 1,
-    };
-    const to = moves[event.key];
-    if (to === undefined) return;
-    event.preventDefault();
-    selectTab(TABS[to]!.id);
-  }
-
   async function act(name: 'approve' | 'rerun' | 'discard' | 'retry', body: unknown = {}) {
     busy = true;
     message = '';
@@ -218,198 +209,147 @@
 </script>
 
 <main>
-  {#if tabbed}
-    <div class="tabs" role="tablist" aria-label="Review">
-      {#each TABS as t (t.id)}
-        <button
-          type="button"
-          role="tab"
-          id="tab-{t.id}"
-          aria-selected={tab === t.id}
-          aria-controls="panel-{t.id}"
-          tabindex={tab === t.id ? 0 : -1}
-          onclick={() => (tab = t.id)}
-          onkeydown={tabKey}>{t.label}</button
-        >
-      {/each}
-    </div>
-  {/if}
+  <section class="tape" aria-label="The video">
+    <Monitor
+      src={localUrl ?? data.playbackUrl}
+      filename={job.filename}
+      width={job.probe?.width}
+      height={job.probe?.height}
+    />
+    <Track {status} {model} />
+    <Heard tags={heardTags(view)} measurements={job.measurements} />
+    {#if data.live && view.pick}
+      <Diff live={data.live} pick={view.pick} />
+    {/if}
+  </section>
 
-  <div
-    class="panel"
-    id="panel-video"
-    role={tabbed ? 'tabpanel' : undefined}
-    aria-labelledby={tabbed ? 'tab-video' : undefined}
-    hidden={tabbed && tab !== 'video'}
-  >
-    <section class="tape" aria-label="The video">
-      <Monitor
-        src={localUrl ?? data.playbackUrl}
-        filename={job.filename}
-        height={job.probe?.height}
-      />
-      <Track {status} {model} />
-      {#if job.state === 'VERIFIED' && job.videoId}
-        <p class="verified">
-          Verified · private · <a
-            href="https://youtu.be/{job.videoId}"
-            target="_blank"
-            rel="noopener">youtu.be/{job.videoId}</a
-          >
-        </p>
+  <div class="right">
+    {#if fields && view.pick}
+      {@const pick = view.pick}
+      {#if pick.flags.length > 0}
+        <!-- Above both tabs: an audio or video problem matters wherever the song goes. -->
+        <section class="warning" aria-labelledby="warning-title">
+          <h2 id="warning-title"><span aria-hidden="true">⚠</span> Check before uploading</h2>
+          <ul>
+            {#each pick.flags as flag (flag)}<li>{flag}</li>{/each}
+          </ul>
+        </section>
       {/if}
-      <Heard tags={heardTags(view)} measurements={job.measurements} />
-      {#if data.live && view.pick}
-        <Diff live={data.live} pick={view.pick} />
-      {/if}
-    </section>
-
-    <div class="right">
-      {#if fields && view.pick}
-        {#key view.pick.version}
-          <Label
-            {fields}
-            candidates={job.hashtagCandidates ?? []}
-            {editable}
-            {busy}
-            {done}
-            {serverErrors}
-            onapprove={(f) => act('approve', { ...f, pickVersion: view.pick?.version })}
-            onrerun={() => act('rerun')}
-            ondiscard={() => act('discard')}
+      <Destinations
+        youtubeDone={job.state === 'VERIFIED'}
+        shortDone={shortView?.job.state === 'VERIFIED'}
+        {bandcampDone}
+      >
+        {#snippet youtube()}
+          {#if job.state === 'VERIFIED' && job.videoId}
+            <p class="uploaded">
+              <span class="check" aria-hidden="true">✓</span>
+              <span
+                >Uploaded to YouTube · private ·
+                <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
+                  >youtu.be/{job.videoId}</a
+                ></span
+              >
+            </p>
+          {/if}
+          {#key pick.version}
+            <Label
+              {fields}
+              candidates={job.hashtagCandidates ?? []}
+              {editable}
+              {busy}
+              {done}
+              {serverErrors}
+              onapprove={(f) => act('approve', { ...f, pickVersion: pick.version })}
+              onrerun={() => act('rerun')}
+              ondiscard={() => act('discard')}
+            />
+          {/key}
+          {#if job.state === 'PAYLOAD' && job.payload}
+            <Payload fields={job.payload} />
+          {/if}
+        {/snippet}
+        {#snippet short()}
+          {#if shortView}
+            <Short
+              view={shortView}
+              src={shortSrc}
+              busy={shortBusy}
+              message={shortMessage}
+              serverErrors={shortErrors}
+              onrecut={(cut) => actShort('recut', cut)}
+              onapprove={(f) =>
+                actShort('approve', { ...f, pickVersion: shortView?.pick?.version })}
+              onrerun={() => actShort('rerun')}
+              ondiscard={() => actShort('discard')}
+              onretry={() => actShort('retry')}
+            />
+          {:else}
+            <section class="placeholder make" aria-labelledby="make-short-heading">
+              <h2 id="make-short-heading">Short</h2>
+              <p>
+                A vertical cut of this video's hook for YouTube Shorts. The model picks the hook;
+                ffmpeg cuts it and fits it to 9:16. It starts from this video's title, description,
+                and tags.
+              </p>
+              {#if canMakeShort}
+                <button
+                  class="btn primary"
+                  type="button"
+                  disabled={shortBusy}
+                  onclick={() => actShort('short')}>Make a Short</button
+                >
+              {:else}
+                <p>Available once the recommendation is ready.</p>
+              {/if}
+              <p class="toast" aria-live="polite">{shortMessage}</p>
+            </section>
+          {/if}
+        {/snippet}
+        {#snippet bandcamp()}
+          <Bandcamp
+            jobId={job.id}
+            songTitle={job.songTitle}
+            {pick}
+            tags={fields.tags}
+            ondone={(d) => (bandcampDone = d)}
           />
-        {/key}
-        {#if view.pick.flags.length > 0 || view.pick.brandCheck}
-          <div class="notes">
-            {#if view.pick.flags.length > 0}
-              <h2>Flags</h2>
-              <ul>
-                {#each view.pick.flags as flag (flag)}<li>{flag}</li>{/each}
-              </ul>
-            {/if}
-            {#if view.pick.brandCheck}
-              <h2>Brand check</h2>
-              <p>{view.pick.brandCheck}</p>
-            {/if}
-          </div>
-        {/if}
-      {:else}
-        <section class="placeholder" aria-label="What goes to YouTube">
-          <h2>{job.songTitle}</h2>
-          <p>The recommendation appears here once every chunk is analyzed.</p>
-        </section>
-      {/if}
+        {/snippet}
+      </Destinations>
+    {:else}
+      <section class="placeholder" aria-label="What goes to YouTube">
+        <h2>{job.songTitle}</h2>
+        <p>The recommendation appears here once every chunk is analyzed.</p>
+      </section>
+    {/if}
 
-      {#if job.state === 'PAYLOAD' && job.payload}
-        <Payload fields={job.payload} />
-      {/if}
-
-      {#if job.state === 'FAILED'}
-        <div class="actions">
-          <button class="btn ghost" type="button" disabled={busy} onclick={() => act('discard')}
-            >Discard</button
-          >
-          <button class="btn primary" type="button" disabled={busy} onclick={() => act('retry')}
-            >Retry</button
-          >
-        </div>
-      {/if}
-      <p class="toast" aria-live="polite">{message}</p>
-    </div>
+    {#if job.state === 'FAILED'}
+      <div class="actions">
+        <button class="btn ghost" type="button" disabled={busy} onclick={() => act('discard')}
+          >Discard</button
+        >
+        <button class="btn primary" type="button" disabled={busy} onclick={() => act('retry')}
+          >Retry</button
+        >
+      </div>
+    {/if}
+    <p class="toast" aria-live="polite">{message}</p>
   </div>
-
-  {#if tabbed}
-    <div id="panel-short" role="tabpanel" aria-labelledby="tab-short" hidden={tab !== 'short'}>
-      {#if shortView}
-        <Short
-          view={shortView}
-          src={shortSrc}
-          busy={shortBusy}
-          message={shortMessage}
-          serverErrors={shortErrors}
-          onrecut={(cut) => actShort('recut', cut)}
-          onapprove={(f) => actShort('approve', { ...f, pickVersion: shortView?.pick?.version })}
-          onrerun={() => actShort('rerun')}
-          ondiscard={() => actShort('discard')}
-          onretry={() => actShort('retry')}
-        />
-      {:else}
-        <section class="placeholder make" aria-labelledby="make-short-heading">
-          <h2 id="make-short-heading">Short</h2>
-          <p>
-            A vertical cut of this video's hook for YouTube Shorts. The model picks the hook; ffmpeg
-            cuts it and fits it to 9:16. It reuses this video's title, description, and tags.
-          </p>
-          <button
-            class="btn primary"
-            type="button"
-            disabled={shortBusy}
-            onclick={() => actShort('short')}>Make a Short</button
-          >
-          <p class="toast" aria-live="polite">{shortMessage}</p>
-        </section>
-      {/if}
-    </div>
-  {/if}
 </main>
 
 <style>
   main {
-    display: grid;
-    gap: 16px;
-  }
-
-  .panel {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
     gap: 20px;
     align-items: start;
   }
 
-  .panel[hidden] {
-    display: none;
-  }
-
+  /* Phones read top to bottom: the video and what the model heard, then the tabs. */
   @media (max-width: 820px) {
-    .panel {
-      grid-template-columns: 1fr;
+    main {
+      grid-template-columns: minmax(0, 1fr);
     }
-  }
-
-  .tabs {
-    display: flex;
-    gap: 4px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  [role='tab'] {
-    background: transparent;
-    color: var(--muted);
-    border: 0;
-    border-bottom: 3px solid transparent;
-    padding: 10px 16px;
-    min-height: 44px;
-    font: 700 13px/1 var(--display);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  [role='tab'][aria-selected='true'] {
-    color: var(--ink);
-    border-bottom-color: var(--magenta);
-  }
-
-  [role='tab']:focus-visible {
-    outline: 2px solid var(--magenta);
-    outline-offset: -2px;
-  }
-
-  .make {
-    display: grid;
-    gap: 12px;
-    justify-items: start;
-    max-width: 60ch;
   }
 
   .tape,
@@ -420,16 +360,65 @@
     min-width: 0;
   }
 
-  .verified {
+  .uploaded {
     margin: 0;
-    font: 500 13px/1.4 var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--green);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--green) 8%, var(--panel));
+    font: 600 14px/1.4 var(--sans);
+    color: var(--ink);
+  }
+
+  .uploaded .check {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--green);
+    color: var(--ground);
+    font-size: 14px;
+  }
+
+  .uploaded a {
     color: var(--green);
   }
 
-  .placeholder,
-  .notes {
+  .placeholder {
     background: var(--panel);
     padding: 12px 14px;
+  }
+
+  /* Yellow is the "needs attention" state color; it stays clear of the orange panel labels. */
+  .warning {
+    padding: 12px 14px;
+    border: 1px solid var(--yellow);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
+  }
+
+  .warning h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--yellow);
+  }
+
+  .warning h2 span {
+    font-size: 16px;
+    letter-spacing: 0;
+  }
+
+  .warning ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--ink);
   }
 
   h2 {
@@ -446,18 +435,18 @@
     color: var(--ink);
   }
 
-  .placeholder p,
-  .notes p {
+  .placeholder p {
     margin: 0;
-    color: var(--muted);
-    font-size: 13px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 500 12px/1.5 var(--mono);
+    color: var(--ink);
   }
 
-  .notes ul {
-    margin: 0 0 10px;
-    padding-left: 18px;
-    font-size: 13px;
-    color: var(--yellow);
+  .make {
+    display: grid;
+    gap: 12px;
+    justify-items: start;
   }
 
   .actions {

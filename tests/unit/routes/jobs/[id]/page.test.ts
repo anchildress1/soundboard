@@ -43,6 +43,7 @@ const PICK: Pick = {
   flags: ['Silence 80.0s to 83.0s'],
   brandCheck: 'Keeps the naming pattern.',
   why: { title: 'Matches.', description: 'Plain.', tags: 'Genre first.' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   modelMs: 12_000,
 };
 
@@ -152,6 +153,32 @@ afterEach(() => {
 });
 
 describe('job page: status chip', () => {
+  it('keeps the model clock counting while the pick runs, then stops in review', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      fetchMock.mockImplementation(hang);
+      setup(view({ state: 'PICK' }, { pick: PICK, chunks: [chunk(0)] }));
+      // A re-run keeps the earlier pick's 12s and counts the new call on top.
+      expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(screen.getByText('gemma-4-12b-it · 19s')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not count while the model is loading', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      fetchMock.mockImplementation(hang);
+      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: 'waking model' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows chunk progress and drives the next step with the job trace', async () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 }, { chunks: [chunk(0)] }));
@@ -179,10 +206,16 @@ describe('job page: status chip', () => {
   it('reads "Needs review" with the recommendation and does not drive', async () => {
     setup(view({ state: 'REVIEW' }, { pick: PICK, chunks: [chunk(0)] }));
     expect(chip()).toHaveTextContent('Needs review');
-    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(PICK.title);
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe(PICK.title);
     expect(screen.getByText('Silence 80.0s to 83.0s')).toBeInTheDocument();
-    expect(screen.getByText('Keeps the naming pattern.')).toBeInTheDocument();
-    expect(screen.getByText('gemma-4-12b-it · 12s')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Check before uploading' })).toBeInTheDocument();
+    expect(screen.queryByText('Keeps the naming pattern.')).toBeNull();
+    expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('To do');
+    await fireEvent.click(screen.getByRole('tab', { name: /Bandcamp/ }));
+    expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeVisible();
+    // The pre-upload warning sits above both tabs, so it stays visible on Bandcamp too.
+    expect(screen.getByRole('heading', { name: 'Check before uploading' })).toBeVisible();
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -193,10 +226,10 @@ describe('job page: status chip', () => {
     expect(screen.queryByRole('heading', { name: 'Brand check' })).toBeNull();
   });
 
-  it('shows brand check alone when there are no flags', () => {
+  it('never shows the brand check, which is the model grading itself', () => {
     setup(view({ state: 'REVIEW' }, { pick: { ...PICK, flags: [] } }));
-    expect(screen.queryByRole('heading', { name: 'Flags' })).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Brand check' })).toBeInTheDocument();
+    expect(screen.queryByText('Keeps the naming pattern.')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Check before uploading' })).toBeNull();
   });
 
   it('reads "Verified · private" with the video link', () => {
@@ -205,6 +238,8 @@ describe('job page: status chip', () => {
     const link = screen.getByRole('link', { name: 'youtu.be/vid1' });
     expect(link).toHaveAttribute('href', 'https://youtu.be/vid1');
     expect(screen.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
+    expect(screen.getByText(/Uploaded to YouTube · private/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('Done');
   });
 
   it('shows the would-be payload for PAYLOAD', () => {
@@ -217,7 +252,7 @@ describe('job page: status chip', () => {
       snippet: { title: 'PeekaBoo', description: 'd', tags: ['synthwave'], categoryId: '10' },
       status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
     });
-    expect((screen.getByLabelText('Title') as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
   });
 
   it('renders the live-video diff for a sample', () => {
@@ -324,7 +359,7 @@ describe('job page: actions', () => {
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
     await fireEvent.click(screen.getByRole('button', { name: 'Re-run model' }));
     await waitFor(() =>
-      expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Second take'),
+      expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Second take'),
     );
     expect(paths()).toEqual(['/api/jobs/j1/rerun', '/api/jobs/j1/step']);
   });
@@ -473,91 +508,76 @@ const shortView = (
   ...extra,
 });
 
-const tab = (name: 'Video' | 'Short') => screen.getByRole('tab', { name });
+const tab = (name: 'YouTube' | 'Short' | 'Bandcamp') =>
+  screen.getByRole('tab', { name: new RegExp(name) });
 const shortPanel = () => document.getElementById('panel-short')!;
-const videoPanel = () => document.getElementById('panel-video')!;
+const youtubePanel = () => document.getElementById('panel-youtube')!;
 const URL_A = 'https://storage.googleapis.com/bkt/uploads/s1-1?sig=a';
 const URL_B = 'https://storage.googleapis.com/bkt/uploads/s1-2?sig=b';
 
-describe('job page: review tabs', () => {
-  it('shows no tabs while the video is still being analyzed', () => {
+describe('job page: Short tab', () => {
+  it('has no destination tabs while the video is still being analyzed', () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 1 }));
     expect(screen.queryByRole('tablist')).toBeNull();
-    expect(videoPanel()).not.toHaveAttribute('role');
-    expect(videoPanel()).not.toHaveAttribute('hidden');
     expect(shortPanel()).toBeNull();
   });
 
-  it('offers Video and Short tabs once the video is in review, Video first', () => {
+  it('sits between YouTube and Bandcamp once there is a recommendation, To do', () => {
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
-    const list = screen.getByRole('tablist', { name: 'Review' });
+    const list = screen.getByRole('tablist', { name: 'Where it goes' });
     expect(
       within(list)
         .getAllByRole('tab')
-        .map((t) => t.textContent),
-    ).toEqual(['Video', 'Short']);
-    expect(tab('Video')).toHaveAttribute('aria-selected', 'true');
-    expect(tab('Short')).toHaveAttribute('aria-selected', 'false');
-    expect(tab('Video')).toHaveAttribute('tabindex', '0');
-    expect(tab('Short')).toHaveAttribute('tabindex', '-1');
-    expect(tab('Video')).toHaveAttribute('aria-controls', 'panel-video');
-    expect(tab('Short')).toHaveAttribute('aria-controls', 'panel-short');
-    expect(screen.getByRole('tabpanel', { name: 'Video' })).toBe(videoPanel());
+        .map((t) => t.id),
+    ).toEqual(['tab-youtube', 'tab-short', 'tab-bandcamp']);
+    expect(tab('Short')).toHaveTextContent('To do');
     expect(shortPanel()).toHaveAttribute('hidden');
     expect(shortPanel()).toHaveAttribute('aria-labelledby', 'tab-short');
   });
 
-  it.each(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'PAYLOAD'] as JobState[])(
-    'keeps the tabs in %s',
-    (state) => {
+  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'PAYLOAD'] as JobState[])(
+    'offers Make a Short in %s',
+    async (state) => {
       fetchMock.mockImplementation(hang);
       setup(view({ state }, { pick: PICK }));
-      expect(screen.getByRole('tablist')).toBeInTheDocument();
+      await fireEvent.click(tab('Short'));
+      expect(within(shortPanel()).getByRole('button', { name: 'Make a Short' })).toBeVisible();
     },
   );
 
-  it('keeps the tabs on a failed upload when a Short already exists', () => {
-    setup(view({ state: 'FAILED', failedState: 'PUBLISHING', shortId: 's1' }, { pick: PICK }), {
-      short: shortView('REVIEW'),
-    });
-    expect(screen.getByRole('tablist')).toBeInTheDocument();
-  });
-
-  it('switches panels on click and keeps unsaved video edits', async () => {
-    setup(view({ state: 'REVIEW' }, { pick: PICK }));
-    await fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Draft edit' } });
+  it('explains instead of offering a Short while a new recommendation is being picked', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'PICK' }, { pick: PICK }));
     await fireEvent.click(tab('Short'));
-    expect(tab('Short')).toHaveAttribute('aria-selected', 'true');
-    expect(videoPanel()).toHaveAttribute('hidden');
-    expect(screen.getByRole('tabpanel', { name: 'Short' })).toBe(shortPanel());
-    expect(screen.getByRole('button', { name: 'Make a Short' })).toBeInTheDocument();
-    await fireEvent.click(tab('Video'));
-    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Draft edit');
+    expect(within(shortPanel()).queryByRole('button', { name: 'Make a Short' })).toBeNull();
+    expect(
+      within(shortPanel()).getByText('Available once the recommendation is ready.'),
+    ).toBeVisible();
   });
 
-  it('moves between tabs with the arrow keys, Home, and End, wrapping around', async () => {
-    setup(view({ state: 'REVIEW' }, { pick: PICK }));
-    tab('Video').focus();
-    await fireEvent.keyDown(tab('Video'), { key: 'ArrowRight' });
-    expect(tab('Short')).toHaveAttribute('aria-selected', 'true');
-    expect(tab('Short')).toHaveFocus();
-    expect(tab('Short')).toHaveAttribute('tabindex', '0');
-    await fireEvent.keyDown(tab('Short'), { key: 'ArrowRight' });
-    expect(tab('Video')).toHaveFocus();
-    await fireEvent.keyDown(tab('Video'), { key: 'ArrowLeft' });
-    expect(tab('Short')).toHaveFocus();
-    await fireEvent.keyDown(tab('Short'), { key: 'Home' });
-    expect(tab('Video')).toHaveAttribute('aria-selected', 'true');
-    await fireEvent.keyDown(tab('Video'), { key: 'End' });
-    expect(tab('Short')).toHaveAttribute('aria-selected', 'true');
+  it('marks the Short tab done once the Short is verified', async () => {
+    setup(view({ state: 'VERIFIED', videoId: 'vid1', shortId: 's1' }, { pick: PICK }), {
+      short: shortView('VERIFIED', {}, { playbackUrl: URL_A }, { videoId: 'short1' }),
+    });
+    expect(tab('Short')).toHaveTextContent('Done');
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('link', { name: 'youtu.be/short1' })).toHaveAttribute(
+      'href',
+      'https://youtu.be/short1',
+    );
   });
 
-  it('ignores other keys', async () => {
-    setup(view({ state: 'REVIEW' }, { pick: PICK }));
-    await fireEvent.keyDown(tab('Video'), { key: 'Enter' });
-    await fireEvent.keyDown(tab('Video'), { key: 'ArrowDown' });
-    expect(tab('Video')).toHaveAttribute('aria-selected', 'true');
+  it('keeps unsaved YouTube edits across a trip to the Short tab', async () => {
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: shortView('REVIEW', {}, { playbackUrl: URL_A }),
+    });
+    const title = () => within(youtubePanel()).getByLabelText(/^Title/) as HTMLInputElement;
+    await fireEvent.input(title(), { target: { value: 'Draft edit' } });
+    await fireEvent.click(tab('Short'));
+    expect(youtubePanel()).toHaveAttribute('hidden');
+    await fireEvent.click(tab('YouTube'));
+    expect(title().value).toBe('Draft edit');
   });
 
   it('keeps every id on the page unique with a Short loaded', () => {
@@ -589,7 +609,7 @@ describe('job page: Short', () => {
       expect(init!.headers).toMatchObject({ 'sentry-trace': 'trace-1', baggage: 'bag-1' });
     }
     expect(shortPanel().querySelector('video')).toHaveAttribute('src', URL_A);
-    expect(container.querySelector('#panel-video video')).toHaveAttribute(
+    expect(container.querySelector('section[aria-label="The video"] video')).toHaveAttribute(
       'src',
       'https://storage.googleapis.com/bkt/uploads/j1?sig=read',
     );
@@ -704,7 +724,7 @@ describe('job page: Short', () => {
       await within(shortPanel()).findByText('Fix the highlighted fields.'),
     ).toBeInTheDocument();
     expect(within(shortPanel()).getByText("Not in this job's tag list: x")).toBeInTheDocument();
-    expect(within(videoPanel()).queryByText('Fix the highlighted fields.')).toBeNull();
+    expect(within(youtubePanel()).queryByText('Fix the highlighted fields.')).toBeNull();
   });
 
   it('re-picks the hook', async () => {
@@ -730,7 +750,7 @@ describe('job page: Short', () => {
     expect(await screen.findByRole('button', { name: 'Make a Short' })).toBeInTheDocument();
     expect(paths()).toEqual(['/api/jobs/s1/discard']);
     expect(h.goto).not.toHaveBeenCalled();
-    expect(within(videoPanel()).getByLabelText('Title')).toBeInTheDocument();
+    expect(within(youtubePanel()).getByLabelText(/^Title/)).toBeInTheDocument();
   });
 
   it('retries a failed Short step', async () => {

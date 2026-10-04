@@ -23,6 +23,7 @@ const PICK: Pick = {
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
+  bandcamp: { about: '', credits: '' },
   modelMs: 12_000,
 };
 
@@ -93,7 +94,7 @@ describe('Short: running', () => {
     expect(container.querySelector('video')).toBeNull();
     expect(screen.getByText('gemma-4-12b-it')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve & upload' })).toBeNull();
-    expect((screen.getByLabelText('Title') as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
   });
 
   it('names the render on the chip and locks the cut while it runs', () => {
@@ -122,7 +123,7 @@ describe('Short: review', () => {
     expect(screen.getByText('00:01:10 – 00:01:40 · 30s')).toBeInTheDocument();
     expect(screen.getByText(/The chorus lands with the full band\./)).toBeInTheDocument();
     expect(screen.getByText('gemma-4-12b-it · 6s')).toBeInTheDocument();
-    expect(screen.getByText('1280p')).toBeInTheDocument();
+    expect(screen.getByText('720p · vertical')).toBeInTheDocument();
   });
 
   it('hides the reason once the artist moved the cut', () => {
@@ -198,8 +199,8 @@ describe('Short: review', () => {
 
   it('edits and approves the Short metadata in its own label', async () => {
     const { onapprove, onrerun, ondiscard } = setup();
-    const label = screen.getByRole('region', { name: 'What goes to YouTube with the Short' });
-    expect(within(label).getByLabelText('Title')).toHaveAttribute('id', 'short-title');
+    const label = screen.getByRole('region', { name: 'YouTube Short' });
+    expect(within(label).getByLabelText(/^Title/)).toHaveAttribute('id', 'short-title');
     await fireEvent.click(within(label).getByRole('button', { name: 'Re-pick hook' }));
     await fireEvent.click(within(label).getByRole('button', { name: 'Discard' }));
     await fireEvent.click(within(label).getByRole('button', { name: 'Approve & upload' }));
@@ -231,7 +232,7 @@ describe('Short: after approval', () => {
     const payload = { title: 'Edited', description: 'd', hashtags: [], tags: [] };
     setup({ view: view('PAYLOAD', {}, { payload }) });
     expect(screen.getByRole('region', { name: 'Would-be upload payload' })).toBeInTheDocument();
-    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Edited');
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Edited');
     expect(start()).toBeDisabled();
   });
 
