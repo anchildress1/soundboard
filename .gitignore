@@ -50,3 +50,6 @@ Thumbs.db
 
 # Agent worktrees
 .claude/worktrees/
+
+# Sentry Config File
+.env.sentry-build-plugin
