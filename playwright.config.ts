@@ -19,5 +19,11 @@ export default defineConfig({
     command: 'pnpm build && pnpm preview',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
+    // Fixed test identities, so header.spec.ts can sign session cookies for each kind of user.
+    env: {
+      SESSION_SECRET: 'e2e-session-secret',
+      ALLOWLIST_EMAILS: 'nathan@e2e.test',
+      DEMO_EMAILS: 'demo@e2e.test',
+    },
   },
 });

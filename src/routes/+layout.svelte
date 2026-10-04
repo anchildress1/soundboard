@@ -33,9 +33,7 @@
 
   <header>
     <h1 class="wordmark">
-      <a href={resolve('/')}>Soundboard</a><small
-        ><span class="role">Release agent ·</span> Flies Like Robots</small
-      >
+      <a href={resolve('/')}>Soundboard</a><small>Release agent · Flies Like Robots</small>
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
@@ -113,14 +111,25 @@
   }
 
   /*
-   * Two fixed columns that never wrap: if the controls could drop to a second row, a web font
-   * arriving late would reflow the header and shift the whole page.
+   * Fixed rows at every width, never wrapping by fit: if the controls dropped to a second row only
+   * when they didn't fit, a web font arriving late would reflow the header and shift the page.
+   * Phones always stack the controls under the wordmark.
    */
   header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 16px;
+    gap: 12px 16px;
+  }
+
+  @media (max-width: 640px) {
+    header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .bar {
+      justify-content: flex-start;
+    }
   }
 
   .wordmark {
@@ -150,13 +159,6 @@
     color: var(--muted);
     text-shadow: none;
     margin: 8px 0 0 6px;
-  }
-
-  /* Phones keep the artist's name and drop the descriptor, rather than cutting the name off. */
-  @media (max-width: 440px) {
-    .role {
-      display: none;
-    }
   }
 
   .bar {
@@ -201,8 +203,9 @@
     font-size: 14px;
   }
 
+  /* A real box, not display: contents, so the skip link can focus and scroll to it. */
   .content {
-    display: contents;
+    display: block;
   }
 
   .content:focus {

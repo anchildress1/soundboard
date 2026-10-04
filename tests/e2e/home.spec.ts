@@ -7,10 +7,7 @@ test.describe('home page', () => {
     const heading = page.getByRole('heading', { level: 1 });
     await expect(heading).toContainText('Soundboard');
     await expect(heading.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    // Phones drop the "Release agent ·" descriptor but always show the artist's name in full.
-    const subtitle = heading.locator('small');
-    await expect(subtitle).toBeVisible();
-    await expect(subtitle).toContainText('Flies Like Robots');
+    await expect(page.getByText('Release agent · Flies Like Robots')).toBeVisible();
   });
 
   test('keeps Analyze disabled with no file picked', async ({ page }) => {
