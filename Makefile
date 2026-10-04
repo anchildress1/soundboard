@@ -1,4 +1,4 @@
-.PHONY: install dev format format-check lint typecheck test build e2e perf secret-scan deploy clean ai-checks
+.PHONY: install dev format format-check lint typecheck test build e2e perf secret-scan deploy model-image clean ai-checks
 
 install:
 	pnpm install
@@ -38,6 +38,9 @@ secret-scan:
 
 deploy:
 	./deploy.sh
+
+model-image:
+	./build-model.sh
 
 clean:
 	rm -rf build .svelte-kit coverage playwright-report test-results .lighthouseci node_modules

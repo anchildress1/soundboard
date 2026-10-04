@@ -24,7 +24,9 @@ updates:
           - '*'
 
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - /
+      - /model
     schedule:
       interval: weekly
       day: tuesday
