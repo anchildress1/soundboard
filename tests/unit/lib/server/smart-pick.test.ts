@@ -590,6 +590,14 @@ describe('finalizePick', () => {
     expect(pick.title).toBe('PeekaBoo');
   });
 
+  it('keeps paragraph breaks when dropping the artist from a description', () => {
+    const pick = finalizePick(
+      raw({ description: 'First line by Flies Like Robots.\n\nSecond paragraph.' }),
+      fix({ useArtistName: false }),
+    );
+    expect(pick.description).toMatch(/^First line by\.\n\nSecond paragraph\.\n\n#/);
+  });
+
   it('drops the artist and its separator from the middle of a title', () => {
     const pick = finalizePick(
       raw({ title: 'PeekaBoo - Flies Like Robots (Official Music Video)' }),

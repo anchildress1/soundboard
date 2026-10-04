@@ -4,14 +4,14 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth';
 
 const escapeAttr = (value: string) =>
-  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 
 /** Swaps the request's trace meta tags for the job's, so the browser continues the job's trace. */
 export function replaceTraceMeta(
   html: string,
   trace: { sentryTrace: string; baggage: string },
 ): string {
-  const stripped = html.replace(/<meta name="(?:sentry-trace|baggage)"[^>]*>\s*/g, '');
+  const stripped = html.replaceAll(/<meta name="(?:sentry-trace|baggage)"[^>]*>\s*/g, '');
   const tags =
     `<meta name="sentry-trace" content="${escapeAttr(trace.sentryTrace)}"/>` +
     `<meta name="baggage" content="${escapeAttr(trace.baggage)}"/>`;

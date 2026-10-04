@@ -57,10 +57,9 @@ export function heardTags(view: JobView, limit = 8): string[] {
   for (const chunk of view.chunks) {
     const music = chunk.analysis?.music;
     if (!music) continue;
-    music.genre.forEach(add);
-    add(music.tempoFeel);
-    music.instrumentation.forEach(add);
-    add(music.vocals);
+    for (const tag of [...music.genre, music.tempoFeel, ...music.instrumentation, music.vocals]) {
+      add(tag);
+    }
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])

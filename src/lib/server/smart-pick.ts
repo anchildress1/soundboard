@@ -164,25 +164,49 @@ export function allowedLinks(text: string, facts: Fact[]): string {
   const allowed = facts
     .filter((f) => f.kind !== 'INFERENCE')
     .flatMap((f) => f.value.match(URL_PATTERN) ?? []);
-  return text.replace(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
+  return text.replaceAll(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
 }
 
-// The name goes with the separator next to it, so "Song - Flies Like Robots" leaves "Song".
-const ARTIST_PATTERN = /\s*[-–|·]?\s*\b(?:flies\s+like\s+robots|flr)\b\s*/giu;
-const removeArtist = (text: string) =>
-  text
-    .replace(ARTIST_PATTERN, ' ')
-    .replace(/^\s*[-–|·]\s*|\s*[-–|·]\s*$/gu, '')
-    .trim();
+const ARTIST_PATTERN = /\b(?:flies like robots|flr)\b/giu;
+const SEPARATORS = new Set(['-', '–', '|', '·']);
+const CUT = '\u0000';
+
+function removeArtistFromLine(line: string): string {
+  const tokens = line
+    .replaceAll(/[ \t]+/g, ' ')
+    .replaceAll(ARTIST_PATTERN, ` ${CUT} `)
+    .split(' ');
+  const out: string[] = [];
+  let afterCut = false;
+  for (const token of tokens) {
+    if (!token) continue;
+    if (token === CUT) {
+      if (SEPARATORS.has(out.at(-1) ?? '')) out.pop();
+      afterCut = true;
+      continue;
+    }
+    if (afterCut && SEPARATORS.has(token)) continue;
+    afterCut = false;
+    out.push(token);
+  }
+  while (SEPARATORS.has(out[0] ?? '')) out.shift();
+  while (SEPARATORS.has(out.at(-1) ?? '')) out.pop();
+  return out.join(' ').replaceAll(/ ([,.;:!?)])/g, '$1');
+}
+
+/** Drops the artist name with the separator next to it, so "Song - Flies Like Robots" leaves "Song". */
+const removeArtist = (text: string) => text.split('\n').map(removeArtistFromLine).join('\n');
 
 const BODY_HASHTAG = /(?<!\S)#[\p{L}\p{N}_]+/gu;
 
 const tidy = (text: string) =>
   text
-    .replace(/[<>]/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ')
+    .replaceAll(/[<>]/g, '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .replaceAll(/[ \t]{2,}/g, ' ')
     .trim();
 
 function clip(text: string, max: number): string {
@@ -238,7 +262,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const scrub = fix.useArtistName ? (t: string) => t : removeArtist;
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
   let body = tidy(
-    tidy(scrub(allowedLinks(draft.description, fix.facts))).replace(BODY_HASHTAG, ''),
+    tidy(scrub(allowedLinks(draft.description, fix.facts))).replaceAll(BODY_HASHTAG, ''),
   );
   const closing = hashtags.join(' ');
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);

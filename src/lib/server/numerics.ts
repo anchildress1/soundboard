@@ -1,14 +1,17 @@
 // Loudness, peak, level, tempo, and frequency figures. ffmpeg owns every audio number; the model's
-// guesses at them are removed rather than shown next to the measured ones.
-const AUDIO_NUMBER = /[-+−]?\s?\d+(?:[.,]\d+)?\s?(?:dB(?:FS|TP|A)?|LUFS|LKFS|LU|bpm|BPM|k?Hz)\b/gi;
+// guesses at them are removed rather than shown next to the measured ones. The lookbehind stops a
+// match from starting mid-number, which keeps the scan linear; `db[a-z]{0,2}` covers dB, dBA,
+// dBFS, and dBTP.
+const AUDIO_NUMBER = /(?<![\d.,])[-+−]?\d+(?:[.,]\d+)? ?(?:db[a-z]{0,2}|lufs|lkfs|lu|bpm|k?hz)\b/gi;
 
 /** Removes model-emitted audio-engineering numbers from one string. */
 export function stripNumerics(text: string): string {
   return text
-    .replace(AUDIO_NUMBER, '')
-    .replace(/\(\s*\)/g, '')
-    .replace(/\s+([,.;:)])/g, '$1')
-    .replace(/[ \t]{2,}/g, ' ')
+    .replaceAll(AUDIO_NUMBER, '')
+    .replaceAll('( )', '')
+    .replaceAll('()', '')
+    .replaceAll(/[ \t]{2,}/g, ' ')
+    .replaceAll(/ ([,.;:)])/g, '$1')
     .trim();
 }
 

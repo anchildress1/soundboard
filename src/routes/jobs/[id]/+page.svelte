@@ -28,7 +28,7 @@
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
   const seconds = $derived(lastModelSeconds(view));
-  const model = $derived(`gemma-4-12b-it${seconds ? ` · ${seconds}s` : ''}`);
+  const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
     job.payload ??
       (view.pick

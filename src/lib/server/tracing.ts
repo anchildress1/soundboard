@@ -11,8 +11,10 @@ type Part =
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string | Part[] };
 
 const dataUrlMime = (url: string) => url.match(/^data:([^;,]+)/)?.[1] ?? 'unknown';
-const base64Bytes = (b64: string) =>
-  Math.floor((b64.length * 3) / 4) - (b64.match(/=+$/)?.[0].length ?? 0);
+const base64Bytes = (b64: string) => {
+  const padding = b64.endsWith('==') ? 2 : Number(b64.endsWith('='));
+  return Math.floor((b64.length * 3) / 4) - padding;
+};
 
 /**
  * Replaces audio and image payloads with `{type, mime, bytes}` placeholders, so media never reaches

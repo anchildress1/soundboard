@@ -34,8 +34,10 @@ function parseUpload(input: Exclude<CreateInput, { sampleId: string }>, maxMinut
   if (notes.length > NOTES_MAX)
     throw new ActionError(400, `Notes are over ${NOTES_MAX} characters.`);
   if (!contentType.startsWith('video/')) throw new ActionError(400, 'Pick a video file.');
-  if (!(size > 0 && size <= MAX_BYTES)) throw new ActionError(400, 'Videos must be under 2 GB.');
-  if (!(duration > 0) || duration > maxMinutes * 60) {
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_BYTES) {
+    throw new ActionError(400, 'Videos must be under 2 GB.');
+  }
+  if (!Number.isFinite(duration) || duration <= 0 || duration > maxMinutes * 60) {
     throw new ActionError(400, `Videos are capped at ${maxMinutes} minutes here.`);
   }
   return {
@@ -43,6 +45,41 @@ function parseUpload(input: Exclude<CreateInput, { sampleId: string }>, maxMinut
     notes,
     contentType,
     filename: String(input.filename ?? 'video').slice(0, 200),
+  };
+}
+
+async function sampleJob(sampleId: string, allowlisted: boolean): Promise<NewJob> {
+  const sample = await getSample(String(sampleId));
+  if (!sample) throw new ActionError(404, 'That sample is gone.');
+  return {
+    owner: allowlisted ? 'nathan' : 'visitor',
+    channel: allowlisted ? 'nathan' : 'sandbox',
+    songTitle: sample.songTitle,
+    notes: '',
+    filename: `${sample.songTitle}.mp4`,
+    contentType: 'video/mp4',
+    object: sample.object,
+    sampleId: sample.id,
+    liveVideoId: sample.videoId,
+    ipHash: null,
+    trace: null,
+  };
+}
+
+function uploadJob(
+  input: Exclude<CreateInput, { sampleId: string }>,
+  allowlisted: boolean,
+): NewJob {
+  const owner = allowlisted ? 'nathan' : 'visitor';
+  return {
+    ...parseUpload(input, MAX_MINUTES[owner]),
+    owner,
+    channel: allowlisted ? 'nathan' : null,
+    object: null,
+    sampleId: null,
+    liveVideoId: null,
+    ipHash: null,
+    trace: null,
   };
 }
 
@@ -55,37 +92,10 @@ export async function create(
   who: { allowlisted: boolean; ip: string },
 ): Promise<Created> {
   const id = newJobId();
-  let job: NewJob;
-  if ('sampleId' in input) {
-    const sample = await getSample(String(input.sampleId));
-    if (!sample) throw new ActionError(404, 'That sample is gone.');
-    job = {
-      owner: who.allowlisted ? 'nathan' : 'visitor',
-      channel: who.allowlisted ? 'nathan' : 'sandbox',
-      songTitle: sample.songTitle,
-      notes: '',
-      filename: `${sample.songTitle}.mp4`,
-      contentType: 'video/mp4',
-      object: sample.object,
-      sampleId: sample.id,
-      liveVideoId: sample.videoId,
-      ipHash: null,
-      trace: null,
-    };
-  } else {
-    const owner = who.allowlisted ? 'nathan' : 'visitor';
-    const fields = parseUpload(input, MAX_MINUTES[owner]);
-    job = {
-      ...fields,
-      owner,
-      channel: who.allowlisted ? 'nathan' : null,
-      object: null,
-      sampleId: null,
-      liveVideoId: null,
-      ipHash: null,
-      trace: null,
-    };
-  }
+  const job =
+    'sampleId' in input
+      ? await sampleJob(input.sampleId, who.allowlisted)
+      : uploadJob(input, who.allowlisted);
   if (!who.allowlisted) {
     job.ipHash = hashIp(who.ip);
     const blocked = await reserveVisitorRun(job.ipHash);

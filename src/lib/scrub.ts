@@ -3,7 +3,7 @@
 const URL_IN_TEXT = /(https?:\/\/[^\s?#"']+)\?[^\s#"']*/g;
 
 export function scrubUrl(text: string): string {
-  return text.replace(URL_IN_TEXT, '$1?[redacted]');
+  return text.replaceAll(URL_IN_TEXT, '$1?[redacted]');
 }
 
 const URL_KEYS = ['url', 'url.full', 'http.url', 'http.query', 'url.query', 'from', 'to'];
