@@ -1,5 +1,3 @@
-# App container: SvelteKit (adapter-node) + ffmpeg. The model runs in its own sidecar container.
-
 FROM node:24.21.0-trixie-slim AS build
 WORKDIR /app
 RUN npm install --global --ignore-scripts pnpm@12.9.1
@@ -14,9 +12,10 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080
-COPY --from=build --chown=node:node --chmod=555 /app/build ./build
-COPY --from=build --chown=node:node --chmod=555 /app/node_modules ./node_modules
-COPY --from=build --chown=node:node --chmod=444 /app/package.json ./package.json
+# Root-owned on purpose: the node user can read and execute the app but never rewrite it.
+COPY --from=build /app/build ./build
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json
 USER node
 EXPOSE 8080
 CMD ["node", "build"]
