@@ -1,0 +1,17 @@
+[
+  {
+    "name": "keep-app-5",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": { "packageNamePrefixes": ["app"], "keepCount": 5 }
+  },
+  {
+    "name": "keep-model-2",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": { "packageNamePrefixes": ["model"], "keepCount": 2 }
+  },
+  {
+    "name": "delete-rest",
+    "action": { "type": "Delete" },
+    "condition": { "tagState": "any", "olderThan": "1d" }
+  }
+]

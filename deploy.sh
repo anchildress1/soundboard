@@ -68,6 +68,10 @@ if ! gcloud artifacts repositories describe "$SERVICE" \
   gcloud artifacts repositories create "$SERVICE" \
     --repository-format docker --location "$REGION" --project "$GCP_PROJECT_ID"
 fi
+# Storage is billed per GB: keep the 5 newest app images and the 2 newest model images.
+gcloud artifacts repositories set-cleanup-policies "$SERVICE" \
+  --location "$REGION" --project "$GCP_PROJECT_ID" \
+  --policy cleanup-policy.json --no-dry-run --quiet > /dev/null
 
 gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
 
