@@ -12,7 +12,7 @@
     "pnpm": "12.9.1"
   },
   "scripts": {
-    "dev": "vite dev",
+    "dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
