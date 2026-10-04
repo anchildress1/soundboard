@@ -35,6 +35,12 @@ const tags = () => screen.getByLabelText(/^Tags/) as HTMLTextAreaElement;
 const approveButton = () => screen.getByRole('button', { name: 'Approve & upload' });
 
 describe('Label: draft and counters', () => {
+  it('heads the panel like the Bandcamp tab', () => {
+    setup();
+    expect(screen.getByRole('region', { name: 'YouTube' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'YouTube' })).toBeInTheDocument();
+  });
+
   it('fills the fields from the draft with live counters', () => {
     setup();
     expect(title().value).toBe('PeekaBoo');

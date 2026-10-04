@@ -48,7 +48,9 @@
   const invalid = $derived(Object.keys(errors).length > 0);
 </script>
 
-<section class="label" aria-label="What goes to YouTube">
+<section class="youtube" aria-labelledby="youtube-title">
+  <h2 id="youtube-title">YouTube</h2>
+  <p class="hint">Edit any field, then approve. The upload stays private.</p>
   <div class="fields">
     <div class="field" class:err={errors.title}>
       <label for="title">Title <span>{title.length} / {TITLE_MAX}</span></label>
@@ -101,11 +103,28 @@
 </section>
 
 <style>
-  .label {
+  /* Same panel, heading, and hint as the Bandcamp tab, so the two destinations read alike. */
+  .youtube {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     min-width: 0;
+    background: var(--panel);
+    padding: 12px 14px;
+  }
+
+  h2 {
+    margin: 0;
+    font: 900 12px/1.2 var(--display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--orange);
+  }
+
+  .hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
   }
 
   .fields {
