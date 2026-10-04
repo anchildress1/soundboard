@@ -127,7 +127,8 @@
     </div>
     {#if !data.session?.allowlisted}
       <p class="note">
-        Signed out: your own video ends at the would-be upload payload; nothing is posted.
+        {data.session ? 'Demo run' : 'Signed out'}: your own video ends at the would-be upload
+        payload; nothing is posted.
       </p>
     {/if}
     <div class="actions">

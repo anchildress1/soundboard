@@ -86,6 +86,17 @@ describe('home page: form', () => {
     expect(analyze()).toBeDisabled();
   });
 
+  it('says signed out only when there is no session', () => {
+    setup();
+    expect(screen.getByText(/^Signed out: your own video ends/)).toBeInTheDocument();
+  });
+
+  it('calls a signed-in visitor run a demo run, not signed out', () => {
+    setup({ session: { email: 'someone@example.com', allowlisted: false } });
+    expect(screen.getByText(/^Demo run: your own video ends/)).toBeInTheDocument();
+    expect(screen.queryByText(/Signed out/)).toBeNull();
+  });
+
   it('allows Nathan 15 minutes and drops the signed-out note', async () => {
     const { container } = setup({ session: { email: 'nathan@example.com', allowlisted: true } });
     expect(screen.getByText('up to 15 min')).toBeInTheDocument();

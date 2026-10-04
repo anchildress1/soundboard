@@ -8,7 +8,7 @@
   --magenta: #ff4fd8;
   --orange: #ff7a1a;
   --yellow: #ffd23f;
-  --blue: #1f6fe8;
+  --blue: #2e8cff;
   --green: #6fdc5a;
   --red: #d8281a;
   --red-text: #ff6a52;
@@ -55,6 +55,25 @@ a {
   min-height: 44px;
 }
 
+.btn {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.btn:not([disabled]):hover {
+  border-color: var(--magenta);
+  color: var(--ink);
+}
+
+.btn.small {
+  padding: 10px 14px;
+  min-height: 40px;
+  font-size: 12px;
+}
+
 .btn:focus-visible {
   outline: 2px solid var(--magenta);
   outline-offset: 3px;
@@ -65,6 +84,12 @@ a {
   border-color: var(--magenta);
   color: var(--ground);
   box-shadow: 4px 4px 0 var(--ink);
+}
+
+.btn.primary:not([disabled]):hover {
+  color: var(--ground);
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--ink);
 }
 
 .btn.primary:active {
@@ -162,8 +187,36 @@ a {
   white-space: nowrap;
 }
 
+/* Sections rise in on load, a beat apart. */
+main > * {
+  animation: rise 0.45s ease-out both;
+}
+
+main > :nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+main > :nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+main > :nth-child(n + 4) {
+  animation-delay: 0.24s;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
     transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

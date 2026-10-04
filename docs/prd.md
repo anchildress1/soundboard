@@ -213,8 +213,12 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - Visibility shown as **Private** (fixed: uploads are private).
   - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
 - **Under 820px:** panes stack, tape first.
+- **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
+- **Header:** the channel handle (YouTube icon) and video and subscriber counts, then Sign in as a button, or Brand guide (Nathan) and Sign out. Channel connect links live on the Brand guide page.
+- **Footer:** one row: credits, then icon links to Ashley's site and socials.
+- **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.
-- **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #1f6fe8`, `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
+- **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #2e8cff` (neon), `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
 - **Type:** Mr Dafoe wordmark, Rubik 700/900 labels and buttons, Inter body, JetBrains Mono for tags, counters, and metadata.
 - **Mockup copy that the build replaces:** hashtags in the tags field (they move to the description; tags are plain terms), "118 bpm" and lyric fragments in "What the model heard" (numbers come from ffmpeg; lyrics are a non-goal), "last 10 uploads" (the grounding is the genre search), the Public/Scheduled/Unlisted options, the Playlist picker, and "Live on YouTube".
 

@@ -33,7 +33,10 @@ describe('layout', () => {
   it('renders the page between header and footer', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
-    expect(screen.getByText('Built for Nathan. One file in, one upload out.')).toBeInTheDocument();
+    expect(screen.getByRole('contentinfo')).toHaveTextContent(
+      'Built for Nathan by Ashley Childress · Hacktoberfest Weekend Challenge: Build for a Friend',
+    );
+    expect(screen.getByText('page body').closest('#content')).not.toBeNull();
   });
 
   it("links Ashley's site and socials in the footer, opening new tabs", () => {
@@ -57,14 +60,9 @@ describe('layout', () => {
 
   it('shows FLR channel stats when available', () => {
     setup({ channel });
-    expect(screen.getByText('Public channel stats')).toBeInTheDocument();
     expect(screen.getByText('@flieslikerobots')).toBeInTheDocument();
-    expect(screen.getByText(/12 videos · 340 subs/)).toHaveTextContent('last upload today');
-  });
-
-  it('omits the last-upload age when unknown', () => {
-    setup({ channel: { ...channel, lastUploadAt: null } });
-    expect(screen.getByText(/12 videos · 340 subs/).textContent).not.toContain('last upload');
+    expect(screen.getByText('12 videos · 340 subs')).toBeInTheDocument();
+    expect(screen.queryByText(/last upload/)).toBeNull();
   });
 
   it('renders without stats', () => {
@@ -74,15 +72,19 @@ describe('layout', () => {
 
   it('offers sign-in when signed out, with no channel connect links', () => {
     setup();
-    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/login');
+    const signIn = screen.getByRole('link', { name: 'Sign in' });
+    expect(signIn).toHaveAttribute('href', '/auth/login');
+    expect(signIn).toHaveClass('btn');
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     expect(screen.queryByText(/Connect channel/)).toBeNull();
   });
 
   it('shows the email and sign-out for a non-allowlisted session, still without connect links', () => {
     setup({ session: { email: 'someone@example.com', allowlisted: false } });
-    expect(screen.getByText('someone@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('someone@example.com')).toBeNull();
     const signOut = screen.getByRole('button', { name: 'Sign out' });
+    expect(signOut).toHaveAttribute('title', 'someone@example.com');
+    expect(signOut).toHaveClass('btn');
     expect(signOut.closest('form')).toHaveAttribute('action', '/auth/logout');
     expect(signOut.closest('form')).toHaveAttribute('method', 'POST');
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
@@ -90,16 +92,20 @@ describe('layout', () => {
     expect(screen.queryByRole('link', { name: 'Brand guide' })).toBeNull();
   });
 
-  it('offers channel connect links to an allowlisted session', () => {
+  it('gives an allowlisted session the brand guide link, without a sign-in', () => {
     setup({ session: { email: 'nathan@example.com', allowlisted: true } });
-    expect(screen.getByRole('link', { name: 'Brand guide' })).toHaveAttribute('href', '/brand');
-    expect(screen.getByRole('link', { name: 'Nathan' })).toHaveAttribute(
+    const brand = screen.getByRole('link', { name: 'Brand guide' });
+    expect(brand).toHaveAttribute('href', '/brand');
+    expect(brand.closest('header')).not.toBeNull();
+    expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+  });
+
+  it('offers a skip link to the page content', () => {
+    setup();
+    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute(
       'href',
-      '/auth/login?connect=nathan',
-    );
-    expect(screen.getByRole('link', { name: 'Sandbox' })).toHaveAttribute(
-      'href',
-      '/auth/login?connect=sandbox',
+      '#content',
     );
   });
 
