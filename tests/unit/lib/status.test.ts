@@ -217,6 +217,7 @@ describe('lastModelSeconds', () => {
     flags: [],
     brandCheck: '',
     why: { title: '', description: '', tags: '' },
+    bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
     modelMs: 12_400,
   };
 

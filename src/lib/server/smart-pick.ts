@@ -20,7 +20,7 @@ const stringArray = { type: 'array', items: { type: 'string' } };
 export const PICK_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'description', 'hashtags', 'tags', 'flags', 'brandCheck', 'why'],
+  required: ['title', 'description', 'hashtags', 'tags', 'flags', 'brandCheck', 'why', 'bandcamp'],
   properties: {
     title: { type: 'string' },
     description: { type: 'string' },
@@ -36,6 +36,15 @@ export const PICK_SCHEMA = {
         title: { type: 'string' },
         description: { type: 'string' },
         tags: { type: 'string' },
+      },
+    },
+    bandcamp: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['about', 'credits'],
+      properties: {
+        about: { type: 'string' },
+        credits: { type: 'string' },
       },
     },
   },
@@ -61,7 +70,11 @@ export function isRawPick(value: unknown): value is RawPick {
     v.why !== null &&
     typeof v.why.title === 'string' &&
     typeof v.why.description === 'string' &&
-    typeof v.why.tags === 'string'
+    typeof v.why.tags === 'string' &&
+    typeof v.bandcamp === 'object' &&
+    v.bandcamp !== null &&
+    typeof v.bandcamp.about === 'string' &&
+    typeof v.bandcamp.credits === 'string'
   );
 }
 
@@ -158,6 +171,8 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       : '',
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
+    "bandcamp.about: the same song for Bandcamp's About field, in the artist voice, a few sentences at most. No hashtags, credits, or contact line.",
+    'bandcamp.credits: the credit line and contact line from the description, exactly as written there.',
     ctx.skipped.length > 0
       ? 'skippedVersions were rejected. Write a different title and a different description: new wording and a new angle, not a rearrangement of the skipped ones. The voice rules still apply.'
       : '',
@@ -284,6 +299,15 @@ function pickHashtags(draft: RawPick, pool: string[]): string[] {
 const PLACEHOLDER_LINE = /^\s*\[[^\]\n]*\]\s*$/gmu;
 const MAX_TAGS = 10;
 
+/** Bandcamp fields follow the description's rules: fact links only, no hashtags, no placeholders. */
+const bandcampText = (text: string, facts: Fact[]) =>
+  clip(
+    tidy(
+      tidy(allowedLinks(text, facts).replaceAll(PLACEHOLDER_LINE, '')).replaceAll(BODY_HASHTAG, ''),
+    ),
+    DESCRIPTION_MAX,
+  );
+
 /**
  * The model's picks from the pool, never containing the song title, plus the artist name, at most
  * 10 within YouTube's 500-character total. Nothing is filled from the pool: search membership alone
@@ -342,6 +366,10 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
     flags: [...measuredFlags(fix.measurements), ...draft.flags.filter(Boolean)],
     brandCheck: draft.brandCheck,
     why: draft.why,
+    bandcamp: {
+      about: bandcampText(draft.bandcamp.about, fix.facts),
+      credits: bandcampText(draft.bandcamp.credits, fix.facts),
+    },
   };
 }
 

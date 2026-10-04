@@ -124,6 +124,7 @@ const RAW_PICK = {
   flags: [],
   brandCheck: 'Keeps the channel naming pattern.',
   why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
 };
 
 type Handler = {

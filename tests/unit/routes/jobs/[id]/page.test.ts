@@ -41,6 +41,7 @@ const PICK: Pick = {
   flags: ['Silence 80.0s to 83.0s'],
   brandCheck: 'Keeps the naming pattern.',
   why: { title: 'Matches.', description: 'Plain.', tags: 'Genre first.' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   modelMs: 12_000,
 };
 
@@ -180,6 +181,7 @@ describe('job page: status chip', () => {
     expect(screen.getByText('Silence 80.0s to 83.0s')).toBeInTheDocument();
     expect(screen.getByText('Keeps the naming pattern.')).toBeInTheDocument();
     expect(screen.getByText('gemma-4-12b-it · 12s')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeInTheDocument();
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
   });

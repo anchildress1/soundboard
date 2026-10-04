@@ -63,6 +63,7 @@ function seed(id: string, patch: Record<string, unknown> = {}) {
     flags: [],
     brandCheck: '',
     why: { title: '', description: '', tags: '' },
+    bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
     modelMs: 1,
     skipped: false,
   });

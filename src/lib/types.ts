@@ -74,11 +74,15 @@ export type PickFields = {
   tags: string[];
 };
 
+/** Copy for Bandcamp's track editor; artist accounts have no upload API, so Nathan pastes it. */
+export type BandcampDraft = { about: string; credits: string };
+
 export type Pick = PickFields & {
   version: number;
   flags: string[];
   brandCheck: string;
   why: { title: string; description: string; tags: string };
+  bandcamp: BandcampDraft;
   modelMs: number;
 };
 

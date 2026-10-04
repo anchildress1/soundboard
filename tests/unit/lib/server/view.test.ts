@@ -50,6 +50,7 @@ const pick = (version: number): Pick => ({
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   modelMs: 1,
 });
 

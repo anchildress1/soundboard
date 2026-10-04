@@ -28,6 +28,7 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   flags: [],
   brandCheck: 'Matches the recent uploads.',
   why: { title: 't', description: 'd', tags: 'g' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   ...over,
 });
 
@@ -133,6 +134,9 @@ describe('isRawPick', () => {
     ['brandCheck missing', { ...raw(), brandCheck: null }],
     ['why null', { ...raw(), why: null }],
     ['why a string', { ...raw(), why: 'because' }],
+    ['bandcamp missing', { ...raw(), bandcamp: undefined }],
+    ['bandcamp about not a string', { ...raw(), bandcamp: { about: 1, credits: '' } }],
+    ['bandcamp credits missing', { ...raw(), bandcamp: { about: '' } }],
     ['why.title missing', { ...raw(), why: { description: '', tags: '' } }],
     ['why.description missing', { ...raw(), why: { title: '', tags: '' } }],
     ['why.tags missing', { ...raw(), why: { title: '', description: '' } }],
@@ -218,6 +222,8 @@ describe('buildPickMessages', () => {
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
     expect(rules).toContain('Never claim what the lyrics say.');
+    expect(rules).toContain("bandcamp.about: the same song for Bandcamp's About field");
+    expect(rules).toContain('bandcamp.credits: the credit line and contact line');
     expect(rules).toContain(`his contact line exactly: "${CONTACT_LINE}"`);
     expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
     expect(rules).toContain('Never write placeholders');
@@ -551,6 +557,20 @@ describe('finalizePick', () => {
     expect(allInCandidates(pick.description)).toBe(true);
   });
 
+  it('cleans the Bandcamp draft like the description: fact links only, no hashtags or notes', () => {
+    const pick = finalizePick(
+      raw({
+        bandcamp: {
+          about: 'Dark synth. #synthwave\n[No contact line found]\nSee https://evil.example/x',
+          credits: 'Written by Nathan.  https://flr.bandcamp.com',
+        },
+      }),
+      fix(),
+    );
+    expect(pick.bandcamp.about).toBe('Dark synth.\n\nSee');
+    expect(pick.bandcamp.credits).toBe('Written by Nathan. https://flr.bandcamp.com');
+  });
+
   it('keeps fact links and removes others from the description', () => {
     const pick = finalizePick(
       raw({
@@ -687,6 +707,7 @@ describe('finalizePick', () => {
         flags: ['Too loud at -6 LUFS', '-3 dB'],
         brandCheck: 'Louder than usual by 3 dB.',
         why: { title: 'At -14 LUFS', description: 'd', tags: 't' },
+        bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
       }),
       fix({ measurements: measurements({ truePeakDbtp: -0.3 }) }),
     );

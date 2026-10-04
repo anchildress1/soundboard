@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { action, ApiError, step, uploadToGcs } from '$lib/api';
+  import Bandcamp from '$lib/components/Bandcamp.svelte';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
@@ -172,6 +173,7 @@
           {/if}
         </div>
       {/if}
+      <Bandcamp songTitle={job.songTitle} pick={view.pick} />
     {:else}
       <section class="placeholder" aria-label="What goes to YouTube">
         <h2>{job.songTitle}</h2>

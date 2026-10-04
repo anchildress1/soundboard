@@ -37,7 +37,7 @@
 
 ## Non-Goals
 
-- Social posting, Bandcamp, website, email marketing, merch, content calendar.
+- Social posting, Bandcamp posting, website, email marketing, merch, content calendar. Bandcamp has no upload API for artist accounts and its editor refuses to be framed, so the app drafts Bandcamp copy and opens the editor instead (R4).
 - Playlists.
 - Lyrics transcription.
 - Competitor research beyond the genre search (R4).
@@ -99,6 +99,7 @@
 - The model picks 3–5 hashtags from the candidates; they close the description.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
+- The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.

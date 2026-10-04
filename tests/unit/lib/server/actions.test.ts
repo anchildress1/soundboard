@@ -38,6 +38,7 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
+  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
   modelMs: 1,
 });
 
