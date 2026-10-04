@@ -52,6 +52,18 @@
       </span>
     {/if}
     <span>Hacktoberfest Weekend Challenge · Build for a Friend</span>
+    <nav class="links" aria-label="Ashley Childress">
+      <!-- The app runs inside the DEV iframe, so links open a new tab instead of replacing it. -->
+      <a href="https://anchildress1.dev" target="_blank" rel="noopener noreferrer"
+        >anchildress1.dev</a
+      >
+      <a href="https://github.com/anchildress1" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://dev.to/anchildress1" target="_blank" rel="noopener noreferrer">DEV</a>
+      <a href="https://www.linkedin.com/in/anchildress1" target="_blank" rel="noopener noreferrer"
+        >LinkedIn</a
+      >
+      <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
+    </nav>
   </footer>
 </div>
 
@@ -168,5 +180,23 @@
     flex-wrap: wrap;
     padding-top: 8px;
     margin-top: auto;
+  }
+
+  .links {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding-top: 8px;
+    border-top: 1px solid var(--well);
+  }
+
+  .links a {
+    color: var(--muted);
+  }
+
+  .links a:hover,
+  .links a:focus-visible {
+    color: var(--ink);
   }
 </style>

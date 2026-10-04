@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { describe, expect, it } from 'vitest';
 import Layout from '$routes/+layout.svelte';
@@ -34,6 +34,24 @@ describe('layout', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     expect(screen.getByText('Built for Nathan. One file in, one upload out.')).toBeInTheDocument();
+  });
+
+  it("links Ashley's site and socials in the footer, opening new tabs", () => {
+    setup();
+    const nav = screen.getByRole('navigation', { name: 'Ashley Childress' });
+    const links = within(nav).getAllByRole('link');
+    expect(links.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['anchildress1.dev', 'https://anchildress1.dev'],
+      ['GitHub', 'https://github.com/anchildress1'],
+      ['DEV', 'https://dev.to/anchildress1'],
+      ['LinkedIn', 'https://www.linkedin.com/in/anchildress1'],
+      ['X', 'https://x.com/anchildress1'],
+    ]);
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+    expect(nav.closest('footer')).not.toBeNull();
   });
 
   it('shows FLR channel stats when available', () => {
