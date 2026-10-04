@@ -254,6 +254,9 @@ export function parseLoudness(stderr: string, offsetSec: number): LoudnessPoint[
   return points;
 }
 
+/** The loudness pass's own time limit. */
+export const LOUDNESS_TIMEOUT_MS = 30_000;
+
 /** Momentary loudness every 100 ms across one stretch of the source, read by range requests. */
 export async function loudnessCurve(
   url: string,
@@ -278,7 +281,7 @@ export async function loudnessCurve(
       'null',
       '-',
     ],
-    30_000,
+    LOUDNESS_TIMEOUT_MS,
   );
   return parseLoudness(stderr, startSec);
 }

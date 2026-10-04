@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
 import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 import { span, startSpan } from '../../../mocks/sentry';
@@ -581,6 +581,21 @@ describe('hookStep', () => {
     expect(hook).toMatchObject({ window: 5, startSec: 147.5, lengthSec: 32.5 });
     expect(hook!.startSec).toBeGreaterThanOrEqual(5 * 29.5);
     expect(hook!.startSec + hook!.lengthSec).toBeLessThanOrEqual(180);
+  });
+
+  it('leaves the loudness pass its whole time limit: no model retry that would eat into it', async () => {
+    seedChunks(6);
+    let clock = 1_000_000;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    onTestFinished(() => now.mockRestore());
+    // The first reply lands 65 s in and doesn't parse. 110 s budget − 35 s reserve − 65 s leaves
+    // 10 s, under the 15 s a retry needs; a 15 s reserve would have left 30 s and retried.
+    fetchMock.mockImplementation(async () => {
+      clock += 65_000;
+      return completion('not json');
+    });
+    await expect(hookStep(shortJob())).rejects.toThrow('The model reply did not parse as a hook.');
+    expect(chatBodies()).toHaveLength(1);
   });
 
   it('propagates a failed loudness pass', async () => {

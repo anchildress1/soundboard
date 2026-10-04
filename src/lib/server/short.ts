@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { lengthBounds, tenth } from '$lib/short';
 import type { Chunk, Hook, Short } from '$lib/types';
-import { loudnessCurve, probe, renderShort, WINDOW_SEC, type LoudnessPoint } from './ffmpeg';
+import {
+  LOUDNESS_TIMEOUT_MS,
+  loudnessCurve,
+  probe,
+  renderShort,
+  WINDOW_SEC,
+  type LoudnessPoint,
+} from './ffmpeg';
 import { signedReadUrl, uploadFile } from './gcs';
 import { fail, listChunks, ok, type JobDoc } from './jobs';
 import { chatJson, stepDeadline } from './model';
@@ -12,8 +19,11 @@ import { isFiniteNumber, isString, shape } from './shape';
 import { digestChunks } from './smart-pick';
 import { agentInput, agentOutput, invokeAgent, type AgentSpan, type ChatMessage } from './tracing';
 
-/** Time the hook step keeps after the model for the loudness pass. */
-const LOUDNESS_RESERVE_MS = 15_000;
+/**
+ * Time the hook step keeps after the model: the loudness pass's whole time limit, plus signing its
+ * URL and writing the job, so a slow model call can't push the step past its budget.
+ */
+const LOUDNESS_RESERVE_MS = LOUDNESS_TIMEOUT_MS + 5_000;
 
 export const HOOK_SCHEMA = {
   type: 'object',
