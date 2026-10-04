@@ -42,28 +42,39 @@
   {@render children()}
 
   <footer>
-    <span>Built for Nathan. One file in, one upload out.</span>
-    {#if data.session?.allowlisted}
-      <span><a href={resolve('/brand')}>Brand guide</a></span>
-      <span>
-        Connect channel:
-        <a href="{resolve('/auth/login')}?connect=nathan" data-sveltekit-reload>Nathan</a> ·
-        <a href="{resolve('/auth/login')}?connect=sandbox" data-sveltekit-reload>Sandbox</a>
-      </span>
-    {/if}
-    <span>Hacktoberfest Weekend Challenge · Build for a Friend</span>
-    <nav class="links" aria-label="Ashley Childress">
-      <!-- The app runs inside the DEV iframe, so links open a new tab instead of replacing it. -->
-      <a href="https://anchildress1.dev" target="_blank" rel="noopener noreferrer"
-        >anchildress1.dev</a
-      >
-      <a href="https://github.com/anchildress1" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a href="https://dev.to/anchildress1" target="_blank" rel="noopener noreferrer">DEV</a>
-      <a href="https://www.linkedin.com/in/anchildress1" target="_blank" rel="noopener noreferrer"
-        >LinkedIn</a
-      >
-      <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
-    </nav>
+    <div class="tape-end" aria-hidden="true"></div>
+    <div class="cols">
+      <div class="about">
+        <p class="lead">Built for Nathan. One file in, one upload out.</p>
+        <p>Hacktoberfest Weekend Challenge · Build for a Friend</p>
+        {#if data.session?.allowlisted}
+          <p>
+            <a href={resolve('/brand')}>Brand guide</a> · Connect channel:
+            <a href="{resolve('/auth/login')}?connect=nathan" data-sveltekit-reload>Nathan</a> ·
+            <a href="{resolve('/auth/login')}?connect=sandbox" data-sveltekit-reload>Sandbox</a>
+          </p>
+        {/if}
+      </div>
+      <div class="maker">
+        <span class="label">Made by Ashley Childress</span>
+        <nav class="links" aria-label="Ashley Childress">
+          <!-- The app runs inside the DEV iframe, so links open a new tab instead of replacing it. -->
+          <a href="https://anchildress1.dev" target="_blank" rel="noopener noreferrer"
+            >anchildress1.dev</a
+          >
+          <a href="https://github.com/anchildress1" target="_blank" rel="noopener noreferrer"
+            >GitHub</a
+          >
+          <a href="https://dev.to/anchildress1" target="_blank" rel="noopener noreferrer">DEV</a>
+          <a
+            href="https://www.linkedin.com/in/anchildress1"
+            target="_blank"
+            rel="noopener noreferrer">LinkedIn</a
+          >
+          <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
+        </nav>
+      </div>
+    </div>
   </footer>
 </div>
 
@@ -172,31 +183,75 @@
   }
 
   footer {
-    font: 500 11px/1.5 var(--mono);
-    color: var(--muted);
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding-top: 8px;
     margin-top: auto;
+    padding-top: 24px;
+    font: 500 11px/1.6 var(--mono);
+    color: var(--muted);
+  }
+
+  .tape-end {
+    height: 3px;
+    margin-bottom: 16px;
+    background: linear-gradient(
+      90deg,
+      var(--blue) 0 38%,
+      var(--orange) 38% 76%,
+      var(--magenta) 76%
+    );
+    opacity: 0.7;
+  }
+
+  .cols {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px 32px;
+  }
+
+  .about {
+    flex: 1 1 320px;
+  }
+
+  .about p {
+    margin: 0;
+  }
+
+  .about .lead {
+    color: var(--ink);
+  }
+
+  .maker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .label {
+    font: 900 10px/1 var(--display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--orange);
   }
 
   .links {
-    flex-basis: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 14px;
-    padding-top: 8px;
-    border-top: 1px solid var(--well);
+    gap: 6px;
   }
 
   .links a {
+    padding: 6px 10px;
+    border: 1px solid var(--line);
     color: var(--muted);
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .links a:hover,
   .links a:focus-visible {
+    border-color: var(--magenta);
     color: var(--ink);
   }
 </style>
