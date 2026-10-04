@@ -13,6 +13,8 @@ import {
   measuredFlags,
   shortFlag,
   runPick,
+  PICK_SCHEMA,
+  windowFlags,
   sameText,
   weighFeedback,
   type PickContext,
@@ -35,7 +37,6 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   description: 'A bright synth track.',
   hashtags: [SYNTHWAVE, RETROWAVE_TAG, '#newmusic'],
   tags: ['synthwave', 'PeekaBoo'],
-  flags: [],
   brandCheck: 'Matches the recent uploads.',
   why: { title: 't', description: 'd', tags: 'g' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
@@ -61,6 +62,7 @@ const facts: Fact[] = [
 
 const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   songTitle: 'PeekaBoo',
+  chunks: [],
   candidates,
   tagCandidates,
   facts,
@@ -142,7 +144,6 @@ describe('isRawPick', () => {
     ['a missing description', omit(raw(), 'description')],
     ['non-string hashtags', { ...raw(), hashtags: [1] }],
     ['tags not an array', { ...raw(), tags: 'a,b' }],
-    ['flags missing', omit(raw(), 'flags')],
     ['brandCheck missing', { ...raw(), brandCheck: null }],
     ['why null', { ...raw(), why: null }],
     ['why a string', { ...raw(), why: 'because' }],
@@ -157,7 +158,12 @@ describe('isRawPick', () => {
   });
 
   it('accepts empty arrays', () => {
-    expect(isRawPick(raw({ hashtags: [], tags: [], flags: [] }))).toBe(true);
+    expect(isRawPick(raw({ hashtags: [], tags: [] }))).toBe(true);
+  });
+
+  it('does not ask the model for flags', () => {
+    expect(PICK_SCHEMA.required).not.toContain('flags');
+    expect(PICK_SCHEMA.properties).not.toHaveProperty('flags');
   });
 });
 
@@ -461,15 +467,53 @@ describe('shortFlag', () => {
   });
 
   it('lands in the pick flags after the measured ones', () => {
+    const c = chunk(0);
+    c.analysis!.qualityFlags = ['Dark opening frames'];
     const pick = finalizePick(
-      raw({ flags: ['Dark opening frames'] }),
-      fix({ probe: probe(720, 1280), measurements: measurements({ truePeakDbtp: -0.3 }) }),
+      raw(),
+      fix({
+        chunks: [c],
+        probe: probe(720, 1280),
+        measurements: measurements({ truePeakDbtp: -0.3 }),
+      }),
     );
     expect(pick.flags).toEqual([
       'True peak -0.3 dBTP, above the -1 dBTP ceiling',
       'Vertical and 3 minutes or shorter: YouTube will publish it as a Short',
       'Dark opening frames',
     ]);
+  });
+});
+
+describe('windowFlags', () => {
+  const flagged = (index: number, qualityFlags: string[]) => {
+    const c = chunk(index);
+    c.analysis!.qualityFlags = qualityFlags;
+    return c;
+  };
+
+  it('lists each window flag once, keeping the first spelling', () => {
+    expect(
+      windowFlags([
+        flagged(0, ['Audio dropout', 'Sync drift']),
+        flagged(1, ['audio  dropout', 'Frozen frame']),
+      ]),
+    ).toEqual(['Audio dropout', 'Sync drift', 'Frozen frame']);
+  });
+
+  it('skips blanks and windows without an analysis', () => {
+    expect(windowFlags([flagged(0, ['', '  ']), chunk(1, { analysis: null })])).toEqual([]);
+  });
+
+  it('returns nothing when no window flagged a problem', () => {
+    expect(windowFlags([chunk(0), chunk(1)])).toEqual([]);
+  });
+});
+
+describe('pick flags', () => {
+  it('ignores flags the model sends anyway, keeping only measured evidence', () => {
+    const reply = { ...raw(), flags: ['Neon green text on black background'] } as RawPick;
+    expect(finalizePick(reply, fix({ chunks: [chunk(0)] })).flags).toEqual([]);
   });
 });
 
@@ -772,7 +816,6 @@ describe('finalizePick: links, tags, and limits', () => {
       raw({
         title: 'PeekaBoo at -14 LUFS',
         description: 'Mastered to -9 LUFS with -0.5 dBTP peaks at 120 bpm.',
-        flags: ['Too loud at -6 LUFS', '-3 dB'],
         brandCheck: 'Louder than usual by 3 dB.',
         why: { title: 'At -14 LUFS', description: 'd', tags: 't' },
         bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
@@ -783,7 +826,7 @@ describe('finalizePick: links, tags, and limits', () => {
     expect(pick.description).not.toMatch(/LUFS|dBTP|bpm|-9|-0\.5|120/);
     expect(pick.brandCheck).not.toMatch(/\d\s?dB/);
     expect(pick.why.title).not.toContain('LUFS');
-    expect(pick.flags).toEqual(['True peak -0.3 dBTP, above the -1 dBTP ceiling', 'Too loud at']);
+    expect(pick.flags).toEqual(['True peak -0.3 dBTP, above the -1 dBTP ceiling']);
   });
 
   it('keeps the FLR name in the title and tags on every run', () => {

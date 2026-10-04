@@ -71,7 +71,6 @@ export const RAW_PICK = {
   description: 'A night drive through the city. #synthwave',
   hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
   tags: ['synthwave', 'PeekaBoo', ARTIST],
-  flags: [],
   brandCheck: 'Keeps the channel naming pattern.',
   why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
