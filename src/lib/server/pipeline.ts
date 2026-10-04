@@ -1,4 +1,5 @@
 import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
+import { scrubUrl } from '$lib/scrub';
 import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
 import { approvedBrand } from './brand';
 import { analyzeChunk } from './chunk-analyst';
@@ -279,9 +280,12 @@ const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> 
 
 const NEEDS_MODEL: ReadonlySet<JobState> = new Set(['ANALYZE', 'PICK', 'HOOK']);
 
-/** A step that throws counts as a failure; two in a row stop the job at that step for a retry. */
+/**
+ * A step that throws counts as a failure; two in a row stop the job at that step for a retry. The
+ * message is stored and shown, and ffmpeg quotes the signed URL it failed on, so queries go.
+ */
 export function failurePatch(job: JobDoc, error: unknown): Patch {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = scrubUrl(error instanceof Error ? error.message : String(error));
   const failures = job.consecutiveFailures + 1;
   if (failures >= 2) return { ...fail(job.state, message), consecutiveFailures: failures };
   return { consecutiveFailures: failures, error: message };

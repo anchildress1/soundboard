@@ -356,6 +356,19 @@ describe('runStep: ANALYZE', () => {
     expect(args[args.indexOf('-t') + 1]).toBe('10.500');
   });
 
+  it("stores an ffmpeg failure without the signed URL's signature", async () => {
+    store.set(FIRST_CHUNK, { index: 0 });
+    tools.window = {
+      code: 1,
+      stderr:
+        'https://storage.googleapis.com/bkt/uploads/j1?X-Goog-Signature=abc123: 403 Forbidden',
+    };
+    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 }));
+    expect(saved().error).toMatch(/ffmpeg exited 1/);
+    expect(saved().error).toContain('uploads/j1?[redacted]');
+    expect(saved().error).not.toContain('X-Goog-Signature');
+  });
+
   it('counts one thrown step, keeps the state, and fails on the second in a row', async () => {
     store.set(FIRST_CHUNK, { index: 0 });
     tools.window = { code: 1, stderr: 'boom\nmoov atom not found' };
@@ -827,6 +840,17 @@ describe('failurePatch', () => {
 
   it('stringifies non-Error throws', () => {
     expect(failurePatch(jobDoc(), 42).error).toBe('42');
+  });
+
+  it('drops the signature from a signed URL quoted in the error', () => {
+    const error = new Error(
+      'ffmpeg exited 1: https://storage.googleapis.com/bkt/uploads/j1?X-Goog-Signature=abc123: Server returned 403',
+    );
+    const { error: stored } = failurePatch(jobDoc(), error);
+    expect(stored).toBe(
+      'ffmpeg exited 1: https://storage.googleapis.com/bkt/uploads/j1?[redacted] Server returned 403',
+    );
+    expect(stored).not.toContain('X-Goog-Signature');
   });
 });
 
