@@ -41,7 +41,19 @@ echo "Model:   $MODEL_IMAGE"
 echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
-  --project "$GCP_PROJECT_ID" --quiet
+  iam.googleapis.com --project "$GCP_PROJECT_ID" --quiet
+
+# Runtime identity: create it once, and let the deploying account attach it to the service
+# (Cloud Run requires iam.serviceAccounts.actAs on a user-managed service account).
+if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT" \
+  --project "$GCP_PROJECT_ID" --quiet &> /dev/null; then
+  gcloud iam service-accounts create "$SERVICE" \
+    --display-name "Soundboard runtime" --project "$GCP_PROJECT_ID"
+fi
+DEPLOYER="$(gcloud config get-value account 2> /dev/null)"
+gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
+  --member "user:${DEPLOYER}" --role roles/iam.serviceAccountUser \
+  --project "$GCP_PROJECT_ID" --quiet > /dev/null
 
 if ! gcloud artifacts repositories describe "$SERVICE" \
   --location "$REGION" --project "$GCP_PROJECT_ID" --quiet &> /dev/null; then
