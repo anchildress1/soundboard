@@ -168,15 +168,16 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
 
 const URL_PATTERN = /https?:\/\/[^\s)]+/g;
 
-/** Keeps only links that appear in FACT or APPROVED records. */
+/** Keeps only links that appear in public FACT or APPROVED records. */
 export function allowedLinks(text: string, facts: Fact[]): string {
   const allowed = facts
-    .filter((f) => f.kind !== 'INFERENCE')
+    .filter((f) => f.public && f.kind !== 'INFERENCE')
     .flatMap((f) => f.value.match(URL_PATTERN) ?? []);
   return text.replaceAll(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
 }
 
 const ARTIST_PATTERN = /\b(?:flies like robots|flr)\b/giu;
+const ARTIST_HASHTAG = /^#(?:flieslikerobots|flr)/i;
 const SEPARATORS = new Set(['-', '–', '|', '·']);
 const CUT = '\u0000';
 
@@ -254,13 +255,9 @@ export function measuredFlags(m: Measurements | null): string[] {
   return flags;
 }
 
-/**
- * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
- * links only from facts, plain-term tags, YouTube limits, and no model-emitted audio numbers.
- */
-export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
-  const draft = stripDeep(raw);
-  const byLower = new Map(fix.candidates.map((c) => [c.toLowerCase(), c]));
+/** 3 to 5 hashtags from the pool: the model's picks first, padded from the top of the pool. */
+function pickHashtags(draft: RawPick, pool: string[]): string[] {
+  const byLower = new Map(pool.map((c) => [c.toLowerCase(), c]));
   const picked = [
     ...new Set(
       [...draft.hashtags, ...parseHashtags(draft.description)].map((t) =>
@@ -270,11 +267,37 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   ]
     .filter((t) => byLower.has(t))
     .slice(0, 5);
-  for (const candidate of fix.candidates) {
+  for (const candidate of pool) {
     if (picked.length >= 3) break;
     if (!picked.includes(candidate.toLowerCase())) picked.push(candidate.toLowerCase());
   }
-  const hashtags = picked.map((t) => byLower.get(t)!);
+  return picked.map((t) => byLower.get(t)!);
+}
+
+/** Plain-term tags: no leading #, deduped, within YouTube's 500-character total. */
+function cleanTags(raw: string[], scrub: (text: string) => string): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of raw.map((t) => tidy(scrub(t.replace(/^#+/, '')))).filter(Boolean)) {
+    const key = tag.toLowerCase();
+    if (seen.has(key) || tagsLength([...tags, tag]) > TAGS_MAX) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/**
+ * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
+ * links only from facts, plain-term tags, YouTube limits, and no model-emitted audio numbers.
+ */
+export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
+  const draft = stripDeep(raw);
+  // Signed-out own-video payloads must not name the artist, hashtags included.
+  const pool = fix.useArtistName
+    ? fix.candidates
+    : fix.candidates.filter((c) => !ARTIST_HASHTAG.test(c));
+  const hashtags = pickHashtags(draft, pool);
 
   const scrub = fix.useArtistName ? (t: string) => t : removeArtist;
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
@@ -285,14 +308,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
 
-  const tags: string[] = [];
-  const seen = new Set<string>();
-  for (const tag of draft.tags.map((t) => tidy(scrub(t.replace(/^#+/, '')))).filter(Boolean)) {
-    const key = tag.toLowerCase();
-    if (seen.has(key) || tagsLength([...tags, tag]) > TAGS_MAX) continue;
-    seen.add(key);
-    tags.push(tag);
-  }
+  const tags = cleanTags(draft.tags, scrub);
 
   return {
     title: fix.useArtistName ? clip(tidy(draft.title), TITLE_MAX) : visitorTitle(fix.songTitle),

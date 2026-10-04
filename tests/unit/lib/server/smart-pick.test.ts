@@ -316,6 +316,16 @@ describe('buildPickMessages', () => {
 });
 
 describe('allowedLinks', () => {
+  it('drops links that appear only in private facts', () => {
+    const privateFact: Fact = {
+      key: 'p',
+      value: 'https://hidden.example/x',
+      kind: 'FACT',
+      public: false,
+    };
+    expect(allowedLinks('See https://hidden.example/x', [privateFact])).toBe('See ');
+  });
+
   it('keeps links from FACT and APPROVED records', () => {
     const text = 'Buy https://flr.bandcamp.com and visit https://flieslikerobots.example/';
     expect(allowedLinks(text, facts)).toBe(text);
@@ -640,6 +650,16 @@ describe('finalizePick', () => {
     );
     expect(pick.description).toContain(link);
     expect(allInCandidates(pick.description)).toBe(true);
+  });
+
+  it('never picks artist hashtags when the artist name is off', () => {
+    const pick = finalizePick(
+      raw({ hashtags: ['#flieslikerobots', '#FLR'], description: 'x #flr' }),
+      fix({ useArtistName: false, candidates: ['#flieslikerobots', '#flr', ...candidates] }),
+    );
+    expect(pick.hashtags.some((t) => /flieslikerobots|flr/i.test(t))).toBe(false);
+    expect(pick.description).not.toMatch(/flieslikerobots|#flr/i);
+    expect(pick.hashtags.length).toBeGreaterThanOrEqual(3);
   });
 
   it('passes brandCheck and why through', () => {
