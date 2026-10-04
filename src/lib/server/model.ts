@@ -6,6 +6,12 @@ export const TEMPERATURE = 0.2;
 export const MAX_TOKENS = 2048;
 /** Per-call timeout, counted only once the model reports ready. */
 export const CALL_TIMEOUT_MS = 90_000;
+/** Whole-step budget for model work, kept inside the 3-minute claim so a step never outlives it. */
+export const STEP_BUDGET_MS = 150_000;
+/** A retry is only worth starting with at least this much budget left. */
+const MIN_CALL_MS = 15_000;
+
+export const stepDeadline = (now = Date.now()) => now + STEP_BUDGET_MS;
 
 export type ModelStatus = 'ready' | 'loading' | 'busy';
 
@@ -44,13 +50,16 @@ export async function chat(
   messages: ChatMessage[],
   schemaName: string,
   schema: Record<string, unknown>,
+  deadline = Date.now() + CALL_TIMEOUT_MS,
 ): Promise<ChatResult> {
   return chatSpan(messages, { temperature: TEMPERATURE, maxTokens: MAX_TOKENS }, async () => {
     const started = Date.now();
+    const timeout = Math.min(CALL_TIMEOUT_MS, deadline - started);
+    if (timeout <= 0) throw new Error('The step ran out of time for the model.');
     const response = await fetch(`${modelUrl()}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeout),
       body: JSON.stringify({
         model: MODEL_NAME,
         messages,
@@ -77,19 +86,21 @@ export async function chat(
 }
 
 /**
- * Parses the model's JSON reply, retrying the call once on a parse failure. A second failure keeps
- * the raw text instead of throwing, so the run still moves on.
+ * Parses the model's JSON reply, retrying the call once on a parse failure while the step budget
+ * allows. A failure that can't be retried keeps the raw text instead of throwing.
  */
 export async function chatJson<T>(
   messages: ChatMessage[],
   schemaName: string,
   schema: Record<string, unknown>,
   validate: (value: unknown) => value is T,
+  deadline = stepDeadline(),
 ): Promise<{ value: T | null; raw: string; ms: number }> {
   let ms = 0;
   let raw = '';
   for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await chat(messages, schemaName, schema);
+    if (attempt > 0 && deadline - Date.now() < MIN_CALL_MS) break;
+    const result = await chat(messages, schemaName, schema, deadline);
     ms += result.ms;
     raw = result.content;
     try {

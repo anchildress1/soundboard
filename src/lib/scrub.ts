@@ -27,6 +27,8 @@ export function scrubBreadcrumb<T extends Crumb>(crumb: T): T {
 
 type SpanLike = { description?: string; data?: Record<string, unknown> };
 type EventLike = {
+  message?: string;
+  exception?: { values?: { value?: string }[] };
   request?: { url?: string; query_string?: unknown };
   spans?: SpanLike[];
   contexts?: { trace?: { data?: Record<string, unknown> } };
@@ -40,6 +42,11 @@ export function scrubEvent<T extends EventLike>(event: T): T {
     if (event.request.query_string) event.request.query_string = '[redacted]';
   }
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
+  // ffmpeg and fetch errors quote the signed URL they failed on.
+  if (event.message) event.message = scrubUrl(event.message);
+  for (const exception of event.exception?.values ?? []) {
+    if (exception.value) exception.value = scrubUrl(exception.value);
+  }
   scrubData(event.contexts?.trace?.data);
   for (const span of event.spans ?? []) {
     if (span.description) span.description = scrubUrl(span.description);

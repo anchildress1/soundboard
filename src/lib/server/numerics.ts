@@ -4,10 +4,16 @@
 // dBFS, and dBTP.
 const AUDIO_NUMBER = /(?<![\d.,])[-+−]?\d+(?:[.,]\d+)? ?(?:db[a-z]{0,2}|lufs|lkfs|lu|bpm|k?hz)\b/gi;
 
+// Clipping and silence figures carry no unit of their own ("12 clipped samples", "silence from 4s
+// to 7s"), so any count or time in a string that mentions them is dropped too.
+const MEASURE_WORDS = /\b(?:clip|silen|dropout)/i;
+const COUNT_OR_TIME = /(?<![\w.,:])\d+(?:[.,:]\d+)? ?(?:ms|s|sec|seconds?|samples?)?\b/gi;
+
 /** Removes model-emitted audio-engineering numbers from one string. */
 export function stripNumerics(text: string): string {
-  return text
-    .replaceAll(AUDIO_NUMBER, '')
+  const united = text.replaceAll(AUDIO_NUMBER, '');
+  const measured = MEASURE_WORDS.test(united) ? united.replaceAll(COUNT_OR_TIME, '') : united;
+  return measured
     .replaceAll('( )', '')
     .replaceAll('()', '')
     .replaceAll(/[ \t]{2,}/g, ' ')

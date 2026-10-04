@@ -1,7 +1,7 @@
 import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '$lib/metadata';
 import type { Chunk, Measurements, Pick } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
-import { chatJson } from './model';
+import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
 import type { ChatMessage } from './tracing';
 import type { CatalogVideo } from './youtube';
@@ -111,19 +111,21 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     'brandCheck: one sentence on how the proposal matches or departs from the recent uploads.',
     'why: one short reason per field for the choice made.',
-    'Never mention facts marked public: false.',
     ctx.skipped.length > 0 ? 'Do not repeat any skipped version; write a different title.' : '',
   ].filter(Boolean);
   const context = {
     artist,
     songTitle: ctx.songTitle,
     artistNotes: ctx.notes || undefined,
-    facts: ctx.facts.map(({ key, value, kind, public: isPublic }) => ({
-      key,
-      value,
-      kind,
-      public: isPublic,
-    })),
+    // Private facts never reach the model, so they can't surface in publishable copy.
+    facts: ctx.facts
+      .filter((fact) => fact.public)
+      .map(({ key, value, kind, public: isPublic }) => ({
+        key,
+        value,
+        kind,
+        public: isPublic,
+      })),
     windows: digestChunks(ctx.chunks),
     ffmpeg: ctx.measurements ?? undefined,
     recentUploads: ctx.recent.map((v) => ({
@@ -217,6 +219,7 @@ function clip(text: string, max: number): string {
 }
 
 export type PickFixups = {
+  songTitle: string;
   candidates: string[];
   facts: Fact[];
   useArtistName: boolean;
@@ -278,13 +281,18 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   }
 
   return {
-    title: clip(tidy(scrub(draft.title)), TITLE_MAX),
+    // Signed-out own-video payloads are titled by the song alone (R8).
+    title: clip(tidy(fix.useArtistName ? draft.title : fix.songTitle), TITLE_MAX),
     description,
     hashtags,
     tags,
-    flags: [...measuredFlags(fix.measurements), ...draft.flags.filter(Boolean)],
-    brandCheck: draft.brandCheck,
-    why: draft.why,
+    flags: [...measuredFlags(fix.measurements), ...draft.flags.map(scrub).filter(Boolean)],
+    brandCheck: scrub(draft.brandCheck),
+    why: {
+      title: scrub(draft.why.title),
+      description: scrub(draft.why.description),
+      tags: scrub(draft.why.tags),
+    },
   };
 }
 
@@ -296,22 +304,24 @@ export const sameTitle = (a: string, b: string) =>
  * model's reply never parses.
  */
 export async function runPick(ctx: PickContext): Promise<{ pick: RawPick; ms: number } | null> {
+  const deadline = stepDeadline();
   let ms = 0;
   let messages = buildPickMessages(ctx);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { value, ms: took } = await chatJson(messages, 'smart_pick', PICK_SCHEMA, isRawPick);
+    const { value, ms: took } = await chatJson(
+      messages,
+      'smart_pick',
+      PICK_SCHEMA,
+      isRawPick,
+      deadline,
+    );
     ms += took;
     if (!value) return null;
     const pick = finalizePick(value, ctx);
     const repeats = ctx.skipped.some((s) => sameTitle(s.title, pick.title));
-    if (!repeats || attempt === 1) {
-      return {
-        pick: repeats
-          ? { ...pick, flags: [...pick.flags, 'Title repeats a skipped version'] }
-          : pick,
-        ms,
-      };
-    }
+    if (!repeats) return { pick, ms };
+    // A re-run must produce a new title; a second repeat fails the pick so the step retries.
+    if (attempt === 1) return null;
     messages = [
       ...messages,
       { role: 'assistant', content: JSON.stringify(value) },

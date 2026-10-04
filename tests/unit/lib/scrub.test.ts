@@ -58,6 +58,18 @@ describe('scrubBreadcrumb', () => {
 });
 
 describe('scrubEvent', () => {
+  it('scrubs signed URLs quoted in messages and exception values', () => {
+    const url = 'https://storage.googleapis.com/b/uploads/x?X-Goog-Signature=abc';
+    const event = scrubEvent({
+      message: `ffmpeg failed on ${url}`,
+      exception: { values: [{ value: `GET ${url} 403` }, {}] },
+    });
+    expect(JSON.stringify(event)).not.toContain('Signature');
+    expect(event.message).toBe(
+      'ffmpeg failed on https://storage.googleapis.com/b/uploads/x?[redacted]',
+    );
+  });
+
   it('scrubs request, transaction, trace data, and spans', () => {
     const event = scrubEvent({
       request: { url: SIGNED, query_string: 'X-Goog-Signature=abc' },

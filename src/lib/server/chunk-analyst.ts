@@ -1,7 +1,7 @@
 import type { Chunk, ChunkAnalysis, Measurements } from '$lib/types';
 import { extractWindow } from './ffmpeg';
-import { chatJson } from './model';
-import { stripDeep } from './numerics';
+import { chatJson, stepDeadline } from './model';
+import { stripDeep, stripNumerics } from './numerics';
 import { invokeAgent, type ChatMessage } from './tracing';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
@@ -98,6 +98,7 @@ export async function analyzeChunk(input: {
   songTitle: string;
   notes: string;
 }): Promise<Chunk> {
+  const deadline = stepDeadline();
   const window = await extractWindow(input.url, input.startSec, input.durationSec);
   return invokeAgent('chunk-analyst', async (span) => {
     span.setAttribute('chunk.index', input.index);
@@ -107,6 +108,7 @@ export async function analyzeChunk(input: {
       'chunk_analysis',
       CHUNK_SCHEMA,
       isChunkAnalysis,
+      deadline,
     );
     return {
       index: input.index,
@@ -114,7 +116,7 @@ export async function analyzeChunk(input: {
       durationSec: input.durationSec,
       measurements: window.measurements,
       analysis: value ? stripDeep(value) : null,
-      raw: value ? null : raw,
+      raw: value ? null : stripNumerics(raw),
       modelMs: ms,
     };
   });

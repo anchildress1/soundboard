@@ -6,6 +6,8 @@ import {
   chatJson,
   MAX_TOKENS,
   modelStatus,
+  STEP_BUDGET_MS,
+  stepDeadline,
   TEMPERATURE,
 } from '$lib/server/model';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
@@ -153,6 +155,26 @@ describe('chat', () => {
   });
 });
 
+describe('step budget', () => {
+  it('sets the deadline one budget ahead and keeps it inside the 3-minute claim', () => {
+    expect(stepDeadline(1000)).toBe(1000 + STEP_BUDGET_MS);
+    expect(STEP_BUDGET_MS).toBeLessThan(3 * 60 * 1000);
+  });
+
+  it('refuses a call once the deadline has passed', async () => {
+    await expect(chat(messages, 's', schema, Date.now() - 1)).rejects.toThrow('ran out of time');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips the parse retry when too little budget is left', async () => {
+    fetchMock.mockResolvedValueOnce(completion('bad'));
+    const isObject = (v: unknown): v is object => typeof v === 'object';
+    const result = await chatJson(messages, 's', schema, isObject, Date.now() + 5_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ value: null, raw: 'bad' });
+  });
+});
+
 describe('chatJson', () => {
   const isOk = (v: unknown): v is { ok: boolean } =>
     typeof v === 'object' && v !== null && typeof (v as { ok?: unknown }).ok === 'boolean';
@@ -192,10 +214,11 @@ describe('chatJson', () => {
 
   it('adds up model time across attempts', async () => {
     const now = vi.spyOn(Date, 'now');
+    // start, end; budget check, start, end
     now.mockReturnValueOnce(1000).mockReturnValueOnce(1400);
-    now.mockReturnValueOnce(2000).mockReturnValueOnce(2250);
+    now.mockReturnValueOnce(1500).mockReturnValueOnce(2000).mockReturnValueOnce(2250);
     fetchMock.mockResolvedValueOnce(completion('bad')).mockResolvedValueOnce(completion('bad'));
-    const result = await chatJson(messages, 's', schema, isOk);
+    const result = await chatJson(messages, 's', schema, isOk, 1_000_000);
     now.mockRestore();
     expect(result.ms).toBe(650);
   });

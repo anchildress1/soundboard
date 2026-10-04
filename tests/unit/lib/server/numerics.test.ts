@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { stripDeep, stripNumerics } from '$lib/server/numerics';
 
 describe('stripNumerics', () => {
+  it('drops counts and times from clipping and silence remarks', () => {
+    expect(stripNumerics('12 clipped samples in the chorus')).toBe('clipped samples in the chorus');
+    expect(stripNumerics('Silence from 4s to 7.5 s, dropout at 1:02')).toBe(
+      'Silence from to, dropout at',
+    );
+  });
+
+  it('keeps counts in remarks that are not about clipping or silence', () => {
+    expect(stripNumerics('3 dancers at 1080p')).toBe('3 dancers at 1080p');
+  });
+
   it('removes loudness, peak, tempo, and frequency figures', () => {
     expect(stripNumerics('Loud master at -9.7 LUFS with peaks near -0.4 dBTP.')).toBe(
       'Loud master at with peaks near.',

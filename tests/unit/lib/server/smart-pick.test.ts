@@ -44,6 +44,7 @@ const facts: Fact[] = [
 ];
 
 const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
+  songTitle: 'PeekaBoo',
   candidates,
   facts,
   useArtistName: true,
@@ -297,14 +298,12 @@ describe('buildPickMessages', () => {
     expect(userParts(buildPickMessages(ctx()))).toHaveLength(1);
   });
 
-  it('passes fact visibility and weighed feedback', () => {
+  it('keeps private facts out of the prompt and weighs feedback', () => {
     const body = context(buildPickMessages(ctx({ feedback: [feedback('SKIPPED')] })));
-    expect(body.facts).toContainEqual({
-      key: 'guess',
-      value: 'https://guess.example/x',
-      kind: 'INFERENCE',
-      public: false,
-    });
+    const sent = body.facts as { public: boolean }[];
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every((f) => f.public)).toBe(true);
+    expect(JSON.stringify(body)).not.toContain('guess.example');
     expect(body.feedback).toEqual([expect.objectContaining({ kind: 'SKIPPED', weight: 'weak' })]);
   });
 });
@@ -598,12 +597,26 @@ describe('finalizePick', () => {
     expect(pick.description).toMatch(/^First line by\.\n\nSecond paragraph\.\n\n#/);
   });
 
-  it('drops the artist and its separator from the middle of a title', () => {
+  it('titles signed-out own-video picks by the song alone', () => {
     const pick = finalizePick(
       raw({ title: 'PeekaBoo - Flies Like Robots (Official Music Video)' }),
+      fix({ useArtistName: false, songTitle: 'PeekaBoo' }),
+    );
+    expect(pick.title).toBe('PeekaBoo');
+  });
+
+  it('scrubs the artist from flags, brand check, and reasons when the name is off', () => {
+    const pick = finalizePick(
+      raw({
+        flags: ['Flies Like Robots logo flickers'],
+        brandCheck: 'Matches Flies Like Robots uploads.',
+        why: { title: 'FLR style', description: 'Flies Like Robots tone', tags: 'by FLR' },
+      }),
       fix({ useArtistName: false }),
     );
-    expect(pick.title).toBe('PeekaBoo (Official Music Video)');
+    expect(JSON.stringify([pick.flags, pick.brandCheck, pick.why])).not.toMatch(
+      /flies like robots|flr/i,
+    );
   });
 
   it('keeps the #fragment of an allowed link', () => {
@@ -685,12 +698,10 @@ describe('runPick', () => {
     });
   });
 
-  it('flags the pick when the retry repeats a skipped title again', async () => {
+  it('fails the pick when the retry repeats a skipped title again', async () => {
     fetchMock.mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
-    const result = await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }));
+    expect(await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }))).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result!.pick.title).toBe('Old Title');
-    expect(result!.pick.flags.at(-1)).toBe('Title repeats a skipped version');
   });
 
   it('returns null when the reply never parses', async () => {

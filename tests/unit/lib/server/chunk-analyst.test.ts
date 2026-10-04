@@ -244,7 +244,7 @@ describe('analyzeChunk', () => {
     expect(chunk.modelMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('keeps the raw reply when the model fails to produce valid JSON twice', async () => {
+  it('keeps the raw reply, minus model numbers, when the model fails to produce valid JSON twice', async () => {
     ffmpegRun();
     fetchMock
       .mockResolvedValueOnce(completion('{"visual": "cut off'))
@@ -254,7 +254,7 @@ describe('analyzeChunk', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(chunk.analysis).toBeNull();
-    expect(chunk.raw).toBe('Sorry, -9 LUFS {not json');
+    expect(chunk.raw).toBe('Sorry, {not json');
     expect(chunk.measurements.integratedLufs).toBe(-9.7);
   });
 

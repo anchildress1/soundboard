@@ -627,7 +627,8 @@ describe('runStep: PICK', () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');
-    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home', 'mr-kill']);
+    // The private INFERENCE is read but never reaches the prompt.
+    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     expect(ctx.feedback).toHaveLength(1);
     expect(ctx.skippedVersions).toEqual([
       { title: 'Old Title', description: RAW_PICK.description },
