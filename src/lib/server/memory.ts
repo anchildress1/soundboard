@@ -32,12 +32,16 @@ export const PUBLIC_FACTS: Fact[] = [SEED_FACTS[0]!];
 
 const artist = () => db().collection('artists').doc(ARTIST_ID);
 
-/** Allowlisted callers only: reads Nathan's facts, seeding them on first use. */
-export async function listFacts(): Promise<Fact[]> {
+/**
+ * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty collection is seeded on first
+ * use; without it, the seeds are returned in memory and nothing is written, so demo jobs stay
+ * read-only.
+ */
+export async function listFacts({ seed }: { seed: boolean }): Promise<Fact[]> {
   const col = artist().collection('facts');
   const snap = await col.get();
   if (!snap.empty) return snap.docs.map((d) => d.data() as Fact);
-  await Promise.all(SEED_FACTS.map((fact) => col.doc(fact.key).set(fact)));
+  if (seed) await Promise.all(SEED_FACTS.map((fact) => col.doc(fact.key).set(fact)));
   return SEED_FACTS;
 }
 

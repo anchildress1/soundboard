@@ -55,7 +55,7 @@ describe('seed facts', () => {
 
 describe('listFacts', () => {
   it('seeds the facts on first use', async () => {
-    expect(await listFacts()).toEqual(SEED_FACTS);
+    expect(await listFacts({ seed: true })).toEqual(SEED_FACTS);
     expect(keysUnder('artists/flr/facts/').sort()).toEqual(
       SEED_FACTS.map((f) => `artists/flr/facts/${f.key}`).sort(),
     );
@@ -66,7 +66,7 @@ describe('listFacts', () => {
   });
 
   it('reads stored facts instead of reseeding', async () => {
-    await listFacts();
+    await listFacts({ seed: true });
     store.set('artists/flr/facts/home', {
       key: 'home',
       value: 'Richmond',
@@ -74,15 +74,32 @@ describe('listFacts', () => {
       public: true,
     });
     store.delete('artists/flr/facts/mr-kill');
-    const facts = await listFacts();
+    const facts = await listFacts({ seed: true });
     expect(facts).toHaveLength(SEED_FACTS.length - 1);
     expect(facts.find((f) => f.key === 'home')?.value).toBe('Richmond');
     expect(store.has('artists/flr/facts/mr-kill')).toBe(false);
   });
 
+  it('returns the seeds without writing them when seeding is off', async () => {
+    expect(await listFacts({ seed: false })).toEqual(SEED_FACTS);
+    expect(keysUnder('artists/')).toEqual([]);
+  });
+
+  it('reads stored facts without seeding when seeding is off', async () => {
+    store.set('artists/flr/facts/home', {
+      key: 'home',
+      value: 'Richmond',
+      kind: 'FACT',
+      public: true,
+    });
+    expect(await listFacts({ seed: false })).toEqual([
+      { key: 'home', value: 'Richmond', kind: 'FACT', public: true },
+    ]);
+  });
+
   it('requires a project id', async () => {
     vi.stubEnv('GCP_PROJECT_ID', '');
-    await expect(listFacts()).rejects.toThrow('GCP_PROJECT_ID');
+    await expect(listFacts({ seed: true })).rejects.toThrow('GCP_PROJECT_ID');
   });
 });
 

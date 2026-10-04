@@ -124,7 +124,11 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 
   async function pickWith(audience: AudienceEvidence, span: Sentry.Span): Promise<StepOutput> {
     const [facts, feedback, brand] = nathan
-      ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
+      ? await Promise.all([
+          listFacts({ seed: job.owner === 'nathan' }),
+          recentFeedback(),
+          approvedBrand(),
+        ])
       : [PUBLIC_FACTS, [], null];
     const result = await runPick(
       {

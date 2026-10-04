@@ -651,9 +651,8 @@ describe('runStep: PICK', () => {
     expect(ctx.feedback).toHaveLength(1);
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     const after = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
-    expect(after.filter((k) => !before.includes(k) && !k.startsWith('artists/flr/facts/'))).toEqual(
-      [],
-    );
+    expect(after).toEqual(before);
+    expect(store.has('artists/flr/facts/home')).toBe(false);
   });
 
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
