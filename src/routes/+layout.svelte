@@ -126,6 +126,8 @@
       var(--ground) 61px 63px
     );
     opacity: 0.9;
+    /* VHS tracking: the gaps in the smear drift slowly sideways. */
+    animation: tracking 9s linear infinite;
   }
 
   /*
@@ -158,6 +160,7 @@
     text-shadow:
       0 0 18px rgba(255, 79, 216, 0.55),
       0 0 2px rgba(255, 79, 216, 0.9);
+    animation: flicker-on 1.4s ease-out both;
     letter-spacing: 0.01em;
   }
 
@@ -267,19 +270,10 @@
     top: 12px;
   }
 
-  /* VHS tracking: the gaps in the smear drift slowly sideways. */
-  .smear::after {
-    animation: tracking 9s linear infinite;
-  }
-
   @keyframes tracking {
     to {
       background-position: 126px 0;
     }
-  }
-
-  .wordmark {
-    animation: flicker-on 1.4s ease-out both;
   }
 
   /* Starts and ends lit: the wordmark is the page's largest paint, so it must show at once. */

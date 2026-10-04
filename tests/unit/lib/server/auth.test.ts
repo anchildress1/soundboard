@@ -17,6 +17,9 @@ import {
   unsign,
 } from '$lib/server/auth';
 
+const NATHAN_EMAIL = 'nathan@example.com';
+const DEMO_EMAIL = 'demo@example.com';
+
 const oauth = vi.hoisted(() => ({
   options: [] as unknown[],
   generateAuthUrl: vi.fn(
@@ -98,7 +101,7 @@ describe('sign / unsign', () => {
 
 describe('isAllowlisted', () => {
   it('matches case-insensitively and trims', () => {
-    expect(isAllowlisted('nathan@example.com')).toBe(true);
+    expect(isAllowlisted(NATHAN_EMAIL)).toBe(true);
     expect(isAllowlisted('  ASHLEY@example.COM ')).toBe(true);
   });
 
@@ -108,7 +111,7 @@ describe('isAllowlisted', () => {
 
   it('rejects everyone with an empty allowlist', () => {
     vi.stubEnv('ALLOWLIST_EMAILS', '');
-    expect(isAllowlisted('nathan@example.com')).toBe(false);
+    expect(isAllowlisted(NATHAN_EMAIL)).toBe(false);
   });
 });
 
@@ -116,13 +119,13 @@ describe('isDemo', () => {
   it('matches demo accounts case-insensitively, and allowlisting wins', () => {
     vi.stubEnv('DEMO_EMAILS', 'Demo@Example.com, nathan@example.com');
     expect(isDemo(' demo@example.COM ')).toBe(true);
-    expect(isDemo('nathan@example.com')).toBe(false);
+    expect(isDemo(NATHAN_EMAIL)).toBe(false);
     expect(isDemo('stranger@example.com')).toBe(false);
   });
 
   it('has no demo accounts when DEMO_EMAILS is unset', () => {
     vi.stubEnv('DEMO_EMAILS', '');
-    expect(isDemo('demo@example.com')).toBe(false);
+    expect(isDemo(DEMO_EMAIL)).toBe(false);
   });
 });
 
@@ -130,9 +133,9 @@ describe('readSession', () => {
   const NOW = 1_800_000_000_000;
 
   it('reads a demo session as demo, not allowlisted', () => {
-    vi.stubEnv('DEMO_EMAILS', 'demo@example.com');
-    expect(readSession(sessionCookie('demo@example.com', NOW), NOW)).toEqual({
-      email: 'demo@example.com',
+    vi.stubEnv('DEMO_EMAILS', DEMO_EMAIL);
+    expect(readSession(sessionCookie(DEMO_EMAIL, NOW), NOW)).toEqual({
+      email: DEMO_EMAIL,
       allowlisted: false,
       demo: true,
     });
@@ -156,13 +159,13 @@ describe('readSession', () => {
   });
 
   it('expires after the session TTL', () => {
-    const cookie = sessionCookie('nathan@example.com', NOW);
+    const cookie = sessionCookie(NATHAN_EMAIL, NOW);
     expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000)).not.toBeNull();
     expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000 + 1)).toBeNull();
   });
 
   it('re-checks the allowlist on every read', () => {
-    const cookie = sessionCookie('nathan@example.com', NOW);
+    const cookie = sessionCookie(NATHAN_EMAIL, NOW);
     expect(readSession(cookie, NOW)?.allowlisted).toBe(true);
     vi.stubEnv('ALLOWLIST_EMAILS', 'ashley@example.com');
     expect(readSession(cookie, NOW)?.allowlisted).toBe(false);
@@ -176,8 +179,8 @@ describe('readSession', () => {
   });
 
   it('uses the current time by default', () => {
-    expect(readSession(sessionCookie('nathan@example.com'))).not.toBeNull();
-    expect(readSession(sign({ email: 'nathan@example.com', exp: 1 }))).toBeNull();
+    expect(readSession(sessionCookie(NATHAN_EMAIL))).not.toBeNull();
+    expect(readSession(sign({ email: NATHAN_EMAIL, exp: 1 }))).toBeNull();
   });
 });
 
@@ -244,7 +247,7 @@ describe('exchangeCode', () => {
       ticket({ email: 'Nathan@Example.COM', email_verified: true }),
     );
     expect(await exchangeCode(ORIGIN, 'code-1')).toEqual({
-      email: 'nathan@example.com',
+      email: NATHAN_EMAIL,
       refreshToken: 'rt',
     });
     expect(oauth.getToken).toHaveBeenCalledWith('code-1');

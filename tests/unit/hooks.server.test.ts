@@ -10,12 +10,11 @@ const PAGE =
   '<html><head><meta name="sentry-trace" content="req-trace"/>\n' +
   '<meta name="baggage" content="req-baggage"/>\n<title>Soundboard</title></head><body></body></html>';
 
-type Locals = App.Locals;
+type Locals = RequestEvent['locals'];
 
 function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
   const url = new URL('http://localhost/jobs/j1');
   return {
-    url,
     request: new Request(url),
     route: { id: '/jobs/[id]' },
     params: { id: 'j1' },
@@ -27,14 +26,14 @@ function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
       delete: vi.fn(),
       serialize: vi.fn(),
     },
-    fetch,
     getClientAddress: () => '127.0.0.1',
-    platform: undefined,
     setHeaders: vi.fn(),
     isDataRequest: false,
     isSubRequest: false,
     isRemoteRequest: false,
     tracing: { enabled: false, root: {}, current: {} },
+    url,
+    fetch,
   } as unknown as RequestEvent;
 }
 

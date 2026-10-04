@@ -3,6 +3,7 @@ import type { JobOwner } from '$lib/types';
 import { ActionError } from './actions';
 import { signedUploadUrl, uploadObjectName } from './gcs';
 import { createJob, MAX_MINUTES, newJobId, type NewJob } from './jobs';
+import { num, text } from './http';
 import { hashIp, reserveVisitorRun } from './quota';
 import { getSample } from './samples';
 import { startJobTrace } from './tracing';
@@ -23,39 +24,46 @@ export type CreateInput =
 
 export type Created = { id: string; uploadUrl: string | null };
 
+/** A positive, finite number no larger than `max`. */
+const within = (n: number, max: number) => Number.isFinite(n) && n > 0 && n <= max;
+
 function parseUpload(input: Exclude<CreateInput, { sampleId: string }>, maxMinutes: number) {
-  const songTitle = String(input.songTitle ?? '').trim();
-  const notes = String(input.notes ?? '').trim();
-  const contentType = String(input.contentType ?? '');
-  const size = Number(input.size);
-  const duration = Number(input.durationSec);
+  const songTitle = text(input.songTitle).trim();
+  const notes = text(input.notes).trim();
+  const contentType = text(input.contentType);
+  const size = num(input.size);
+  const duration = num(input.durationSec);
   if (!songTitle) throw new ActionError(400, 'Song title is required.');
   if (songTitle.length > TITLE_MAX)
     throw new ActionError(400, `Song title is over ${TITLE_MAX} characters.`);
   if (notes.length > NOTES_MAX)
     throw new ActionError(400, `Notes are over ${NOTES_MAX} characters.`);
   if (!contentType.startsWith('video/')) throw new ActionError(400, 'Pick a video file.');
-  if (!Number.isFinite(size) || size <= 0 || size > MAX_BYTES) {
-    throw new ActionError(400, 'Videos must be under 2 GB.');
-  }
-  if (!Number.isFinite(duration) || duration <= 0 || duration > maxMinutes * 60) {
+  if (!within(size, MAX_BYTES)) throw new ActionError(400, 'Videos must be under 2 GB.');
+  if (!within(duration, maxMinutes * 60)) {
     throw new ActionError(400, `Videos are capped at ${maxMinutes} minutes here.`);
   }
   return {
     songTitle,
     notes,
     contentType,
-    filename: String(input.filename ?? 'video').slice(0, 200),
+    filename: text(input.filename, 'video').slice(0, 200),
   };
 }
 
 export type Who = { allowlisted: boolean; demo: boolean; ip: string };
 
-const ownerFor = (who: Who): JobOwner =>
-  who.allowlisted ? 'nathan' : who.demo ? 'demo' : 'visitor';
+function ownerFor(who: Who): JobOwner {
+  if (who.allowlisted) return 'nathan';
+  return who.demo ? 'demo' : 'visitor';
+}
 
-async function sampleJob(sampleId: string, owner: JobOwner): Promise<NewJob> {
-  const sample = await getSample(String(sampleId));
+/** Sample IDs come from `scripts/add-sample.sh`; anything else would be a Firestore path, not an ID. */
+const SAMPLE_ID = /^[\w-]+$/;
+
+async function sampleJob(sampleId: unknown, owner: JobOwner): Promise<NewJob> {
+  const id = text(sampleId);
+  const sample = SAMPLE_ID.test(id) ? await getSample(id) : null;
   if (!sample) throw new ActionError(404, 'That sample is gone.');
   return {
     owner,

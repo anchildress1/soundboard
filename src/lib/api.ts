@@ -60,12 +60,10 @@ export function step(id: string, trace: Trace) {
   return call<JobView>(`/api/jobs/${id}/step`, { method: 'POST', headers: traceHeaders(trace) });
 }
 
-export function action(
-  id: string,
-  name: 'approve' | 'rerun' | 'discard' | 'retry',
-  trace: Trace,
-  body: unknown = {},
-) {
+export type ActionName = 'approve' | 'rerun' | 'discard' | 'retry' | 'recut' | 'short';
+
+/** `short` starts the job's Short and returns the Short's view; every other action returns the job's. */
+export function action(id: string, name: ActionName, trace: Trace, body: unknown = {}) {
   return call<JobView>(`/api/jobs/${id}/${name}`, {
     method: 'POST',
     headers: traceHeaders(trace),

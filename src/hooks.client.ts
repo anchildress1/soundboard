@@ -1,11 +1,11 @@
-import * as Sentry from '@sentry/sveltekit';
+import { browserTracingIntegration, handleErrorWithSentry, init } from '@sentry/sveltekit';
 import { env } from '$env/dynamic/public';
 import { scrubBreadcrumb, scrubEvent, scrubSpan } from '$lib/scrub';
 
-Sentry.init({
+init({
   dsn: env.PUBLIC_SENTRY_DSN,
   tracesSampleRate: 1,
-  integrations: [Sentry.browserTracingIntegration()],
+  integrations: [browserTracingIntegration()],
   beforeBreadcrumb: scrubBreadcrumb,
   beforeSend: scrubEvent,
   // scrubSpan only runs while spans stream; a static lifecycle would skip it and send them raw.
@@ -13,4 +13,4 @@ Sentry.init({
   beforeSendSpan: scrubSpan,
 });
 
-export const handleError = Sentry.handleErrorWithSentry();
+export const handleError = handleErrorWithSentry();

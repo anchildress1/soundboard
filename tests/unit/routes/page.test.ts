@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { takePending } from '$lib/pending';
 import Page from '$routes/+page.svelte';
 
+const FILE_NAME = 'peekaboo.mp4';
+const LOCAL_BLOB = 'blob:local-1';
+const SIGNED_PUT = 'https://storage.googleapis.com/put';
+
 const h = vi.hoisted(() => ({ goto: vi.fn() }));
 
 vi.mock('$app/navigation', () => ({ goto: h.goto }));
@@ -24,7 +28,7 @@ function setup(data: Partial<Data> = {}) {
 }
 
 const analyze = () => screen.getByRole('button', { name: /Analyze|Starting/ });
-const video = new File(['x'.repeat(10)], 'peekaboo.mp4', { type: 'video/mp4' });
+const video = new File(['x'.repeat(10)], FILE_NAME, { type: 'video/mp4' });
 
 async function pickFile(container: HTMLElement, file: File = video, duration = 200) {
   await fireEvent.change(screen.getByLabelText(/^Video/), { target: { files: [file] } });
@@ -38,7 +42,10 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   let n = 0;
-  URL.createObjectURL = vi.fn(() => `blob:local-${++n}`);
+  URL.createObjectURL = vi.fn(() => {
+    n += 1;
+    return `blob:local-${n}`;
+  });
   URL.revokeObjectURL = vi.fn();
 });
 
@@ -61,15 +68,15 @@ describe('home page: form', () => {
   it('plays the picked file in the monitor at once', async () => {
     const { container } = setup();
     await pickFile(container);
-    expect(container.querySelector('video')).toHaveAttribute('src', 'blob:local-1');
-    expect(screen.getByText('peekaboo.mp4')).toBeInTheDocument();
+    expect(container.querySelector('video')).toHaveAttribute('src', LOCAL_BLOB);
+    expect(screen.getByText(FILE_NAME)).toBeInTheDocument();
   });
 
   it('revokes the previous object URL when another file is picked', async () => {
     const { container } = setup();
     await pickFile(container);
     await pickFile(container, new File(['y'], 'second.mp4', { type: 'video/mp4' }));
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-1');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
     expect(container.querySelector('video')).toHaveAttribute('src', 'blob:local-2');
   });
 
@@ -118,9 +125,7 @@ describe('home page: form', () => {
   });
 
   it('creates the job, hands the file to the job page, and navigates', async () => {
-    fetchMock.mockResolvedValue(
-      json({ id: 'job1', uploadUrl: 'https://storage.googleapis.com/put' }),
-    );
+    fetchMock.mockResolvedValue(json({ id: 'job1', uploadUrl: SIGNED_PUT }));
     const { container } = setup();
     await fireEvent.input(screen.getByLabelText(/^Song title/), {
       target: { value: ' PeekaBoo ' },
@@ -134,15 +139,15 @@ describe('home page: form', () => {
     expect(JSON.parse(String(init!.body))).toEqual({
       songTitle: 'PeekaBoo',
       notes: 'first single',
-      filename: 'peekaboo.mp4',
+      filename: FILE_NAME,
       contentType: 'video/mp4',
       size: 10,
       durationSec: 200,
     });
     expect(takePending('job1')).toEqual({
       file: video,
-      uploadUrl: 'https://storage.googleapis.com/put',
-      objectUrl: 'blob:local-1',
+      uploadUrl: SIGNED_PUT,
+      objectUrl: LOCAL_BLOB,
       contentType: 'video/mp4',
     });
   });
@@ -159,9 +164,7 @@ describe('home page: form', () => {
   });
 
   it('hands the job page the signed type for an untyped file', async () => {
-    fetchMock.mockResolvedValue(
-      json({ id: 'job4', uploadUrl: 'https://storage.googleapis.com/put' }),
-    );
+    fetchMock.mockResolvedValue(json({ id: 'job4', uploadUrl: SIGNED_PUT }));
     const { container } = setup();
     await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
     await pickFile(container, new File(['x'], 'clip', { type: '' }));
@@ -245,6 +248,6 @@ describe('home page: cleanup', () => {
     const { container, unmount } = setup();
     await pickFile(container);
     unmount();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local-1');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
   });
 });

@@ -4,6 +4,8 @@ export type JobState =
   | 'PREP'
   | 'ANALYZE'
   | 'PICK'
+  | 'HOOK'
+  | 'RENDER'
   | 'REVIEW'
   | 'PUBLISHING'
   | 'CLAIMED_COMPLETE'
@@ -17,8 +19,19 @@ export const DRIVEN_STATES: readonly JobState[] = [
   'PREP',
   'ANALYZE',
   'PICK',
+  'HOOK',
+  'RENDER',
   'PUBLISHING',
   'CLAIMED_COMPLETE',
+];
+
+/** Video job states whose chunk analysis is finished, so a Short can be cut from them. */
+export const SHORT_SOURCE_STATES: readonly JobState[] = [
+  'REVIEW',
+  'PUBLISHING',
+  'CLAIMED_COMPLETE',
+  'VERIFIED',
+  'PAYLOAD',
 ];
 
 /**
@@ -87,6 +100,30 @@ export type Pick = PickFields & {
   modelMs: number;
 };
 
+/** How a landscape frame fits 9:16: a blurred copy of the frame behind it, or a center crop. */
+export type Reframe = 'blur' | 'crop';
+
+/** Where the Short is cut: the model picks the window and length, ffmpeg's loudness places the start. */
+export type Hook = {
+  window: number;
+  startSec: number;
+  lengthSec: number;
+  /** Why the model picked it; cleared when the artist moves the cut. */
+  reason: string;
+};
+
+/** A Short job's cut. Its metadata is the source video's pick, reviewed like any other. */
+export type Short = {
+  parentId: string;
+  sourceDurationSec: number;
+  reframe: Reframe;
+  hook: Hook | null;
+  /** Hooks re-picked away from, so the model offers a different one. */
+  skipped: { window: number; lengthSec: number }[];
+  renders: number;
+  modelMs: number;
+};
+
 export type Wait =
   'waking model' | 'waiting on another run' | 'step running in another tab' | 'waiting on YouTube';
 
@@ -110,6 +147,10 @@ export type PublicJob = {
   videoId: string | null;
   payload: PickFields | null;
   hashtagCandidates: string[] | null;
+  /** Set on a video job once a Short is cut from it. */
+  shortId: string | null;
+  /** Set only on a Short job. */
+  short: Short | null;
   createdAt: number;
 };
 
@@ -118,6 +159,8 @@ export type JobView = {
   chunks: Chunk[];
   pick: Pick | null;
   wait?: Wait;
+  /** Signed playback URL of a rendered Short. */
+  playbackUrl?: string;
 };
 
 export type Sample = {

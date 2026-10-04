@@ -77,6 +77,8 @@ export async function recordPublish(record: {
   await artist().collection('publishes').doc(record.videoId).set(record);
 }
 
+const asText = (v: string | string[]) => (Array.isArray(v) ? v.join(', ') : v);
+
 /** Feedback rows for one approval: an EDITED row per changed field, then the ACCEPTED row. */
 export function approvalFeedback(
   proposed: PickFields,
@@ -84,7 +86,6 @@ export function approvalFeedback(
   meta: { jobId: string; songTitle: string; pickVersion: number; at: number },
 ): Feedback[] {
   const rows: Feedback[] = [];
-  const asText = (v: string | string[]) => (Array.isArray(v) ? v.join(', ') : v);
   for (const field of ['title', 'description', 'tags'] as const) {
     const before = asText(proposed[field]);
     const after = asText(final[field]);

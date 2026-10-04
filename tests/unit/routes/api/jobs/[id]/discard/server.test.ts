@@ -25,9 +25,10 @@ const seed = (id: string, patch: Record<string, unknown> = {}) =>
 function vanishAfter(path: string, reads: number) {
   const real = store.get.bind(store);
   let n = 0;
-  vi.spyOn(store, 'get').mockImplementation((key: string) =>
-    key === path && ++n > reads ? undefined : real(key),
-  );
+  vi.spyOn(store, 'get').mockImplementation((key: string) => {
+    if (key === path) n += 1;
+    return key === path && n > reads ? undefined : real(key);
+  });
 }
 
 beforeEach(() => {

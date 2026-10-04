@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
 import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
 
+const WAKING = 'waking model';
+const SYNTH_BASS = 'synth bass';
+
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   id: 'j1',
   state: 'ANALYZE',
@@ -21,6 +24,8 @@ const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   videoId: null,
   payload: null,
   hashtagCandidates: null,
+  shortId: null,
+  short: null,
   createdAt: 0,
   ...patch,
 });
@@ -40,6 +45,8 @@ const music = (m: Partial<ChunkAnalysis['music']>): ChunkAnalysis => ({
 
 const chunk = (index: number, analysis: ChunkAnalysis | null, modelMs = 1000): Chunk => ({
   index,
+  analysis,
+  modelMs,
   startSec: index * 29.5,
   durationSec: 29.5,
   measurements: {
@@ -49,16 +56,14 @@ const chunk = (index: number, analysis: ChunkAnalysis | null, modelMs = 1000): C
     clippedSamples: 0,
     silences: [],
   },
-  analysis,
   raw: analysis ? null : '{bad',
-  modelMs,
 });
 
 describe('jobStatus', () => {
   it('shows a named wait with running progress ahead of the state label', () => {
-    expect(jobStatus(view({ state: 'ANALYZE' }), 'waking model')).toEqual({
+    expect(jobStatus(view({ state: 'ANALYZE' }), WAKING)).toEqual({
       tone: 'info',
-      text: 'waking model',
+      text: WAKING,
       progress: 6 + 21,
     });
   });
@@ -121,6 +126,8 @@ describe('jobStatus', () => {
     const expected: [JobState, string, string, number][] = [
       ['PREP', 'info', 'Measuring audio', 4],
       ['PICK', 'info', 'Smart pick', 92],
+      ['HOOK', 'info', 'Picking the hook', 30],
+      ['RENDER', 'info', 'Cutting the Short', 60],
       ['REVIEW', 'warn', 'Needs review', 100],
       ['PAYLOAD', 'warn', 'Payload ready', 100],
       ['FAILED', 'err', 'Failed', 6 + 21],
@@ -143,7 +150,7 @@ describe('heardTags', () => {
             music({
               genre: ['Synthwave', 'indie'],
               tempoFeel: 'driving',
-              instrumentation: ['synth bass'],
+              instrumentation: [SYNTH_BASS],
               vocals: 'male lead',
             }),
           ),
@@ -152,7 +159,7 @@ describe('heardTags', () => {
             music({
               genre: ['synthwave'],
               tempoFeel: 'Driving',
-              instrumentation: ['synth bass', 'drum machine'],
+              instrumentation: [SYNTH_BASS, 'drum machine'],
               vocals: '',
             }),
           ),
@@ -170,7 +177,7 @@ describe('heardTags', () => {
     );
     const tags = heardTags(v);
     expect(tags.slice(0, 2)).toEqual(['synthwave', 'driving']);
-    expect(tags).toEqual(expect.arrayContaining(['synth bass', 'indie', 'drum machine']));
+    expect(tags).toEqual(expect.arrayContaining([SYNTH_BASS, 'indie', 'drum machine']));
     expect(tags).toHaveLength(5);
   });
 
@@ -241,6 +248,21 @@ describe('modelSeconds', () => {
     expect(modelSeconds(view({}, { pick }))).toBe(12);
   });
 
+  it("uses a Short's hook pick, not the video pick it copied", () => {
+    const short = {
+      parentId: 'p',
+      sourceDurationSec: 180,
+      reframe: 'blur' as const,
+      hook: null,
+      skipped: [],
+      renders: 0,
+      modelMs: 4_600,
+    };
+    expect(modelSeconds(view({ short }, { pick }))).toBe(5);
+    expect(modelSeconds(view({ short: { ...short, modelMs: 0 } }, { pick }))).toBeNull();
+    expect(modelSeconds(view({ short }, { pick }), 1400)).toBe(6);
+  });
+
   it('is null with no model call or a zero duration', () => {
     expect(modelSeconds(view())).toBeNull();
     expect(modelSeconds(view({}, { chunks: [chunk(0, null, 0)] }))).toBeNull();
@@ -253,7 +275,7 @@ describe('modelWorking', () => {
   });
 
   it('is false while the model loads, during chunks, or outside model states', () => {
-    expect(modelWorking(view({ state: 'PICK' }, { wait: 'waking model' }))).toBe(false);
+    expect(modelWorking(view({ state: 'PICK' }, { wait: WAKING }))).toBe(false);
     expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(false);
     expect(modelWorking(view({ state: 'PREP' }))).toBe(false);
     expect(modelWorking(view({ state: 'REVIEW' }))).toBe(false);

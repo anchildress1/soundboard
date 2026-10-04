@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import Label from '$lib/components/Label.svelte';
 import type { PickFields } from '$lib/types';
 
+const OFFICIAL_TITLE = 'PeekaBoo (Official Video)';
+const RERUN = 'Re-run model';
+const SHORT_HEADING = 'YouTube Short';
+
 const fields: PickFields = {
   title: 'PeekaBoo',
   description: 'Night drive.\n\n#synthwave #retrowave',
@@ -55,7 +59,7 @@ describe('Label: draft and counters', () => {
 
   it('updates the title counter as Nathan types', async () => {
     setup();
-    await fireEvent.input(title(), { target: { value: 'PeekaBoo (Official Video)' } });
+    await fireEvent.input(title(), { target: { value: OFFICIAL_TITLE } });
     expect(screen.getByText('25 / 100')).toBeInTheDocument();
   });
 
@@ -116,11 +120,11 @@ describe('Label: validation', () => {
 describe('Label: actions', () => {
   it('approves the edited fields with split tags', async () => {
     const { onapprove } = setup();
-    await fireEvent.input(title(), { target: { value: 'PeekaBoo (Official Video)' } });
+    await fireEvent.input(title(), { target: { value: OFFICIAL_TITLE } });
     await fireEvent.input(tags(), { target: { value: ' synthwave , , PeekaBoo ' } });
     await fireEvent.click(approveButton());
     expect(onapprove).toHaveBeenCalledWith({
-      title: 'PeekaBoo (Official Video)',
+      title: OFFICIAL_TITLE,
       description: fields.description,
       tags: ['synthwave', 'PeekaBoo'],
     });
@@ -128,7 +132,7 @@ describe('Label: actions', () => {
 
   it('fires re-run and discard', async () => {
     const { onrerun, ondiscard, onapprove } = setup();
-    await fireEvent.click(screen.getByRole('button', { name: 'Re-run model' }));
+    await fireEvent.click(screen.getByRole('button', { name: RERUN }));
     await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(onrerun).toHaveBeenCalledTimes(1);
     expect(ondiscard).toHaveBeenCalledTimes(1);
@@ -137,7 +141,7 @@ describe('Label: actions', () => {
 
   it('disables every action while busy', () => {
     setup({ busy: true });
-    for (const name of ['Discard', 'Re-run model', 'Approve & upload']) {
+    for (const name of ['Discard', RERUN, 'Approve & upload']) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
   });
@@ -156,6 +160,38 @@ describe('Label: read-only', () => {
     setup({ editable: false, done: true });
     expect(screen.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Re-run model' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: RERUN })).toBeDisabled();
+  });
+});
+
+describe('Label: a second label on the page', () => {
+  it('prefixes field ids so labels stay tied to their own fields', () => {
+    const { container } = setup({ idPrefix: 'short-' });
+    expect(title().id).toBe('short-title');
+    expect(description().id).toBe('short-desc');
+    expect(tags().id).toBe('short-tags');
+    expect(container.querySelector('#title')).toBeNull();
+  });
+
+  it('keeps the plain ids by default', () => {
+    setup();
+    expect(title().id).toBe('title');
+  });
+
+  it('takes its own heading and re-run label, with a prefixed heading id', async () => {
+    const { onrerun } = setup({
+      idPrefix: 'short-',
+      heading: SHORT_HEADING,
+      rerunLabel: 'Re-pick hook',
+    });
+    const region = screen.getByRole('region', { name: SHORT_HEADING });
+    expect(region).toHaveAttribute('aria-labelledby', 'short-youtube-title');
+    expect(screen.getByRole('heading', { name: SHORT_HEADING })).toHaveAttribute(
+      'id',
+      'short-youtube-title',
+    );
+    expect(screen.queryByRole('button', { name: RERUN })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Re-pick hook' }));
+    expect(onrerun).toHaveBeenCalledOnce();
   });
 });

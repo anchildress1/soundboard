@@ -6,12 +6,15 @@
     filename = '',
     width = null,
     height = null,
+    vertical = false,
     duration = $bindable(0),
   }: {
     src?: string | null;
     filename?: string;
     width?: number | null;
     height?: number | null;
+    /** 9:16 frame for a Short. */
+    vertical?: boolean;
     duration?: number;
   } = $props();
 
@@ -24,7 +27,7 @@
   );
 </script>
 
-<div class="monitor">
+<div class="monitor" class:vertical>
   {#if src}
     <!-- Music videos carry their own audio; there is no caption track to offer. -->
     <!-- svelte-ignore a11y_media_has_caption -->
@@ -54,6 +57,12 @@
     background: #000;
     border: 1px solid var(--line);
     overflow: hidden;
+  }
+
+  .monitor.vertical {
+    aspect-ratio: 9/16;
+    width: min(100%, 360px);
+    margin: 0 auto;
   }
 
   video {

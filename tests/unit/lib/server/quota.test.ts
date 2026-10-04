@@ -9,9 +9,13 @@ import {
   RUNS_PER_DAY,
   RUNS_PER_IP,
   takeUploadSlot,
+  takeVisitorRun,
   UPLOADS_PER_DAY,
   VISITOR_UPLOADS_PER_DAY,
 } from '$lib/server/quota';
+
+const VISITOR_IP = '203.0.113.7';
+const QUOTA_DOC = 'quota/2026-10-04';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -47,18 +51,18 @@ describe('quotaDay', () => {
 
 describe('hashIp', () => {
   it('is stable for the same ip and secret', () => {
-    expect(hashIp('203.0.113.7')).toBe(hashIp('203.0.113.7'));
-    expect(hashIp('203.0.113.7')).toMatch(/^[0-9a-f]{32}$/);
+    expect(hashIp(VISITOR_IP)).toBe(hashIp(VISITOR_IP));
+    expect(hashIp(VISITOR_IP)).toMatch(/^[0-9a-f]{32}$/);
   });
 
   it('differs per ip', () => {
-    expect(hashIp('203.0.113.7')).not.toBe(hashIp('203.0.113.8'));
+    expect(hashIp(VISITOR_IP)).not.toBe(hashIp('203.0.113.8'));
   });
 
   it('is salted by the session secret', () => {
-    const a = hashIp('203.0.113.7');
+    const a = hashIp(VISITOR_IP);
     vi.stubEnv('SESSION_SECRET', 'secret-b');
-    expect(hashIp('203.0.113.7')).not.toBe(a);
+    expect(hashIp(VISITOR_IP)).not.toBe(a);
   });
 
   it('never contains the raw ip', () => {
@@ -75,7 +79,7 @@ describe('hashIp', () => {
 describe('reserveVisitorRun', () => {
   it('counts a run on a fresh day', async () => {
     expect(await reserveVisitorRun('ipA', NOW)).toBeNull();
-    expect(store.get('quota/2026-10-04')).toEqual({
+    expect(store.get(QUOTA_DOC)).toEqual({
       runs: 1,
       ips: { ipA: 1 },
       uploads: 0,
@@ -89,11 +93,11 @@ describe('reserveVisitorRun', () => {
       '5 runs per visitor per day. Try again tomorrow.',
     );
     expect(await reserveVisitorRun('ipB', NOW)).toBeNull();
-    expect(store.get('quota/2026-10-04')).toMatchObject({ runs: 6, ips: { ipA: 5, ipB: 1 } });
+    expect(store.get(QUOTA_DOC)).toMatchObject({ runs: 6, ips: { ipA: 5, ipB: 1 } });
   });
 
   it(`caps all visitors at ${RUNS_PER_DAY} runs a day`, async () => {
-    store.set('quota/2026-10-04', {
+    store.set(QUOTA_DOC, {
       runs: RUNS_PER_DAY - 1,
       ips: {},
       uploads: 0,
@@ -103,12 +107,37 @@ describe('reserveVisitorRun', () => {
     expect(await reserveVisitorRun('ipB', NOW)).toBe(
       "Today's 40 public runs are used up. Try again tomorrow.",
     );
-    expect(store.get('quota/2026-10-04')).toMatchObject({ runs: RUNS_PER_DAY });
+    expect(store.get(QUOTA_DOC)).toMatchObject({ runs: RUNS_PER_DAY });
   });
 
   it('resets on the next Pacific day', async () => {
-    store.set('quota/2026-10-04', { runs: RUNS_PER_DAY, ips: {}, uploads: 0, visitorUploads: 0 });
+    store.set(QUOTA_DOC, { runs: RUNS_PER_DAY, ips: {}, uploads: 0, visitorUploads: 0 });
     expect(await reserveVisitorRun('ipA', new Date('2026-10-05T08:00:00Z'))).toBeNull();
+  });
+});
+
+describe('takeVisitorRun', () => {
+  it("counts a run inside the caller's transaction", async () => {
+    expect(await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA', NOW))).toBeNull();
+    expect(store.get(QUOTA_DOC)).toMatchObject({ runs: 1, ips: { ipA: 1 } });
+  });
+
+  it('names the cap and counts nothing once the visitor is out of runs', async () => {
+    store.set(QUOTA_DOC, {
+      runs: 5,
+      ips: { ipA: RUNS_PER_IP },
+      uploads: 0,
+      visitorUploads: 0,
+    });
+    expect(await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA', NOW))).toBe(
+      '5 runs per visitor per day. Try again tomorrow.',
+    );
+    expect(store.get(QUOTA_DOC)).toMatchObject({ runs: 5 });
+  });
+
+  it('defaults to today', async () => {
+    await db().runTransaction((tx) => takeVisitorRun(tx, 'ipA'));
+    expect([...store.keys()]).toEqual([`quota/${quotaDay()}`]);
   });
 });
 
@@ -117,7 +146,7 @@ describe('takeUploadSlot', () => {
     for (let i = 0; i < VISITOR_UPLOADS_PER_DAY; i++)
       expect(await reserveUpload(true, NOW)).toBe(true);
     expect(await reserveUpload(true, NOW)).toBe(false);
-    expect(store.get('quota/2026-10-04')).toMatchObject({ uploads: 4, visitorUploads: 4 });
+    expect(store.get(QUOTA_DOC)).toMatchObject({ uploads: 4, visitorUploads: 4 });
   });
 
   it('leaves the remaining slots for Nathan, up to the daily total', async () => {
@@ -125,7 +154,7 @@ describe('takeUploadSlot', () => {
     expect(await reserveUpload(false, NOW)).toBe(true);
     expect(await reserveUpload(false, NOW)).toBe(true);
     expect(await reserveUpload(false, NOW)).toBe(false);
-    expect(store.get('quota/2026-10-04')).toMatchObject({
+    expect(store.get(QUOTA_DOC)).toMatchObject({
       uploads: UPLOADS_PER_DAY,
       visitorUploads: VISITOR_UPLOADS_PER_DAY,
     });
@@ -135,7 +164,7 @@ describe('takeUploadSlot', () => {
     for (let i = 0; i < UPLOADS_PER_DAY; i++) expect(await reserveUpload(false, NOW)).toBe(true);
     expect(await reserveUpload(false, NOW)).toBe(false);
     expect(await reserveUpload(true, NOW)).toBe(false);
-    expect(store.get('quota/2026-10-04')).toMatchObject({ uploads: 6, visitorUploads: 0 });
+    expect(store.get(QUOTA_DOC)).toMatchObject({ uploads: 6, visitorUploads: 0 });
   });
 
   it('defaults to today', async () => {

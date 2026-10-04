@@ -171,6 +171,20 @@
 
 **R12 · Brand guide** — reads up to 30 FLR videos + 10 thumbnails, proposes one brand statement with keep / fix / drop rules. Nathan approves it; smart pick uses it.
 
+**R13 · Short**
+
+- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request from a video in review or later. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
+- The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
+- **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
+- **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.
+- **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
+- **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
+- Approve uploads through R6 (private, read-back verified) and takes an upload slot. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
+- A visitor's new Short counts as one run against R8's caps (one model call and one render); returning the live Short is free.
+- [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
+- [ ] A 60 s Short renders inside one step on the app container.
+- [ ] A Short is `VERIFIED` only by read-back.
+
 ## System Design
 
 One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
@@ -191,13 +205,15 @@ One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
   - **prep:** probe and measure the whole file.
   - **analyze:** cut and analyze one 29.5s window per call.
   - **pick:** hashtag search, then smart pick → job to `REVIEW`.
+  - **hook** (Short jobs): pick the hook window, place the cut from loudness.
+  - **render** (Short jobs): cut and reframe to 9:16 into GCS → job to `REVIEW`.
 - Each step claims the job in a Firestore transaction with a 3-minute expiry, so a second tab waits instead of double-running.
 
 ### Firestore
 
 | Path                                     | Holds                                                                                                                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jobs/{id}`                              | state, chunk progress, trace headers, hashtag candidates                                                                                                                              |
+| `jobs/{id}`                              | state, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` (hook, framing, renders) on a Short                                                           |
 | `jobs/{id}/chunks/{n}`, `jobs/{id}/pick` | step results                                                                                                                                                                          |
 | `artists/{id}/facts`                     | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy. |
 | `artists/{id}/feedback`                  | EDITED · SKIPPED · ACCEPTED                                                                                                                                                           |
@@ -215,6 +231,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
   - Above both tabs, "Check before uploading" lists the flags as a warning (⚠, yellow outline), since an audio or video problem matters wherever the song goes.
   - **YouTube** (done once verified): the title as a plain field with a live `n / 100` counter, the description ("model draft", ending in the picked hashtags), tags in mono with a live `n / 500` counter (Approve disables past 500), and Visibility fixed at **Private**. Actions sit together: Discard, Re-run model, Approve & upload (magenta, offset shadow).
+  - **Short** (done once verified): "Make a Short" until one exists, then the 9:16 render, its cut (start, length, blur fill / center crop) with Re-cut, and its own YouTube fields with Re-pick hook in place of Re-run model.
   - **Bandcamp** (done once every field is copied): track name, About, credits, and tags with a Copy button each, and Bandcamp's new-track page opened in its own window.
   - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
 - **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.

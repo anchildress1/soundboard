@@ -6,7 +6,7 @@ import { load } from '$routes/+layout.server';
 type Event = Parameters<typeof load>[0];
 type Data = { channel: unknown; session: unknown };
 
-const run = async (session: App.Locals['session']) =>
+const run = async (session: Event['locals']['session']) =>
   (await load({ locals: { session } } as unknown as Event)) as Data;
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -67,7 +67,7 @@ describe('layout load', () => {
   it('passes only the email, allowlist, and demo flags of the session', async () => {
     fetchMock.mockRejectedValue(new Error('offline'));
     const session = { email: 'nathan@example.com', allowlisted: true, demo: false, extra: 'x' };
-    expect((await run(session as App.Locals['session'])).session).toEqual({
+    expect((await run(session as Event['locals']['session'])).session).toEqual({
       email: 'nathan@example.com',
       allowlisted: true,
       demo: false,

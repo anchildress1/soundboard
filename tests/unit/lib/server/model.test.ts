@@ -5,6 +5,8 @@ import { chat, chatJson, modelStatus, STEP_BUDGET_MS, stepDeadline } from '$lib/
 import { CLAIM_TTL_MS } from '$lib/server/jobs';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
 
+const OK_JSON = '{"ok":true}';
+
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -93,7 +95,7 @@ describe('modelStatus', () => {
 
 describe('chat', () => {
   it('sends a schema-constrained request at temperature 0.2 and returns content', async () => {
-    fetchMock.mockResolvedValueOnce(completion('{"ok":true}'));
+    fetchMock.mockResolvedValueOnce(completion(OK_JSON));
     const result = await chat(messages, 'chunk_analysis', schema);
 
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
@@ -103,15 +105,15 @@ describe('chat', () => {
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({
       model: MODEL_NAME,
-      messages,
       temperature: 0.2,
       max_tokens: 2048,
       response_format: {
         type: 'json_schema',
         json_schema: { name: 'chunk_analysis', strict: true, schema },
       },
+      messages,
     });
-    expect(result.content).toBe('{"ok":true}');
+    expect(result.content).toBe(OK_JSON);
     expect(result.reasoning).toBe('thinking...');
     expect(result.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
     expect(result.ms).toBeGreaterThanOrEqual(0);
@@ -200,10 +202,10 @@ describe('chatJson', () => {
     typeof v === 'object' && v !== null && typeof (v as { ok?: unknown }).ok === 'boolean';
 
   it('returns the parsed value on the first valid reply', async () => {
-    fetchMock.mockResolvedValueOnce(completion('{"ok":true}'));
+    fetchMock.mockResolvedValueOnce(completion(OK_JSON));
     const result = await chatJson(messages, 'smart_pick', schema, isOk);
     expect(result.value).toEqual({ ok: true });
-    expect(result.raw).toBe('{"ok":true}');
+    expect(result.raw).toBe(OK_JSON);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -219,7 +221,7 @@ describe('chatJson', () => {
   it('retries once when the JSON fails validation', async () => {
     fetchMock
       .mockResolvedValueOnce(completion('{"ok":"yes"}'))
-      .mockResolvedValueOnce(completion('{"ok":true}'));
+      .mockResolvedValueOnce(completion(OK_JSON));
     expect((await chatJson(messages, 'smart_pick', schema, isOk)).value).toEqual({ ok: true });
   });
 

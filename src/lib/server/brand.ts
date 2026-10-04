@@ -16,6 +16,7 @@ import { db } from './clients';
 import { ARTIST_ID } from './memory';
 import { chatJson, modelStatus, stepDeadline } from './model';
 import { stripDeep } from './numerics';
+import { isString, isStrings, shape } from './shape';
 import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracing';
 import { recentVideos, thumbnailDataUrl, type CatalogVideo } from './youtube';
 
@@ -35,19 +36,15 @@ export const BRAND_SCHEMA = {
   },
 } as const;
 
-const isStrings = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((s) => typeof s === 'string');
+const BRAND_GUIDE = shape({
+  statement: isString,
+  keep: isStrings,
+  fix: isStrings,
+  drop: isStrings,
+});
 
 export function isBrandGuide(value: unknown): value is BrandGuide {
-  const v = value as BrandGuide | null;
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    typeof v.statement === 'string' &&
-    isStrings(v.keep) &&
-    isStrings(v.fix) &&
-    isStrings(v.drop)
-  );
+  return BRAND_GUIDE(value);
 }
 
 const RULES = [
@@ -185,6 +182,8 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
   return { proposal };
 }
 
+const trimRules = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
+
 /**
  * Approves the guide as edited, replacing any earlier one. The proposal is re-read in the same
  * transaction and must be the one under review (`proposedAt` is its `createdAt`), so a discard or
@@ -196,12 +195,11 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
   const { proposedAt } = input as { proposedAt?: unknown };
   if (typeof proposedAt !== 'number')
     throw new ActionError(400, 'Name the proposal being approved.');
-  const trim = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
   const guide: BrandGuide = {
     statement: input.statement.trim(),
-    keep: trim(input.keep),
-    fix: trim(input.fix),
-    drop: trim(input.drop),
+    keep: trimRules(input.keep),
+    fix: trimRules(input.fix),
+    drop: trimRules(input.drop),
   };
   const problem = guideError(guide);
   if (problem) throw new ActionError(422, problem);

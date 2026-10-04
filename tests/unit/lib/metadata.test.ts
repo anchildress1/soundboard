@@ -143,6 +143,10 @@ describe('validateFields', () => {
       { title: '', description: '#nope', tags: ['y'.repeat(TAGS_MAX + 1)] },
       [],
     );
-    expect(Object.keys(errors).sort()).toEqual(['description', 'tags', 'title']);
+    expect(Object.keys(errors).sort((a, b) => a.localeCompare(b))).toEqual([
+      'description',
+      'tags',
+      'title',
+    ]);
   });
 });

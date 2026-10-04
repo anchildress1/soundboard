@@ -9,6 +9,19 @@ const media = (el: Element, props: Record<string, number>) => {
 };
 
 describe('Monitor', () => {
+  it('frames a Short at 9:16 when vertical', () => {
+    const { container } = render(Monitor, {
+      src: 'https://storage.googleapis.com/b/s',
+      vertical: true,
+    });
+    expect(container.querySelector('.monitor')).toHaveClass('vertical');
+  });
+
+  it('keeps the 16:9 frame by default', () => {
+    const { container } = render(Monitor, {});
+    expect(container.querySelector('.monitor')).not.toHaveClass('vertical');
+  });
+
   it('shows the test scene and no timecode without a source', () => {
     const { container } = render(Monitor, {});
     expect(container.querySelector('video')).toBeNull();

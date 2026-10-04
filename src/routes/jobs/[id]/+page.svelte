@@ -2,19 +2,22 @@
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { action, ApiError, step, uploadToGcs } from '$lib/api';
+  import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
   import Bandcamp from '$lib/components/Bandcamp.svelte';
   import Destinations from '$lib/components/Destinations.svelte';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
+  import Payload from '$lib/components/Payload.svelte';
+  import Short from '$lib/components/Short.svelte';
   import Track from '$lib/components/Track.svelte';
   import { drive, sleep } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
   import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
-  import { DRIVEN_STATES, type JobView, type PickFields } from '$lib/types';
+  import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
+  import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -24,7 +27,8 @@
   let uploadPct = $state(0);
   let localUrl = $state<string | null>(null);
   let busy = $state(false);
-  let message = $state('');
+  // svelte-ignore state_referenced_locally
+  let message = $state(data.view.job.error ?? '');
   let serverErrors = $state<FieldErrors>({});
   let bandcampDone = $state(false);
   // Finished calls only land in the view when their step returns, so the clock covers the gap.
@@ -32,6 +36,16 @@
   let now = $state(Date.now());
   let stopped = false;
   let driving = false;
+
+  // svelte-ignore state_referenced_locally
+  let shortView = $state<JobView | null>(data.short);
+  // svelte-ignore state_referenced_locally
+  let shortSrc = $state<string | null>(data.short?.playbackUrl ?? null);
+  let shortBusy = $state(false);
+  // svelte-ignore state_referenced_locally
+  let shortMessage = $state(data.short?.job.error ?? '');
+  let shortErrors = $state<FieldErrors>({});
+  let drivingShort = false;
 
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
@@ -51,38 +65,92 @@
   );
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
+  const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
+  const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
 
+  // Reading `view` reruns this whenever a new view lands.
   $effect(() => {
-    void view;
-    stepStartedAt = now = Date.now();
+    if (view) stepStartedAt = now = Date.now();
   });
 
   $effect(() => {
-    if (!working) return;
-    const tick = setInterval(() => (now = Date.now()), 1000);
+    const tick = working ? setInterval(() => (now = Date.now()), 1000) : undefined;
     return () => clearInterval(tick);
   });
 
-  async function run() {
+  const run = async () => {
     if (driving) return;
     driving = true;
     try {
       await drive(view, {
         step: () => step(job.id, data.trace),
-        sleep,
         stopped: () => stopped,
         onView: (next) => {
           view = next;
           message = next.job.error ?? '';
         },
         onError: (text) => (message = text),
+        sleep,
       });
     } finally {
       driving = false;
     }
-  }
+  };
 
-  async function act(name: 'approve' | 'rerun' | 'discard' | 'retry', body: unknown = {}) {
+  /** Signed URLs change on every response; the player only reloads for a new render. */
+  const showShort = (next: JobView) => {
+    const renders = shortView?.job.short?.renders;
+    shortView = next;
+    if (next.playbackUrl && (next.job.short?.renders !== renders || !shortSrc)) {
+      shortSrc = next.playbackUrl;
+    }
+  };
+
+  const runShort = async () => {
+    if (drivingShort || !shortView) return;
+    drivingShort = true;
+    const id = shortView.job.id;
+    try {
+      await drive(shortView, {
+        step: () => step(id, data.trace),
+        stopped: () => stopped || shortView?.job.id !== id,
+        onView: (next) => {
+          showShort(next);
+          shortMessage = next.job.error ?? '';
+        },
+        onError: (text) => (shortMessage = text),
+        sleep,
+      });
+    } finally {
+      drivingShort = false;
+    }
+  };
+
+  const actShort = async (name: ActionName, body: unknown = {}) => {
+    shortBusy = true;
+    shortMessage = '';
+    shortErrors = {};
+    try {
+      const target = name === 'short' ? job.id : shortView?.job.id;
+      if (!target) return;
+      const next = await action(target, name, data.trace, body);
+      if (next.job.state === 'DISCARDED') {
+        shortView = null;
+        shortSrc = null;
+        return;
+      }
+      showShort(next);
+      shortMessage = next.job.error ?? '';
+      if (DRIVEN_STATES.includes(next.job.state)) void runShort();
+    } catch (error) {
+      shortMessage = error instanceof Error ? error.message : 'Action failed';
+      if (error instanceof ApiError && error.fields) shortErrors = error.fields;
+    } finally {
+      shortBusy = false;
+    }
+  };
+
+  const act = async (name: Exclude<ActionName, 'recut' | 'short'>, body: unknown = {}) => {
     busy = true;
     message = '';
     serverErrors = {};
@@ -100,20 +168,22 @@
     } finally {
       busy = false;
     }
-  }
+  };
 
-  onMount(async () => {
-    if (job.state !== 'AWAITING_UPLOAD') {
+  /** A reload mid-upload loses the file; the upload may still have landed. */
+  const resumeAfterReload = async () => {
+    view = await step(job.id, data.trace).catch(() => view);
+    if (view.job.state === 'AWAITING_UPLOAD') {
+      message = 'The upload was interrupted. Start a new run from the home page.';
+    } else {
       void run();
-      return;
     }
+  };
+
+  const finishUpload = async () => {
     const pending = takePending(job.id);
     if (!pending) {
-      // A reload mid-upload loses the file; the upload may still have landed.
-      view = await step(job.id, data.trace).catch(() => view);
-      if (view.job.state === 'AWAITING_UPLOAD')
-        message = 'The upload was interrupted. Start a new run from the home page.';
-      else void run();
+      await resumeAfterReload();
       return;
     }
     localUrl = pending.objectUrl;
@@ -132,6 +202,12 @@
     } catch (error) {
       message = error instanceof Error ? error.message : 'Upload failed';
     }
+  };
+
+  onMount(() => {
+    if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
+    if (job.state === 'AWAITING_UPLOAD') void finishUpload();
+    else void run();
   });
 
   onDestroy(() => {
@@ -167,7 +243,11 @@
           </ul>
         </section>
       {/if}
-      <Destinations youtubeDone={job.state === 'VERIFIED'} {bandcampDone}>
+      <Destinations
+        youtubeDone={job.state === 'VERIFIED'}
+        shortDone={shortView?.job.state === 'VERIFIED'}
+        {bandcampDone}
+      >
         {#snippet youtube()}
           {#if job.state === 'VERIFIED' && job.videoId}
             <p class="uploaded">
@@ -194,21 +274,45 @@
             />
           {/key}
           {#if job.state === 'PAYLOAD' && job.payload}
-            <section class="payload" aria-label="Would-be upload payload">
-              <h2>Would-be payload</h2>
-              <pre>{JSON.stringify(
-                  {
-                    snippet: {
-                      title: job.payload.title,
-                      description: job.payload.description,
-                      tags: job.payload.tags,
-                      categoryId: '10',
-                    },
-                    status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-                  },
-                  null,
-                  2,
-                )}</pre>
+            <Payload fields={job.payload} />
+          {/if}
+        {/snippet}
+        {#snippet short()}
+          {#if shortView}
+            <Short
+              view={shortView}
+              src={shortSrc}
+              busy={shortBusy}
+              message={shortMessage}
+              serverErrors={shortErrors}
+              onrecut={(cut) => actShort('recut', cut)}
+              onapprove={(f) =>
+                actShort('approve', { ...f, pickVersion: shortView?.pick?.version })}
+              onrerun={() => actShort('rerun')}
+              ondiscard={() => actShort('discard')}
+              onretry={() => actShort('retry')}
+            />
+          {:else}
+            <section class="placeholder make" aria-labelledby="make-short-heading">
+              <h2 id="make-short-heading">Short</h2>
+              <p>
+                A vertical cut of this video's hook for YouTube Shorts. The model picks the hook;
+                ffmpeg cuts it and fits it to 9:16. It starts from this video's title, description,
+                and tags.
+              </p>
+              {#if tooShortForShort}
+                <p>A Short needs a video of at least {SHORT_MIN_SEC} seconds.</p>
+              {:else if canMakeShort}
+                <button
+                  class="btn primary"
+                  type="button"
+                  disabled={shortBusy}
+                  onclick={() => actShort('short')}>Make a Short</button
+                >
+              {:else}
+                <p>Available once the recommendation is ready.</p>
+              {/if}
+              <p class="toast" aria-live="polite">{shortMessage}</p>
             </section>
           {/if}
         {/snippet}
@@ -295,10 +399,17 @@
     color: var(--green);
   }
 
-  .placeholder,
-  .payload {
+  .placeholder {
     background: var(--panel);
     padding: 12px 14px;
+  }
+
+  h2 {
+    margin: 0 0 6px;
+    font: 900 12px/1.2 var(--display);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
   }
 
   /* Yellow is the "needs attention" state color; it stays clear of the orange panel labels. */
@@ -328,27 +439,24 @@
     color: var(--ink);
   }
 
-  h2 {
-    margin: 0 0 6px;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-
   .placeholder h2 {
     font-size: 18px;
     letter-spacing: 0.04em;
     color: var(--ink);
   }
 
-  .placeholder p,
-  .payload pre {
+  .placeholder p {
     margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font: 500 12px/1.5 var(--mono);
     color: var(--ink);
+  }
+
+  .make {
+    display: grid;
+    gap: 12px;
+    justify-items: start;
   }
 
   .actions {

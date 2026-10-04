@@ -10,6 +10,7 @@ import {
 } from '$lib/server/chunk-analyst';
 import type { ChunkAnalysis, Measurements } from '$lib/types';
 import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
+import { omit } from '../../../helpers/omit';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const spawnMock = vi.mocked(spawn);
@@ -131,7 +132,7 @@ describe('isChunkAnalysis', () => {
     expect(bad({ genre: ['ok', 3] })).toBe(false);
     expect(bad({ tempoFeel: 120 })).toBe(false);
     expect(bad({ instrumentation: null })).toBe(false);
-    expect(bad({ vocals: undefined })).toBe(false);
+    expect(isChunkAnalysis({ ...analysis, music: omit(analysis.music, 'vocals') })).toBe(false);
     expect(bad({ mood: {} })).toBe(false);
     expect(isChunkAnalysis({ ...analysis, qualityFlags: 'none' })).toBe(false);
   });
@@ -153,9 +154,9 @@ describe('buildChunkMessages', () => {
       notes: '',
       startSec: 0,
       durationSec: 29.5,
+      wav: WAV,
       measurements,
       frames,
-      wav: WAV,
     });
     expect(system!.role).toBe('system');
     expect(system!.content).toMatch(/Do not restate or estimate any loudness/);
@@ -180,9 +181,9 @@ describe('buildChunkMessages', () => {
       notes: 'Flies Like Robots live take',
       startSec: 0,
       durationSec: 1,
-      measurements,
       frames: [],
       wav: Buffer.alloc(0),
+      measurements,
     });
     const parts = user!.content as Part[];
     expect(JSON.parse(parts[0]!.text!).artistNotes).toBe('Flies Like Robots live take');

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
-import { ActionError, approve, discard, rerun, retry } from '$lib/server/actions';
+import { ActionError, approve, discard, makeShort, recut, rerun, retry } from '$lib/server/actions';
 import { resetClients } from '$lib/server/clients';
 import {
   createJob,
@@ -13,7 +13,14 @@ import {
   type NewJob,
 } from '$lib/server/jobs';
 import { quotaDay, UPLOADS_PER_DAY, VISITOR_UPLOADS_PER_DAY } from '$lib/server/quota';
-import type { Channel, JobOwner, JobState, Pick } from '$lib/types';
+import type { Channel, Hook, JobOwner, JobState, Pick, Short } from '$lib/types';
+
+const SYNTHWAVE_TAG = '#synthwave';
+const RETROWAVE = '#retrowave';
+const DESCRIPTION = 'A bright synth track.\n\n#synthwave #retrowave';
+const JOB_FEEDBACK = 'jobs/job1/feedback/';
+const EDITED_TITLE = 'Edited Title';
+const ARTIST_FEEDBACK = 'artists/flr/feedback/';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -27,13 +34,13 @@ vi.mock('@google-cloud/secret-manager', () => ({
   },
 }));
 
-const candidates = ['#synthwave', '#retrowave', '#NewMusic'];
+const candidates = [SYNTHWAVE_TAG, RETROWAVE, '#NewMusic'];
 
 const pick = (version: number, title = `Title ${version}`): Pick => ({
   version,
   title,
-  description: 'A bright synth track.\n\n#synthwave #retrowave',
-  hashtags: ['#synthwave', '#retrowave'],
+  description: DESCRIPTION,
+  hashtags: [SYNTHWAVE_TAG, RETROWAVE],
   tags: ['synthwave', 'outrun'],
   flags: [],
   brandCheck: '',
@@ -95,7 +102,7 @@ const input = (
   over: Partial<{ title: string; description: string; tags: string[]; pickVersion: number }> = {},
 ) => ({
   title: 'Title 1',
-  description: 'A bright synth track.\n\n#synthwave #retrowave',
+  description: DESCRIPTION,
   tags: ['synthwave', 'outrun'],
   pickVersion: 1,
   ...over,
@@ -155,7 +162,7 @@ describe('approve', () => {
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/newer recommendation/);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 
   it('refuses an approval with no pick version', async () => {
@@ -200,7 +207,7 @@ describe('approve', () => {
 
   it('reports a YouTube limit before the tag list', async () => {
     const job = await makeJob();
-    const error = await approve(job, input({ tags: ['#synthwave'] })).catch((e: unknown) => e);
+    const error = await approve(job, input({ tags: [SYNTHWAVE_TAG] })).catch((e: unknown) => e);
     expect(error).toMatchObject({
       fields: { tags: 'Tags are plain terms; hashtags belong in the description.' },
     });
@@ -211,7 +218,7 @@ describe('approve', () => {
     const error = await rejection(approve(job, input({ description: 'Out now #invented' })));
     expect(error.status).toBe(422);
     expect(error.fields).toEqual({ description: "Not in this job's hashtag list: #invented" });
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
 
@@ -219,7 +226,7 @@ describe('approve', () => {
     const job = await makeJob({ patch: { hashtagCandidates: null } });
     const error = await rejection(approve(job, input()));
     expect(error.status).toBe(422);
-    expect(error.fields?.description).toContain('#synthwave');
+    expect(error.fields?.description).toContain(SYNTHWAVE_TAG);
   });
 
   it('reports title and tags errors together', async () => {
@@ -227,9 +234,14 @@ describe('approve', () => {
     const error = await rejection(
       approve(job, input({ title: ' ', tags: Array.from({ length: 100 }, () => 'long tag') })),
     );
-    expect(Object.keys(error.fields!).sort()).toEqual(['tags', 'title']);
+    expect(Object.keys(error.fields!).sort((a, b) => a.localeCompare(b))).toEqual([
+      'tags',
+      'title',
+    ]);
   });
+});
 
+describe('approve: where the upload goes', () => {
   it('ends at the payload when the job has no channel', async () => {
     const job = await makeJob({ channel: null });
     await approve(job, input({ title: '  Title 1  ' }));
@@ -237,8 +249,8 @@ describe('approve', () => {
     expect(after.state).toBe('PAYLOAD');
     expect(after.payload).toEqual({
       title: 'Title 1',
-      description: 'A bright synth track.\n\n#synthwave #retrowave',
-      hashtags: ['#synthwave', '#retrowave'],
+      description: DESCRIPTION,
+      hashtags: [SYNTHWAVE_TAG, RETROWAVE],
       tags: ['synthwave', 'outrun'],
     });
     expect(after.finalFields).toEqual(after.payload);
@@ -309,7 +321,7 @@ describe('approve', () => {
     expect(after.finalFields).toEqual({
       title: 'Title 1',
       description: 'Edited.\n\n#synthwave #newmusic',
-      hashtags: ['#synthwave', '#NewMusic'],
+      hashtags: [SYNTHWAVE_TAG, '#NewMusic'],
       tags: ['synthwave', 'outrun'],
     });
     // The approved fields stay visible while publishing, so the page shows what was sent.
@@ -337,21 +349,21 @@ describe('approve', () => {
   it('keeps demo feedback on the job, out of the artist memory', async () => {
     connected();
     const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
-    await approve(job, input({ title: 'Edited Title' }));
+    await approve(job, input({ title: EDITED_TITLE }));
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
-    expect(feedbackRows('jobs/job1/feedback/').length).toBeGreaterThan(0);
+    expect(feedbackRows(JOB_FEEDBACK).length).toBeGreaterThan(0);
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 
   it('keeps visitor feedback on the job', async () => {
     const job = await makeJob({ channel: null });
-    await approve(job, input({ title: 'Edited Title' }));
-    const rows = feedbackRows('jobs/job1/feedback/');
+    await approve(job, input({ title: EDITED_TITLE }));
+    const rows = feedbackRows(JOB_FEEDBACK);
     expect(rows.map((r) => [r.kind, r.field])).toEqual([
       ['EDITED', 'title'],
       ['ACCEPTED', undefined],
     ]);
-    expect(rows[0]).toMatchObject({ before: 'Title 1', after: 'Edited Title', pickVersion: 1 });
+    expect(rows[0]).toMatchObject({ before: 'Title 1', after: EDITED_TITLE, pickVersion: 1 });
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 
@@ -359,7 +371,7 @@ describe('approve', () => {
     connected();
     const job = await makeJob({ owner: 'nathan', channel: 'nathan', picks: 2 });
     await approve(job, input({ title: 'Title 2', pickVersion: 2 }));
-    const rows = feedbackRows('artists/flr/feedback/');
+    const rows = feedbackRows(ARTIST_FEEDBACK);
     expect(rows).toEqual([
       expect.objectContaining({
         kind: 'ACCEPTED',
@@ -368,7 +380,7 @@ describe('approve', () => {
         jobId: 'job1',
       }),
     ]);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 });
 
@@ -385,7 +397,7 @@ describe('rerun', () => {
       [1, false],
       [2, true],
     ]);
-    const rows = feedbackRows('jobs/job1/feedback/');
+    const rows = feedbackRows(JOB_FEEDBACK);
     expect(rows).toEqual([
       expect.objectContaining({
         kind: 'SKIPPED',
@@ -403,17 +415,15 @@ describe('rerun', () => {
   it("stores Nathan's skip in the artist's memory", async () => {
     const job = await makeJob({ owner: 'nathan', channel: 'nathan' });
     await rerun(job);
-    expect(feedbackRows('artists/flr/feedback/')).toEqual([
-      expect.objectContaining({ kind: 'SKIPPED' }),
-    ]);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {
     const job = await makeJob({ picks: 0 });
     await rerun(job);
     expect((await getJob('job1'))!.state).toBe('PICK');
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 });
 
@@ -428,9 +438,7 @@ describe('concurrent actions', () => {
       uploads: number;
     };
     expect(quota.uploads).toBe(1);
-    expect(feedbackRows('jobs/job1/feedback/').filter((r) => r.kind === 'ACCEPTED')).toHaveLength(
-      1,
-    );
+    expect(feedbackRows(JOB_FEEDBACK).filter((r) => r.kind === 'ACCEPTED')).toHaveLength(1);
   });
 
   it('refuses a re-run once the job already left review', async () => {
@@ -475,7 +483,7 @@ describe('discard', () => {
   it('learns nothing from a discard', async () => {
     const job = await makeJob();
     await discard(job);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 });
@@ -526,4 +534,303 @@ describe('retry', () => {
     expect(error.status).toBe(409);
     expect(error.message).toBe('Not allowed while the job is REVIEW.');
   });
+});
+
+describe('makeShort', () => {
+  const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
+
+  it("starts a Short whose pick is the video's recommendation on screen", async () => {
+    const job = await makeJob({ picks: 2, patch: { probe: PROBE } });
+    const id = await makeShort(job);
+    const short = (await getJob(id))!;
+    expect(short.state).toBe('HOOK');
+    expect(short.short?.parentId).toBe('job1');
+    expect((await listPicks(id)).map((p) => [p.version, p.title])).toEqual([[1, 'Title 2']]);
+    expect((await getJob('job1'))!.shortId).toBe(id);
+  });
+
+  it("starts from the artist's approved fields once the video was approved", async () => {
+    const final = {
+      title: 'Edited',
+      description: 'Mine. #synthwave',
+      hashtags: [SYNTHWAVE_TAG],
+      tags: ['synthwave'],
+    };
+    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, finalFields: final } });
+    const id = await makeShort(job);
+    const [stored] = await listPicks(id);
+    expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
+  });
+
+  it("charges a visitor's new Short as one of their runs", async () => {
+    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
+    await makeShort(job);
+    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ runs: 1, ips: { ipA: 1 } });
+  });
+
+  it('turns a visitor away with 429 once their runs are spent, starting nothing', async () => {
+    store.set(`quota/${quotaDay()}`, { runs: 5, ips: { ipA: 5 }, uploads: 0, visitorUploads: 0 });
+    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([
+      429,
+      '5 runs per visitor per day. Try again tomorrow.',
+    ]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+  });
+
+  it.each(['nathan', 'demo'] as JobOwner[])(
+    'never charges a %s Short against visitor caps',
+    async (owner) => {
+      const job = await makeJob({ owner, patch: { probe: PROBE, ipHash: 'ipA' } });
+      await makeShort(job);
+      expect(store.has(`quota/${quotaDay()}`)).toBe(false);
+    },
+  );
+
+  it('starts from fields approved after the caller read the video', async () => {
+    const stale = await makeJob({ patch: { probe: PROBE } });
+    const final = {
+      title: 'Approved',
+      description: 'Mine. #synthwave',
+      hashtags: [SYNTHWAVE_TAG],
+      tags: ['synthwave'],
+    };
+    await updateJob('job1', { state: 'PUBLISHING', finalFields: final });
+    const [stored] = await listPicks(await makeShort(stale));
+    expect(stored).toMatchObject({ ...final, version: 1 });
+  });
+
+  it('returns the live Short instead of starting another', async () => {
+    const job = await makeJob({ patch: { probe: PROBE } });
+    const first = await makeShort(job);
+    expect(await makeShort((await getJob('job1'))!)).toBe(first);
+  });
+
+  it('refuses a video under 15 seconds and accepts one of exactly 15', async () => {
+    const short = await makeJob({ patch: { probe: { ...PROBE, durationSec: 14.9 } } });
+    const error = await rejection(makeShort(short));
+    expect([error.status, error.message]).toEqual([
+      409,
+      'A Short needs a video of at least 15 seconds.',
+    ]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+    await updateJob('job1', { probe: { ...PROBE, durationSec: 15 } });
+    expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
+  });
+
+  it('refuses a video still being analyzed', async () => {
+    const job = await makeJob({ state: 'ANALYZE', patch: { probe: PROBE } });
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([409, 'Not allowed while the job is ANALYZE.']);
+  });
+
+  it('refuses a Short of a Short', async () => {
+    const job = await makeJob({ patch: { probe: PROBE } });
+    const short = (await getJob(await makeShort(job)))!;
+    const error = await rejection(makeShort({ ...short, state: 'REVIEW' }));
+    expect([error.status, error.message]).toEqual([409, "A Short can't be cut from a Short."]);
+  });
+
+  it('refuses a video with no known length', async () => {
+    const job = await makeJob();
+    expect((await rejection(makeShort(job))).message).toBe("This video's length is unknown.");
+    const zero = await makeJob({ patch: { probe: { ...PROBE, durationSec: 0 } } });
+    expect((await rejection(makeShort(zero))).status).toBe(409);
+  });
+
+  it('refuses a video with no recommendation', async () => {
+    const job = await makeJob({ picks: 0, patch: { probe: PROBE } });
+    expect((await rejection(makeShort(job))).message).toBe(
+      'This video has no recommendation to start from.',
+    );
+  });
+
+  it('refuses when the video moved on before the transaction', async () => {
+    const job = await makeJob({ patch: { probe: PROBE } });
+    await updateJob('job1', { state: 'DISCARDED' });
+    expect((await rejection(makeShort(job))).message).toBe(
+      'The video moved on before the Short could start.',
+    );
+  });
+});
+
+const HOOK: Hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands.' };
+const SHORT: Short = {
+  parentId: 'p1',
+  sourceDurationSec: 180,
+  reframe: 'blur',
+  hook: HOOK,
+  skipped: [],
+  renders: 1,
+  modelMs: 900,
+};
+
+async function shortJob(
+  opts: { state?: JobState; short?: Partial<Short>; channel?: Channel } = {},
+) {
+  return makeJob({
+    state: opts.state ?? 'REVIEW',
+    channel: opts.channel,
+    patch: { short: { ...SHORT, ...opts.short }, sourceObject: 'uploads/p1' },
+  });
+}
+
+describe('recut', () => {
+  it('re-renders with the new framing and keeps the reason when the cut stays put', async () => {
+    const job = await shortJob();
+    await recut(job, { startSec: 70, lengthSec: 30, reframe: 'crop' });
+    const after = (await getJob('job1'))!;
+    expect(after.state).toBe('RENDER');
+    expect(after.short).toEqual({ ...SHORT, reframe: 'crop' });
+  });
+
+  it("moves the cut to the artist's start and length and clears the model's reason", async () => {
+    const job = await shortJob();
+    await recut(job, { startSec: 81.24, lengthSec: 22.06, reframe: 'blur' });
+    expect((await getJob('job1'))!.short!.hook).toEqual({
+      ...HOOK,
+      startSec: 81.2,
+      lengthSec: 22.1,
+      reason: '',
+    });
+  });
+
+  it('accepts a cut ending exactly at the end of the source', async () => {
+    const job = await shortJob();
+    await recut(job, { startSec: 120, lengthSec: 60, reframe: 'blur' });
+    expect((await getJob('job1'))!.short!.hook).toMatchObject({ startSec: 120, lengthSec: 60 });
+  });
+
+  it('rejects an unknown framing', async () => {
+    const job = await shortJob();
+    const error = await rejection(recut(job, { startSec: 70, lengthSec: 30, reframe: 'stretch' }));
+    expect([error.status, error.message]).toEqual([400, 'Pick blur fill or center crop.']);
+  });
+
+  it('rejects a length outside 15–60 s, and a start past the end', async () => {
+    const job = await shortJob();
+    expect(
+      (await rejection(recut(job, { startSec: 0, lengthSec: 10, reframe: 'blur' }))).message,
+    ).toBe('Length must be 15 to 60 seconds.');
+    expect(
+      (await rejection(recut(job, { startSec: 170, lengthSec: 30, reframe: 'blur' }))).message,
+    ).toBe('Start must be 0 to 150 seconds for that length.');
+    expect(
+      (await rejection(recut(job, { startSec: Number.NaN, lengthSec: 30, reframe: 'blur' })))
+        .status,
+    ).toBe(400);
+    expect((await getJob('job1'))!.state).toBe('REVIEW');
+  });
+
+  it('refuses a video job, and a Short with no cut yet', async () => {
+    const video = await makeJob();
+    expect(
+      (await rejection(recut(video, { startSec: 0, lengthSec: 30, reframe: 'blur' }))).message,
+    ).toBe('Only a cut Short can be re-cut.');
+    const uncut = await shortJob({ state: 'HOOK', short: { hook: null } });
+    expect(
+      (await rejection(recut(uncut, { startSec: 0, lengthSec: 30, reframe: 'blur' }))).status,
+    ).toBe(409);
+  });
+
+  it('refuses outside REVIEW', async () => {
+    const job = await shortJob({ state: 'PUBLISHING' });
+    const error = await rejection(recut(job, { startSec: 70, lengthSec: 30, reframe: 'blur' }));
+    expect(error.message).toBe('Not allowed while the job is PUBLISHING.');
+  });
+
+  it('refuses when the Short moved on before the transition', async () => {
+    const job = await shortJob();
+    await updateJob('job1', { state: 'DISCARDED' });
+    const error = await rejection(recut(job, { startSec: 70, lengthSec: 30, reframe: 'blur' }));
+    expect([error.status, error.message]).toEqual([409, 'This Short was already handled.']);
+  });
+});
+
+describe('rerun on a Short', () => {
+  it('re-picks the hook away from the current one and keeps the metadata', async () => {
+    const job = await shortJob({ short: { skipped: [{ window: 0, lengthSec: 20 }] } });
+    await rerun(job);
+    const after = (await getJob('job1'))!;
+    expect(after.state).toBe('HOOK');
+    expect(after.short).toEqual({
+      ...SHORT,
+      hook: null,
+      skipped: [
+        { window: 0, lengthSec: 20 },
+        { window: 2, lengthSec: 30 },
+      ],
+    });
+    expect((await listPicks('job1')).map((p) => p.skipped)).toEqual([false]);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(feedbackRows('artists/')).toHaveLength(0);
+  });
+
+  it('re-picks without adding a skip when no hook was set', async () => {
+    const job = await shortJob({ short: { hook: null } });
+    await rerun(job);
+    expect((await getJob('job1'))!.short!.skipped).toEqual([]);
+  });
+
+  it('refuses when the Short moved on', async () => {
+    const job = await shortJob();
+    await updateJob('job1', { state: 'RENDER' });
+    expect((await rejection(rerun(job))).message).toBe('This Short was already handled.');
+  });
+});
+
+describe('approve on a Short', () => {
+  it('uploads through the same flow and does not count the acceptance twice', async () => {
+    connected();
+    const job = await shortJob({ channel: 'nathan' });
+    await approve({ ...job, owner: 'nathan' }, input());
+    const after = (await getJob('job1'))!;
+    expect(after.state).toBe('PUBLISHING');
+    expect(after.finalFields?.title).toBe('Title 1');
+    expect(feedbackRows('artists/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1 });
+  });
+
+  it("learns Nathan's edits to the Short's metadata", async () => {
+    connected();
+    const job = await shortJob({ channel: 'nathan' });
+    await approve({ ...job, owner: 'nathan' }, input({ title: 'Shorter title' }));
+    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([
+      expect.objectContaining({
+        kind: 'EDITED',
+        field: 'title',
+        before: 'Title 1',
+        after: 'Shorter title',
+        jobId: 'job1',
+      }),
+    ]);
+  });
+
+  it('holds the Short to the same hashtag and tag rules', async () => {
+    const job = await shortJob();
+    const error = await rejection(approve(job, input({ tags: ['study music'] })));
+    expect(error.status).toBe(422);
+  });
+});
+
+describe('discard on a Short', () => {
+  it.each(['HOOK', 'RENDER', 'REVIEW'] as JobState[])('ends a Short in %s', async (state) => {
+    const job = await shortJob({ state });
+    await discard(job);
+    expect((await getJob('job1'))!.state).toBe('DISCARDED');
+  });
+});
+
+describe('retry on a Short', () => {
+  it.each(['HOOK', 'RENDER'] as JobState[])(
+    'resumes at the failed %s step',
+    async (failedState) => {
+      const job = await shortJob({ state: 'FAILED' });
+      await updateJob('job1', { failedState });
+      await retry({ ...job, failedState });
+      expect((await getJob('job1'))!.state).toBe(failedState);
+    },
+  );
 });

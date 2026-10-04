@@ -45,6 +45,7 @@ const AGENT_FOR_SCHEMA = {
   chunk_analysis: 'chunk-analyst',
   smart_pick: 'smart-pick',
   brand_guide: 'brand-guide',
+  hook_pick: 'hook-pick',
 } as const satisfies Record<string, AgentName>;
 
 export type SchemaName = keyof typeof AGENT_FOR_SCHEMA;
@@ -80,13 +81,13 @@ export async function chat(
       signal: AbortSignal.timeout(timeout),
       body: JSON.stringify({
         model: MODEL_NAME,
-        messages,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
         response_format: {
           type: 'json_schema',
           json_schema: { name: schemaName, strict: true, schema },
         },
+        messages,
       }),
     });
     if (!response.ok) {

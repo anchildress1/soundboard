@@ -3,9 +3,9 @@ import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
 import { required } from './env';
 
-let firestore: Firestore | undefined;
-let storage: Storage | undefined;
-let secrets: SecretManagerServiceClient | undefined;
+let firestore: Firestore | null = null;
+let storage: Storage | null = null;
+let secrets: SecretManagerServiceClient | null = null;
 
 export function db(): Firestore {
   firestore ??= new Firestore({
@@ -27,7 +27,7 @@ export function secretManager(): SecretManagerServiceClient {
 
 /** Drops cached clients so tests can swap env vars between cases. */
 export function resetClients(): void {
-  firestore = undefined;
-  storage = undefined;
-  secrets = undefined;
+  firestore = null;
+  storage = null;
+  secrets = null;
 }

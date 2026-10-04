@@ -1,4 +1,5 @@
-import * as Sentry from '@sentry/sveltekit';
+import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
+import { scrubUrl } from '$lib/scrub';
 import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
 import { approvedBrand } from './brand';
 import { analyzeChunk } from './chunk-analyst';
@@ -11,12 +12,14 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  ok,
   releaseJob,
   transitionJob,
   type JobDoc,
 } from './jobs';
 import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from './memory';
 import { modelStatus, stepDeadline } from './model';
+import { hookStep, renderStep } from './short';
 import { runPick } from './smart-pick';
 import { accessToken } from './tokens';
 import { invokeAgent } from './tracing';
@@ -36,7 +39,6 @@ const RECENT_COUNT = 3;
 type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
 type StepOutput = Patch & { pick?: Pick; chunk?: Chunk };
-const ok = (patch: Patch): Patch => ({ ...patch, consecutiveFailures: 0, error: null });
 
 /** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
 class StepFailure extends Error {
@@ -68,10 +70,10 @@ async function prep(job: JobDoc): Promise<Patch> {
   return ok({
     state: 'ANALYZE',
     probe: probed,
-    measurements,
     contentType: info.contentType,
     chunkCount: chunkCount(probed.durationSec),
     chunkIndex: 0,
+    measurements,
   });
 }
 
@@ -81,11 +83,11 @@ async function analyze(job: JobDoc): Promise<StepOutput> {
   const duration = job.probe?.durationSec ?? 0;
   const chunk = await analyzeChunk({
     url: await signedReadUrl(job.object),
-    index,
-    startSec,
     durationSec: Math.min(WINDOW_SEC, duration - startSec),
     songTitle: job.songTitle,
     notes: job.notes,
+    index,
+    startSec,
   });
   const next = index + 1;
   return {
@@ -122,7 +124,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
     }
   });
 
-  async function pickWith(audience: AudienceEvidence, span: Sentry.Span): Promise<StepOutput> {
+  async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
     const [facts, feedback, brand] = nathan
       ? await Promise.all([
           listFacts({ seed: job.owner === 'nathan' }),
@@ -134,18 +136,18 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       {
         songTitle: job.songTitle,
         notes: job.notes,
-        chunks,
         measurements: job.measurements,
         probe: job.probe,
         recent: withThumbs,
         candidates: audience.hashtags,
         tagCandidates: audience.tags,
         audience: audience.top,
-        facts,
-        feedback,
         skipped: picks
           .filter((p) => p.skipped)
           .map(({ title, description }) => ({ title, description })),
+        chunks,
+        facts,
+        feedback,
         brand,
       },
       deadline,
@@ -158,8 +160,8 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       ...ok({
         state: 'REVIEW',
         hashtagCandidates: audience.hashtags,
-        audience,
         pickVersion: version,
+        audience,
       }),
       // Each stored pick carries the running total, so a re-run never loses earlier pick time.
       pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
@@ -235,24 +237,29 @@ async function publishing(job: JobDoc): Promise<Patch> {
 const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
 const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
 
+/** Nathan's verified uploads join his memory; demo and visitor uploads never do. */
+async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
+  if (job.owner !== 'nathan' || !job.finalFields) return;
+  await recordPublish({
+    videoId,
+    url: `https://youtu.be/${videoId}`,
+    jobId: job.id,
+    fields: job.finalFields,
+    status: 'VERIFIED',
+    at: Date.now(),
+  });
+}
+
 async function verify(job: JobDoc): Promise<Patch> {
   const token = job.channel ? await accessToken(job.channel) : null;
   if (!token || !job.videoId) return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   const video = await readBack(token, job.videoId);
-  if (video && REJECTED_UPLOADS.has(video.uploadStatus ?? '')) {
-    return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
+  const uploadStatus = video?.uploadStatus ?? '';
+  if (REJECTED_UPLOADS.has(uploadStatus)) {
+    return fail('CLAIMED_COMPLETE', `YouTube ${uploadStatus} the upload.`);
   }
-  if (video && ACCEPTED_UPLOADS.has(video.uploadStatus ?? '')) {
-    if (job.owner === 'nathan' && job.finalFields) {
-      await recordPublish({
-        videoId: job.videoId,
-        url: `https://youtu.be/${job.videoId}`,
-        jobId: job.id,
-        fields: job.finalFields,
-        status: 'VERIFIED',
-        at: Date.now(),
-      });
-    }
+  if (ACCEPTED_UPLOADS.has(uploadStatus)) {
+    await recordVerified(job, job.videoId);
     return ok({ state: 'VERIFIED' });
   }
   const attempts = job.verifyAttempts + 1;
@@ -265,15 +272,20 @@ const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> 
   PREP: prep,
   ANALYZE: analyze,
   PICK: pick,
+  HOOK: hookStep,
+  RENDER: renderStep,
   PUBLISHING: publishing,
   CLAIMED_COMPLETE: verify,
 };
 
-const NEEDS_MODEL: readonly JobState[] = ['ANALYZE', 'PICK'];
+const NEEDS_MODEL: ReadonlySet<JobState> = new Set(['ANALYZE', 'PICK', 'HOOK']);
 
-/** A step that throws counts as a failure; two in a row stop the job at that step for a retry. */
+/**
+ * A step that throws counts as a failure; two in a row stop the job at that step for a retry. The
+ * message is stored and shown, and ffmpeg quotes the signed URL it failed on, so queries go.
+ */
 export function failurePatch(job: JobDoc, error: unknown): Patch {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = scrubUrl(error instanceof Error ? error.message : String(error));
   const failures = job.consecutiveFailures + 1;
   if (failures >= 2) return { ...fail(job.state, message), consecutiveFailures: failures };
   return { consecutiveFailures: failures, error: message };
@@ -288,37 +300,13 @@ async function modelWait(): Promise<Wait | undefined> {
   return undefined;
 }
 
-/**
- * Runs exactly one pipeline step for the job. Model loading or busy returns a wait at once, without
- * claiming the job; otherwise the step claims the job, runs, and releases it with its result.
- */
-export async function runStep(snapshot: JobDoc): Promise<StepResult> {
-  if (snapshot.state === 'AWAITING_UPLOAD') {
-    if (await objectInfo(snapshot.object)) {
-      await transitionJob(snapshot.id, ['AWAITING_UPLOAD'], { state: 'PREP' });
-    }
-    return {};
-  }
-  if (!HANDLERS[snapshot.state] || !DRIVEN_STATES.includes(snapshot.state)) return {};
-
-  const claimed = await claimJob(snapshot.id);
-  if (!claimed) return { wait: 'step running in another tab' };
-  const { token, job } = claimed;
-  const handler = HANDLERS[job.state];
-  if (!handler || !DRIVEN_STATES.includes(job.state)) {
-    await releaseJob(job.id, token, job.state);
-    return {};
-  }
-  // Readiness is checked against the claimed state, which may be ahead of the caller's snapshot.
-  const wait = NEEDS_MODEL.includes(job.state) ? await modelWait() : undefined;
-  if (wait) {
-    await releaseJob(job.id, token, job.state);
-    return { wait };
-  }
-
-  let output: StepOutput;
+/** Runs the claimed step's handler; a throw becomes the failure patch, keeping any finished output. */
+async function runHandler(
+  job: JobDoc,
+  handler: (job: JobDoc) => Promise<StepOutput>,
+): Promise<StepOutput> {
   try {
-    output = await Sentry.startSpan(
+    return await startSpan(
       {
         op: 'pipeline.step',
         name: `step ${job.state}`,
@@ -328,17 +316,57 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
     );
   } catch (error) {
     const failure = error instanceof StepFailure ? error : null;
-    Sentry.captureException(failure ? failure.cause : error, { tags: { step: job.state } });
-    output = { ...failurePatch(job, error), ...failure?.keep };
+    captureException(failure ? failure.cause : error, { tags: { step: job.state } });
+    return { ...failurePatch(job, error), ...failure?.keep };
   }
+}
+
+/**
+ * Runs exactly one pipeline step for the job. Model loading or busy returns a wait at once, without
+ * claiming the job; otherwise the step claims the job, runs, and releases it with its result.
+ */
+export async function runStep(snapshot: JobDoc): Promise<StepResult> {
+  if (snapshot.state === 'AWAITING_UPLOAD') {
+    await startOnceUploaded(snapshot);
+    return {};
+  }
+  if (!handlerFor(snapshot.state)) return {};
+
+  const claimed = await claimJob(snapshot.id);
+  if (!claimed) return { wait: 'step running in another tab' };
+  const { token, job } = claimed;
+  const handler = handlerFor(job.state);
+  if (!handler) {
+    await releaseJob(job.id, token, job.state);
+    return {};
+  }
+  // Readiness is checked against the claimed state, which may be ahead of the caller's snapshot.
+  const wait = NEEDS_MODEL.has(job.state) ? await modelWait() : undefined;
+  if (wait) {
+    await releaseJob(job.id, token, job.state);
+    return { wait };
+  }
+
+  const output = await runHandler(job, handler);
   const { pick: newPick, chunk, ...patch } = output;
   if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
-    Sentry.captureMessage('Step result dropped: the claim lapsed or the job moved on', {
+    captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },
     });
   }
-  return job.state === 'CLAIMED_COMPLETE' && patch.state === undefined
-    ? { wait: 'waiting on YouTube' }
-    : {};
+  const stillVerifying = job.state === 'CLAIMED_COMPLETE' && patch.state === undefined;
+  return stillVerifying ? { wait: 'waiting on YouTube' } : {};
+}
+
+/** The browser's upload has landed once its object exists; then the pipeline starts. */
+async function startOnceUploaded(job: JobDoc): Promise<void> {
+  if (await objectInfo(job.object)) {
+    await transitionJob(job.id, ['AWAITING_UPLOAD'], { state: 'PREP' });
+  }
+}
+
+/** The step to run for a state the page drives, or null for any other state. */
+function handlerFor(state: JobState): ((job: JobDoc) => Promise<StepOutput>) | null {
+  return DRIVEN_STATES.includes(state) ? (HANDLERS[state] ?? null) : null;
 }

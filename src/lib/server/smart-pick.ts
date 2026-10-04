@@ -11,6 +11,7 @@ import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
+import { isString, isStrings, shape } from './shape';
 import type { AudienceVideo, TagCandidate } from './hashtags';
 import { agentInput, agentOutput, type AgentSpan, type ChatMessage } from './tracing';
 import type { CatalogVideo } from './youtube';
@@ -52,30 +53,19 @@ export const PICK_SCHEMA = {
 
 export type RawPick = Omit<Pick, 'version' | 'modelMs'>;
 
-const isStrings = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((s) => typeof s === 'string');
+const RAW_PICK = shape({
+  title: isString,
+  description: isString,
+  hashtags: isStrings,
+  tags: isStrings,
+  flags: isStrings,
+  brandCheck: isString,
+  why: shape({ title: isString, description: isString, tags: isString }),
+  bandcamp: shape({ about: isString, credits: isString }),
+});
 
 export function isRawPick(value: unknown): value is RawPick {
-  const v = value as RawPick | null;
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    typeof v.title === 'string' &&
-    typeof v.description === 'string' &&
-    isStrings(v.hashtags) &&
-    isStrings(v.tags) &&
-    isStrings(v.flags) &&
-    typeof v.brandCheck === 'string' &&
-    typeof v.why === 'object' &&
-    v.why !== null &&
-    typeof v.why.title === 'string' &&
-    typeof v.why.description === 'string' &&
-    typeof v.why.tags === 'string' &&
-    typeof v.bandcamp === 'object' &&
-    v.bandcamp !== null &&
-    typeof v.bandcamp.about === 'string' &&
-    typeof v.bandcamp.credits === 'string'
-  );
+  return RAW_PICK(value);
 }
 
 export type PickContext = {
@@ -231,10 +221,12 @@ const URL_PATTERN = /https?:\/\/[^\s)]+/g;
 
 /** Keeps only links that appear in public FACT or APPROVED records. */
 export function allowedLinks(text: string, facts: Fact[]): string {
-  const allowed = facts
-    .filter((f) => f.public && f.kind !== 'INFERENCE')
-    .flatMap((f) => f.value.match(URL_PATTERN) ?? []);
-  return text.replaceAll(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
+  const allowed = new Set(
+    facts
+      .filter((f) => f.public && f.kind !== 'INFERENCE')
+      .flatMap((f) => f.value.match(URL_PATTERN) ?? []),
+  );
+  return text.replaceAll(URL_PATTERN, (url) => (allowed.has(url) ? url : ''));
 }
 
 const BODY_HASHTAG = /(?<!\S)#[\p{L}\p{N}_]+/gu;
@@ -317,7 +309,7 @@ function pickHashtags(draft: RawPick, pool: string[], tags: string[]): string[] 
 }
 
 /** A line that is only a bracketed note, like "[Contact line: none provided]". */
-const PLACEHOLDER_LINE = /^\s*\[[^\]\n]*\]\s*$/gmu;
+const PLACEHOLDER_LINE = /^[ \t]*\[[^\]\n]*\][ \t]*$/gmu;
 const MAX_TAGS = 10;
 
 /** Bandcamp fields follow the description's rules: fact links only, no hashtags, no placeholders. */
@@ -379,10 +371,10 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
 
   return {
-    title: clip(tidy(draft.title), TITLE_MAX),
     description,
     hashtags,
     tags,
+    title: clip(tidy(draft.title), TITLE_MAX),
     flags: [
       ...measuredFlags(fix.measurements),
       ...shortFlag(fix.probe),
@@ -397,12 +389,11 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   };
 }
 
+const normText = (t: string) =>
+  t.replaceAll(BODY_HASHTAG, '').replaceAll(/\s+/g, ' ').trim().toLowerCase();
+
 /** Same words, ignoring case, spacing, and hashtags, so a reshuffled closing line doesn't count as new. */
-export const sameText = (a: string, b: string) => {
-  const norm = (t: string) =>
-    t.replaceAll(BODY_HASHTAG, '').replaceAll(/\s+/g, ' ').trim().toLowerCase();
-  return norm(a) === norm(b);
-};
+export const sameText = (a: string, b: string) => normText(a) === normText(b);
 
 /**
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the

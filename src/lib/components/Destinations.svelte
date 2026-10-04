@@ -1,30 +1,45 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  type Tab = { id: 'youtube' | 'bandcamp'; label: string; done: boolean; panel: Snippet };
+  type Tab = { id: 'youtube' | 'short' | 'bandcamp'; label: string; done: boolean; panel: Snippet };
 
   let {
     youtube,
+    short,
     bandcamp,
     youtubeDone,
+    shortDone,
     bandcampDone,
-  }: { youtube: Snippet; bandcamp: Snippet; youtubeDone: boolean; bandcampDone: boolean } =
-    $props();
+  }: {
+    youtube: Snippet;
+    short: Snippet;
+    bandcamp: Snippet;
+    youtubeDone: boolean;
+    shortDone: boolean;
+    bandcampDone: boolean;
+  } = $props();
 
   const tabs = $derived<Tab[]>([
     { id: 'youtube', label: 'YouTube', done: youtubeDone, panel: youtube },
+    { id: 'short', label: 'Short', done: shortDone, panel: short },
     { id: 'bandcamp', label: 'Bandcamp', done: bandcampDone, panel: bandcamp },
   ]);
 
   let active = $state<Tab['id']>('youtube');
   const buttons: Record<string, HTMLButtonElement> = {};
 
-  /** Arrow keys move between tabs, per the WAI-ARIA tabs pattern. */
+  /** Arrow keys, Home, and End move between tabs, per the WAI-ARIA tabs pattern. */
   function onkeydown(event: KeyboardEvent) {
-    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-    event.preventDefault();
     const index = tabs.findIndex((t) => t.id === active);
-    const next = tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]!;
+    const to: Record<string, number> = {
+      ArrowRight: (index + 1) % tabs.length,
+      ArrowLeft: (index + tabs.length - 1) % tabs.length,
+      Home: 0,
+      End: tabs.length - 1,
+    };
+    if (to[event.key] === undefined) return;
+    event.preventDefault();
+    const next = tabs[to[event.key]!]!;
     active = next.id;
     buttons[next.id]?.focus();
   }
@@ -79,10 +94,13 @@
 
   [role='tab'] {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 4px 8px;
+    min-width: 0;
     min-height: 44px;
-    padding: 0 12px;
+    padding: 6px 12px;
     white-space: nowrap;
     background: none;
     border: 0;
@@ -130,6 +148,19 @@
 
   .done .state {
     color: var(--green);
+  }
+
+  /* Three tabs don't fit a phone side by side with their state; it drops under the name. */
+  @media (max-width: 520px) {
+    [role='tab'] {
+      flex: 1 1 0;
+      padding: 6px 4px;
+    }
+
+    .state {
+      flex-basis: 100%;
+      text-align: center;
+    }
   }
 
   [role='tabpanel'] {

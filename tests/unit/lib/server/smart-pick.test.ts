@@ -23,11 +23,17 @@ import type { Chunk, Measurements, Probe } from '$lib/types';
 import type { AgentSpan } from '$lib/server/tracing';
 import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 import { span } from '../../../mocks/sentry';
+import { omit } from '../../../helpers/omit';
+
+const SYNTHWAVE = '#synthwave';
+const RETROWAVE_TAG = '#retrowave';
+const ARTIST = 'Flies Like Robots';
+const FRESH_TITLE = 'Fresh Title';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
   title: 'PeekaBoo',
   description: 'A bright synth track.',
-  hashtags: ['#synthwave', '#retrowave', '#newmusic'],
+  hashtags: [SYNTHWAVE, RETROWAVE_TAG, '#newmusic'],
   tags: ['synthwave', 'PeekaBoo'],
   flags: [],
   brandCheck: 'Matches the recent uploads.',
@@ -36,13 +42,13 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   ...over,
 });
 
-const candidates = ['#synthwave', '#retrowave', '#newmusic', '#electronic', '#indie', '#80s'];
+const candidates = [SYNTHWAVE, RETROWAVE_TAG, '#newmusic', '#electronic', '#indie', '#80s'];
 const tagNames = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'outrun'];
 const cands = (...tags: string[]) => tags.map((tag) => ({ tag, usedBy: 1 }));
 const tagCandidates = cands(...tagNames);
 
 const facts: Fact[] = [
-  { key: 'artist-name', value: 'Flies Like Robots', kind: 'FACT', public: true },
+  { key: 'artist-name', value: ARTIST, kind: 'FACT', public: true },
   { key: 'bandcamp', value: 'https://flr.bandcamp.com', kind: 'FACT', public: true },
   {
     key: 'site',
@@ -133,14 +139,14 @@ describe('isRawPick', () => {
     ['null', null],
     ['a string', 'pick'],
     ['a numeric title', { ...raw(), title: 1 }],
-    ['a missing description', { ...raw(), description: undefined }],
+    ['a missing description', omit(raw(), 'description')],
     ['non-string hashtags', { ...raw(), hashtags: [1] }],
     ['tags not an array', { ...raw(), tags: 'a,b' }],
-    ['flags missing', { ...raw(), flags: undefined }],
+    ['flags missing', omit(raw(), 'flags')],
     ['brandCheck missing', { ...raw(), brandCheck: null }],
     ['why null', { ...raw(), why: null }],
     ['why a string', { ...raw(), why: 'because' }],
-    ['bandcamp missing', { ...raw(), bandcamp: undefined }],
+    ['bandcamp missing', omit(raw(), 'bandcamp')],
     ['bandcamp about not a string', { ...raw(), bandcamp: { about: 1, credits: '' } }],
     ['bandcamp credits missing', { ...raw(), bandcamp: { about: '' } }],
     ['why.title missing', { ...raw(), why: { description: '', tags: '' } }],
@@ -166,8 +172,6 @@ describe('digestChunks', () => {
         instrumentation: ['synth', 'drum machine'],
         vocals: 'none',
         mood: ['nostalgic'],
-        qualityFlags: undefined,
-        unparsed: undefined,
       },
     ]);
   });
@@ -254,10 +258,10 @@ describe('buildPickMessages', () => {
     expect(messages[0]!.role).toBe('system');
     expect(messages[1]!.role).toBe('user');
     const body = context(messages);
-    expect(body.artist).toBe('Flies Like Robots');
+    expect(body.artist).toBe(ARTIST);
     expect(body.artistNotes).toBe('live take');
     expect(body.candidateHashtags).toEqual(candidates);
-    expect(body.candidateTags).toEqual([...tagCandidates, { tag: 'Flies Like Robots', usedBy: 0 }]);
+    expect(body.candidateTags).toEqual([...tagCandidates, { tag: ARTIST, usedBy: 0 }]);
     expect(body.ffmpeg).toEqual(measurements());
     expect(system(messages)).toContain("recentUploads are the artist's own uploads");
     expect(system(messages)).toContain('credit lines');
@@ -516,14 +520,14 @@ describe('sameText', () => {
 describe('finalizePick', () => {
   it('closes the description with the picked candidate hashtags', () => {
     const pick = finalizePick(raw(), fix());
-    expect(pick.hashtags).toEqual(['#synthwave', '#retrowave', '#newmusic']);
+    expect(pick.hashtags).toEqual([SYNTHWAVE, RETROWAVE_TAG, '#newmusic']);
     expect(pick.description).toBe('A bright synth track.\n\n#synthwave #retrowave #newmusic');
     expect(allInCandidates(pick.description)).toBe(true);
   });
 
   it('drops invented hashtags and pads to 3 from candidates', () => {
-    const pick = finalizePick(raw({ hashtags: ['#madeup', '#synthwave', '#alsofake'] }), fix());
-    expect(pick.hashtags).toEqual(['#synthwave', '#retrowave', '#newmusic']);
+    const pick = finalizePick(raw({ hashtags: ['#madeup', SYNTHWAVE, '#alsofake'] }), fix());
+    expect(pick.hashtags).toEqual([SYNTHWAVE, RETROWAVE_TAG, '#newmusic']);
     expect(pick.description).not.toContain('#madeup');
     expect(pick.description).not.toContain('#alsofake');
     expect(allInCandidates(pick.description)).toBe(true);
@@ -553,11 +557,11 @@ describe('finalizePick', () => {
     const pick = finalizePick(
       raw({ tags: ['retrowave', 'new music', 'outrun'], hashtags: ['#indie', '#80s'] }),
       fix({
-        candidates: ['#indie', '#80s', '#retrowave', '#newmusic'],
+        candidates: ['#indie', '#80s', RETROWAVE_TAG, '#newmusic'],
         tagCandidates: cands('retrowave', 'new music', 'outrun'),
       }),
     );
-    expect(pick.hashtags).toEqual(['#retrowave', '#newmusic', '#indie', '#80s']);
+    expect(pick.hashtags).toEqual([RETROWAVE_TAG, '#newmusic', '#indie', '#80s']);
   });
 
   it('moves candidate hashtags from the body to the closing line and removes invented ones', () => {
@@ -568,7 +572,7 @@ describe('finalizePick', () => {
       }),
       fix(),
     );
-    expect(pick.hashtags).toEqual(['#synthwave', '#electronic', '#indie']);
+    expect(pick.hashtags).toEqual([SYNTHWAVE, '#electronic', '#indie']);
     expect(pick.description).toBe(
       'Night drive vibes .\n\nMore soon\n\n#synthwave #electronic #indie',
     );
@@ -589,8 +593,8 @@ describe('finalizePick', () => {
   });
 
   it('pads with fewer than 3 hashtags when the candidate list is short', () => {
-    const pick = finalizePick(raw({ hashtags: [] }), fix({ candidates: ['#synthwave'] }));
-    expect(pick.hashtags).toEqual(['#synthwave']);
+    const pick = finalizePick(raw({ hashtags: [] }), fix({ candidates: [SYNTHWAVE] }));
+    expect(pick.hashtags).toEqual([SYNTHWAVE]);
     expect(pick.description).toBe('A bright synth track.\n\n#synthwave');
   });
 
@@ -608,17 +612,19 @@ describe('finalizePick', () => {
 
   it('dedupes hashtags given with and without #', () => {
     const pick = finalizePick(
-      raw({ hashtags: ['synthwave', '#synthwave'], description: 'Body #synthwave' }),
+      raw({ hashtags: ['synthwave', SYNTHWAVE], description: 'Body #synthwave' }),
       fix(),
     );
-    expect(pick.hashtags).toEqual(['#synthwave', '#retrowave', '#newmusic']);
+    expect(pick.hashtags).toEqual([SYNTHWAVE, RETROWAVE_TAG, '#newmusic']);
   });
 
   it('never lets angle-bracket stripping create a stray hashtag', () => {
     const pick = finalizePick(raw({ description: 'Out now #<invented>' }), fix());
     expect(allInCandidates(pick.description)).toBe(true);
   });
+});
 
+describe('finalizePick: links, tags, and limits', () => {
   it('cleans the Bandcamp draft like the description: fact links only, no hashtags or notes', () => {
     const pick = finalizePick(
       raw({
@@ -661,7 +667,7 @@ describe('finalizePick', () => {
       raw({ tags: ['#Synthwave', '##RETROWAVE', 'synthwave', 'synthpop', 'invented', '  '] }),
       fix(),
     );
-    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', 'Flies Like Robots']);
+    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', ARTIST]);
   });
 
   it('never uses the song title as a tag, even when the search returns it', () => {
@@ -679,7 +685,7 @@ describe('finalizePick', () => {
       raw({ tags: names }),
       fix({ songTitle: 'Pop', tagCandidates: cands(...names) }),
     );
-    expect(pick.tags).toEqual(['synthpop', 'hyperpop', 'Flies Like Robots']);
+    expect(pick.tags).toEqual(['synthpop', 'hyperpop', ARTIST]);
   });
 
   it('lists the artist name once even when the search returned it', () => {
@@ -689,7 +695,7 @@ describe('finalizePick', () => {
     const parts = messages[1]!.content as { text?: string }[];
     expect(JSON.parse(parts[0]!.text!).candidateTags).toEqual([
       { tag: 'synthwave', usedBy: 1 },
-      { tag: 'Flies Like Robots', usedBy: 0 },
+      { tag: ARTIST, usedBy: 0 },
     ]);
   });
 
@@ -708,23 +714,23 @@ describe('finalizePick', () => {
 
   it('never fills from the pool: the artist name alone when the model picks nothing usable', () => {
     const pick = finalizePick(raw({ tags: ['made up', 'PeekaBoo'] }), fix());
-    expect(pick.tags).toEqual(['Flies Like Robots']);
+    expect(pick.tags).toEqual([ARTIST]);
   });
 
   it('keeps the artist where the model placed it', () => {
-    const pick = finalizePick(raw({ tags: ['Flies Like Robots', 'outrun'] }), fix());
-    expect(pick.tags).toEqual(['Flies Like Robots', 'outrun']);
+    const pick = finalizePick(raw({ tags: [ARTIST, 'outrun'] }), fix());
+    expect(pick.tags).toEqual([ARTIST, 'outrun']);
   });
 
   it('caps tags at 10, keeping the artist name', () => {
     const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
     const pick = finalizePick(raw({ tags: names }), fix({ tagCandidates: cands(...names) }));
-    expect(pick.tags).toEqual([...names.slice(0, 9), 'Flies Like Robots']);
+    expect(pick.tags).toEqual([...names.slice(0, 9), ARTIST]);
   });
 
   it('falls back to the artist name alone when the search found no tags', () => {
     const pick = finalizePick(raw({ tags: ['synthwave'] }), fix({ tagCandidates: [] }));
-    expect(pick.tags).toEqual(['Flies Like Robots']);
+    expect(pick.tags).toEqual([ARTIST]);
   });
 
   it('keeps tags within 500 characters by YouTube counting', () => {
@@ -739,7 +745,7 @@ describe('finalizePick', () => {
   it('skips one oversize tag but keeps later ones that fit', () => {
     const pool = ['a', 'x'.repeat(600), 'b'];
     const pick = finalizePick(raw({ tags: pool }), fix({ tagCandidates: cands(...pool) }));
-    expect(pick.tags).toEqual(['a', 'b', 'Flies Like Robots']);
+    expect(pick.tags).toEqual(['a', 'b', ARTIST]);
   });
 
   it('clips the title to 100 characters at a word boundary', () => {
@@ -782,11 +788,11 @@ describe('finalizePick', () => {
 
   it('keeps the FLR name in the title and tags on every run', () => {
     const pick = finalizePick(
-      raw({ title: 'PeekaBoo - Flies Like Robots', tags: ['Flies Like Robots'] }),
+      raw({ title: 'PeekaBoo - Flies Like Robots', tags: [ARTIST] }),
       fix(),
     );
     expect(pick.title).toBe('PeekaBoo - Flies Like Robots');
-    expect(pick.tags[0]).toBe('Flies Like Robots');
+    expect(pick.tags[0]).toBe(ARTIST);
   });
 
   it('keeps the #fragment of an allowed link', () => {
@@ -840,7 +846,7 @@ describe('runPick', () => {
   it('records the first request and the finalized pick on the agent span', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
-      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Fresh Title' }))));
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
     const result = await runPick(
       ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }),
       undefined,
@@ -885,9 +891,9 @@ describe('runPick', () => {
   it('retries once when the title repeats a skipped version and keeps the new title', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
-      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Fresh Title' }))));
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
     const result = await runPick(ctx({ skipped: [{ title: 'old title', description: 'x' }] }));
-    expect(result!.pick.title).toBe('Fresh Title');
+    expect(result!.pick.title).toBe(FRESH_TITLE);
     expect(result!.pick.flags).not.toContain('Title repeats a skipped version');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const second = sentBodies()[1]!.messages;

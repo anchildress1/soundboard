@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { scrubBreadcrumb, scrubEvent, scrubSpan, scrubUrl } from '$lib/scrub';
 
+const REDACTED = '[redacted]';
+const SCRUBBED_UPLOAD_URL = 'https://storage.googleapis.com/b/uploads/j1?[redacted]';
+
 const SIGNED =
   'https://storage.googleapis.com/bucket/uploads/j1?X-Goog-Signature=abc&X-Goog-Credential=svc';
 
@@ -40,8 +43,8 @@ describe('scrubBreadcrumb', () => {
     expect(crumb.message).toBe('fetch https://storage.googleapis.com/bucket/uploads/j1?[redacted]');
     expect(crumb.data).toEqual({
       url: 'https://storage.googleapis.com/bucket/uploads/j1?[redacted]',
-      'http.query': '[redacted]',
-      'url.query': '[redacted]',
+      'http.query': REDACTED,
+      'url.query': REDACTED,
       from: '/a?x=1',
       to: 'https://h/b?[redacted]',
       method: 'PUT',
@@ -83,7 +86,7 @@ describe('scrubEvent', () => {
     });
     expect(JSON.stringify(event)).not.toContain('abc');
     expect(JSON.stringify(event)).not.toContain('svc');
-    expect(event.request.query_string).toBe('[redacted]');
+    expect(event.request.query_string).toBe(REDACTED);
     expect(event.transaction).toBe('GET https://h/a?[redacted]');
     expect(event.spans[1]).toEqual({ description: 'no url' });
     expect(event.spans[2]).toEqual({});
@@ -119,12 +122,10 @@ describe('scrubSpan', () => {
       },
     });
     expect(span.name).toBe('GET https://storage.googleapis.com/b/uploads/j1?[redacted]');
-    expect(span.attributes['url.full']).toBe(
-      'https://storage.googleapis.com/b/uploads/j1?[redacted]',
-    );
+    expect(span.attributes['url.full']).toBe(SCRUBBED_UPLOAD_URL);
     expect(span.attributes['gen_ai.input.messages']).not.toContain('secret');
-    expect(span.attributes['http.query']).toBe('[redacted]');
-    expect(span.attributes['url.query']).toBe('[redacted]');
+    expect(span.attributes['http.query']).toBe(REDACTED);
+    expect(span.attributes['url.query']).toBe(REDACTED);
     expect(span.attributes['gen_ai.usage.input_tokens']).toBe(900);
     expect(span.attributes['job.ok']).toBe(true);
   });
@@ -139,15 +140,12 @@ describe('scrubSpan', () => {
         'job.sizes': [1, 2],
       },
     });
-    expect(span.attributes['url.list']).toEqual([
-      'https://storage.googleapis.com/b/uploads/j1?[redacted]',
-      'plain',
-    ]);
+    expect(span.attributes['url.list']).toEqual([SCRUBBED_UPLOAD_URL, 'plain']);
     expect(span.attributes['url.full']).toEqual({
-      value: 'https://storage.googleapis.com/b/uploads/j1?[redacted]',
+      value: SCRUBBED_UPLOAD_URL,
       unit: 'none',
     });
-    expect(span.attributes['url.query']).toEqual({ value: '[redacted]' });
+    expect(span.attributes['url.query']).toEqual({ value: REDACTED });
     expect(span.attributes['job.sizes']).toEqual([1, 2]);
   });
 

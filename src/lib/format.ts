@@ -1,7 +1,8 @@
+const pad = (n: number) => String(n).padStart(2, '0');
+
 /** `HH:MM:SS` for the monitor overlay. */
 export function timecode(seconds: number): string {
   const s = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
-  const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 

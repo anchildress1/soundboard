@@ -81,12 +81,23 @@ class Query {
   }
 }
 
+function nextAutoId(): string {
+  autoId += 1;
+  return `auto${autoId}`;
+}
+
 export class CollectionRef extends Query {
-  doc(id: string = `auto${++autoId}`) {
-    return new DocRef(`${this.path}/${id}`);
+  /** Rejects what the real SDK rejects: an empty id, or one whose slashes leave a collection path. */
+  doc(id: string = nextAutoId()) {
+    const path = `${this.path}/${id}`;
+    const segments = path.split('/');
+    if (segments.includes('') || segments.length % 2 !== 0) {
+      throw new Error(`Value for argument "documentPath" must point to a document: ${path}`);
+    }
+    return new DocRef(path);
   }
   async add(data: Data) {
-    const ref = this.doc(`auto${++autoId}`);
+    const ref = this.doc(nextAutoId());
     await ref.set(data);
     return ref;
   }

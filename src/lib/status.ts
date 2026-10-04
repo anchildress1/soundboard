@@ -1,45 +1,48 @@
 import { percent } from './format';
-import type { JobView, Wait } from './types';
+import type { JobState, JobView, Wait } from './types';
 
 export type Tone = 'info' | 'warn' | 'ok' | 'err';
 export type Status = { tone: Tone; text: string; progress: number };
 
+type Label = (view: JobView, uploadPct: number) => Status;
+
+const fixed =
+  (tone: Tone, text: string, progress: number): Label =>
+  () => ({ tone, text, progress });
+
+const LABELS: Record<JobState, Label> = {
+  AWAITING_UPLOAD: (_view, uploadPct) => ({
+    tone: 'info',
+    text: `Uploading ${uploadPct}%`,
+    progress: uploadPct,
+  }),
+  PREP: fixed('info', 'Measuring audio', 4),
+  ANALYZE: (view) => ({
+    tone: 'info',
+    text: `Chunk ${Math.min(view.job.chunkIndex + 1, view.job.chunkCount)} / ${view.job.chunkCount}`,
+    progress: runningProgress(view),
+  }),
+  PICK: fixed('info', 'Smart pick', 92),
+  HOOK: fixed('info', 'Picking the hook', 30),
+  RENDER: fixed('info', 'Cutting the Short', 60),
+  REVIEW: fixed('warn', 'Needs review', 100),
+  PUBLISHING: ({ job }) => {
+    const sent = job.uploadProgress
+      ? percent(job.uploadProgress.sent, job.uploadProgress.total)
+      : 0;
+    return { tone: 'info', text: `Uploading to YouTube ${sent}%`, progress: sent };
+  },
+  CLAIMED_COMPLETE: fixed('info', 'Verifying upload', 100),
+  VERIFIED: fixed('ok', 'Verified · private', 100),
+  PAYLOAD: fixed('warn', 'Payload ready', 100),
+  FAILED: (view) => ({ tone: 'err', text: 'Failed', progress: runningProgress(view) }),
+  DISCARDED: fixed('err', 'Discarded', 0),
+};
+
 /** The state chip, bar, and label for a job. Chunk N/M or a named wait is always shown while running. */
 export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
-  const { job } = view;
   if (wait) return { tone: 'info', text: wait, progress: runningProgress(view) };
-  switch (job.state) {
-    case 'AWAITING_UPLOAD':
-      return { tone: 'info', text: `Uploading ${uploadPct}%`, progress: uploadPct };
-    case 'PREP':
-      return { tone: 'info', text: 'Measuring audio', progress: 4 };
-    case 'ANALYZE':
-      return {
-        tone: 'info',
-        text: `Chunk ${Math.min(job.chunkIndex + 1, job.chunkCount)} / ${job.chunkCount}`,
-        progress: runningProgress(view),
-      };
-    case 'PICK':
-      return { tone: 'info', text: 'Smart pick', progress: 92 };
-    case 'REVIEW':
-      return { tone: 'warn', text: 'Needs review', progress: 100 };
-    case 'PUBLISHING': {
-      const sent = job.uploadProgress
-        ? percent(job.uploadProgress.sent, job.uploadProgress.total)
-        : 0;
-      return { tone: 'info', text: `Uploading to YouTube ${sent}%`, progress: sent };
-    }
-    case 'CLAIMED_COMPLETE':
-      return { tone: 'info', text: 'Verifying upload', progress: 100 };
-    case 'VERIFIED':
-      return { tone: 'ok', text: 'Verified · private', progress: 100 };
-    case 'PAYLOAD':
-      return { tone: 'warn', text: 'Payload ready', progress: 100 };
-    case 'FAILED':
-      return { tone: 'err', text: 'Failed', progress: runningProgress(view) };
-    case 'DISCARDED':
-      return { tone: 'err', text: 'Discarded', progress: 0 };
-  }
+  return LABELS[view.job.state](view, uploadPct);
 }
 
 function runningProgress({ job }: JobView): number {
@@ -80,9 +83,12 @@ export function modelWorking(view: JobView): boolean {
 /**
  * Seconds the model has spent on this job (every chunk plus the current pick), for the
  * `gemma-4-12b-it · 52s` label. `runningMs` adds the call still in flight so the label keeps counting.
+ * A Short counts only its hook pick: its pick is the video's, copied.
  */
 export function modelSeconds(view: JobView, runningMs = 0): number | null {
-  const done = view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, view.pick?.modelMs ?? 0);
+  const done = view.job.short
+    ? view.job.short.modelMs
+    : view.chunks.reduce((sum, chunk) => sum + chunk.modelMs, view.pick?.modelMs ?? 0);
   const ms = done + runningMs;
   return ms ? Math.round(ms / 1000) : null;
 }

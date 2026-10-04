@@ -19,6 +19,9 @@
     busy = false,
     done = false,
     serverErrors = {},
+    idPrefix = '',
+    heading = 'YouTube',
+    rerunLabel = 'Re-run model',
     onapprove,
     onrerun,
     ondiscard,
@@ -29,6 +32,10 @@
     busy?: boolean;
     done?: boolean;
     serverErrors?: FieldErrors;
+    /** Keeps field ids unique when two labels share a page. */
+    idPrefix?: string;
+    heading?: string;
+    rerunLabel?: string;
     onapprove: (fields: Fields) => void;
     onrerun: () => void;
     ondiscard: () => void;
@@ -48,13 +55,13 @@
   const invalid = $derived(Object.keys(errors).length > 0);
 </script>
 
-<section class="youtube" aria-labelledby="youtube-title">
-  <h2 id="youtube-title">YouTube</h2>
+<section class="youtube" aria-labelledby="{idPrefix}youtube-title">
+  <h2 id="{idPrefix}youtube-title">{heading}</h2>
   <div class="fields">
     <div class="field" class:err={errors.title}>
-      <label for="title">Title <span>{title.length} / {TITLE_MAX}</span></label>
+      <label for="{idPrefix}title">Title <span>{title.length} / {TITLE_MAX}</span></label>
       <input
-        id="title"
+        id="{idPrefix}title"
         bind:value={title}
         maxlength={TITLE_MAX}
         autocomplete="off"
@@ -63,13 +70,14 @@
       {#if errors.title}<span class="msg">{errors.title}</span>{/if}
     </div>
     <div class="field" class:err={errors.description}>
-      <label for="desc">Description <span>model draft</span></label>
-      <textarea id="desc" rows="7" bind:value={description} readonly={!editable}></textarea>
+      <label for="{idPrefix}desc">Description <span>model draft</span></label>
+      <textarea id="{idPrefix}desc" rows="7" bind:value={description} readonly={!editable}
+      ></textarea>
       {#if errors.description}<span class="msg">{errors.description}</span>{/if}
     </div>
     <div class="field" class:err={errors.tags}>
-      <label for="tags">Tags <span>{tagCount} / {TAGS_MAX}</span></label>
-      <textarea id="tags" class="mono" rows="2" bind:value={tagsText} readonly={!editable}
+      <label for="{idPrefix}tags">Tags <span>{tagCount} / {TAGS_MAX}</span></label>
+      <textarea id="{idPrefix}tags" class="mono" rows="2" bind:value={tagsText} readonly={!editable}
       ></textarea>
       <span class="msg"
         >{errors.tags ?? 'Plain terms, comma-separated. Hashtags live in the description.'}</span
@@ -87,7 +95,7 @@
         >Discard</button
       >
       <button class="btn ghost" type="button" onclick={onrerun} disabled={busy || done}
-        >Re-run model</button
+        >{rerunLabel}</button
       >
       <button
         class="btn primary"

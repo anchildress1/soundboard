@@ -1,5 +1,10 @@
 // @vitest-environment node
-import * as Sentry from '@sentry/sveltekit';
+import {
+  getTraceData as sentryGetTraceData,
+  startNewTrace,
+  startSpan as sentryStartSpan,
+  type Span,
+} from '@sentry/sveltekit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   agentInput,
@@ -18,8 +23,12 @@ import {
 
 import { span } from '../../../mocks/sentry';
 
-const startSpan = vi.mocked(Sentry.startSpan);
-const getTraceData = vi.mocked(Sentry.getTraceData);
+const CHUNK_ANALYST = 'chunk-analyst';
+const SMART_PICK = 'smart-pick';
+const VISUAL_JSON = '{"visual":"neon"}';
+
+const startSpan = vi.mocked(sentryStartSpan);
+const getTraceData = vi.mocked(sentryGetTraceData);
 type SpanOptions = { op: string; name: string; attributes: Record<string, unknown> };
 const lastOptions = () => startSpan.mock.calls.at(-1)![0] as unknown as SpanOptions;
 
@@ -102,7 +111,7 @@ describe('redactMessages', () => {
 
 describe('invokeAgent', () => {
   it('opens an invoke_agent span named for the agent and passes it to the callback', async () => {
-    const result = await invokeAgent('chunk-analyst', async (s) => {
+    const result = await invokeAgent(CHUNK_ANALYST, async (s) => {
       expect(s).toBe(span);
       return 7;
     });
@@ -112,7 +121,7 @@ describe('invokeAgent', () => {
       name: 'invoke_agent chunk-analyst',
       attributes: {
         'gen_ai.operation.name': 'invoke_agent',
-        'gen_ai.agent.name': 'chunk-analyst',
+        'gen_ai.agent.name': CHUNK_ANALYST,
         'gen_ai.pipeline.name': PIPELINE,
         'gen_ai.request.model': MODEL_NAME,
         'gen_ai.provider.name': PROVIDER,
@@ -122,7 +131,7 @@ describe('invokeAgent', () => {
 
   it('propagates callback errors', async () => {
     await expect(
-      invokeAgent('smart-pick', async () => {
+      invokeAgent(SMART_PICK, async () => {
         throw new Error('model down');
       }),
     ).rejects.toThrow('model down');
@@ -131,7 +140,7 @@ describe('invokeAgent', () => {
 
 describe('agentInput', () => {
   it('records system instructions and the redacted request on the agent span', () => {
-    agentInput(span as unknown as Sentry.Span, multimodal);
+    agentInput(span as unknown as Span, multimodal);
     const attributes = span.setAttributes.mock.calls[0]![0] as Record<string, string>;
     expect(JSON.parse(attributes['gen_ai.system_instructions']!)).toEqual([
       { type: 'text', content: 'Instructions' },
@@ -144,7 +153,7 @@ describe('agentInput', () => {
   });
 
   it('omits system instructions when the request has none', () => {
-    agentInput(span as unknown as Sentry.Span, multimodal.slice(1));
+    agentInput(span as unknown as Span, multimodal.slice(1));
     expect(span.setAttributes).toHaveBeenCalledWith({
       'gen_ai.input.messages': JSON.stringify(redactMessages(multimodal.slice(1))),
     });
@@ -153,7 +162,7 @@ describe('agentInput', () => {
 
 describe('agentOutput', () => {
   it('records the answer as one assistant text part', () => {
-    agentOutput(span as unknown as Sentry.Span, '{"title":"PeekaBoo"}');
+    agentOutput(span as unknown as Span, '{"title":"PeekaBoo"}');
     expect(span.setAttribute).toHaveBeenCalledWith(
       'gen_ai.output.messages',
       JSON.stringify([
@@ -163,7 +172,7 @@ describe('agentOutput', () => {
   });
 
   it('records an empty answer as an empty text part', () => {
-    agentOutput(span as unknown as Sentry.Span, '');
+    agentOutput(span as unknown as Span, '');
     const [, value] = span.setAttribute.mock.calls[0]!;
     expect(JSON.parse(value as string)).toEqual([
       { role: 'assistant', parts: [{ type: 'text', content: '' }] },
@@ -172,9 +181,9 @@ describe('agentOutput', () => {
 });
 
 describe('chatSpan', () => {
-  const PARAMS = { agent: 'chunk-analyst', temperature: 0.2, maxTokens: 2048 } as const;
+  const PARAMS = { agent: CHUNK_ANALYST, temperature: 0.2, maxTokens: 2048 } as const;
   const reply = (over: Partial<ChatReply> = {}): ChatReply => ({
-    content: '{"visual":"neon"}',
+    content: VISUAL_JSON,
     reasoning: '',
     usage: {
       prompt_tokens: 900,
@@ -189,7 +198,7 @@ describe('chatSpan', () => {
 
   it('records the agent, parameters, system instructions, and redacted input', async () => {
     const result = await chatSpan(multimodal, PARAMS, async () => reply());
-    expect(result.content).toBe('{"visual":"neon"}');
+    expect(result.content).toBe(VISUAL_JSON);
 
     const options = lastOptions();
     expect(options.op).toBe('gen_ai.chat');
@@ -198,7 +207,7 @@ describe('chatSpan', () => {
       'gen_ai.operation.name': 'chat',
       'gen_ai.provider.name': PROVIDER,
       'gen_ai.request.model': MODEL_NAME,
-      'gen_ai.agent.name': 'chunk-analyst',
+      'gen_ai.agent.name': CHUNK_ANALYST,
       'gen_ai.pipeline.name': PIPELINE,
       'gen_ai.request.temperature': 0.2,
       'gen_ai.request.max_tokens': 2048,
@@ -228,7 +237,7 @@ describe('chatSpan', () => {
           role: 'assistant',
           parts: [
             { type: 'reasoning', content: 'thinking' },
-            { type: 'text', content: '{"visual":"neon"}' },
+            { type: 'text', content: VISUAL_JSON },
           ],
           finish_reason: 'stop',
         },
@@ -251,7 +260,7 @@ describe('chatSpan', () => {
     expect(span.setAttributes).toHaveBeenCalledWith({
       'gen_ai.response.model': MODEL_NAME,
       'gen_ai.output.messages': JSON.stringify([
-        { role: 'assistant', parts: [{ type: 'text', content: '{"visual":"neon"}' }] },
+        { role: 'assistant', parts: [{ type: 'text', content: VISUAL_JSON }] },
       ]),
       'gen_ai.usage.input_tokens': 0,
       'gen_ai.usage.output_tokens': 0,
@@ -272,7 +281,7 @@ describe('chatSpan', () => {
 describe('toolSpan', () => {
   it('opens an execute_tool span with serialized arguments', async () => {
     const result = await toolSpan(
-      'smart-pick',
+      SMART_PICK,
       'hashtag_search',
       { query: 'synthwave music video' },
       async (s) => {
@@ -287,7 +296,7 @@ describe('toolSpan', () => {
       attributes: {
         'gen_ai.operation.name': 'execute_tool',
         'gen_ai.pipeline.name': PIPELINE,
-        'gen_ai.agent.name': 'smart-pick',
+        'gen_ai.agent.name': SMART_PICK,
         'gen_ai.tool.name': 'hashtag_search',
         'gen_ai.tool.call.arguments': '{"query":"synthwave music video"}',
       },
@@ -302,7 +311,7 @@ describe('startJobTrace', () => {
       sentryTrace: 'abc-123-1',
       baggage: 'sentry-release=1',
     });
-    expect(Sentry.startNewTrace).toHaveBeenCalled();
+    expect(startNewTrace).toHaveBeenCalled();
     expect(lastOptions()).toEqual({
       op: 'job.create',
       name: 'job',
