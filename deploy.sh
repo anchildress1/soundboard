@@ -23,6 +23,12 @@ require_env() {
   fi
 }
 
+# The image tag names a commit, so the build context must be exactly that commit.
+if ! git diff --quiet HEAD -- || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+  echo "Error: commit or stash local changes before deploying." >&2
+  exit 1
+fi
+
 require_env GCP_PROJECT_ID
 require_env GCS_BUCKET
 require_env MODEL_IMAGE
