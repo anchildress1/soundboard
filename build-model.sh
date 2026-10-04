@@ -21,13 +21,14 @@ if [[ -z "${GCP_PROJECT_ID:-}" ]]; then
   exit 1
 fi
 
-# The tag names the commit that last changed model/, so the image matches its Dockerfile.
+# The tag is the git tree hash of model/: content-addressed, so it survives rebases and squash
+# merges, and an unchanged Dockerfile never pays for a second build.
 if ! git diff --quiet HEAD -- model; then
   echo "Error: commit model/ changes before building the image." >&2
   exit 1
 fi
-MODEL_SHA="$(git log -1 --format=%h -- model)"
-IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/model:${MODEL_SHA}"
+MODEL_TREE="$(git rev-parse --short=12 HEAD:model)"
+IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/model:${MODEL_TREE}"
 
 if gcloud artifacts docker images describe "$IMAGE" --project "$GCP_PROJECT_ID" &> /dev/null; then
   echo "Already built: $IMAGE"
