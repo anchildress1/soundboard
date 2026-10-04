@@ -112,7 +112,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     'Keep what already works in the recent uploads (naming pattern, tone, recurring lines); improve only what is weak.',
     `title: at most ${TITLE_MAX} characters.${artist ? '' : ' The title is set separately; name no artist anywhere.'}`,
-    "description: plain text in the channel's voice, no hashtags inside it; they are appended separately. Only include links listed in facts.",
+    "description: plain text that follows the structure, length, and recurring lines of the recent uploads' descriptions; no hashtags inside it, they are appended separately. Only include links listed in facts.",
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
     `tags: plain search terms without #: genres, the song title${artist ? ', the artist name' : ''}. Under ${TAGS_MAX} characters combined.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',

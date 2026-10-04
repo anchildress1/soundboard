@@ -205,6 +205,12 @@ describe('weighFeedback', () => {
 });
 
 describe('buildPickMessages', () => {
+  it('asks for description patterns, not a voice or persona', () => {
+    const rules = system(buildPickMessages(ctx()));
+    expect(rules).not.toMatch(/voice|persona/i);
+    expect(rules).toContain('structure, length, and recurring lines');
+  });
+
   const userParts = (messages: ReturnType<typeof buildPickMessages>) =>
     messages[1]!.content as { type: string; text?: string; image_url?: { url: string } }[];
   const context = (messages: ReturnType<typeof buildPickMessages>) =>

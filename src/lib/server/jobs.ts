@@ -42,6 +42,7 @@ export function newJobId(): string {
 }
 
 const jobs = () => db().collection('jobs');
+const pad = (n: number) => String(n).padStart(4, '0');
 export const jobRef = (id: string) => jobs().doc(id);
 
 export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
@@ -123,6 +124,7 @@ export async function releaseJob(
   token: string,
   claimedState: JobState,
   patch: Partial<JobDoc> = {},
+  pick?: Pick,
 ): Promise<boolean> {
   const ref = jobs().doc(id);
   return db().runTransaction(async (tx) => {
@@ -133,6 +135,11 @@ export async function releaseJob(
     if (job.state !== claimedState) {
       tx.update(ref, { claim: null, updatedAt: Date.now() });
       return false;
+    }
+    // The pick lands in the same transaction, so a worker that lost its claim persists nothing.
+    if (pick) {
+      const stored: StoredPick = { ...pick, skipped: false };
+      tx.set(ref.collection('pick').doc(pad(pick.version)), stored);
     }
     tx.update(ref, { ...patch, claim: null, updatedAt: Date.now() });
     return true;
@@ -153,8 +160,6 @@ export async function transitionJob(
     return true;
   });
 }
-
-const pad = (n: number) => String(n).padStart(4, '0');
 
 export async function saveChunk(id: string, chunk: Chunk): Promise<void> {
   await jobs().doc(id).collection('chunks').doc(pad(chunk.index)).set(chunk);

@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { stripDeep, stripNumerics } from '$lib/server/numerics';
 
 describe('stripNumerics', () => {
+  it('drops unitless peak and loudness figures', () => {
+    expect(stripNumerics('True peak -1, loudness 9 overall')).toBe('True peak, loudness overall');
+  });
+
   it('leaves dates and URL paths alone when a sentence only says video clip', () => {
     const text = 'Official video clip. Out 10/31/2024 at https://flr.example/2024/tour';
     expect(stripNumerics(text)).toBe(text);

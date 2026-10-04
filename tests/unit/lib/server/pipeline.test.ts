@@ -877,6 +877,15 @@ describe('runStep: claim safety', () => {
     expect(chatBodies()).toHaveLength(0);
   });
 
+  it('waits on a loading model when the claimed state is ahead of the snapshot', async () => {
+    const stale = seed({ state: 'PREP' });
+    store.set('jobs/j1', { ...stale, state: 'ANALYZE', chunkCount: 2 });
+    on(/127\.0\.0\.1:8081\/health$/, () => new Response('loading', { status: 503 }));
+    expect(await runStep(stale)).toEqual({ wait: 'waking model' });
+    expect(saved()).toMatchObject({ state: 'ANALYZE', claim: null });
+    expect(chatBodies()).toHaveLength(0);
+  });
+
   it('drops the step result when the job was discarded mid-step', async () => {
     const job = seed({ state: 'PICK', owner: 'visitor', sampleId: 's1' });
     on(/v1\/chat\/completions$/, () => {
@@ -886,5 +895,6 @@ describe('runStep: claim safety', () => {
     await runStep(job);
     expect(saved().state).toBe('DISCARDED');
     expect(saved().claim).toBeNull();
+    expect(store.has('jobs/j1/pick/0001')).toBe(false);
   });
 });

@@ -4,14 +4,17 @@
 // dBFS, and dBTP.
 const AUDIO_NUMBER = /(?<![\d.,])[-+−]?\d+(?:[.,]\d+)? ?(?:db[a-z]{0,2}|lufs|lkfs|lu|bpm|k?hz)\b/gi;
 
-// Clipping and silence figures carry no unit of their own ("12 clipped samples", "silence from 4s
-// to 7s"), so counts and times are dropped from any sentence that is about them. "clipp" skips
-// "video clip"; the lookbehind leaves dates, versions, and URL paths alone.
-const MEASURE_WORDS = /\b(?:clipp|silen|dropout)/i;
+// Measurement talk often drops the unit ("12 clipped samples", "true peak -1", "loudness 9"), so
+// counts and times are dropped from any sentence about clipping, silence, peak, loudness, or level.
+// "clipp" skips "video clip"; the lookbehind leaves dates, versions, and URL paths alone.
+const MEASURE_WORDS = /\b(?:clipp|silen|dropout|peak|loudness|headroom|gain|tempo|volume)/i;
 const COUNT_OR_TIME = /(?<![\w.,:/])\d+(?:[.,:]\d+)? ?(?:ms|s|sec|seconds?|samples?)?\b/gi;
+const LEADING_SIGN = /(?<=\s|^)[-+−](?=\d)/g;
 
 const stripMeasuredCounts = (sentence: string) =>
-  MEASURE_WORDS.test(sentence) ? sentence.replaceAll(COUNT_OR_TIME, '') : sentence;
+  MEASURE_WORDS.test(sentence)
+    ? sentence.replaceAll(LEADING_SIGN, '').replaceAll(COUNT_OR_TIME, '')
+    : sentence;
 
 /** Removes model-emitted audio-engineering numbers from one string. */
 export function stripNumerics(text: string): string {

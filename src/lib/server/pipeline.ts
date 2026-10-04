@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/sveltekit';
-import { DRIVEN_STATES, type JobState, type Wait } from '$lib/types';
+import { DRIVEN_STATES, type JobState, type Pick, type Wait } from '$lib/types';
 import { analyzeChunk } from './chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from './ffmpeg';
 import { objectInfo, signedReadUrl } from './gcs';
@@ -12,7 +12,6 @@ import {
   listPicks,
   releaseJob,
   saveChunk,
-  savePick,
   transitionJob,
   type JobDoc,
 } from './jobs';
@@ -35,6 +34,8 @@ export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 5;
 
 type Patch = Partial<JobDoc>;
+/** A step's job patch, plus a pick to store only if the claim is still valid at release. */
+type StepOutput = Patch & { pick?: Pick };
 const ok = (patch: Patch): Patch => ({ ...patch, consecutiveFailures: 0, error: null });
 
 async function prep(job: JobDoc): Promise<Patch> {
@@ -81,7 +82,7 @@ async function analyze(job: JobDoc): Promise<Patch> {
   return ok({ chunkIndex: next, state: next >= job.chunkCount ? 'PICK' : 'ANALYZE' });
 }
 
-async function pick(job: JobDoc): Promise<Patch> {
+async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
   const nathan = job.owner === 'nathan';
@@ -126,8 +127,10 @@ async function pick(job: JobDoc): Promise<Patch> {
     if (!result) throw new Error('The model reply did not parse as a recommendation.');
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
-    await savePick(job.id, { ...result.pick, version, modelMs: result.ms });
-    return ok({ state: 'REVIEW', hashtagCandidates: candidates });
+    return {
+      ...ok({ state: 'REVIEW', hashtagCandidates: candidates }),
+      pick: { ...result.pick, version, modelMs: result.ms },
+    };
   });
 }
 
@@ -225,7 +228,7 @@ async function verify(job: JobDoc): Promise<Patch> {
   return { verifyAttempts: attempts };
 }
 
-const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<Patch>>> = {
+const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> = {
   PREP: prep,
   ANALYZE: analyze,
   PICK: pick,
@@ -245,6 +248,13 @@ export function failurePatch(job: JobDoc, error: unknown): Patch {
 
 export type StepResult = { wait?: Wait };
 
+async function modelWait(): Promise<Wait | undefined> {
+  const status = await modelStatus();
+  if (status === 'loading') return 'waking model';
+  if (status === 'busy') return 'waiting on another run';
+  return undefined;
+}
+
 /**
  * Runs exactly one pipeline step for the job. Model loading or busy returns a wait at once, without
  * claiming the job; otherwise the step claims the job, runs, and releases it with its result.
@@ -258,12 +268,6 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   }
   if (!HANDLERS[snapshot.state] || !DRIVEN_STATES.includes(snapshot.state)) return {};
 
-  if (NEEDS_MODEL.includes(snapshot.state)) {
-    const status = await modelStatus();
-    if (status === 'loading') return { wait: 'waking model' };
-    if (status === 'busy') return { wait: 'waiting on another run' };
-  }
-
   const claimed = await claimJob(snapshot.id);
   if (!claimed) return { wait: 'step running in another tab' };
   const { token, job } = claimed;
@@ -272,10 +276,16 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
     await releaseJob(job.id, token, job.state);
     return {};
   }
+  // Readiness is checked against the claimed state, which may be ahead of the caller's snapshot.
+  const wait = NEEDS_MODEL.includes(job.state) ? await modelWait() : undefined;
+  if (wait) {
+    await releaseJob(job.id, token, job.state);
+    return { wait };
+  }
 
-  let patch: Patch;
+  let output: StepOutput;
   try {
-    patch = await Sentry.startSpan(
+    output = await Sentry.startSpan(
       {
         op: 'pipeline.step',
         name: `step ${job.state}`,
@@ -285,9 +295,10 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
     );
   } catch (error) {
     Sentry.captureException(error, { tags: { step: job.state } });
-    patch = failurePatch(job, error);
+    output = failurePatch(job, error);
   }
-  if (!(await releaseJob(job.id, token, job.state, patch))) {
+  const { pick: newPick, ...patch } = output;
+  if (!(await releaseJob(job.id, token, job.state, patch, newPick))) {
     Sentry.captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },
