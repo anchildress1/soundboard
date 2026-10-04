@@ -6,7 +6,7 @@ Soundboard analyzes a finished music video and drafts its YouTube title, descrip
 
 Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an entry in the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01).
 
-> **Status:** in development during the challenge weekend (October 3–5, 2026). The repository currently holds the scaffold; the features below are the planned scope from [docs/prd.md](docs/prd.md).
+> **Status:** in development during the challenge weekend (October 3–5, 2026). The P0 pipeline from [docs/prd.md](docs/prd.md) is implemented; the brand guide (P1) is not.
 
 ---
 
@@ -123,30 +123,34 @@ make dev
 | `make deploy`      | Build and deploy to Cloud Run (requires a clean working tree)                    |
 | `make model-image` | Build the Gemma 4 sidecar image on Cloud Build; skipped if `model/` is unchanged |
 
+### Operating it
+
+- **Connect channels:** sign in with an allowlisted account, then use the footer's _Connect channel_ links. _Nathan_ must be consented by Nathan's Google account; _Sandbox_ by the throwaway channel's. Each stores a YouTube refresh token in Secret Manager (`yt-refresh-nathan`, `yt-refresh-sandbox`).
+- **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `<service-url>/auth/callback` as a redirect URI after the first deploy.
+- **Samples:** `scripts/add-sample.sh <video> <youtube-video-id> "<song title>"` cuts the loudest 30 seconds, uploads it to `samples/`, and registers it on the home page.
+
 ---
 
 ## Configuration
 
 Values live in `.env` for local development and in Secret Manager or Cloud Run environment variables when deployed. Do not commit real values.
 
-| Variable                                                | Purpose                                                                    |
-| ------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                      |
-| `GCS_BUCKET`                                            | Bucket for uploads                                                         |
-| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar   |
-| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`             |
-| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                           |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                            |
-| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel               |
-| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                           |
-| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                              |
+| Variable                                                | Purpose                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                          |
+| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`) |
+| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar       |
+| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`                 |
+| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads     |
+| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                               |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                |
+| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                   |
+| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                               |
+| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                  |
 
 ---
 
 ## Security
-
-Planned controls, from [docs/prd.md](docs/prd.md):
 
 - Video and audio are stored only in Cloud Storage and processed only by the model running in the same Cloud Run instance. Sentry receives text, with audio and images replaced by size-only placeholders.
 - Signed-out visitors run against a separate test channel. Only allowlisted Google accounts can upload to Nathan's channel or read his jobs and stored preferences.
