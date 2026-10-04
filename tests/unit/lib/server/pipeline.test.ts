@@ -2,6 +2,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
+import { captureException } from '../../../mocks/sentry';
 import { resetClients } from '$lib/server/clients';
 import { MAX_MINUTES, type JobDoc } from '$lib/server/jobs';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline';
@@ -712,6 +713,18 @@ describe('runStep: PICK', () => {
     expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect(saved().error).toBe('The model reply did not parse as a recommendation.');
     expect(store.has('jobs/j1/pick/0001')).toBe(false);
+  });
+
+  it('reports the original model error to Sentry, not the evidence-carrying wrapper', async () => {
+    captureException.mockClear();
+    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    await runStep(seed({ state: 'PICK' }));
+    expect(captureException).toHaveBeenCalledTimes(1);
+    const [reported, context] = captureException.mock.calls[0]!;
+    expect(reported).toBeInstanceOf(Error);
+    expect((reported as Error).constructor.name).toBe('Error');
+    expect((reported as Error).message).toBe('The model reply did not parse as a recommendation.');
+    expect(context).toEqual({ tags: { step: 'PICK' } });
   });
 
   it('keeps the genre search when the model fails, so the retry does not search again', async () => {

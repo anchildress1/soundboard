@@ -30,6 +30,7 @@ Read `docs/prd.md` before changing behavior. It is the source of truth; when cod
 - Unit tests live in `tests/unit/` mirroring `src/`; E2E in `tests/e2e/`. Import app code through `$lib` / `$routes`, never relative paths into `src/`.
 - Coverage floors: 85% lines/functions/statements, 80% branches. Never lower them.
 - Every new module ships positive, negative, and edge-case tests. Mock at process boundaries (GCS, Firestore, YouTube, `llama-server`), never internal modules.
+- `@sentry/sveltekit` is mocked for every test (`tests/mocks/sentry.ts`, registered in `tests/vitest-setup.ts`). Assert captures and spans through that mock; never load the real SDK in tests.
 - E2E runs desktop Chrome and a Pixel 7 profile; the mobile path is the judged path.
 
 ## Workflow
