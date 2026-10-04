@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import Short from '$lib/components/Short.svelte';
 import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$lib/types';
 
+const INVALID = 'aria-invalid';
+
 const SPEC: ShortSpec = {
   parentId: 'p1',
   sourceDurationSec: 180,
@@ -158,7 +160,7 @@ describe('Short: review', () => {
   it('flags a length out of bounds on the field and blocks the re-cut', async () => {
     const { onrecut } = setup();
     await fireEvent.input(length(), { target: { value: '75' } });
-    expect(length()).toHaveAttribute('aria-invalid', 'true');
+    expect(length()).toHaveAttribute(INVALID, 'true');
     expect(length()).toHaveAccessibleDescription('Length must be 15 to 60 seconds.');
     expect(recut()).toBeDisabled();
     await fireEvent.submit(recut().closest('form')!);
@@ -169,14 +171,14 @@ describe('Short: review', () => {
     setup();
     await fireEvent.input(start(), { target: { value: '160' } });
     expect(start()).toHaveAccessibleDescription('Start must be 0 to 150 seconds for that length.');
-    expect(start()).toHaveAttribute('aria-invalid', 'true');
-    expect(length()).not.toHaveAttribute('aria-invalid');
+    expect(start()).toHaveAttribute(INVALID, 'true');
+    expect(length()).not.toHaveAttribute(INVALID);
   });
 
   it('flags an emptied field instead of cutting at zero', async () => {
     setup();
     await fireEvent.input(length(), { target: { value: '' } });
-    expect(length()).toHaveAttribute('aria-invalid', 'true');
+    expect(length()).toHaveAttribute(INVALID, 'true');
     expect(recut()).toBeDisabled();
   });
 

@@ -1,15 +1,39 @@
 // @vitest-environment node
-import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../helpers/fake-firestore';
 import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
+import {
+  ANALYSIS,
+  ARTIST,
+  child,
+  completion,
+  defaultHandlers,
+  headers,
+  JPEG,
+  jobDoc,
+  json,
+  MEASURE_STDERR,
+  probeJson,
+  RAW_PICK,
+  RETROWAVE,
+  SESSION_URI,
+  SYNTHWAVE,
+  type Handler,
+  type Run,
+} from '../../../helpers/pipeline';
 import { captureException } from '../../../mocks/sentry';
 import { resetClients } from '$lib/server/clients';
 import { MAX_MINUTES, type JobDoc } from '$lib/server/jobs';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline';
 import { clearStatsCache } from '$lib/server/youtube';
 
-type Run = { stdout?: string | Buffer; stderr?: string; fd3?: Buffer; code?: number };
+const WAKING = 'waking model';
+const FIRST_CHUNK = 'jobs/j1/chunks/0000';
+const FIRST_PICK = 'jobs/j1/pick/0001';
+const ARTIST_NAME_KEY = 'artist-name';
+const BAD_PICK_JSON = '{"title": 1}';
+const WAITING_ON_YOUTUBE = 'waiting on YouTube';
+const SOURCE_OBJECT = 'uploads/p1';
 
 const h = vi.hoisted(() => ({
   objects: new Map<string, { size?: string; contentType?: string }>(),
@@ -60,87 +84,7 @@ vi.mock('google-auth-library', () => ({
 
 vi.mock('node:child_process', () => ({ spawn: h.spawn }));
 
-// ---- ffmpeg / ffprobe ----
-
-const MEASURE_STDERR = [
-  '[Parsed_ebur128_0 @ 0x1] Summary:',
-  '  Integrated loudness:',
-  '    I:         -13.8 LUFS',
-  '  True peak:',
-  '    Peak:        -0.4 dBFS',
-  '[Parsed_astats_2 @ 0x2] Peak level dB: -2.1',
-  '[Parsed_astats_2 @ 0x2] Peak count: 4',
-  '[silencedetect @ 0x3] silence_start: 80',
-  '[silencedetect @ 0x3] silence_end: 83 | silence_duration: 3',
-].join('\n');
-
-const probeJson = (durationSec: number, audio = true) =>
-  JSON.stringify({
-    format: { duration: String(durationSec) },
-    streams: [
-      { codec_type: 'video', width: 1920, height: 1080 },
-      ...(audio ? [{ codec_type: 'audio' }] : []),
-    ],
-  });
-
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02, 0xff, 0xd9]);
-
 let tools: { probe: Run; measure: Run; window: Run };
-
-function child(run: Run) {
-  const stdout = new EventEmitter();
-  const stderr = new EventEmitter();
-  const fd3 = new EventEmitter();
-  const proc = Object.assign(new EventEmitter(), {
-    stdout,
-    stderr,
-    stdio: [null, stdout, stderr, fd3],
-  });
-  setImmediate(() => {
-    if (run.stdout) stdout.emit('data', Buffer.from(run.stdout));
-    if (run.stderr) stderr.emit('data', Buffer.from(run.stderr));
-    if (run.fd3) fd3.emit('data', run.fd3);
-    proc.emit('close', run.code ?? 0);
-  });
-  return proc;
-}
-
-// ---- network: llama-server, YouTube, GCS signed URLs ----
-
-const ANALYSIS = {
-  visual: 'Neon city streets at night, quick cuts.',
-  music: {
-    genre: ['synthwave', 'electronic'],
-    tempoFeel: 'driving',
-    instrumentation: ['analog synth', 'drum machine'],
-    vocals: 'male lead',
-    mood: ['nostalgic'],
-  },
-  qualityFlags: [],
-};
-
-const RAW_PICK = {
-  title: 'PeekaBoo (Official Video)',
-  description: 'A night drive through the city. #synthwave',
-  hashtags: ['#synthwave', '#retrowave', '#newmusic'],
-  tags: ['synthwave', 'PeekaBoo', 'Flies Like Robots'],
-  flags: [],
-  brandCheck: 'Keeps the channel naming pattern.',
-  why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
-  bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
-};
-
-type Handler = {
-  test: RegExp;
-  reply: (url: string, init: RequestInit) => Response | Promise<Response>;
-};
-
-const json = (body: unknown, init: ResponseInit = {}) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
-  });
 
 let handlers: Handler[];
 const calls: { url: string; init: RequestInit }[] = [];
@@ -148,141 +92,10 @@ const calls: { url: string; init: RequestInit }[] = [];
 /** Later registrations win over the defaults. */
 const on = (test: RegExp, reply: Handler['reply']) => handlers.unshift({ test, reply });
 const called = (test: RegExp) => calls.filter((c) => test.test(c.url));
-const headers = (init: RequestInit) => (init.headers ?? {}) as Record<string, string>;
 const chatBodies = () =>
   called(/\/v1\/chat\/completions$/).map(
     (c) => JSON.parse(String(c.init.body)) as Record<string, unknown>,
   );
-
-const completion = (content: string) =>
-  json({
-    choices: [{ message: { content, reasoning_content: 'thinking' } }],
-    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-  });
-
-function defaultHandlers(): Handler[] {
-  return [
-    { test: /127\.0\.0\.1:8081\/health$/, reply: () => json({ status: 'ok' }) },
-    { test: /127\.0\.0\.1:8081\/slots$/, reply: () => json([{ is_processing: false }]) },
-    {
-      test: /127\.0\.0\.1:8081\/v1\/chat\/completions$/,
-      reply: (_url, init) => {
-        const body = JSON.parse(String(init.body)) as {
-          response_format: { json_schema: { name: string } };
-        };
-        const name = body.response_format.json_schema.name;
-        return completion(JSON.stringify(name === 'chunk_analysis' ? ANALYSIS : RAW_PICK));
-      },
-    },
-    {
-      test: /youtube\/v3\/channels\?/,
-      reply: () =>
-        json({
-          items: [
-            {
-              snippet: { customUrl: '@flieslikerobots' },
-              statistics: { videoCount: '12', subscriberCount: '300' },
-              contentDetails: { relatedPlaylists: { uploads: 'UUflr' } },
-            },
-          ],
-        }),
-    },
-    {
-      test: /youtube\/v3\/playlistItems\?/,
-      reply: () =>
-        json({
-          items: ['v1', 'v2', 'v3', 'v4', 'v5', 'v6'].map((videoId) => ({
-            contentDetails: { videoId, videoPublishedAt: '2026-09-01T00:00:00Z' },
-          })),
-        }),
-    },
-    {
-      test: /com\/youtube\/v3\/videos\?/,
-      reply: (url, init) => {
-        const id = new URL(url).searchParams.get('id') ?? '';
-        if (headers(init).authorization) {
-          return json({
-            items: [{ id, snippet: { title: 't' }, status: { uploadStatus: 'processed' } }],
-          });
-        }
-        return json({
-          items: id.split(',').map((vid, i) => ({
-            id: vid,
-            snippet: {
-              title: `Song ${vid}`,
-              description: `Out now. #synthwave #retrowave${i === 0 ? ' #newmusic' : ''}`,
-              tags: ['synthwave'],
-              publishedAt: '2026-09-01T00:00:00Z',
-              thumbnails:
-                vid === 'v5' ? {} : { medium: { url: `https://i.ytimg.com/${vid}/m.jpg` } },
-            },
-          })),
-        });
-      },
-    },
-    { test: /youtube\/v3\/search\?/, reply: () => json({ items: [{ id: { videoId: 's1' } }] }) },
-    {
-      test: /i\.ytimg\.com/,
-      reply: () => new Response(JPEG, { headers: { 'content-type': 'image/jpeg' } }),
-    },
-    {
-      test: /upload\/youtube\/v3\/videos/,
-      reply: () =>
-        new Response('', { status: 200, headers: { location: 'https://upload.example/s1' } }),
-    },
-    {
-      test: /upload\.example\/s1/,
-      reply: (_url, init) =>
-        headers(init)['content-range']?.startsWith('bytes */')
-          ? new Response('', { status: 308 })
-          : json({ id: 'vid1' }),
-    },
-    { test: /storage\.googleapis\.com/, reply: () => new Response('xx', { status: 206 }) },
-  ];
-}
-
-// ---- jobs ----
-
-function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
-  return {
-    id: 'j1',
-    state: 'PREP',
-    owner: 'visitor',
-    channel: null,
-    songTitle: 'PeekaBoo',
-    notes: '',
-    filename: 'peekaboo.mp4',
-    contentType: 'video/mp4',
-    sampleId: null,
-    liveVideoId: null,
-    object: 'uploads/j1',
-    ipHash: null,
-    probe: null,
-    measurements: null,
-    chunkCount: 0,
-    chunkIndex: 0,
-    failedState: null,
-    error: null,
-    uploadProgress: null,
-    videoId: null,
-    payload: null,
-    consecutiveFailures: 0,
-    claim: null,
-    trace: null,
-    hashtagCandidates: null,
-    audience: null,
-    upload: null,
-    finalFields: null,
-    pickVersion: null,
-    verifyAttempts: 0,
-    shortId: null,
-    short: null,
-    sourceObject: null,
-    createdAt: 1,
-    updatedAt: 1,
-    ...patch,
-  };
-}
 
 function seed(patch: Partial<JobDoc> = {}): JobDoc {
   const doc = jobDoc(patch);
@@ -294,7 +107,7 @@ const saved = () => store.get('jobs/j1') as JobDoc;
 const FIELDS = {
   title: 'PeekaBoo',
   description: 'd #synthwave',
-  hashtags: ['#synthwave'],
+  hashtags: [SYNTHWAVE],
   tags: ['a'],
 };
 const PROBE = { durationSec: 40, width: 1920, height: 1080, hasAudio: true };
@@ -378,7 +191,7 @@ describe('runStep: model readiness', () => {
   it('returns "waking model" while /health answers 503, without claiming the job', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(result).toEqual({ wait: 'waking model' });
+    expect(result).toEqual({ wait: WAKING });
     expect(saved().claim).toBeNull();
     expect(saved().consecutiveFailures).toBe(0);
     expect(h.spawn).not.toHaveBeenCalled();
@@ -386,7 +199,7 @@ describe('runStep: model readiness', () => {
 
   it('treats a refused connection as loading', async () => {
     on(/\/health$/, () => Promise.reject(new TypeError('ECONNREFUSED')));
-    expect(await runStep(seed({ state: 'PICK' }))).toEqual({ wait: 'waking model' });
+    expect(await runStep(seed({ state: 'PICK' }))).toEqual({ wait: WAKING });
   });
 
   it('returns "waiting on another run" when every slot is processing', async () => {
@@ -513,7 +326,7 @@ describe('runStep: ANALYZE', () => {
     });
     await runStep(job);
     expect(saved().state).toBe('DISCARDED');
-    expect(store.has('jobs/j1/chunks/0000')).toBe(false);
+    expect(store.has(FIRST_CHUNK)).toBe(false);
   });
 
   it('saves the chunk and advances to the next window', async () => {
@@ -522,7 +335,7 @@ describe('runStep: ANALYZE', () => {
     );
     expect(result).toEqual({});
     expect(saved()).toMatchObject({ state: 'ANALYZE', chunkIndex: 1, consecutiveFailures: 0 });
-    const chunk = store.get('jobs/j1/chunks/0000') as { index: number; analysis: unknown };
+    const chunk = store.get(FIRST_CHUNK) as { index: number; analysis: unknown };
     expect(chunk).toMatchObject({ index: 0, startSec: 0, durationSec: 29.5, raw: null });
     expect(chunk.analysis).toEqual(ANALYSIS);
     const body = chatBodies()[0]!;
@@ -544,7 +357,7 @@ describe('runStep: ANALYZE', () => {
   });
 
   it('counts one thrown step, keeps the state, and fails on the second in a row', async () => {
-    store.set('jobs/j1/chunks/0000', { index: 0 });
+    store.set(FIRST_CHUNK, { index: 0 });
     tools.window = { code: 1, stderr: 'boom\nmoov atom not found' };
     await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 }));
     expect(saved()).toMatchObject({ state: 'ANALYZE', chunkIndex: 1, consecutiveFailures: 1 });
@@ -558,7 +371,7 @@ describe('runStep: ANALYZE', () => {
       consecutiveFailures: 2,
       chunkIndex: 1,
     });
-    expect(store.has('jobs/j1/chunks/0000')).toBe(true);
+    expect(store.has(FIRST_CHUNK)).toBe(true);
   });
 
   it('resets the failure count after a step succeeds', async () => {
@@ -569,56 +382,58 @@ describe('runStep: ANALYZE', () => {
   it('keeps the raw reply when the model never returns valid JSON', async () => {
     on(/chat\/completions$/, () => completion('not json'));
     await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(store.get('jobs/j1/chunks/0000')).toMatchObject({ analysis: null, raw: 'not json' });
+    expect(store.get(FIRST_CHUNK)).toMatchObject({ analysis: null, raw: 'not json' });
     expect(saved().chunkIndex).toBe(1);
   });
 });
 
-describe('runStep: PICK', () => {
-  const chunkDoc = (index: number) => ({
-    index,
-    startSec: index * 29.5,
-    durationSec: 29.5,
-    measurements: MEASURED,
-    analysis: ANALYSIS,
-    raw: null,
-    modelMs: 4000,
-  });
+const chunkDoc = (index: number) => ({
+  index,
+  startSec: index * 29.5,
+  durationSec: 29.5,
+  measurements: MEASURED,
+  analysis: ANALYSIS,
+  raw: null,
+  modelMs: 4000,
+});
 
-  const context = () => {
-    const body = chatBodies().at(-1)!;
-    const messages = body.messages as { content: { type: string; text?: string }[] }[];
-    return JSON.parse(messages[1]!.content[0]!.text!) as {
-      artist: string | null;
-      facts: { key: string }[];
-      feedback: unknown[];
-      skippedVersions?: { title: string }[];
-      candidateHashtags: string[];
-      candidateTags: { tag: string; usedBy: number }[];
-      audienceTopVideos: unknown[];
-      recentUploads?: unknown[];
-      brandGuide?: unknown;
-    };
+const context = () => {
+  const body = chatBodies().at(-1)!;
+  const messages = body.messages as { content: { type: string; text?: string }[] }[];
+  return JSON.parse(messages[1]!.content[0]!.text!) as {
+    artist: string | null;
+    facts: { key: string }[];
+    feedback: unknown[];
+    skippedVersions?: { title: string }[];
+    candidateHashtags: string[];
+    candidateTags: { tag: string; usedBy: number }[];
+    audienceTopVideos: unknown[];
+    recentUploads?: unknown[];
+    brandGuide?: unknown;
   };
+};
 
-  beforeEach(() => {
-    store.set('jobs/j1/chunks/0000', chunkDoc(0));
-    store.set('jobs/j1/chunks/0001', chunkDoc(1));
-  });
+function seedPickChunks() {
+  store.set(FIRST_CHUNK, chunkDoc(0));
+  store.set('jobs/j1/chunks/0001', chunkDoc(1));
+}
+
+describe('runStep: PICK', () => {
+  beforeEach(seedPickChunks);
 
   it('stores candidates and pick version 1 for a visitor job, named as the artist with public facts only', async () => {
     expect(await runStep(seed({ state: 'PICK', measurements: MEASURED }))).toEqual({});
     const job = saved();
     expect(job.state).toBe('REVIEW');
-    expect(job.hashtagCandidates).toEqual(['#synthwave', '#retrowave', '#newmusic']);
-    const pick = store.get('jobs/j1/pick/0001') as Record<string, unknown>;
+    expect(job.hashtagCandidates).toEqual([SYNTHWAVE, RETROWAVE, '#newmusic']);
+    const pick = store.get(FIRST_PICK) as Record<string, unknown>;
     expect(pick).toMatchObject({ version: 1, skipped: false });
     expect(typeof pick.modelMs).toBe('number');
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
 
     const ctx = context();
-    expect(ctx.artist).toBe('Flies Like Robots');
-    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name']);
+    expect(ctx.artist).toBe(ARTIST);
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
     expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
@@ -635,13 +450,13 @@ describe('runStep: PICK', () => {
     const { input, output } = agentSpanIO();
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).toContain('recentUploads');
-    const stored = store.get('jobs/j1/pick/0001') as Record<string, unknown>;
+    const stored = store.get(FIRST_PICK) as Record<string, unknown>;
     expect(JSON.parse(output[0]!)).toMatchObject({ title: stored.title });
   });
 
   it('names the artist for a sample and leaves its live video out of the comparison set', async () => {
     await runStep(seed({ state: 'PICK', sampleId: 'smp', liveVideoId: 'v2', channel: 'sandbox' }));
-    expect(context().artist).toBe('Flies Like Robots');
+    expect(context().artist).toBe(ARTIST);
     const catalog = called(/com\/youtube\/v3\/videos\?/).map((c) =>
       new URL(c.url).searchParams.get('id'),
     );
@@ -650,6 +465,10 @@ describe('runStep: PICK', () => {
     expect(context().recentUploads).toHaveLength(3);
     expect(called(/i\.ytimg\.com/)).toHaveLength(3);
   });
+});
+
+describe("runStep: PICK with Nathan's memory", () => {
+  beforeEach(seedPickChunks);
 
   it("reads Nathan's memory for a demo job without writing any of it", async () => {
     store.set('artists/flr/feedback/f1', {
@@ -662,13 +481,17 @@ describe('runStep: PICK', () => {
       after: 'B',
       at: 5,
     });
-    const before = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    const before = [...store.keys()]
+      .filter((k) => k.startsWith('artists/'))
+      .sort((a, b) => a.localeCompare(b));
     await runStep(seed({ state: 'PICK', owner: 'demo', channel: 'sandbox' }));
     expect(saved().state).toBe('REVIEW');
     const ctx = context();
     expect(ctx.feedback).toHaveLength(1);
-    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
-    const after = [...store.keys()].filter((k) => k.startsWith('artists/')).sort();
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
+    const after = [...store.keys()]
+      .filter((k) => k.startsWith('artists/'))
+      .sort((a, b) => a.localeCompare(b));
     expect(after).toEqual(before);
     expect(store.has('artists/flr/facts/home')).toBe(false);
   });
@@ -684,7 +507,7 @@ describe('runStep: PICK', () => {
       after: 'B',
       at: 5,
     });
-    store.set('jobs/j1/pick/0001', {
+    store.set(FIRST_PICK, {
       ...RAW_PICK,
       title: 'Old Title',
       description: 'An older description.',
@@ -703,10 +526,10 @@ describe('runStep: PICK', () => {
         state: 'PICK',
         owner: 'nathan',
         channel: 'nathan',
-        hashtagCandidates: ['#synthwave', '#retrowave', '#newmusic'],
+        hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
         audience: {
           query: 'synthwave music video',
-          hashtags: ['#synthwave', '#retrowave', '#newmusic'],
+          hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
           tags: [
             { tag: 'synthwave', usedBy: 9 },
             { tag: 'outrun', usedBy: 4 },
@@ -722,17 +545,17 @@ describe('runStep: PICK', () => {
     expect(third.modelMs).toBeGreaterThanOrEqual(50_000);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
-    expect(ctx.artist).toBe('Flies Like Robots');
+    expect(ctx.artist).toBe(ARTIST);
     expect(ctx.candidateTags).toEqual([
       { tag: 'synthwave', usedBy: 9 },
       { tag: 'outrun', usedBy: 4 },
-      { tag: 'Flies Like Robots', usedBy: 0 },
+      { tag: ARTIST, usedBy: 0 },
     ]);
     expect(ctx.audienceTopVideos).toEqual([
       { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
     ]);
     // The private INFERENCE is read but never reaches the prompt.
-    expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
     expect(ctx.feedback).toHaveLength(1);
     expect(ctx.skippedVersions).toEqual([
       { title: 'Old Title', description: 'An older description.' },
@@ -763,16 +586,16 @@ describe('runStep: PICK', () => {
   });
 
   it('counts an unparseable recommendation as a failure', async () => {
-    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
     await runStep(seed({ state: 'PICK' }));
     expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect(saved().error).toBe('The model reply did not parse as a recommendation.');
-    expect(store.has('jobs/j1/pick/0001')).toBe(false);
+    expect(store.has(FIRST_PICK)).toBe(false);
   });
 
   it('reports the original model error to Sentry, not the evidence-carrying wrapper', async () => {
     captureException.mockClear();
-    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
     await runStep(seed({ state: 'PICK' }));
     expect(captureException).toHaveBeenCalledTimes(1);
     const [reported, context] = captureException.mock.calls[0]!;
@@ -783,10 +606,10 @@ describe('runStep: PICK', () => {
   });
 
   it('keeps the genre search when the model fails, so the retry does not search again', async () => {
-    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
     await runStep(seed({ state: 'PICK' }));
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    expect(saved().audience).toMatchObject({ hashtags: ['#synthwave', '#retrowave', '#newmusic'] });
+    expect(saved().audience).toMatchObject({ hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'] });
 
     on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
     await runStep(saved());
@@ -824,7 +647,7 @@ describe('runStep: PUBLISHING', () => {
     await runStep(publishing());
     expect(saved()).toMatchObject({
       state: 'PUBLISHING',
-      upload: { sessionUri: 'https://upload.example/s1', total: 1000 },
+      upload: { sessionUri: SESSION_URI, total: 1000 },
       uploadProgress: { sent: 0, total: 1000 },
     });
     const init = called(/upload\/youtube\/v3\/videos/)[0]!.init;
@@ -867,7 +690,7 @@ describe('runStep: PUBLISHING', () => {
         ? new Response('', { status: 308, headers: { range: 'bytes=0-399' } })
         : new Response('', { status: 308, headers: { range: 'bytes=0-699' } }),
     );
-    await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
+    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
     expect(saved()).toMatchObject({
       state: 'PUBLISHING',
       uploadProgress: { sent: 700, total: 1000 },
@@ -880,7 +703,7 @@ describe('runStep: PUBLISHING', () => {
   });
 
   it('claims completion with the video ID on the final 200', async () => {
-    await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
+    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
     expect(saved()).toMatchObject({
       state: 'CLAIMED_COMPLETE',
       videoId: 'vid1',
@@ -890,13 +713,13 @@ describe('runStep: PUBLISHING', () => {
 
   it('drops an expired upload session so the next step opens a fresh one', async () => {
     on(/upload\.example\/s1/, () => new Response('gone', { status: 404 }));
-    await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
+    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
     expect(saved()).toMatchObject({ state: 'PUBLISHING', upload: null, uploadProgress: null });
   });
 
   it('skips the range read when YouTube already holds every byte', async () => {
     on(/upload\.example\/s1/, () => json({ id: 'vid2' }));
-    await runStep(publishing({ upload: { sessionUri: 'https://upload.example/s1', total: 1000 } }));
+    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
     expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: 'vid2' });
     expect(called(/storage\.googleapis\.com/)).toHaveLength(0);
   });
@@ -950,13 +773,13 @@ describe('runStep: CLAIMED_COMPLETE', () => {
 
   it('keeps waiting while a listed upload has no accepted status yet', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status: {} }] }));
-    expect(await runStep(claimed())).toEqual({ wait: 'waiting on YouTube' });
+    expect(await runStep(claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
     expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
   });
 
   it('waits on YouTube while the video is not listed yet', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [] }));
-    expect(await runStep(claimed({ verifyAttempts: 2 }))).toEqual({ wait: 'waiting on YouTube' });
+    expect(await runStep(claimed({ verifyAttempts: 2 }))).toEqual({ wait: WAITING_ON_YOUTUBE });
     expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 3 });
   });
 
@@ -980,7 +803,7 @@ describe('runStep: CLAIMED_COMPLETE', () => {
 
   it('counts a read-back error as a failure and asks the page to wait', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => new Response('oops', { status: 500 }));
-    expect(await runStep(claimed())).toEqual({ wait: 'waiting on YouTube' });
+    expect(await runStep(claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
     expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', consecutiveFailures: 1 });
   });
 });
@@ -1021,7 +844,7 @@ describe('runStep: claim safety', () => {
     const stale = seed({ state: 'PREP' });
     store.set('jobs/j1', { ...stale, state: 'ANALYZE', chunkCount: 2 });
     on(/127\.0\.0\.1:8081\/health$/, () => new Response('loading', { status: 503 }));
-    expect(await runStep(stale)).toEqual({ wait: 'waking model' });
+    expect(await runStep(stale)).toEqual({ wait: WAKING });
     expect(saved()).toMatchObject({ state: 'ANALYZE', claim: null });
     expect(chatBodies()).toHaveLength(0);
   });
@@ -1035,7 +858,7 @@ describe('runStep: claim safety', () => {
     await runStep(job);
     expect(saved().state).toBe('DISCARDED');
     expect(saved().claim).toBeNull();
-    expect(store.has('jobs/j1/pick/0001')).toBe(false);
+    expect(store.has(FIRST_PICK)).toBe(false);
   });
 });
 
@@ -1072,7 +895,7 @@ describe('runStep: Short', () => {
         modelMs: 1,
       });
     }
-    h.objects.set('uploads/p1', { size: '9000', contentType: 'video/mp4' });
+    h.objects.set(SOURCE_OBJECT, { size: '9000', contentType: 'video/mp4' });
     h.upload.mockReset();
     h.upload.mockResolvedValue([{}]);
     h.spawn.mockImplementation((command: string, args: string[]) => {
@@ -1091,7 +914,7 @@ describe('runStep: Short', () => {
 
   it('runs HOOK then RENDER into REVIEW, one step per call', async () => {
     hookReply({ window: 2, lengthSec: 30, reason: 'The chorus lands.' });
-    const job = seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1', pickVersion: 1 });
+    const job = seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT, pickVersion: 1 });
 
     expect(await runStep(job)).toEqual({});
     expect(saved().state).toBe('RENDER');
@@ -1117,8 +940,10 @@ describe('runStep: Short', () => {
 
   it('waits for the model before picking the hook', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
-    const result = await runStep(seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1' }));
-    expect(result).toEqual({ wait: 'waking model' });
+    const result = await runStep(
+      seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT }),
+    );
+    expect(result).toEqual({ wait: WAKING });
     expect(saved().state).toBe('HOOK');
     expect(saved().claim).toBeNull();
   });
@@ -1126,14 +951,16 @@ describe('runStep: Short', () => {
   it('renders without waiting on the model, which it does not use', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
-    await runStep(seed({ state: 'RENDER', short: { ...SHORT, hook }, sourceObject: 'uploads/p1' }));
+    await runStep(
+      seed({ state: 'RENDER', short: { ...SHORT, hook }, sourceObject: SOURCE_OBJECT }),
+    );
     expect(called(/\/health$/)).toHaveLength(0);
     expect(saved().state).toBe('REVIEW');
   });
 
   it('fails at HOOK after two unparsed replies in a row, ready for a retry', async () => {
     on(/\/v1\/chat\/completions$/, () => completion('nope'));
-    seed({ state: 'HOOK', short: SHORT, sourceObject: 'uploads/p1' });
+    seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT });
     await runStep(saved());
     expect(saved()).toMatchObject({ state: 'HOOK', consecutiveFailures: 1 });
     await runStep(saved());
@@ -1153,7 +980,7 @@ describe('runStep: Short', () => {
     const job = seed({
       state: 'RENDER',
       short: { ...SHORT, hook },
-      sourceObject: 'uploads/p1',
+      sourceObject: SOURCE_OBJECT,
       consecutiveFailures: 1,
     });
     await runStep(job);

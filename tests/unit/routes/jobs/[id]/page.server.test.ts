@@ -36,8 +36,8 @@ type Data = {
 const TRACE = { sentryTrace: 'abc-def-1', baggage: 'sentry-trace_id=abc' };
 
 async function run(id: string, allowlisted = false) {
-  const locals: App.Locals = {
-    session: allowlisted ? { email: 'nathan@example.com', allowlisted, demo: false } : null,
+  const locals: Event['locals'] = {
+    session: allowlisted ? { allowlisted, email: 'nathan@example.com', demo: false } : null,
   };
   const data = (await load({ params: { id }, locals } as unknown as Event)) as Data;
   return { data, locals };
@@ -129,7 +129,7 @@ describe('job page load', () => {
 
   it("404s Nathan's job for a non-allowlisted session without touching locals", async () => {
     seed('n', { owner: 'nathan' });
-    const locals: App.Locals = { session: null };
+    const locals: Event['locals'] = { session: null };
     const error = await Promise.resolve(
       load({ params: { id: 'n' }, locals } as unknown as Event),
     ).catch((e: unknown) => e);
@@ -173,7 +173,7 @@ describe('job page load: Short', () => {
 
   it("sends a Short's own URL to its video's page", async () => {
     seed('s', { state: 'REVIEW', short: SHORT });
-    const locals: App.Locals = { session: null };
+    const locals: Event['locals'] = { session: null };
     const error = await Promise.resolve(
       load({ params: { id: 's' }, locals } as unknown as Event),
     ).catch((e: unknown) => e);

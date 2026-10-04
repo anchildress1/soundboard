@@ -9,10 +9,10 @@ type Event = Parameters<typeof GET>[0];
 function call(query: string, allowlisted: boolean | null, origin = 'http://localhost:5173') {
   const cookies = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
   const event = {
-    url: new URL(`${origin}/auth/login${query}`),
     cookies,
+    url: new URL(`${origin}/auth/login${query}`),
     locals: {
-      session: allowlisted === null ? null : { email: 'nathan@example.com', allowlisted },
+      session: allowlisted === null ? null : { allowlisted, email: 'nathan@example.com' },
     },
   } as unknown as Event;
   let thrown: unknown;

@@ -26,6 +26,10 @@ import {
 import { resetClients } from '$lib/server/clients';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 
+const SAMPLE_OBJECT = 'samples/a.mp4';
+const REFUSES_MISSING = 'refuses a missing job';
+const SYNTHWAVE = '#synthwave';
+
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
 );
@@ -96,9 +100,9 @@ describe('createJob', () => {
   });
 
   it('starts at PREP for samples that already sit in the bucket', async () => {
-    const job = await createJob({ ...input, object: 'samples/a.mp4' }, 'job2');
+    const job = await createJob({ ...input, object: SAMPLE_OBJECT }, 'job2');
     expect(job.state).toBe('PREP');
-    expect(job.object).toBe('samples/a.mp4');
+    expect(job.object).toBe(SAMPLE_OBJECT);
   });
 });
 
@@ -133,7 +137,7 @@ describe('claimJob / releaseJob', () => {
   });
 
   it('returns the job as read inside the claim', async () => {
-    await createJob({ ...input, object: 'samples/a.mp4' }, 'j');
+    await createJob({ ...input, object: SAMPLE_OBJECT }, 'j');
     const claimed = await claimJob('j');
     expect(claimed?.job.state).toBe('PREP');
     expect(claimed?.token).toMatch(/^[0-9a-f]{16}$/);
@@ -165,7 +169,7 @@ describe('claimJob / releaseJob', () => {
     expect((await getJob('j'))?.state).toBe('AWAITING_UPLOAD');
   });
 
-  it('refuses a missing job', async () => {
+  it(REFUSES_MISSING, async () => {
     expect(await releaseJob('ghost', 't', 'PREP')).toBe(false);
   });
 });
@@ -178,7 +182,7 @@ describe('transitionJob', () => {
     expect((await getJob('j'))?.state).toBe('PREP');
   });
 
-  it('refuses a missing job', async () => {
+  it(REFUSES_MISSING, async () => {
     expect(await transitionJob('ghost', ['PREP'], { state: 'ANALYZE' })).toBe(false);
   });
 });
@@ -217,7 +221,7 @@ describe('skipAndRepick', () => {
     expect((await getJob('j'))?.state).toBe('PICK');
   });
 
-  it('refuses a missing job', async () => {
+  it(REFUSES_MISSING, async () => {
     expect(await skipAndRepick('ghost', 1)).toBe(false);
   });
 });
@@ -240,14 +244,14 @@ describe('newJobDoc', () => {
 
 describe('createShort', () => {
   async function parent(patch: Record<string, unknown> = {}) {
-    await createJob({ ...input, owner: 'nathan', channel: 'nathan', object: 'samples/a.mp4' }, 'p');
+    await createJob({ ...input, owner: 'nathan', channel: 'nathan', object: SAMPLE_OBJECT }, 'p');
     await updateJob('p', {
       state: 'REVIEW',
       probe: { durationSec: 180, width: 1920, height: 1080, hasAudio: true },
-      hashtagCandidates: ['#synthwave'],
+      hashtagCandidates: [SYNTHWAVE],
       audience: {
         query: 'q',
-        hashtags: ['#synthwave'],
+        hashtags: [SYNTHWAVE],
         tags: [{ tag: 'synthwave', usedBy: 2 }],
         top: [],
       },
@@ -271,8 +275,8 @@ describe('createShort', () => {
       filename: 'peekaboo (Short).mp4',
       contentType: 'video/mp4',
       object: 'uploads/s1',
-      sourceObject: 'samples/a.mp4',
-      hashtagCandidates: ['#synthwave'],
+      sourceObject: SAMPLE_OBJECT,
+      hashtagCandidates: [SYNTHWAVE],
       audience: { tags: [{ tag: 'synthwave', usedBy: 2 }] },
       pickVersion: 1,
       trace: { sentryTrace: 't-s-1', baggage: 'b' },

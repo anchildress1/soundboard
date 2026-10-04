@@ -19,6 +19,9 @@ import { resetClients } from '$lib/server/clients';
 import { clearStatsCache, type CatalogVideo } from '$lib/server/youtube';
 import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 
+const PROPOSAL_DOC = 'artists/flr/brand/proposal';
+const APPROVED_DOC = 'artists/flr/brand/approved';
+
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
 );
@@ -195,7 +198,7 @@ describe('proposeBrand', () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     expect(await proposeBrand()).toEqual({ wait: 'waking model' });
     expect(called(/youtube/)).toHaveLength(0);
-    expect(store.has('artists/flr/brand/proposal')).toBe(false);
+    expect(store.has(PROPOSAL_DOC)).toBe(false);
   });
 
   it('waits while another run holds the model', async () => {
@@ -207,7 +210,7 @@ describe('proposeBrand', () => {
   it('reads 30 uploads and 10 thumbnails and stores the proposal', async () => {
     const result = await proposeBrand();
     expect(result).toMatchObject({ proposal: { ...GUIDE, status: 'PROPOSED', approvedAt: null } });
-    const stored = store.get('artists/flr/brand/proposal') as StoredBrand;
+    const stored = store.get(PROPOSAL_DOC) as StoredBrand;
     expect(stored.basedOn).toEqual(uploads.slice(0, 30));
     expect(called(/i\.ytimg\.com/)).toHaveLength(10);
     const parts = chatBody().messages[1]!.content as { type: string }[];
@@ -246,13 +249,13 @@ describe('proposeBrand', () => {
     on(/chat\/completions$/, () => completion('{"statement": 1}'));
     clearAgentSpan();
     await expect(proposeBrand()).rejects.toMatchObject({ status: 502 });
-    expect(store.has('artists/flr/brand/proposal')).toBe(false);
+    expect(store.has(PROPOSAL_DOC)).toBe(false);
     expect(agentSpanIO().output).toEqual([]);
   });
 });
 
 describe('approveBrand', () => {
-  beforeEach(() => store.set('artists/flr/brand/proposal', PROPOSAL));
+  beforeEach(() => store.set(PROPOSAL_DOC, PROPOSAL));
 
   it('approves the edited guide, trimmed, and clears the proposal', async () => {
     const approved = await approveBrand({
@@ -271,16 +274,14 @@ describe('approveBrand', () => {
       basedOn: PROPOSAL.basedOn,
       createdAt: PROPOSAL.createdAt,
     });
-    expect(store.get('artists/flr/brand/approved')).toEqual(approved);
-    expect(store.has('artists/flr/brand/proposal')).toBe(false);
+    expect(store.get(APPROVED_DOC)).toEqual(approved);
+    expect(store.has(PROPOSAL_DOC)).toBe(false);
   });
 
   it('replaces an earlier approved guide', async () => {
-    store.set('artists/flr/brand/approved', { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
+    store.set(APPROVED_DOC, { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
     await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt });
-    expect((store.get('artists/flr/brand/approved') as StoredBrand).statement).toBe(
-      GUIDE.statement,
-    );
+    expect((store.get(APPROVED_DOC) as StoredBrand).statement).toBe(GUIDE.statement);
   });
 
   it('400s on a malformed body', async () => {
@@ -293,8 +294,8 @@ describe('approveBrand', () => {
     ).rejects.toMatchObject({
       status: 422,
     });
-    expect(store.has('artists/flr/brand/approved')).toBe(false);
-    expect(store.has('artists/flr/brand/proposal')).toBe(true);
+    expect(store.has(APPROVED_DOC)).toBe(false);
+    expect(store.has(PROPOSAL_DOC)).toBe(true);
   });
 
   it('409s once the proposal is gone', async () => {
@@ -304,23 +305,23 @@ describe('approveBrand', () => {
     );
     expect(error).toBeInstanceOf(ActionError);
     expect((error as ActionError).status).toBe(409);
-    expect(store.has('artists/flr/brand/approved')).toBe(false);
+    expect(store.has(APPROVED_DOC)).toBe(false);
   });
 
   it('400s without the reviewed proposal named', async () => {
     await expect(approveBrand(GUIDE)).rejects.toMatchObject({ status: 400 });
-    expect(store.has('artists/flr/brand/proposal')).toBe(true);
+    expect(store.has(PROPOSAL_DOC)).toBe(true);
   });
 
   it('409s on stale text when another tab replaced the proposal, changing neither guide', async () => {
     const newer = { ...PROPOSAL, statement: 'Newer proposal.', createdAt: PROPOSAL.createdAt + 1 };
-    store.set('artists/flr/brand/proposal', newer);
+    store.set(PROPOSAL_DOC, newer);
     const error = await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
       (e: unknown) => e,
     );
     expect(error).toMatchObject({ status: 409 });
-    expect(store.has('artists/flr/brand/approved')).toBe(false);
-    expect(store.get('artists/flr/brand/proposal')).toEqual(newer);
+    expect(store.has(APPROVED_DOC)).toBe(false);
+    expect(store.get(PROPOSAL_DOC)).toEqual(newer);
   });
 });
 
@@ -331,13 +332,13 @@ describe('reads', () => {
   });
 
   it('gives smart pick only the guide fields', async () => {
-    store.set('artists/flr/brand/approved', { ...PROPOSAL, status: 'APPROVED', approvedAt: 5 });
+    store.set(APPROVED_DOC, { ...PROPOSAL, status: 'APPROVED', approvedAt: 5 });
     expect(await approvedBrand()).toEqual(GUIDE);
   });
 
   it('keeps the approved guide when a proposal is discarded', async () => {
-    store.set('artists/flr/brand/approved', { ...PROPOSAL, status: 'APPROVED' });
-    store.set('artists/flr/brand/proposal', PROPOSAL);
+    store.set(APPROVED_DOC, { ...PROPOSAL, status: 'APPROVED' });
+    store.set(PROPOSAL_DOC, PROPOSAL);
     await discardBrandProposal();
     const { approved, proposal } = await getBrand();
     expect(approved).not.toBeNull();

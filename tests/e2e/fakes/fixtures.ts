@@ -3,13 +3,16 @@
 import type { JobDoc } from '$lib/server/jobs';
 import type { Chunk, Pick, Short } from '$lib/types';
 
+const SYNTHWAVE = '#synthwave';
+const RETROWAVE = '#retrowave';
+
 const PROBE = { durationSec: 140, width: 1920, height: 1080, hasAudio: true };
 
 const PICK: Pick = {
   version: 1,
   title: 'PeekaBoo (Official Video)',
   description: 'Night drive in a borrowed car.\n\n#synthwave #retrowave',
-  hashtags: ['#synthwave', '#retrowave'],
+  hashtags: [SYNTHWAVE, RETROWAVE],
   tags: ['synthwave', 'Flies Like Robots'],
   flags: [],
   brandCheck: '',
@@ -70,10 +73,10 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
     consecutiveFailures: 0,
     claim: null,
     trace: null,
-    hashtagCandidates: ['#synthwave', '#retrowave'],
+    hashtagCandidates: [SYNTHWAVE, RETROWAVE],
     audience: {
       query: 'synthwave music video',
-      hashtags: ['#synthwave', '#retrowave'],
+      hashtags: [SYNTHWAVE, RETROWAVE],
       tags: [{ tag: 'synthwave', usedBy: 3 }],
       top: [],
     },
@@ -106,7 +109,7 @@ const reviewed = (id: string) => [job(id), PICK, [0, 1, 2, 3, 4].map(chunk)] as 
 export const SEED: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   ...['e2e-tabs', 'e2e-make-chromium', 'e2e-make-mobile'].map((id) => {
     const [doc, pick, chunks] = reviewed(id);
-    return { job: doc, pick, chunks: [...chunks] };
+    return { job: doc, chunks: [...chunks], pick };
   }),
   {
     job: job('e2e-cut', { shortId: 'e2e-cut-short' }),

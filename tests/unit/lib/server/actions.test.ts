@@ -15,6 +15,13 @@ import {
 import { quotaDay, UPLOADS_PER_DAY, VISITOR_UPLOADS_PER_DAY } from '$lib/server/quota';
 import type { Channel, Hook, JobOwner, JobState, Pick, Short } from '$lib/types';
 
+const SYNTHWAVE_TAG = '#synthwave';
+const RETROWAVE = '#retrowave';
+const DESCRIPTION = 'A bright synth track.\n\n#synthwave #retrowave';
+const JOB_FEEDBACK = 'jobs/job1/feedback/';
+const EDITED_TITLE = 'Edited Title';
+const ARTIST_FEEDBACK = 'artists/flr/feedback/';
+
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
 );
@@ -27,13 +34,13 @@ vi.mock('@google-cloud/secret-manager', () => ({
   },
 }));
 
-const candidates = ['#synthwave', '#retrowave', '#NewMusic'];
+const candidates = [SYNTHWAVE_TAG, RETROWAVE, '#NewMusic'];
 
 const pick = (version: number, title = `Title ${version}`): Pick => ({
   version,
   title,
-  description: 'A bright synth track.\n\n#synthwave #retrowave',
-  hashtags: ['#synthwave', '#retrowave'],
+  description: DESCRIPTION,
+  hashtags: [SYNTHWAVE_TAG, RETROWAVE],
   tags: ['synthwave', 'outrun'],
   flags: [],
   brandCheck: '',
@@ -95,7 +102,7 @@ const input = (
   over: Partial<{ title: string; description: string; tags: string[]; pickVersion: number }> = {},
 ) => ({
   title: 'Title 1',
-  description: 'A bright synth track.\n\n#synthwave #retrowave',
+  description: DESCRIPTION,
   tags: ['synthwave', 'outrun'],
   pickVersion: 1,
   ...over,
@@ -155,7 +162,7 @@ describe('approve', () => {
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/newer recommendation/);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 
   it('refuses an approval with no pick version', async () => {
@@ -200,7 +207,7 @@ describe('approve', () => {
 
   it('reports a YouTube limit before the tag list', async () => {
     const job = await makeJob();
-    const error = await approve(job, input({ tags: ['#synthwave'] })).catch((e: unknown) => e);
+    const error = await approve(job, input({ tags: [SYNTHWAVE_TAG] })).catch((e: unknown) => e);
     expect(error).toMatchObject({
       fields: { tags: 'Tags are plain terms; hashtags belong in the description.' },
     });
@@ -211,7 +218,7 @@ describe('approve', () => {
     const error = await rejection(approve(job, input({ description: 'Out now #invented' })));
     expect(error.status).toBe(422);
     expect(error.fields).toEqual({ description: "Not in this job's hashtag list: #invented" });
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
 
@@ -219,7 +226,7 @@ describe('approve', () => {
     const job = await makeJob({ patch: { hashtagCandidates: null } });
     const error = await rejection(approve(job, input()));
     expect(error.status).toBe(422);
-    expect(error.fields?.description).toContain('#synthwave');
+    expect(error.fields?.description).toContain(SYNTHWAVE_TAG);
   });
 
   it('reports title and tags errors together', async () => {
@@ -227,9 +234,14 @@ describe('approve', () => {
     const error = await rejection(
       approve(job, input({ title: ' ', tags: Array.from({ length: 100 }, () => 'long tag') })),
     );
-    expect(Object.keys(error.fields!).sort()).toEqual(['tags', 'title']);
+    expect(Object.keys(error.fields!).sort((a, b) => a.localeCompare(b))).toEqual([
+      'tags',
+      'title',
+    ]);
   });
+});
 
+describe('approve: where the upload goes', () => {
   it('ends at the payload when the job has no channel', async () => {
     const job = await makeJob({ channel: null });
     await approve(job, input({ title: '  Title 1  ' }));
@@ -237,8 +249,8 @@ describe('approve', () => {
     expect(after.state).toBe('PAYLOAD');
     expect(after.payload).toEqual({
       title: 'Title 1',
-      description: 'A bright synth track.\n\n#synthwave #retrowave',
-      hashtags: ['#synthwave', '#retrowave'],
+      description: DESCRIPTION,
+      hashtags: [SYNTHWAVE_TAG, RETROWAVE],
       tags: ['synthwave', 'outrun'],
     });
     expect(after.finalFields).toEqual(after.payload);
@@ -309,7 +321,7 @@ describe('approve', () => {
     expect(after.finalFields).toEqual({
       title: 'Title 1',
       description: 'Edited.\n\n#synthwave #newmusic',
-      hashtags: ['#synthwave', '#NewMusic'],
+      hashtags: [SYNTHWAVE_TAG, '#NewMusic'],
       tags: ['synthwave', 'outrun'],
     });
     // The approved fields stay visible while publishing, so the page shows what was sent.
@@ -337,21 +349,21 @@ describe('approve', () => {
   it('keeps demo feedback on the job, out of the artist memory', async () => {
     connected();
     const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
-    await approve(job, input({ title: 'Edited Title' }));
+    await approve(job, input({ title: EDITED_TITLE }));
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
-    expect(feedbackRows('jobs/job1/feedback/').length).toBeGreaterThan(0);
+    expect(feedbackRows(JOB_FEEDBACK).length).toBeGreaterThan(0);
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 
   it('keeps visitor feedback on the job', async () => {
     const job = await makeJob({ channel: null });
-    await approve(job, input({ title: 'Edited Title' }));
-    const rows = feedbackRows('jobs/job1/feedback/');
+    await approve(job, input({ title: EDITED_TITLE }));
+    const rows = feedbackRows(JOB_FEEDBACK);
     expect(rows.map((r) => [r.kind, r.field])).toEqual([
       ['EDITED', 'title'],
       ['ACCEPTED', undefined],
     ]);
-    expect(rows[0]).toMatchObject({ before: 'Title 1', after: 'Edited Title', pickVersion: 1 });
+    expect(rows[0]).toMatchObject({ before: 'Title 1', after: EDITED_TITLE, pickVersion: 1 });
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 
@@ -359,7 +371,7 @@ describe('approve', () => {
     connected();
     const job = await makeJob({ owner: 'nathan', channel: 'nathan', picks: 2 });
     await approve(job, input({ title: 'Title 2', pickVersion: 2 }));
-    const rows = feedbackRows('artists/flr/feedback/');
+    const rows = feedbackRows(ARTIST_FEEDBACK);
     expect(rows).toEqual([
       expect.objectContaining({
         kind: 'ACCEPTED',
@@ -368,7 +380,7 @@ describe('approve', () => {
         jobId: 'job1',
       }),
     ]);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 });
 
@@ -385,7 +397,7 @@ describe('rerun', () => {
       [1, false],
       [2, true],
     ]);
-    const rows = feedbackRows('jobs/job1/feedback/');
+    const rows = feedbackRows(JOB_FEEDBACK);
     expect(rows).toEqual([
       expect.objectContaining({
         kind: 'SKIPPED',
@@ -403,17 +415,15 @@ describe('rerun', () => {
   it("stores Nathan's skip in the artist's memory", async () => {
     const job = await makeJob({ owner: 'nathan', channel: 'nathan' });
     await rerun(job);
-    expect(feedbackRows('artists/flr/feedback/')).toEqual([
-      expect.objectContaining({ kind: 'SKIPPED' }),
-    ]);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {
     const job = await makeJob({ picks: 0 });
     await rerun(job);
     expect((await getJob('job1'))!.state).toBe('PICK');
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
   });
 });
 
@@ -428,9 +438,7 @@ describe('concurrent actions', () => {
       uploads: number;
     };
     expect(quota.uploads).toBe(1);
-    expect(feedbackRows('jobs/job1/feedback/').filter((r) => r.kind === 'ACCEPTED')).toHaveLength(
-      1,
-    );
+    expect(feedbackRows(JOB_FEEDBACK).filter((r) => r.kind === 'ACCEPTED')).toHaveLength(1);
   });
 
   it('refuses a re-run once the job already left review', async () => {
@@ -475,7 +483,7 @@ describe('discard', () => {
   it('learns nothing from a discard', async () => {
     const job = await makeJob();
     await discard(job);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 });
@@ -545,7 +553,7 @@ describe('makeShort', () => {
     const final = {
       title: 'Edited',
       description: 'Mine. #synthwave',
-      hashtags: ['#synthwave'],
+      hashtags: [SYNTHWAVE_TAG],
       tags: ['synthwave'],
     };
     const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, finalFields: final } });
@@ -585,7 +593,7 @@ describe('makeShort', () => {
     const final = {
       title: 'Approved',
       description: 'Mine. #synthwave',
-      hashtags: ['#synthwave'],
+      hashtags: [SYNTHWAVE_TAG],
       tags: ['synthwave'],
     };
     await updateJob('job1', { state: 'PUBLISHING', finalFields: final });
@@ -743,7 +751,7 @@ describe('rerun on a Short', () => {
       ],
     });
     expect((await listPicks('job1')).map((p) => p.skipped)).toEqual([false]);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect(feedbackRows('artists/')).toHaveLength(0);
   });
 
@@ -769,7 +777,7 @@ describe('approve on a Short', () => {
     expect(after.state).toBe('PUBLISHING');
     expect(after.finalFields?.title).toBe('Title 1');
     expect(feedbackRows('artists/')).toHaveLength(0);
-    expect(feedbackRows('jobs/job1/feedback/')).toHaveLength(0);
+    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
     expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1 });
   });
 
@@ -777,7 +785,7 @@ describe('approve on a Short', () => {
     connected();
     const job = await shortJob({ channel: 'nathan' });
     await approve({ ...job, owner: 'nathan' }, input({ title: 'Shorter title' }));
-    expect(feedbackRows('artists/flr/feedback/')).toEqual([
+    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([
       expect.objectContaining({
         kind: 'EDITED',
         field: 'title',

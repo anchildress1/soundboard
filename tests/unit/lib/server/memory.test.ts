@@ -14,6 +14,9 @@ import {
 } from '$lib/server/memory';
 import type { PickFields } from '$lib/types';
 
+const MR_KILL_FACT = 'artists/flr/facts/mr-kill';
+const OFFICIAL_TITLE = 'PeekaBoo (Official Video)';
+
 const recordFeedback = (
   entries: Parameters<typeof writeFeedback>[1],
   target: Parameters<typeof writeFeedback>[2],
@@ -25,10 +28,10 @@ vi.mock('@google-cloud/firestore', async () =>
 
 const entry = (at: number, kind: Feedback['kind'] = 'ACCEPTED'): Feedback => ({
   kind,
+  at,
   jobId: 'job1',
   songTitle: 'PeekaBoo',
   pickVersion: 1,
-  at,
 });
 
 const keysUnder = (prefix: string) => [...store.keys()].filter((k) => k.startsWith(prefix));
@@ -56,10 +59,10 @@ describe('seed facts', () => {
 describe('listFacts', () => {
   it('seeds the facts on first use', async () => {
     expect(await listFacts({ seed: true })).toEqual(SEED_FACTS);
-    expect(keysUnder('artists/flr/facts/').sort()).toEqual(
-      SEED_FACTS.map((f) => `artists/flr/facts/${f.key}`).sort(),
+    expect(keysUnder('artists/flr/facts/').sort((a, b) => a.localeCompare(b))).toEqual(
+      SEED_FACTS.map((f) => `artists/flr/facts/${f.key}`).sort((a, b) => a.localeCompare(b)),
     );
-    expect(store.get('artists/flr/facts/mr-kill')).toMatchObject({
+    expect(store.get(MR_KILL_FACT)).toMatchObject({
       kind: 'INFERENCE',
       public: false,
     });
@@ -73,11 +76,11 @@ describe('listFacts', () => {
       kind: 'FACT',
       public: true,
     });
-    store.delete('artists/flr/facts/mr-kill');
+    store.delete(MR_KILL_FACT);
     const facts = await listFacts({ seed: true });
     expect(facts).toHaveLength(SEED_FACTS.length - 1);
     expect(facts.find((f) => f.key === 'home')?.value).toBe('Richmond');
-    expect(store.has('artists/flr/facts/mr-kill')).toBe(false);
+    expect(store.has(MR_KILL_FACT)).toBe(false);
   });
 
   it('returns the seeds without writing them when seeding is off', async () => {
@@ -154,9 +157,9 @@ describe('recordPublish', () => {
       videoId: 'vid1',
       url: 'https://youtu.be/vid1',
       jobId: 'j',
-      fields,
       status: 'VERIFIED' as const,
       at: 5,
+      fields,
     };
     await recordPublish(record);
     expect(store.get('artists/flr/publishes/vid1')).toEqual(record);
@@ -180,7 +183,7 @@ describe('approvalFeedback', () => {
 
   it('records an EDITED row per changed field, then ACCEPTED', () => {
     const final: PickFields = {
-      title: 'PeekaBoo (Official Video)',
+      title: OFFICIAL_TITLE,
       description: 'Desc',
       hashtags: ['#retrowave'],
       tags: ['synthwave', 'retro'],
@@ -191,7 +194,7 @@ describe('approvalFeedback', () => {
         kind: 'EDITED',
         field: 'title',
         before: 'PeekaBoo',
-        after: 'PeekaBoo (Official Video)',
+        after: OFFICIAL_TITLE,
         ...meta,
       },
       {
@@ -201,7 +204,7 @@ describe('approvalFeedback', () => {
         after: 'synthwave, retro',
         ...meta,
       },
-      { kind: 'ACCEPTED', ...meta, after: 'PeekaBoo (Official Video)' },
+      { kind: 'ACCEPTED', ...meta, after: OFFICIAL_TITLE },
     ]);
   });
 

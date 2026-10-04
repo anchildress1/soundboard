@@ -17,6 +17,9 @@ import {
 import type { CatalogVideo } from '$lib/server/youtube';
 import type { Chunk } from '$lib/types';
 
+const SYNTHWAVE_TAG = '#synthwave';
+const INDUSTRIAL = '#industrial';
+
 const chunk = (genre: string[] | null): Chunk => ({
   index: 0,
   startSec: 0,
@@ -103,7 +106,7 @@ describe('rankHashtags', () => {
       '#newmusic #synthwave',
       '#lofi',
     ]);
-    expect(ranked).toEqual(['#synthwave', '#newmusic', '#indie', '#lofi']);
+    expect(ranked).toEqual([SYNTHWAVE_TAG, '#newmusic', '#indie', '#lofi']);
   });
 
   it('caps the list', () => {
@@ -138,10 +141,10 @@ const video = (
 ): CatalogVideo => ({
   videoId: id,
   title: `Title ${id}`,
-  description,
-  tags,
   publishedAt: '',
   thumbnailUrl: null,
+  description,
+  tags,
   views,
   durationSec,
 });
@@ -196,7 +199,7 @@ describe('rankTags', () => {
   it("counts a result's description hashtags as tags, once per video", () => {
     const tags = rankTags([
       video('a', 10, ['glitch'], 'New one #Glitch #industrial'),
-      video('b', 5, [], '#industrial'),
+      video('b', 5, [], INDUSTRIAL),
     ]);
     expect(tags).toEqual([
       { tag: 'industrial', usedBy: 2 },
@@ -205,7 +208,7 @@ describe('rankTags', () => {
   });
 
   it('drops hashtags, blanks, and repeats within one video', () => {
-    expect(rankTags([video('a', 1, ['#synthwave', '  ', 'retro', 'Retro '])])).toEqual([
+    expect(rankTags([video('a', 1, [SYNTHWAVE_TAG, '  ', 'retro', 'Retro '])])).toEqual([
       { tag: 'retro', usedBy: 1 },
     ]);
   });
@@ -260,7 +263,7 @@ describe('audienceEvidence', () => {
     const evidence = await audienceEvidence([chunk(['synthwave'])], null);
 
     expect(evidence.query).toBe('synthwave music video');
-    expect(evidence.hashtags).toEqual(['#synthwave', '#retro', '#80s']);
+    expect(evidence.hashtags).toEqual([SYNTHWAVE_TAG, '#retro', '#80s']);
     expect(evidence.tags).toEqual([
       { tag: 'synthwave', usedBy: 2 },
       { tag: '80s', usedBy: 1 },
@@ -289,7 +292,7 @@ describe('audienceEvidence', () => {
           items: [
             {
               id: 'near',
-              snippet: { title: 'Near', description: '#industrial', tags: ['industrial'] },
+              snippet: { title: 'Near', description: INDUSTRIAL, tags: ['industrial'] },
               statistics: { viewCount: '10' },
               contentDetails: { duration: 'PT1M40S' },
             },
@@ -315,7 +318,7 @@ describe('audienceEvidence', () => {
     expect(searchUrl.searchParams.get('maxResults')).toBe('50');
     expect(searchUrl.searchParams.get('videoDuration')).toBe('short');
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
-    expect(evidence.hashtags).toEqual(['#industrial']);
+    expect(evidence.hashtags).toEqual([INDUSTRIAL]);
     expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
   });
 

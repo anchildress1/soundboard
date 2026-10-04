@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
 import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
 
+const WAKING = 'waking model';
+const SYNTH_BASS = 'synth bass';
+
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   id: 'j1',
   state: 'ANALYZE',
@@ -42,6 +45,8 @@ const music = (m: Partial<ChunkAnalysis['music']>): ChunkAnalysis => ({
 
 const chunk = (index: number, analysis: ChunkAnalysis | null, modelMs = 1000): Chunk => ({
   index,
+  analysis,
+  modelMs,
   startSec: index * 29.5,
   durationSec: 29.5,
   measurements: {
@@ -51,16 +56,14 @@ const chunk = (index: number, analysis: ChunkAnalysis | null, modelMs = 1000): C
     clippedSamples: 0,
     silences: [],
   },
-  analysis,
   raw: analysis ? null : '{bad',
-  modelMs,
 });
 
 describe('jobStatus', () => {
   it('shows a named wait with running progress ahead of the state label', () => {
-    expect(jobStatus(view({ state: 'ANALYZE' }), 'waking model')).toEqual({
+    expect(jobStatus(view({ state: 'ANALYZE' }), WAKING)).toEqual({
       tone: 'info',
-      text: 'waking model',
+      text: WAKING,
       progress: 6 + 21,
     });
   });
@@ -147,7 +150,7 @@ describe('heardTags', () => {
             music({
               genre: ['Synthwave', 'indie'],
               tempoFeel: 'driving',
-              instrumentation: ['synth bass'],
+              instrumentation: [SYNTH_BASS],
               vocals: 'male lead',
             }),
           ),
@@ -156,7 +159,7 @@ describe('heardTags', () => {
             music({
               genre: ['synthwave'],
               tempoFeel: 'Driving',
-              instrumentation: ['synth bass', 'drum machine'],
+              instrumentation: [SYNTH_BASS, 'drum machine'],
               vocals: '',
             }),
           ),
@@ -174,7 +177,7 @@ describe('heardTags', () => {
     );
     const tags = heardTags(v);
     expect(tags.slice(0, 2)).toEqual(['synthwave', 'driving']);
-    expect(tags).toEqual(expect.arrayContaining(['synth bass', 'indie', 'drum machine']));
+    expect(tags).toEqual(expect.arrayContaining([SYNTH_BASS, 'indie', 'drum machine']));
     expect(tags).toHaveLength(5);
   });
 
@@ -272,7 +275,7 @@ describe('modelWorking', () => {
   });
 
   it('is false while the model loads, during chunks, or outside model states', () => {
-    expect(modelWorking(view({ state: 'PICK' }, { wait: 'waking model' }))).toBe(false);
+    expect(modelWorking(view({ state: 'PICK' }, { wait: WAKING }))).toBe(false);
     expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(false);
     expect(modelWorking(view({ state: 'PREP' }))).toBe(false);
     expect(modelWorking(view({ state: 'REVIEW' }))).toBe(false);

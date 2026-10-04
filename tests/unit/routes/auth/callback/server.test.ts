@@ -5,6 +5,9 @@ import { resetClients } from '$lib/server/clients';
 import { OAUTH_COOKIE, readSession, SESSION_COOKIE, sign, type OAuthState } from '$lib/server/auth';
 import { GET } from '$routes/auth/callback/+server';
 
+const NATHAN_EMAIL = 'nathan@example.com';
+const DEMO_EMAIL = 'demo@example.com';
+
 const h = vi.hoisted(() => ({
   getToken: vi.fn(),
   verifyIdToken: vi.fn(),
@@ -48,13 +51,12 @@ async function call(opts: {
   };
   const allowlisted = opts.allowlisted ?? null;
   const event = {
+    cookies,
     url: new URL(
       `${opts.origin ?? 'http://localhost'}/auth/callback${opts.query ?? '?code=c1&state=nonce-1'}`,
     ),
-    cookies,
     locals: {
-      session:
-        allowlisted === null ? null : { email: 'nathan@example.com', allowlisted, demo: false },
+      session: allowlisted === null ? null : { allowlisted, email: NATHAN_EMAIL, demo: false },
     },
   } as unknown as Event;
   let thrown: unknown;
@@ -120,12 +122,12 @@ describe('GET /auth/callback: sign-in', () => {
   });
 
   it('signs in a demo account', async () => {
-    vi.stubEnv('DEMO_EMAILS', 'demo@example.com');
-    google('demo@example.com');
+    vi.stubEnv('DEMO_EMAILS', DEMO_EMAIL);
+    google(DEMO_EMAIL);
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/']);
     expect(readSession(cookies.set.mock.calls[0]![1] as string)).toEqual({
-      email: 'demo@example.com',
+      email: DEMO_EMAIL,
       allowlisted: false,
       demo: true,
     });
@@ -143,7 +145,7 @@ describe('GET /auth/callback: sign-in', () => {
     expect(name).toBe(SESSION_COOKIE);
     expect(options).toMatchObject({ path: '/', httpOnly: true, secure: true, sameSite: 'lax' });
     expect(readSession(value as string)).toEqual({
-      email: 'nathan@example.com',
+      email: NATHAN_EMAIL,
       allowlisted: true,
       demo: false,
     });
@@ -151,7 +153,7 @@ describe('GET /auth/callback: sign-in', () => {
   });
 
   it('refuses an unverified Google email', async () => {
-    google('nathan@example.com', null, false);
+    google(NATHAN_EMAIL, null, false);
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect((thrown as Error).message).toBe('Google account email is not verified');
     expect(cookies.set).not.toHaveBeenCalled();
@@ -162,7 +164,7 @@ describe('GET /auth/callback: connect', () => {
   const connectState = () => sign(state({ purpose: 'connect', channel: 'nathan' }));
 
   it("stores the channel's refresh token for an allowlisted session", async () => {
-    google('nathan@example.com', 'refresh-1');
+    google(NATHAN_EMAIL, 'refresh-1');
     const { thrown, cookies } = await call({ cookie: connectState(), allowlisted: true });
     expect(redirectTo(thrown)).toEqual([303, '/?connected=nathan']);
     expect(h.addSecretVersion).toHaveBeenCalledWith({
@@ -173,21 +175,21 @@ describe('GET /auth/callback: connect', () => {
   });
 
   it('400s when Google returns no refresh token', async () => {
-    google('nathan@example.com', null);
+    google(NATHAN_EMAIL, null);
     const { thrown } = await call({ cookie: connectState(), allowlisted: true });
     expect(statusOf(thrown)).toBe(400);
     expect(h.addSecretVersion).not.toHaveBeenCalled();
   });
 
   it('403s a connect from a non-allowlisted session', async () => {
-    google('nathan@example.com', 'refresh-1');
+    google(NATHAN_EMAIL, 'refresh-1');
     expect(statusOf((await call({ cookie: connectState(), allowlisted: false })).thrown)).toBe(403);
     expect(statusOf((await call({ cookie: connectState() })).thrown)).toBe(403);
     expect(h.addSecretVersion).not.toHaveBeenCalled();
   });
 
   it('403s a connect state with no channel', async () => {
-    google('nathan@example.com', 'refresh-1');
+    google(NATHAN_EMAIL, 'refresh-1');
     const noChannel = sign(state({ purpose: 'connect', channel: null }));
     expect(statusOf((await call({ cookie: noChannel, allowlisted: true })).thrown)).toBe(403);
   });

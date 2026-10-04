@@ -9,6 +9,8 @@ import {
   uploadObjectName,
 } from '$lib/server/gcs';
 
+const UPLOAD_OBJECT = 'uploads/j1';
+
 const gcs = vi.hoisted(() => ({
   storageOptions: [] as unknown[],
   buckets: [] as string[],
@@ -63,10 +65,10 @@ describe('uploadObjectName', () => {
 describe('signedUploadUrl', () => {
   it('signs a v4 write with the content type and the 2 GB range header', async () => {
     gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/put']);
-    expect(await signedUploadUrl('uploads/j1', 'video/mp4')).toBe('https://storage/put');
+    expect(await signedUploadUrl(UPLOAD_OBJECT, 'video/mp4')).toBe('https://storage/put');
     expect(gcs.storageOptions).toEqual([{ projectId: 'proj' }]);
     expect(gcs.buckets).toEqual(['sb-media']);
-    expect(gcs.files).toEqual(['uploads/j1']);
+    expect(gcs.files).toEqual([UPLOAD_OBJECT]);
     expect(gcs.getSignedUrl).toHaveBeenCalledWith({
       version: 'v4',
       action: 'write',
@@ -97,9 +99,9 @@ describe('signedUploadUrl', () => {
 describe('uploadFile', () => {
   it('uploads the local file to the object with its content type', async () => {
     gcs.upload.mockResolvedValueOnce([{}]);
-    await uploadFile('/tmp/short-s1-1.mp4', 'uploads/s1-1', 'video/mp4');
+    await uploadFile('renders/short-s1-1.mp4', 'uploads/s1-1', 'video/mp4');
     expect(gcs.buckets).toEqual(['sb-media']);
-    expect(gcs.upload).toHaveBeenCalledWith('/tmp/short-s1-1.mp4', {
+    expect(gcs.upload).toHaveBeenCalledWith('renders/short-s1-1.mp4', {
       destination: 'uploads/s1-1',
       contentType: 'video/mp4',
     });
@@ -107,7 +109,7 @@ describe('uploadFile', () => {
 
   it('propagates an upload failure', async () => {
     gcs.upload.mockRejectedValueOnce(new Error('403 Forbidden'));
-    await expect(uploadFile('/tmp/x.mp4', 'uploads/x', 'video/mp4')).rejects.toThrow('403');
+    await expect(uploadFile('renders/x.mp4', 'uploads/x', 'video/mp4')).rejects.toThrow('403');
   });
 });
 
@@ -128,7 +130,7 @@ describe('objectInfo', () => {
   it('returns size and type for an uploaded object', async () => {
     gcs.exists.mockResolvedValueOnce([true]);
     gcs.getMetadata.mockResolvedValueOnce([{ size: '1048576', contentType: 'video/quicktime' }]);
-    expect(await objectInfo('uploads/j1')).toEqual({
+    expect(await objectInfo(UPLOAD_OBJECT)).toEqual({
       size: 1048576,
       contentType: 'video/quicktime',
     });
@@ -136,14 +138,14 @@ describe('objectInfo', () => {
 
   it('returns null while the object is missing', async () => {
     gcs.exists.mockResolvedValueOnce([false]);
-    expect(await objectInfo('uploads/j1')).toBeNull();
+    expect(await objectInfo(UPLOAD_OBJECT)).toBeNull();
     expect(gcs.getMetadata).not.toHaveBeenCalled();
   });
 
   it('defaults missing metadata fields', async () => {
     gcs.exists.mockResolvedValueOnce([true]);
     gcs.getMetadata.mockResolvedValueOnce([{}]);
-    expect(await objectInfo('uploads/j1')).toEqual({
+    expect(await objectInfo(UPLOAD_OBJECT)).toEqual({
       size: 0,
       contentType: 'application/octet-stream',
     });

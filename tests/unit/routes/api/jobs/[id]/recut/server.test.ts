@@ -27,7 +27,7 @@ type Event = Parameters<typeof POST>[0];
 const recut = async (id: string, body: unknown, allowlisted = false) =>
   POST({
     params: { id },
-    request: new Request('http://x', { method: 'POST', body: JSON.stringify(body) }),
+    request: new Request('https://x', { method: 'POST', body: JSON.stringify(body) }),
     locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null },
   } as unknown as Event);
 
@@ -111,9 +111,10 @@ describe('POST /api/jobs/[id]/recut', () => {
     seed('s');
     const real = store.get.bind(store);
     let reads = 0;
-    vi.spyOn(store, 'get').mockImplementation((key: string) =>
-      key === 'jobs/s' && ++reads > 2 ? undefined : real(key),
-    );
+    vi.spyOn(store, 'get').mockImplementation((key: string) => {
+      if (key === 'jobs/s') reads += 1;
+      return key === 'jobs/s' && reads > 2 ? undefined : real(key);
+    });
     const response = await recut('s', { startSec: 70, lengthSec: 30, reframe: 'crop' });
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;

@@ -3,13 +3,18 @@ import { createRawSnippet } from 'svelte';
 import { describe, expect, it } from 'vitest';
 import Destinations from '$lib/components/Destinations.svelte';
 
+const YOUTUBE_PANEL = 'YouTube panel';
+const SHORT_PANEL = 'Short panel';
+const BANDCAMP_PANEL = 'Bandcamp panel';
+const SELECTED = 'aria-selected';
+
 const panel = (text: string) => createRawSnippet(() => ({ render: () => `<p>${text}</p>` }));
 
 const setup = (youtubeDone = false, bandcampDone = false, shortDone = false) =>
   render(Destinations, {
-    youtube: panel('YouTube panel'),
-    short: panel('Short panel'),
-    bandcamp: panel('Bandcamp panel'),
+    youtube: panel(YOUTUBE_PANEL),
+    short: panel(SHORT_PANEL),
+    bandcamp: panel(BANDCAMP_PANEL),
     youtubeDone,
     shortDone,
     bandcampDone,
@@ -20,10 +25,10 @@ const tab = (name: RegExp) => screen.getByRole('tab', { name });
 describe('Destinations', () => {
   it('opens on YouTube with the other panels hidden', () => {
     setup();
-    expect(tab(/YouTube/)).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('YouTube panel')).toBeVisible();
-    expect(screen.queryByText('Short panel')).not.toBeVisible();
-    expect(screen.queryByText('Bandcamp panel')).not.toBeVisible();
+    expect(tab(/YouTube/)).toHaveAttribute(SELECTED, 'true');
+    expect(screen.getByText(YOUTUBE_PANEL)).toBeVisible();
+    expect(screen.queryByText(SHORT_PANEL)).not.toBeVisible();
+    expect(screen.queryByText(BANDCAMP_PANEL)).not.toBeVisible();
   });
 
   it('orders the tabs YouTube, Short, Bandcamp, each tied to its panel', () => {
@@ -39,11 +44,11 @@ describe('Destinations', () => {
   it('switches panels on click', async () => {
     setup();
     await fireEvent.click(tab(/Bandcamp/));
-    expect(tab(/Bandcamp/)).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Bandcamp panel')).toBeVisible();
-    expect(screen.queryByText('YouTube panel')).not.toBeVisible();
+    expect(tab(/Bandcamp/)).toHaveAttribute(SELECTED, 'true');
+    expect(screen.getByText(BANDCAMP_PANEL)).toBeVisible();
+    expect(screen.queryByText(YOUTUBE_PANEL)).not.toBeVisible();
     await fireEvent.click(tab(/Short/));
-    expect(screen.getByText('Short panel')).toBeVisible();
+    expect(screen.getByText(SHORT_PANEL)).toBeVisible();
   });
 
   it('moves between tabs with the arrow keys, wrapping around', async () => {
@@ -62,14 +67,14 @@ describe('Destinations', () => {
     await fireEvent.keyDown(youtube, { key: 'ArrowLeft' });
     expect(bandcamp).toHaveFocus();
     await fireEvent.keyDown(bandcamp, { key: 'Enter' });
-    expect(bandcamp).toHaveAttribute('aria-selected', 'true');
+    expect(bandcamp).toHaveAttribute(SELECTED, 'true');
   });
 
   it('jumps to the first and last tab with Home and End', async () => {
     setup();
     await fireEvent.keyDown(tab(/YouTube/), { key: 'End' });
     expect(tab(/Bandcamp/)).toHaveFocus();
-    expect(tab(/Bandcamp/)).toHaveAttribute('aria-selected', 'true');
+    expect(tab(/Bandcamp/)).toHaveAttribute(SELECTED, 'true');
     await fireEvent.keyDown(tab(/Bandcamp/), { key: 'Home' });
     expect(tab(/YouTube/)).toHaveFocus();
   });

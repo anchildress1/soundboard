@@ -22,6 +22,10 @@ import {
 } from '$lib/server/short';
 import type { Chunk, Short } from '$lib/types';
 
+const NOTES = 'first single';
+const CHORUS = 'The chorus lands.';
+const RENDER_FILE = 'short-s1-1.mp4';
+
 const h = vi.hoisted(() => ({
   objects: new Set<string>(),
   spawn: vi.fn(),
@@ -147,7 +151,7 @@ function shortJob(patch: Partial<JobDoc> = {}, short: Partial<Short> = {}): JobD
     owner: 'visitor',
     channel: 'sandbox',
     songTitle: 'PeekaBoo',
-    notes: 'first single',
+    notes: NOTES,
     filename: 'peekaboo (Short).mp4',
     contentType: 'video/mp4',
     sampleId: null,
@@ -213,8 +217,8 @@ beforeEach(() => {
   };
   h.spawn.mockReset();
   h.spawn.mockImplementation((command: string, args: string[]) => {
-    const run =
-      command === 'ffprobe' ? runs.probe : args.includes('-movflags') ? runs.render : runs.loudness;
+    const render = args.includes('-movflags') ? runs.render : runs.loudness;
+    const run = command === 'ffprobe' ? runs.probe : render;
     run.onRun?.(args);
     return child(run);
   });
@@ -222,7 +226,7 @@ beforeEach(() => {
 
 describe('isRawHook', () => {
   it('accepts a window, a length, and a reason', () => {
-    expect(isRawHook({ window: 2, lengthSec: 30, reason: 'The chorus lands.' })).toBe(true);
+    expect(isRawHook({ window: 2, lengthSec: 30, reason: CHORUS })).toBe(true);
   });
 
   it('rejects missing or mistyped fields', () => {
@@ -268,7 +272,7 @@ describe('settleHook', () => {
 
 describe('buildHookMessages', () => {
   it('sends text only: rules plus each window with its ffmpeg loudness', () => {
-    const [system, user] = buildHookMessages(ctx({ notes: 'first single' }));
+    const [system, user] = buildHookMessages(ctx({ notes: NOTES }));
     expect(system!.role).toBe('system');
     expect(system!.content).toContain('15 to 60 seconds');
     expect(system!.content).not.toContain('skippedHooks');
@@ -279,7 +283,7 @@ describe('buildHookMessages', () => {
       windows: { window: number; at: number; integratedLufs?: number; visual: string }[];
       skippedHooks?: unknown;
     };
-    expect(context.artistNotes).toBe('first single');
+    expect(context.artistNotes).toBe(NOTES);
     expect(context.durationSec).toBe(180);
     expect(context.windows.map((w) => w.window)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(context.windows[2]).toMatchObject({ at: 59, integratedLufs: -14 });
@@ -415,8 +419,10 @@ describe('placeCut', () => {
   });
 
   it('backs up to the quietest moment in the second before the hit', () => {
-    const curve = pts(56, 90.5, 70).map((p) => (p.t === 69.4 ? { ...p, m: -60 } : p));
-    expect(placeCut(curve, cut)).toBe(69.4);
+    const curve = pts(56, 90.5, 70).map((p) =>
+      Math.abs(p.t - 69.4) < 1e-9 ? { ...p, m: -60 } : p,
+    );
+    expect(placeCut(curve, cut)).toBeCloseTo(69.4, 9);
   });
 
   it("keeps the window's start when nothing rises by the minimum", () => {
@@ -456,7 +462,7 @@ describe('hookStep', () => {
     seedChunks(6);
     h.objects.add('uploads/p1');
     fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'The chorus lands.' })),
+      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: CHORUS })),
     );
     const patch = await hookStep(shortJob());
     expect(patch).toMatchObject({
@@ -468,7 +474,7 @@ describe('hookStep', () => {
         reframe: 'blur',
         renders: 0,
         skipped: [],
-        hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands.' },
+        hook: { window: 2, startSec: 70, lengthSec: 30, reason: CHORUS },
       },
     });
     expect(patch.short!.modelMs).toBeGreaterThanOrEqual(0);
@@ -481,7 +487,7 @@ describe('hookStep', () => {
     );
     expect(agent).toBeDefined();
     expect(agentSpanIO().output).toEqual([
-      JSON.stringify({ window: 2, lengthSec: 30, reason: 'The chorus lands.' }),
+      JSON.stringify({ window: 2, lengthSec: 30, reason: CHORUS }),
     ]);
   });
 
@@ -563,7 +569,7 @@ describe('renderStep', () => {
     });
     const args = h.spawn.mock.calls[0]![1] as string[];
     const local = args.at(-1)!;
-    expect(local).toBe(join(tmpdir(), 'short-s1-1.mp4'));
+    expect(local).toBe(join(tmpdir(), RENDER_FILE));
     expect(args[args.indexOf('-i') + 1]).toContain('/uploads/p1?sig=read');
     expect(args[args.indexOf('-ss') + 1]).toBe('70.000');
     expect(args[args.indexOf('-t') + 1]).toBe('30.000');
@@ -589,7 +595,7 @@ describe('renderStep', () => {
     await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
       '403 Forbidden',
     );
-    expect(existsSync(join(tmpdir(), 'short-s1-1.mp4'))).toBe(false);
+    expect(existsSync(join(tmpdir(), RENDER_FILE))).toBe(false);
   });
 
   it('fails when the render reads back without playable video', async () => {
@@ -605,7 +611,7 @@ describe('renderStep', () => {
       'ffmpeg exited 1: Conversion failed!',
     );
     expect(h.upload).not.toHaveBeenCalled();
-    expect(existsSync(join(tmpdir(), 'short-s1-1.mp4'))).toBe(false);
+    expect(existsSync(join(tmpdir(), RENDER_FILE))).toBe(false);
   });
 
   it('refuses a Short without a hook', async () => {

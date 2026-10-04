@@ -1,12 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 
+const TABS_JOB = '/jobs/e2e-tabs';
+
 const tab = (page: Page, name: 'YouTube' | 'Short' | 'Bandcamp') =>
   page.getByRole('tab', { name: new RegExp(name) });
 const shortPanel = (page: Page) => page.locator('#panel-short');
 
 test.describe('destination tabs', () => {
   test('lists YouTube, Short, and Bandcamp, each to do, with YouTube open', async ({ page }) => {
-    await page.goto('/jobs/e2e-tabs');
+    await page.goto(TABS_JOB);
     const tabs = page.getByRole('tablist', { name: 'Where it goes' }).getByRole('tab');
     await expect(tabs).toHaveCount(3);
     await expect(tabs.nth(0)).toContainText('YouTube');
@@ -19,7 +21,7 @@ test.describe('destination tabs', () => {
   });
 
   test('moves between tabs from the keyboard', async ({ page }) => {
-    await page.goto('/jobs/e2e-tabs');
+    await page.goto(TABS_JOB);
     await tab(page, 'YouTube').focus();
     await page.keyboard.press('ArrowRight');
     await expect(tab(page, 'Short')).toBeFocused();
@@ -37,7 +39,7 @@ test.describe('destination tabs', () => {
   });
 
   test('keeps the tab row inside the screen', async ({ page }) => {
-    await page.goto('/jobs/e2e-tabs');
+    await page.goto(TABS_JOB);
     const width = page.viewportSize()!.width;
     for (const name of ['YouTube', 'Short', 'Bandcamp'] as const) {
       const box = (await tab(page, name).boundingBox())!;

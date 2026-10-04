@@ -6,6 +6,12 @@ import { resetClients } from '$lib/server/clients';
 import { create, MAX_BYTES, NOTES_MAX, type CreateInput } from '$lib/server/create';
 import { RUNS_PER_DAY } from '$lib/server/quota';
 import type { JobDoc } from '$lib/server/jobs';
+import { omit } from '../../../helpers/omit';
+
+const SIGNED_PUT = 'https://storage/put';
+const TOO_LONG = 'Videos are capped at 5 minutes here.';
+const TITLE_REQUIRED = 'Song title is required.';
+const TOO_BIG = 'Videos must be under 2 GB.';
 
 vi.mock('@google-cloud/firestore', async () =>
   (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
@@ -60,7 +66,7 @@ beforeEach(() => {
   resetClients();
   vi.clearAllMocks();
   gcs.files.length = 0;
-  gcs.getSignedUrl.mockResolvedValue(['https://storage/put']);
+  gcs.getSignedUrl.mockResolvedValue([SIGNED_PUT]);
   store.set('samples/peek', {
     songTitle: 'PeekaBoo',
     videoId: 'yt-peek',
@@ -113,7 +119,7 @@ describe('create from a sample', () => {
 describe('create from an own video', () => {
   it('makes a visitor job that ends at the payload, with a signed upload URL', async () => {
     const { id, uploadUrl } = await create(upload(), visitor);
-    expect(uploadUrl).toBe('https://storage/put');
+    expect(uploadUrl).toBe(SIGNED_PUT);
     expect(gcs.files).toEqual([`uploads/${id}`]);
     expect(gcs.getSignedUrl).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'write', contentType: 'video/mp4' }),
@@ -152,7 +158,7 @@ describe('create from an own video', () => {
   });
 
   it('defaults a missing filename and notes', async () => {
-    const { id } = await create(upload({ filename: undefined, notes: undefined }), visitor);
+    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, visitor);
     expect(job(id).filename).toBe('video');
     expect(job(id).notes).toBe('');
   });
@@ -161,13 +167,13 @@ describe('create from an own video', () => {
     await expect(create(upload({ durationSec: 300 }), visitor)).resolves.toBeTruthy();
     const error = await rejection(create(upload({ durationSec: 301 }), visitor));
     expect(error.status).toBe(400);
-    expect(error.message).toBe('Videos are capped at 5 minutes here.');
+    expect(error.message).toBe(TOO_LONG);
   });
 
   it("gives Nathan's uploads 15 minutes, his channel, and no IP caps", async () => {
     for (let i = 0; i < 6; i++) {
       const { id, uploadUrl } = await create(upload({ durationSec: 900 }), nathan);
-      expect(uploadUrl).toBe('https://storage/put');
+      expect(uploadUrl).toBe(SIGNED_PUT);
       expect(job(id)).toMatchObject({ owner: 'nathan', channel: 'nathan', ipHash: null });
     }
     expect(quota()).toBeUndefined();
@@ -176,28 +182,28 @@ describe('create from an own video', () => {
   });
 
   it.each([
-    ['a missing title', { songTitle: '' }, 'Song title is required.'],
-    ['a blank title', { songTitle: '   ' }, 'Song title is required.'],
-    ['an undefined title', { songTitle: undefined }, 'Song title is required.'],
+    ['a missing title', upload({ songTitle: '' }), TITLE_REQUIRED],
+    ['a blank title', upload({ songTitle: '   ' }), TITLE_REQUIRED],
+    ['an undefined title', omit(upload(), 'songTitle'), TITLE_REQUIRED],
     [
       'a title over 100 chars',
-      { songTitle: 'x'.repeat(101) },
+      upload({ songTitle: 'x'.repeat(101) }),
       'Song title is over 100 characters.',
     ],
     [
       'notes over 1000 chars',
-      { notes: 'n'.repeat(NOTES_MAX + 1) },
+      upload({ notes: 'n'.repeat(NOTES_MAX + 1) }),
       'Notes are over 1000 characters.',
     ],
-    ['a non-video type', { contentType: 'audio/mpeg' }, 'Pick a video file.'],
-    ['a missing type', { contentType: undefined }, 'Pick a video file.'],
-    ['size 0', { size: 0 }, 'Videos must be under 2 GB.'],
-    ['size over 2 GB', { size: MAX_BYTES + 1 }, 'Videos must be under 2 GB.'],
-    ['a non-numeric size', { size: 'big' }, 'Videos must be under 2 GB.'],
-    ['duration 0', { durationSec: 0 }, 'Videos are capped at 5 minutes here.'],
-    ['a NaN duration', { durationSec: 'long' }, 'Videos are capped at 5 minutes here.'],
-  ])('rejects %s with 400', async (_label, over, message) => {
-    const error = await rejection(create(upload(over), visitor));
+    ['a non-video type', upload({ contentType: 'audio/mpeg' }), 'Pick a video file.'],
+    ['a missing type', omit(upload(), 'contentType'), 'Pick a video file.'],
+    ['size 0', upload({ size: 0 }), TOO_BIG],
+    ['size over 2 GB', upload({ size: MAX_BYTES + 1 }), TOO_BIG],
+    ['a non-numeric size', upload({ size: 'big' }), TOO_BIG],
+    ['duration 0', upload({ durationSec: 0 }), TOO_LONG],
+    ['a NaN duration', upload({ durationSec: 'long' }), TOO_LONG],
+  ])('rejects %s with 400', async (_label, input, message) => {
+    const error = await rejection(create(input as CreateInput, visitor));
     expect(error.status).toBe(400);
     expect(error.message).toBe(message);
     expect(store.size).toBe(1);

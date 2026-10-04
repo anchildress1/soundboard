@@ -81,12 +81,17 @@ class Query {
   }
 }
 
+function nextAutoId(): string {
+  autoId += 1;
+  return `auto${autoId}`;
+}
+
 export class CollectionRef extends Query {
-  doc(id: string = `auto${++autoId}`) {
+  doc(id: string = nextAutoId()) {
     return new DocRef(`${this.path}/${id}`);
   }
   async add(data: Data) {
-    const ref = this.doc(`auto${++autoId}`);
+    const ref = this.doc(nextAutoId());
     await ref.set(data);
     return ref;
   }

@@ -6,6 +6,8 @@ import { resetClients } from '$lib/server/clients';
 import { POST } from '$routes/api/jobs/[id]/approve/+server';
 import type { JobView } from '$lib/types';
 
+const SYNTHWAVE = '#synthwave';
+
 const h = vi.hoisted(() => ({ secrets: new Map<string, string>() }));
 
 vi.mock('@google-cloud/firestore', async () =>
@@ -34,7 +36,7 @@ const approve = async (id: string, body: unknown, allowlisted = false) =>
     locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null },
   } as unknown as Event);
 
-const CANDIDATES = ['#synthwave', '#RetroWave', '#newmusic'];
+const CANDIDATES = [SYNTHWAVE, '#RetroWave', '#newmusic'];
 
 function seed(id: string, patch: Record<string, unknown> = {}) {
   store.set(`jobs/${id}`, {
@@ -58,7 +60,7 @@ function seed(id: string, patch: Record<string, unknown> = {}) {
     version: 1,
     title: 'PeekaBoo',
     description: 'Night drive. #synthwave',
-    hashtags: ['#synthwave'],
+    hashtags: [SYNTHWAVE],
     tags: ['synthwave'],
     flags: [],
     brandCheck: '',
@@ -94,7 +96,7 @@ describe('POST /api/jobs/[id]/approve', () => {
     expect(view.job.payload).toEqual({
       title: 'PeekaBoo (Official Video)',
       description: 'Night drive. #synthwave #retrowave',
-      hashtags: ['#synthwave', '#RetroWave'],
+      hashtags: [SYNTHWAVE, '#RetroWave'],
       tags: ['synthwave', 'outrun'],
     });
     // Visitor feedback stays on the job.

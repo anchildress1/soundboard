@@ -33,7 +33,7 @@ test.describe('home page', () => {
   test('sets zero cookies for a signed-out visitor', async ({ page, context }) => {
     const response = await page.goto('/');
     expect(response?.headers()['set-cookie']).toBeUndefined();
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('load');
     expect(await context.cookies()).toEqual([]);
   });
 

@@ -6,8 +6,8 @@ import { readBody, respond } from '$lib/server/http';
 const post = (body: string) =>
   new Request('http://localhost/api', {
     method: 'POST',
-    body,
     headers: { 'content-type': 'application/json' },
+    body,
   });
 
 describe('respond', () => {

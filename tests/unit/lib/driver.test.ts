@@ -5,8 +5,8 @@ import type { JobState, JobView, Wait } from '$lib/types';
 
 const view = (state: JobState, wait?: Wait): JobView => ({
   job: {
-    id: 'j1',
     state,
+    id: 'j1',
     owner: 'visitor',
     channel: null,
     songTitle: 'PeekaBoo',
@@ -34,7 +34,7 @@ const view = (state: JobState, wait?: Wait): JobView => ({
 
 function deps(steps: (JobView | Error | string)[], stopped = () => false) {
   const queue = [...steps];
-  const d = {
+  return {
     step: vi.fn(async () => {
       const next = queue.shift();
       if (next === undefined) throw new Error('no more steps');
@@ -46,7 +46,6 @@ function deps(steps: (JobView | Error | string)[], stopped = () => false) {
     onView: vi.fn(),
     onError: vi.fn(),
   } satisfies DriverDeps;
-  return d;
 }
 
 afterEach(() => {
@@ -108,7 +107,10 @@ describe('drive', () => {
 
   it('stops when the caller says so', async () => {
     let calls = 0;
-    const d = deps([view('ANALYZE'), view('ANALYZE'), view('ANALYZE')], () => calls++ >= 2);
+    const d = deps([view('ANALYZE'), view('ANALYZE'), view('ANALYZE')], () => {
+      calls += 1;
+      return calls > 2;
+    });
     const final = await drive(view('ANALYZE'), d);
     expect(d.step).toHaveBeenCalledTimes(2);
     expect(final.job.state).toBe('ANALYZE');

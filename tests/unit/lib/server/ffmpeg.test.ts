@@ -20,6 +20,11 @@ import {
   splitJpegs,
 } from '$lib/server/ffmpeg';
 
+const SIGNED_OBJECT_URL = 'https://storage.example/obj?X-Goog-Signature=secret';
+const FFMPEG_OP = 'process.ffmpeg';
+const OBJECT_URL = 'https://storage.example/obj';
+const FILTER_GRAPH = '-filter_complex';
+
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const spawnMock = vi.mocked(spawn);
 
@@ -300,14 +305,14 @@ describe('ffmpeg spans', () => {
     nextRun({ stdout: Buffer.from(PROBE_JSON) });
     nextRun({ stderr: '' });
     nextRun({ stderr: '' });
-    await probe('https://storage.example/obj?X-Goog-Signature=secret');
-    await measureFile('https://storage.example/obj?X-Goog-Signature=secret', 10);
-    await extractWindow('https://storage.example/obj?X-Goog-Signature=secret', 0, 10);
+    await probe(SIGNED_OBJECT_URL);
+    await measureFile(SIGNED_OBJECT_URL, 10);
+    await extractWindow(SIGNED_OBJECT_URL, 0, 10);
     const spans = startSpan.mock.calls.map(([options]) => options as { op: string; name: string });
     expect(spans.map((s) => [s.op, s.name])).toEqual([
-      ['process.ffmpeg', 'ffprobe probe'],
-      ['process.ffmpeg', 'ffmpeg measure'],
-      ['process.ffmpeg', 'ffmpeg window'],
+      [FFMPEG_OP, 'ffprobe probe'],
+      [FFMPEG_OP, 'ffmpeg measure'],
+      [FFMPEG_OP, 'ffmpeg window'],
     ]);
     expect(JSON.stringify(spans)).not.toContain('Signature');
   });
@@ -321,7 +326,7 @@ describe('ffmpeg spans', () => {
 describe('measureFile', () => {
   it('measures the whole file from offset zero', async () => {
     nextRun({ stderr: `${STDERR}[silencedetect @ 0x3] silence_start: 170\n` });
-    const m = await measureFile('https://storage.example/obj', 183.2);
+    const m = await measureFile(OBJECT_URL, 183.2);
     expect(m.integratedLufs).toBeCloseTo(-9.7);
     expect(m.silences).toEqual([
       { start: 4, end: 7 },
@@ -329,10 +334,8 @@ describe('measureFile', () => {
     ]);
     const [command, args] = spawnMock.mock.calls[0]!;
     expect(command).toBe('ffmpeg');
-    expect(args).toEqual(
-      expect.arrayContaining(['-vn', '-i', 'https://storage.example/obj', 'null']),
-    );
-    const graph = args![args!.indexOf('-filter_complex') + 1]!;
+    expect(args).toEqual(expect.arrayContaining(['-vn', '-i', OBJECT_URL, 'null']));
+    const graph = args![args!.indexOf(FILTER_GRAPH) + 1]!;
     expect(graph).toMatch(/^\[0:a:0\]ebur128=peak=true/);
     expect(graph).toContain('silencedetect=n=-60dB:d=2');
   });
@@ -351,7 +354,7 @@ describe('extractWindow', () => {
     const frames = Array.from({ length: FRAMES_PER_WINDOW }, (_, i) => jpeg([i]));
     nextRun({ stdout: wav, stderr: STDERR, fd3: Buffer.concat(frames) });
 
-    const window = await extractWindow('https://storage.example/obj', 29.5, 29.5);
+    const window = await extractWindow(OBJECT_URL, 29.5, 29.5);
 
     expect(Buffer.compare(window.wav, wav)).toBe(0);
     expect(window.frames).toHaveLength(8);
@@ -362,7 +365,7 @@ describe('extractWindow', () => {
     expect(args).toContain('pipe:1');
     expect(args).toContain('pipe:3');
     expect(args[args.indexOf('-frames:v') + 1]).toBe('8');
-    const graph = args[args.indexOf('-filter_complex') + 1]!;
+    const graph = args[args.indexOf(FILTER_GRAPH) + 1]!;
     expect(graph).toContain('fps=0.2712');
     expect(graph).toContain('aresample=16000');
     expect(graph).toContain('scale=-2:360');
@@ -414,15 +417,15 @@ describe('parseLoudness', () => {
 describe('loudnessCurve', () => {
   it('seeks the stretch, reads audio only, and returns the shifted curve', async () => {
     nextRun({ stderr: EBUR_LINES });
-    const curve = await loudnessCurve('https://storage.example/obj', 26.5, 35);
+    const curve = await loudnessCurve(OBJECT_URL, 26.5, 35);
     expect(curve).toHaveLength(3);
     expect(curve[0]).toEqual({ t: 26.6, m: -120.7 });
     const [command, args] = spawnMock.mock.calls[0]!;
     expect(command).toBe('ffmpeg');
     expect(args![args!.indexOf('-ss') + 1]).toBe('26.500');
     expect(args![args!.indexOf('-t') + 1]).toBe('35.000');
-    expect(args).toEqual(expect.arrayContaining(['-vn', '-i', 'https://storage.example/obj']));
-    expect(args![args!.indexOf('-filter_complex') + 1]).toBe('[0:a:0]ebur128');
+    expect(args).toEqual(expect.arrayContaining(['-vn', '-i', OBJECT_URL]));
+    expect(args![args!.indexOf(FILTER_GRAPH) + 1]).toBe('[0:a:0]ebur128');
     expect(args!.indexOf('-ss')).toBeLessThan(args!.indexOf('-i'));
   });
 
@@ -463,7 +466,7 @@ describe('shortFilter', () => {
 describe('renderShort', () => {
   it('cuts the hook into a local MP4 with its index up front', async () => {
     nextRun({});
-    await renderShort('https://storage.example/src', '/tmp/short-s1-1.mp4', {
+    await renderShort('https://storage.example/src', 'renders/short-s1-1.mp4', {
       startSec: 40,
       lengthSec: 30,
       reframe: 'crop',
@@ -473,19 +476,19 @@ describe('renderShort', () => {
     expect(args![args!.indexOf('-ss') + 1]).toBe('40.000');
     expect(args![args!.indexOf('-t') + 1]).toBe('30.000');
     expect(args![args!.indexOf('-i') + 1]).toBe('https://storage.example/src');
-    expect(args![args!.indexOf('-filter_complex') + 1]).toBe(shortFilter('crop'));
+    expect(args![args!.indexOf(FILTER_GRAPH) + 1]).toBe(shortFilter('crop'));
     expect(args).toEqual(expect.arrayContaining(['-map', '[v]', '-map', '0:a:0']));
     expect(args![args!.indexOf('-movflags') + 1]).toBe('+faststart');
     expect(args![args!.indexOf('-preset') + 1]).toBe('veryfast');
     expect(args).toContain('-y');
-    expect(args!.at(-1)).toBe('/tmp/short-s1-1.mp4');
+    expect(args!.at(-1)).toBe('renders/short-s1-1.mp4');
   });
 
   it('uses the blur graph for blur fill', async () => {
     nextRun({});
     await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' });
     const args = spawnMock.mock.calls[0]![1]!;
-    expect(args[args.indexOf('-filter_complex') + 1]).toBe(shortFilter('blur'));
+    expect(args[args.indexOf(FILTER_GRAPH) + 1]).toBe(shortFilter('blur'));
   });
 
   it('rejects when ffmpeg fails', async () => {

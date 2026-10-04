@@ -10,7 +10,8 @@ vi.mock('@google-cloud/firestore', async () =>
 );
 
 type Event = Parameters<typeof load>[0];
-const run = (session: App.Locals['session']) => load({ locals: { session } } as unknown as Event);
+const run = (session: Event['locals']['session']) =>
+  load({ locals: { session } } as unknown as Event);
 
 beforeEach(() => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');

@@ -17,6 +17,8 @@ import {
 } from '$lib/server/youtube';
 import type { PickFields } from '$lib/types';
 
+const SESSION_URL = 'https://session';
+
 const fetchMock = vi.fn<typeof fetch>();
 
 const json = (body: unknown, init: ResponseInit = {}) =>
@@ -357,8 +359,8 @@ describe('uploadOffset', () => {
     fetchMock.mockResolvedValueOnce(
       new Response(null, { status: 308, headers: { range: 'bytes=0-524287' } }),
     );
-    expect(await uploadOffset('https://session', 1_000_000)).toEqual({ done: false, next: 524288 });
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://session');
+    expect(await uploadOffset(SESSION_URL, 1_000_000)).toEqual({ done: false, next: 524288 });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(SESSION_URL);
     expect(initOf(0).method).toBe('PUT');
     expect(headersOf(0)).toEqual({ 'content-range': 'bytes */1000000', 'content-length': '0' });
   });
@@ -395,11 +397,11 @@ describe('uploadChunk', () => {
         headers: { range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` },
       }),
     );
-    const result = await uploadChunk('https://session', 'https://gcs/signed', 0, total);
+    const result = await uploadChunk(SESSION_URL, 'https://gcs/signed', 0, total);
     expect(result).toEqual({ done: false, next: UPLOAD_CHUNK_BYTES });
     expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
     expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
-    expect(String(fetchMock.mock.calls[1]![0])).toBe('https://session');
+    expect(String(fetchMock.mock.calls[1]![0])).toBe(SESSION_URL);
     expect(initOf(1).method).toBe('PUT');
     expect(headersOf(1)).toEqual({
       'content-length': String(UPLOAD_CHUNK_BYTES),

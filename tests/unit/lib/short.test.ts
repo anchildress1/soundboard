@@ -4,7 +4,7 @@ import { cutErrors, lengthBounds, SHORT_MAX_SEC, SHORT_MIN_SEC, tenth } from '$l
 describe('tenth', () => {
   it('rounds to a tenth of a second', () => {
     expect(tenth(40.04)).toBe(40);
-    expect(tenth(40.05)).toBe(40.1);
+    expect(tenth(40.05)).toBeCloseTo(40.1, 9);
     expect(tenth(-0.04)).toBe(-0);
   });
 });
