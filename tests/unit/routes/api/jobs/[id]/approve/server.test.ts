@@ -110,6 +110,19 @@ describe('POST /api/jobs/[id]/approve', () => {
     expect((job('j').payload as { tags: string[] }).tags).toEqual(['synthwave', '42']);
   });
 
+  it('drops array tags that are not text', async () => {
+    seed('j');
+    await approve('j', { ...fields, tags: ['synthwave', { tag: 'outrun' }, null] });
+    expect((job('j').payload as { tags: string[] }).tags).toEqual(['synthwave']);
+  });
+
+  it('reads an object title as empty rather than "[object Object]"', async () => {
+    seed('j');
+    const response = await approve('j', { ...fields, title: { text: 'PeekaBoo' } });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ fields: { title: 'Title is required.' } });
+  });
+
   it('treats missing fields as empty and reports the title', async () => {
     seed('j');
     const response = await approve('j', {});

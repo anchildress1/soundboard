@@ -163,6 +163,11 @@ describe('create from an own video', () => {
     expect(job(id).notes).toBe('');
   });
 
+  it('defaults a filename that is not text', async () => {
+    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), visitor);
+    expect(job(id).filename).toBe('video');
+  });
+
   it('accepts a visitor video at exactly 5 minutes and rejects one over', async () => {
     await expect(create(upload({ durationSec: 300 }), visitor)).resolves.toBeTruthy();
     const error = await rejection(create(upload({ durationSec: 301 }), visitor));
@@ -185,6 +190,8 @@ describe('create from an own video', () => {
     ['a missing title', upload({ songTitle: '' }), TITLE_REQUIRED],
     ['a blank title', upload({ songTitle: '   ' }), TITLE_REQUIRED],
     ['an undefined title', omit(upload(), 'songTitle'), TITLE_REQUIRED],
+    ['a boolean title', upload({ songTitle: true }), TITLE_REQUIRED],
+    ['an object title', upload({ songTitle: { text: 'PeekaBoo' } }), TITLE_REQUIRED],
     [
       'a title over 100 chars',
       upload({ songTitle: 'x'.repeat(101) }),
@@ -197,6 +204,7 @@ describe('create from an own video', () => {
     ],
     ['a non-video type', upload({ contentType: 'audio/mpeg' }), 'Pick a video file.'],
     ['a missing type', omit(upload(), 'contentType'), 'Pick a video file.'],
+    ['an array type', upload({ contentType: ['video/mp4'] }), 'Pick a video file.'],
     ['size 0', upload({ size: 0 }), TOO_BIG],
     ['size over 2 GB', upload({ size: MAX_BYTES + 1 }), TOO_BIG],
     ['a non-numeric size', upload({ size: 'big' }), TOO_BIG],

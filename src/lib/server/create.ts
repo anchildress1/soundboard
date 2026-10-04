@@ -3,6 +3,7 @@ import type { JobOwner } from '$lib/types';
 import { ActionError } from './actions';
 import { signedUploadUrl, uploadObjectName } from './gcs';
 import { createJob, MAX_MINUTES, newJobId, type NewJob } from './jobs';
+import { text } from './http';
 import { hashIp, reserveVisitorRun } from './quota';
 import { getSample } from './samples';
 import { startJobTrace } from './tracing';
@@ -22,9 +23,6 @@ export type CreateInput =
     };
 
 export type Created = { id: string; uploadUrl: string | null };
-
-/** A request field as text; JSON bodies may leave it out. */
-const text = (value: unknown, fallback = '') => String(value ?? fallback);
 
 /** A positive, finite number no larger than `max`. */
 const within = (n: number, max: number) => Number.isFinite(n) && n > 0 && n <= max;

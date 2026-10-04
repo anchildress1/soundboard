@@ -88,6 +88,12 @@ describe('POST /api/jobs/[id]/recut', () => {
     expect((await recut('s', { startSec: 70, lengthSec: 30 })).status).toBe(400);
   });
 
+  it('400s a framing that is not a string', async () => {
+    seed('s');
+    expect((await recut('s', { startSec: 70, lengthSec: 30, reframe: ['crop'] })).status).toBe(400);
+    expect((store.get('jobs/s') as { state: string }).state).toBe('REVIEW');
+  });
+
   it('400s a body that is not a JSON object', async () => {
     seed('s');
     expect((await recut('s', [1, 2])).status).toBe(400);

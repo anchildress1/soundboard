@@ -1,5 +1,5 @@
 import { recut } from '$lib/server/actions';
-import { readBody, respond } from '$lib/server/http';
+import { readBody, respond, text } from '$lib/server/http';
 import { getJob } from '$lib/server/jobs';
 import { authorizedJob, buildView } from '$lib/server/view';
 import type { RequestHandler } from './$types';
@@ -11,7 +11,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
     await recut(job, {
       startSec: Number(body.startSec),
       lengthSec: Number(body.lengthSec),
-      reframe: String(body.reframe ?? ''),
+      reframe: text(body.reframe),
     });
     return buildView((await getJob(job.id)) ?? job);
   });
