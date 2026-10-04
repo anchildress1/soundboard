@@ -7,5 +7,7 @@ Sentry.init({
   tracesSampleRate: 1,
   beforeBreadcrumb: scrubBreadcrumb,
   beforeSend: scrubEvent,
+  // scrubSpan only runs while spans stream; a static lifecycle would skip it and send them raw.
+  traceLifecycle: 'stream',
   beforeSendSpan: scrubSpan,
 });
