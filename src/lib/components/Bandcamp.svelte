@@ -26,21 +26,27 @@
     { label: 'Tags', value: tags.join(', ') },
   ]);
 
-  // Copies are remembered per pick in this browser, so a reload keeps the checklist.
+  // Copies are remembered per pick in this browser, so a reload keeps the checklist. The copied
+  // text is kept, not just the label: an approved edit changes the value and needs a new copy.
   const storageKey = $derived(`bandcamp:${jobId}:${pick.version}`);
-  let copied = $state<string[]>([]);
+  let copied = $state<Record<string, string>>({});
   let last = $state('');
+  const isCopied = (label: string, value: string) => copied[label] === value;
 
   $effect(() => {
     try {
-      copied = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as string[];
+      const stored: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '{}');
+      copied =
+        stored && typeof stored === 'object' && !Array.isArray(stored)
+          ? (stored as Record<string, string>)
+          : {};
     } catch {
-      copied = [];
+      copied = {};
     }
   });
 
   $effect(() => {
-    ondone?.(fields.every((f) => !f.value || copied.includes(f.label)));
+    ondone?.(fields.every((f) => !f.value || isCopied(f.label, f.value)));
   });
 
   async function copy(label: string, value: string) {
@@ -50,7 +56,7 @@
       return;
     }
     last = label;
-    if (!copied.includes(label)) copied = [...copied, label];
+    copied = { ...copied, [label]: value };
     try {
       localStorage.setItem(storageKey, JSON.stringify(copied));
     } catch {
@@ -80,10 +86,10 @@
   <p class="hint">Copy each field into the track editor. Every field copied marks Bandcamp done.</p>
   <dl>
     {#each fields as field (field.label)}
-      {@const isCopied = copied.includes(field.label)}
-      <div class="field" class:copied={isCopied}>
+      {@const done = isCopied(field.label, field.value)}
+      <div class="field" class:copied={done}>
         <dt>
-          <span class="mark" aria-hidden="true">{isCopied ? '✓' : '●'}</span>{field.label}
+          <span class="mark" aria-hidden="true">{done ? '✓' : '●'}</span>{field.label}
         </dt>
         <dd>{field.value}</dd>
         <button
@@ -91,7 +97,7 @@
           type="button"
           disabled={!field.value}
           aria-label="Copy {field.label}"
-          onclick={() => copy(field.label, field.value)}>{isCopied ? 'Copied' : 'Copy'}</button
+          onclick={() => copy(field.label, field.value)}>{done ? 'Copied' : 'Copy'}</button
         >
       </div>
     {/each}

@@ -109,6 +109,22 @@ describe('Bandcamp', () => {
     expect(screen.queryByText(/copied$/)).toBeNull();
   });
 
+  it('asks for a new copy when an approved edit changes the value', async () => {
+    const props = { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: ['vaporwave'] };
+    const { unmount } = render(Bandcamp, props);
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy Tags' }));
+    expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copied');
+    unmount();
+    render(Bandcamp, { ...props, tags: ['vaporwave', 'glitch'] });
+    expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copy');
+  });
+
+  it('ignores a checklist stored in an unexpected shape', () => {
+    localStorage.setItem('bandcamp:j1:1', JSON.stringify(['Tags']));
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick, tags: pick.tags });
+    expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copy');
+  });
+
   it('disables copying an empty field', () => {
     render(Bandcamp, {
       jobId: 'j1',
