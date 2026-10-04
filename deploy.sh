@@ -158,17 +158,28 @@ VERTEX="https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJE
 # Starts a Vertex long-running create and waits for it to finish, failing with the API's error.
 # A model upload copies the ~7 GB image and takes several minutes.
 vertex_create() {
-  local operation state
+  local operation state response code
   operation="$(curl -fsS -X POST "${VERTEX}/$1" \
     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
     -H "Content-Type: application/json" -d "$2" |
     python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')"
   for _ in $(seq 180); do
-    state="$(curl -fsS "https://${REGION}-aiplatform.googleapis.com/v1beta1/${operation}" \
-      -H "Authorization: Bearer $(gcloud auth print-access-token)" | python3 -c '
+    # A network error (000), 429, or 5xx is transient: the operation keeps running server side, and
+    # abandoning it invites a duplicate create on rerun. Anything else non-200 won't heal by waiting.
+    response="$(curl -sS -w '\n%{http_code}' \
+      "https://${REGION}-aiplatform.googleapis.com/v1beta1/${operation}" \
+      -H "Authorization: Bearer $(gcloud auth print-access-token)" 2> /dev/null || printf '\n000')"
+    code="${response##*$'\n'}"
+    case "$code" in
+      200) ;;
+      000 | 429 | 5??) sleep 10; continue ;;
+      *) echo "Error: polling $1 returned HTTP $code: ${response%$'\n'*}" >&2; exit 1 ;;
+    esac
+    state="$(python3 -c '
 import json, sys
-op = json.load(sys.stdin)
-print("failed: " + json.dumps(op["error"]) if "error" in op else "done" if op.get("done") else "")')"
+op = json.loads(sys.argv[1])
+print("failed: " + json.dumps(op["error"]) if "error" in op else "done" if op.get("done") else "")' \
+      "${response%$'\n'*}")"
     case "$state" in
       done) return ;;
       failed*) echo "Error: $1 $state" >&2; exit 1 ;;
