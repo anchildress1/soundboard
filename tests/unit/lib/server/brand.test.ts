@@ -224,6 +224,18 @@ describe('proposeBrand', () => {
     expect(JSON.parse(output[0]!)).toEqual(GUIDE);
   });
 
+  it('records the cleaned guide, minus model audio numbers, as the agent output', async () => {
+    const loud = { ...GUIDE, fix: ['Master to -14 LUFS before upload'] };
+    on(/chat\/completions$/, () => completion(JSON.stringify(loud)));
+    clearAgentSpan();
+    const result = await proposeBrand();
+    const [output] = agentSpanIO().output;
+    expect(output).not.toMatch(/LUFS|\d/);
+    expect(JSON.parse(output!)).toMatchObject({
+      fix: (result as { proposal: StoredBrand }).proposal.fix,
+    });
+  });
+
   it('409s when the channel has no uploads', async () => {
     uploads = [];
     await expect(proposeBrand()).rejects.toMatchObject({ status: 409 });

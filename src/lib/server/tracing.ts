@@ -100,12 +100,12 @@ function messageAttributes(messages: ChatMessage[]): Record<string, string> {
 }
 
 /** The agent's task on its `invoke_agent` span; Sentry shows an agent's input only from here. */
-export function agentInput(span: Sentry.Span, messages: ChatMessage[]): void {
+export function agentInput(span: AgentSpan, messages: ChatMessage[]): void {
   span.setAttributes(messageAttributes(messages));
 }
 
 /** The agent's final answer on its `invoke_agent` span. */
-export function agentOutput(span: Sentry.Span, content: string): void {
+export function agentOutput(span: AgentSpan, content: string): void {
   span.setAttribute(
     'gen_ai.output.messages',
     JSON.stringify([{ role: 'assistant', parts: [{ type: 'text', content }] }]),

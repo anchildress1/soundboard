@@ -166,14 +166,16 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
     const messages = buildBrandMessages(withThumbs);
     agentInput(span, messages);
     const { value } = await chatJson(messages, 'brand_guide', BRAND_SCHEMA, isBrandGuide, deadline);
-    if (value) agentOutput(span, JSON.stringify(value));
-    return value;
+    if (!value) return null;
+    const cleaned = cleanGuide(value);
+    agentOutput(span, JSON.stringify(cleaned));
+    return cleaned;
   });
   if (!guide)
     throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
 
   const proposal: StoredBrand = {
-    ...cleanGuide(guide),
+    ...guide,
     status: 'PROPOSED',
     basedOn: videos.map((v) => v.videoId),
     createdAt: Date.now(),
