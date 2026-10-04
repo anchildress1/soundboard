@@ -33,10 +33,11 @@ Audience: AI coding agents. Directives only.
 
 ## Architecture
 
-- One Cloud Run service, max 1 instance, one L4. App → `llama-server` sidecar at `127.0.0.1:8081`.
-- NEVER add services, queues, Cloud Functions, Eventarc, or background workers.
+- App: one Cloud Run service, max 1 instance, no GPU.
+- Model: one Vertex AI dedicated endpoint, one `g2-standard-4` (one L4), scale to zero, max 1 replica. App → `llama-server` paths via invoke routes, service-account auth.
+- NEVER add other services, queues, Cloud Functions, Eventarc, or background workers.
 - Pipeline is page-driven: one step per `POST /api/jobs/{id}/step`, each under ~2 minutes.
-- Model loading or busy → return a wait reason immediately. NEVER block a step on it.
+- Model scaled to zero (429), loading, or busy → return a wait reason immediately. NEVER block a step on it.
 - Each step claims the job in a Firestore transaction, 3-minute expiry.
 - Gemma calls: temperature 0.2, `max_tokens` ≥ 2048, JSON schema, parse `content` (not `reasoning_content`). Audio windows: 29.5 s.
 

@@ -56,7 +56,14 @@ test.describe('destination tabs', () => {
   });
 
   test('shows no tabs while the video is still being analyzed', async ({ page }) => {
+    const step = page.waitForResponse((response) =>
+      response.url().endsWith('/jobs/e2e-analyzing/step'),
+    );
     await page.goto('/jobs/e2e-analyzing');
+    expect(await (await step).json()).toMatchObject({
+      wait: 'waking model',
+      job: { state: 'ANALYZE', error: null },
+    });
     await expect(page.getByText('waking model')).toBeVisible();
     await expect(page.getByRole('tablist')).toHaveCount(0);
   });
@@ -66,8 +73,15 @@ test.describe('Short tab', () => {
   test('makes a Short and waits on the model for the hook', async ({ page }, testInfo) => {
     await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
     await tab(page, 'Short').click();
+    const step = page.waitForResponse(
+      (response) => response.request().method() === 'POST' && response.url().endsWith('/step'),
+    );
     await shortPanel(page).getByRole('button', { name: 'Make a Short' }).click();
-    // No llama-server runs in E2E, so the hook step reports the model as loading.
+    // The test model's health endpoint returns 503, so no hook or media call starts.
+    expect(await (await step).json()).toMatchObject({
+      wait: 'waking model',
+      job: { state: 'HOOK', error: null },
+    });
     await expect(shortPanel(page).getByRole('status')).toHaveText(/waking model/i);
     await expect(shortPanel(page).getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
   });

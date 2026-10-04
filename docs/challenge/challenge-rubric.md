@@ -31,3 +31,15 @@ Judging order, heaviest first. Every row needs a link, number, or image before t
 - [ ] The win (a verified upload of Nathan's video) is finished before the deadline.
 - [ ] Every number and screenshot is public; nothing from Nathan's unreleased masters is shown without his OK.
 - [ ] The title carries one concrete number or contradiction. Candidates: "It listens to every second and looks every four" · "My friend's unreleased masters never left my GPU".
+
+## Submission evidence · October 4 review
+
+- Rules rechecked live: deadline **October 5, 2:59 AM EDT**; the tags and categories above remain correct.
+- Current local validation: **1,201 unit tests**, **36 desktop Chrome / Pixel 7 browser tests**, **99.66% line coverage**; model-loading tests use an isolated HTTP fake, not a live model.
+- Formatting, lint, and typecheck pass; the build still warns `Generated an empty chunk: "chunks/env.js".` Sonar analysis failed.
+- [ ] Validate the final frozen revision after the review findings are resolved.
+- [ ] Record a signed-out sample completing inside a real DEV draft iframe on a phone.
+- [ ] Capture a full job trace and a failed-run trace, with latency and token counts.
+- [ ] Capture Nathan's private upload read-back and his reaction, with permission for public evidence.
+- [ ] Add the live default `run.app` URL, walkthrough video, and public MIT repository to the submission template.
+- Avoid "listens to every second": analysis deliberately skips a trailing sliver under one second.

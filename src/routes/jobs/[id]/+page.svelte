@@ -296,9 +296,8 @@
             <section class="placeholder make" aria-labelledby="make-short-heading">
               <h2 id="make-short-heading">Short</h2>
               <p>
-                A vertical cut of this video's hook for YouTube Shorts. The model picks the hook;
-                ffmpeg cuts it and fits it to 9:16. It starts from this video's title, description,
-                and tags.
+                Turn this video's strongest moment into a vertical YouTube Short. Review the clip
+                and edit its title, description, and tags before uploading.
               </p>
               {#if tooShortForShort}
                 <p>A Short needs a video of at least {SHORT_MIN_SEC} seconds.</p>
@@ -447,7 +446,6 @@
 
   .placeholder p {
     margin: 0;
-    white-space: pre-wrap;
     overflow-wrap: anywhere;
     font: 500 12px/1.5 var(--mono);
     color: var(--ink);

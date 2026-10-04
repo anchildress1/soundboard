@@ -50,7 +50,7 @@ const INSTRUCTIONS = [
   'Report what you see and hear in short plain phrases.',
   'visual: one or two sentences on imagery, setting, color, and editing pace.',
   'music: genre terms, tempo feel in words, instrumentation, vocal type, mood words.',
-  'qualityFlags: audible or visible problems only (distortion, dropouts, sync, artifacts). Empty if none.',
+  'qualityFlags: unintended audible or visible problems only (dropouts, sync drift, encoding artifacts). Never the intended style: glitch, distortion, or lo-fi effects used on purpose are not problems. Empty if none.',
   'The measurements were taken with ffmpeg. Do not restate or estimate any loudness, level, or tempo numbers.',
   'Do not transcribe lyrics.',
 ].join('\n');

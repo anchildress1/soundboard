@@ -5,7 +5,20 @@ import { chat, chatJson, modelStatus, STEP_BUDGET_MS, stepDeadline } from '$lib/
 import { CLAIM_TTL_MS } from '$lib/server/jobs';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
 
+const auth = vi.hoisted(() => ({ getAccessToken: vi.fn(), scopes: [] as unknown[] }));
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    constructor(options: { scopes: unknown }) {
+      auth.scopes.push(options.scopes);
+    }
+    getAccessToken = auth.getAccessToken;
+  },
+}));
+
 const OK_JSON = '{"ok":true}';
+const ENDPOINT =
+  'https://1.us-central1-2.prediction.vertexai.goog/v1/projects/2/locations/us-central1/endpoints/1/invoke';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -44,7 +57,7 @@ describe('modelStatus', () => {
     expect(fetchMock.mock.calls[0]![0]).toBe('http://model.test/health');
   });
 
-  it('is loading while the sidecar refuses connections', async () => {
+  it('is loading while llama-server refuses connections', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
     expect(await modelStatus()).toBe('loading');
   });
@@ -85,7 +98,13 @@ describe('modelStatus', () => {
     expect(await modelStatus()).toBe('ready');
   });
 
-  it('defaults to the loopback sidecar', async () => {
+  it('is loading while the scaled-to-zero endpoint answers 429', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('Model is not yet ready', { status: 429 }));
+    expect(await modelStatus()).toBe('loading');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to a local llama-server', async () => {
     vi.stubEnv('MODEL_URL', undefined);
     fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }));
     await modelStatus();
@@ -257,5 +276,56 @@ describe('chatJson', () => {
       'llama-server 503',
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Vertex endpoint auth', () => {
+  beforeEach(() => {
+    vi.stubEnv('MODEL_URL', ENDPOINT);
+    auth.getAccessToken.mockReset().mockResolvedValue('token-1');
+  });
+
+  const authorization = (call: number) =>
+    (fetchMock.mock.calls[call]![1] as RequestInit).headers as Record<string, string>;
+
+  it('sends the runtime token on /health and /slots under the invoke URL', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(200, {}))
+      .mockResolvedValueOnce(json(200, [{ is_processing: false }]));
+    expect(await modelStatus()).toBe('ready');
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${ENDPOINT}/health`);
+    expect(fetchMock.mock.calls[1]![0]).toBe(`${ENDPOINT}/slots`);
+    expect(authorization(0)).toEqual({ authorization: 'Bearer token-1' });
+    expect(authorization(1)).toEqual({ authorization: 'Bearer token-1' });
+    expect(auth.scopes).toContain('https://www.googleapis.com/auth/cloud-platform');
+  });
+
+  it('sends the runtime token on chat completions', async () => {
+    fetchMock.mockResolvedValueOnce(completion(OK_JSON));
+    await chat(messages, 'chunk_analysis', schema);
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${ENDPOINT}/v1/chat/completions`);
+    expect(authorization(0)).toEqual({
+      'content-type': 'application/json',
+      authorization: 'Bearer token-1',
+    });
+  });
+
+  it('fails the status check instead of reporting a wait when no token is issued', async () => {
+    auth.getAccessToken.mockResolvedValueOnce(null);
+    await expect(modelStatus()).rejects.toThrow('No access token for the model endpoint.');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates a credential error', async () => {
+    auth.getAccessToken.mockRejectedValueOnce(new Error('Could not load the default credentials'));
+    await expect(modelStatus()).rejects.toThrow('Could not load the default credentials');
+  });
+
+  it('sends no token to a local llama-server', async () => {
+    vi.stubEnv('MODEL_URL', 'http://127.0.0.1:8081');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }));
+    await modelStatus();
+    expect(authorization(0)).toEqual({});
+    expect(auth.getAccessToken).not.toHaveBeenCalled();
   });
 });

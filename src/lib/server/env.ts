@@ -9,6 +9,7 @@ export function optional(name: string, fallback = ''): string {
   return process.env[name] || fallback;
 }
 
+/** `llama-server` base: local in development, the Vertex endpoint's invoke URL when deployed. */
 export function modelUrl(): string {
   return optional('MODEL_URL', 'http://127.0.0.1:8081');
 }

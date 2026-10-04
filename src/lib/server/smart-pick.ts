@@ -21,13 +21,12 @@ const stringArray = { type: 'array', items: { type: 'string' } };
 export const PICK_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'description', 'hashtags', 'tags', 'flags', 'brandCheck', 'why', 'bandcamp'],
+  required: ['title', 'description', 'hashtags', 'tags', 'brandCheck', 'why', 'bandcamp'],
   properties: {
     title: { type: 'string' },
     description: { type: 'string' },
     hashtags: stringArray,
     tags: stringArray,
-    flags: stringArray,
     brandCheck: { type: 'string' },
     why: {
       type: 'object',
@@ -51,14 +50,15 @@ export const PICK_SCHEMA = {
   },
 } as const;
 
-export type RawPick = Omit<Pick, 'version' | 'modelMs'>;
+/** The model's reply. Flags are never the model's: `finalizePick` builds them from measured evidence. */
+export type RawPick = Omit<Pick, 'version' | 'modelMs' | 'flags'>;
+export type FinalPick = Omit<Pick, 'version' | 'modelMs'>;
 
 const RAW_PICK = shape({
   title: isString,
   description: isString,
   hashtags: isStrings,
   tags: isStrings,
-  flags: isStrings,
   brandCheck: isString,
   why: shape({ title: isString, description: isString, tags: isString }),
   bandcamp: shape({ about: isString, credits: isString }),
@@ -157,7 +157,6 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
     `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones. Include "${ARTIST_NAME}". Never the song title. Never invent one.`,
-    'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
@@ -250,6 +249,7 @@ function clip(text: string, max: number): string {
 
 export type PickFixups = {
   songTitle: string;
+  chunks: Chunk[];
   candidates: string[];
   tagCandidates: TagCandidate[];
   facts: Fact[];
@@ -279,6 +279,16 @@ export function measuredFlags(m: Measurements | null): string[] {
     flags.push(`Silence ${s.start.toFixed(1)}s to ${s.end.toFixed(1)}s`);
   }
   return flags;
+}
+
+/** The windows' own quality flags, once each. */
+export function windowFlags(chunks: Chunk[]): string[] {
+  const seen = new Map<string, string>();
+  for (const flag of chunks.flatMap((c) => c.analysis?.qualityFlags ?? [])) {
+    const text = tidy(flag);
+    if (text && !seen.has(text.toLowerCase())) seen.set(text.toLowerCase(), text);
+  }
+  return [...seen.values()];
 }
 
 /** 3 to 5 hashtags from the pool: the model's picks first, padded from the top of the pool. */
@@ -348,9 +358,10 @@ function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
 
 /**
  * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
- * links only from facts, plain-term tags, YouTube limits, and no model-emitted audio numbers.
+ * links only from facts, plain-term tags, YouTube limits, and no model-emitted audio numbers. Flags
+ * come only from ffmpeg, the probe, and the windows' quality flags.
  */
-export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
+export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
   const draft = stripDeep(raw);
   const tags = pickTags(
     draft.tags,
@@ -378,7 +389,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
     flags: [
       ...measuredFlags(fix.measurements),
       ...shortFlag(fix.probe),
-      ...draft.flags.filter(Boolean),
+      ...windowFlags(fix.chunks),
     ],
     brandCheck: draft.brandCheck,
     why: draft.why,
@@ -403,7 +414,7 @@ export async function runPick(
   ctx: PickContext,
   deadline = stepDeadline(),
   span?: AgentSpan,
-): Promise<{ pick: RawPick; ms: number } | null> {
+): Promise<{ pick: FinalPick; ms: number } | null> {
   let ms = 0;
   let messages = buildPickMessages(ctx);
   if (span) agentInput(span, messages);

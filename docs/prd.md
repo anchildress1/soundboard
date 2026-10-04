@@ -76,9 +76,9 @@
 - Prep probes duration and the displayed video size (the file's rotation applied, since phones store portrait video as rotated landscape frames) and measures the whole file: LUFS, true peak, clipping, silence.
 - A square or vertical video of 3 minutes or less adds a flag: YouTube publishes it as a Short.
 - Each analyze step seeks to its own 29.5s window (under Gemma's 30s audio cap), extracts 8 frames at 360p + 16 kHz mono WAV in memory, and measures that window.
-- One Gemma call per chunk: audio + frames + measurements + song title → visual, music, quality flags.
+- One Gemma call per chunk: audio + frames + measurements + song title → visual, music, quality flags. Quality flags are unintended problems only; a deliberate glitch or distortion style is not one.
 - Call settings: temperature 0.2, `max_tokens` ≥ 2048, JSON schema. Parse `content`; `reasoning_content` is the think block.
-- When the model is loading (`/health` 503) or busy (`/slots` shows the slot taken), the step returns at once with a wait reason ("waking model", "waiting on another run") and the page calls again. Every step stays under about 2 minutes.
+- When the model is scaled to zero (endpoint 429), loading (`/health` 503), or busy (`/slots` shows the slot taken), the step returns at once with a wait reason ("waking model", "waiting on another run") and the page calls again. Every step stays under about 2 minutes.
 - [ ] Model-emitted dB/LUFS numbers are stripped.
 - [ ] Per-chunk timeout 90s, counted after the model is up. A parse failure retries once, then keeps the raw text.
 - [ ] Two consecutive chunk failures set `FAILED`; finished chunks stay visible. Loading and busy count as waits.
@@ -86,7 +86,8 @@
 
 **R4 · Smart pick**
 
-- Chunk results + audience evidence + FLR's 3 most recent videos (identity only; 3 keeps the pick inside the model's 8K context) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
+- Chunk results + audience evidence + FLR's 3 most recent videos (identity only; 3 keeps the pick inside the model's 8K context) + Nathan's feedback → one `title, description, hashtags[], tags[], brandCheck`.
+- `flags[]` are never the model's. The server builds them from ffmpeg's measurements, the Short notice, and the windows' own quality flags, each once. A free-form flag field let the model restate the video's look as problems.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
   - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.
@@ -187,17 +188,18 @@
 
 ## System Design
 
-One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
+One Cloud Run service for the app and one Vertex AI endpoint for the model, both in Ashley's project.
 
-| Container                        | Runs                                                                                                                                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app` (ingress)                  | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                                                                                   |
-| `model` (sidecar, holds the GPU) | `llama-server` + Google's official Gemma 4 12B-it QAT Q4_0 GGUF + its mmproj, weights baked in and checksum-verified, port 8081 inside the instance only; `/props` reports `vision: true, audio: true` |
+| Piece                                | Runs                                                                                                                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app` (Cloud Run, ingress)           | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                                                                           |
+| `model` (Vertex AI endpoint, one L4) | `llama-server` + Google's official Gemma 4 12B-it QAT Q4_0 GGUF + its mmproj, weights baked in and checksum-verified, port 8081 in the container; `/props` reports `vision: true, audio: true` |
 
-- **Service:** model container 4 vCPU / 16 GiB (the L4 minimum) + app container 2 vCPU / 8 GiB, max 1, min 0, instance-based billing (required for GPUs), 60-min request timeout. Cloud Run gives the GPU to one container per instance ([GPU support for services](https://docs.cloud.google.com/run/docs/configuring/services/gpu)).
-- **Startup:** the `model` sidecar's startup probe is a TCP check, so the page serves within seconds while weights load; `/health` drives "waking model".
-- **Why one service:** both pieces live and die with the single instance anyway. One service drops the service-to-service IAM token, the second deploy, and Cloud Run's 429s; `llama-server` queues requests itself.
-- **Cost:** any visit wakes the GPU instance and bills it until it idles out (up to ~15 min). $0 when nobody visits. Scale by raising max instances.
+- **App service:** 2 vCPU / 8 GiB, max 1, min 0, 60-min request timeout. No GPU.
+- **Model endpoint:** a dedicated endpoint with one `g2-standard-4` replica (4 vCPU, 16 GiB, one L4), the same model image as a custom container. Invoke routes (`invokeRoutePrefix: "/*"`) pass `llama-server`'s own paths through, so the app calls `/v1/chat/completions`, `/health`, and `/slots` unchanged. The app authenticates with its service account ([custom container requirements](https://docs.cloud.google.com/vertex-ai/docs/predictions/custom-container-requirements)).
+- **Scale to zero:** `minReplicaCount: 0`, `maxReplicaCount: 1`, idle scale-down and min scale-up periods at the 5-minute floor. A request to a scaled-down endpoint gets a 429 and starts a replica; the step maps it to "waking model". The feature is Preview, needs a dedicated (not shared public) endpoint, can stock out on scale-up, and undeploys a model idle for 30 days ([autoscaling](https://docs.cloud.google.com/vertex-ai/docs/predictions/autoscaling)).
+- **Why Vertex:** Cloud Run's L4 quota for the project is 0 and two increase requests were denied. Vertex's L4 serving quota in us-central1 is 2 without a request. Audio still never leaves the project.
+- **Cost:** about $0.81/hr while a model replica is up (`g2-standard-4` online inference, L4 included), billed for at least 5 minutes per wake. The app bills only while serving. $0 when nobody visits.
 - **Storage:** one GCS bucket, `uploads/`.
 - **State:** Firestore. **Secrets:** Secret Manager.
 - **Region:** us-central1 for everything. Firestore is created there; its location is permanent.
