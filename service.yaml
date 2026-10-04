@@ -35,6 +35,33 @@ spec:
               value: ${GCP_PROJECT_ID}
             - name: GCS_BUCKET
               value: ${GCS_BUCKET}
+            - name: FLR_CHANNEL_ID
+              value: ${FLR_CHANNEL_ID}
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              value: ${GOOGLE_OAUTH_CLIENT_ID}
+            - name: ALLOWLIST_EMAILS
+              value: ${ALLOWLIST_EMAILS}
+            - name: PUBLIC_SENTRY_DSN
+              value: ${PUBLIC_SENTRY_DSN}
+            # Cloud Run terminates TLS and appends the client to X-Forwarded-For; adapter-node reads
+            # the origin (for the OAuth redirect) and client IP (for per-visitor caps) from these.
+            - name: PROTOCOL_HEADER
+              value: x-forwarded-proto
+            - name: HOST_HEADER
+              value: host
+            - name: ADDRESS_HEADER
+              value: x-forwarded-for
+            - name: XFF_DEPTH
+              value: '1'
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: soundboard-session-secret, key: latest }
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: soundboard-oauth-client-secret, key: latest }
+            - name: YOUTUBE_API_KEY
+              valueFrom:
+                secretKeyRef: { name: soundboard-youtube-api-key, key: latest }
           resources:
             limits:
               cpu: '2'

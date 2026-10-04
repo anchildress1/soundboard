@@ -1,0 +1,169 @@
+:root {
+  --ground: #0a0a0a;
+  --panel: #171615;
+  --well: #242321;
+  --line: #6e6a64;
+  --ink: #f4f1ea;
+  --muted: #b3ada3;
+  --magenta: #ff4fd8;
+  --orange: #ff7a1a;
+  --yellow: #ffd23f;
+  --blue: #1f6fe8;
+  --green: #6fdc5a;
+  --red: #d8281a;
+  --red-text: #ff6a52;
+  --info: #7fb2ff;
+  --bubble: #ffffff;
+  --bubble-ink: #0a0a0a;
+  --script: 'Mr Dafoe', cursive;
+  --display: 'Rubik', system-ui, sans-serif;
+  --sans: 'Inter', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 15px/1.5 var(--sans);
+  padding-inline: 16px;
+}
+
+a {
+  color: var(--info);
+}
+
+.btn {
+  font: 900 14px/1 var(--display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 14px 18px;
+  border: 2px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 3px;
+}
+
+.btn.primary {
+  background: var(--magenta);
+  border-color: var(--magenta);
+  color: var(--ground);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.btn.primary:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.btn.primary[disabled] {
+  background: var(--well);
+  border-color: var(--well);
+  color: var(--muted);
+  box-shadow: none;
+  cursor: default;
+}
+
+.btn.primary.done[disabled] {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--ground);
+}
+
+.btn.ghost {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.btn.danger {
+  border-color: transparent;
+  color: var(--red-text);
+  padding-left: 0;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field > label,
+.field > .label {
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field > label span,
+.field > .label span {
+  font: 500 11px/1 var(--mono);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.field :is(textarea, input, select) {
+  width: 100%;
+  background: var(--well);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  font: 400 14px/1.5 var(--sans);
+  resize: vertical;
+}
+
+.field .mono {
+  font: 500 13px/1.6 var(--mono);
+}
+
+.field :is(textarea, input, select):focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 2px;
+}
+
+.field.err :is(textarea, input) {
+  border-color: var(--red-text);
+}
+
+.field .msg {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field.err .msg {
+  color: var(--red-text);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
