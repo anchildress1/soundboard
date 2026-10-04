@@ -155,20 +155,27 @@ MODEL_ENDPOINT="soundboard-model"
 MODEL_NAME="soundboard-model-${MODEL_IMAGE##*:}"
 VERTEX="https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_ID}/locations/${REGION}"
 
-vertex_post() {
-  curl -fsS -X POST "${VERTEX}/$1" -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-    -H "Content-Type: application/json" -d "$2" > /dev/null
-}
-
-# Polls a list command until the resource it filters for exists (creation is a long-running op).
-await_resource() {
-  local found=""
-  for _ in $(seq 60); do
-    found="$("$@")"
-    [[ -n "$found" ]] && { echo "$found"; return; }
-    sleep 5
+# Starts a Vertex long-running create and waits for it to finish, failing with the API's error.
+# A model upload copies the ~7 GB image and takes several minutes.
+vertex_create() {
+  local operation state
+  operation="$(curl -fsS -X POST "${VERTEX}/$1" \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" -d "$2" |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')"
+  for _ in $(seq 180); do
+    state="$(curl -fsS "https://${REGION}-aiplatform.googleapis.com/v1beta1/${operation}" \
+      -H "Authorization: Bearer $(gcloud auth print-access-token)" | python3 -c '
+import json, sys
+op = json.load(sys.stdin)
+print("failed: " + json.dumps(op["error"]) if "error" in op else "done" if op.get("done") else "")')"
+    case "$state" in
+      done) return ;;
+      failed*) echo "Error: $1 $state" >&2; exit 1 ;;
+    esac
+    sleep 10
   done
-  echo "Error: timed out waiting for: $*" >&2
+  echo "Error: $1 did not finish in 30 minutes: $operation" >&2
   exit 1
 }
 
@@ -183,21 +190,21 @@ model_id() {
 
 # Scale to zero needs a dedicated endpoint, which gcloud can't create; the REST API can.
 if [[ -z "$(endpoint_id)" ]]; then
-  vertex_post endpoints "{\"displayName\": \"${MODEL_ENDPOINT}\", \"dedicatedEndpointEnabled\": true}"
+  vertex_create endpoints "{\"displayName\": \"${MODEL_ENDPOINT}\", \"dedicatedEndpointEnabled\": true}"
 fi
-ENDPOINT_ID="$(await_resource endpoint_id)"
+ENDPOINT_ID="$(endpoint_id)"
 
 # invokeRoutePrefix passes llama-server's own paths through (/invoke/health → /health); gcloud has
 # no flag for it. The deployment timeout covers loading ~7 GB of weights onto the GPU.
 if [[ -z "$(model_id)" ]]; then
-  vertex_post models:upload "$(cat << MODEL
+  vertex_create models:upload "$(cat << MODEL
 {"model": {"displayName": "${MODEL_NAME}", "containerSpec": {
   "imageUri": "${MODEL_IMAGE}", "ports": [{"containerPort": 8081}],
   "healthRoute": "/health", "invokeRoutePrefix": "/*", "deploymentTimeout": "1800s"}}}
 MODEL
 )"
 fi
-MODEL_ID="$(await_resource model_id)"
+MODEL_ID="$(model_id)"
 
 DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(deployedModels.model)')"
