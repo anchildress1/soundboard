@@ -21,6 +21,8 @@ import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracin
 import { recentVideos, thumbnailDataUrl, type CatalogVideo } from './youtube';
 
 const DESCRIPTION_CHARS = 200;
+/** Uploads carry 14 to 44 tags each; uncapped, they filled the 8K context and cut off the reply. */
+const TAGS_PER_VIDEO = 8;
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
@@ -62,7 +64,7 @@ export function buildBrandMessages(
   const uploads = videos.map((v) => ({
     title: v.title,
     description: v.description.slice(0, DESCRIPTION_CHARS),
-    tags: v.tags,
+    tags: v.tags.slice(0, TAGS_PER_VIDEO),
     publishedAt: v.publishedAt,
   }));
   const thumbnails = videos

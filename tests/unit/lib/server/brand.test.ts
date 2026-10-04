@@ -187,6 +187,22 @@ describe('buildBrandMessages', () => {
     expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1);
   });
 
+  const sentTags = (tags: string[]) => {
+    const [, user] = buildBrandMessages([{ ...video('a', null), tags }]);
+    const text = (user!.content as { text: string }[])[0]!.text;
+    return (JSON.parse(text) as { uploads: { tags: string[] }[] }).uploads[0]!.tags;
+  };
+
+  it('keeps only the first 8 tags of each upload so the reply fits the context', () => {
+    const tags = Array.from({ length: 44 }, (_, i) => `tag ${i}`);
+    expect(sentTags(tags)).toEqual(tags.slice(0, 8));
+  });
+
+  it('sends every tag of an upload with 8 or fewer', () => {
+    expect(sentTags(['synthwave', 'retrowave'])).toEqual(['synthwave', 'retrowave']);
+    expect(sentTags([])).toEqual([]);
+  });
+
   it('sends text only when no thumbnail loaded', () => {
     const [, user] = buildBrandMessages([video('a', null)]);
     expect(user!.content).toHaveLength(1);
