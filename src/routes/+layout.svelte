@@ -1,4 +1,12 @@
 <script lang="ts">
+  // Self-hosted fonts: a third-party font host made the wordmark's paint, and Lighthouse, swing.
+  import '@fontsource/inter/400.css';
+  import '@fontsource/inter/600.css';
+  import '@fontsource/jetbrains-mono/500.css';
+  import '@fontsource/mr-dafoe/400.css';
+  import '@fontsource/rubik/700.css';
+  import '@fontsource/rubik/900.css';
+  import wordmarkFont from '@fontsource/mr-dafoe/files/mr-dafoe-latin-400-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -20,6 +28,8 @@
 </script>
 
 <svelte:head>
+  <!-- The wordmark is the largest paint; fetch its font with the page instead of after the CSS. -->
+  <link rel="preload" href={wordmarkFont} as="font" type="font/woff2" crossorigin="anonymous" />
   <meta
     name="description"
     content="Release agent for Flies Like Robots: self-hosted Gemma 4 watches and listens to a music video, then drafts and verifies the YouTube upload."
