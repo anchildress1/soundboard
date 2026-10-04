@@ -1,10 +1,12 @@
 # 🎛️ Soundboard
 
-A release agent for one musician. It watches and listens to a finished music video, compares it to the channel's recent catalog, and hands back one YouTube title, description, and tag set to approve — then uploads it and checks that the upload actually landed.
+Soundboard analyzes a finished music video and drafts its YouTube title, description, hashtags, and tags. The artist approves, edits, or re-runs the draft; on approval, Soundboard uploads the video as private and confirms the upload through the YouTube API.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-> Built for [Nathan](https://www.youtube.com/@flieslikerobots) (Flies Like Robots) for the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01).
+Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an entry in the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01).
+
+> **Status:** in development during the challenge weekend (October 3–5, 2026). The repository currently holds the scaffold; the features below are the planned scope from [docs/prd.md](docs/prd.md).
 
 ---
 
@@ -27,26 +29,26 @@ A release agent for one musician. It watches and listens to a finished music vid
 
 ## About
 
-Nathan makes the music and makes the videos for it. The part that stalls is everything after: titles, descriptions, tags, hashtags, keeping the channel consistent, and noticing the master clips before the whole internet does.
+Nathan writes, records, and films his own music. Publishing each video still takes metadata work: a title, a description, tags, hashtags, consistency with the rest of the channel, and a check that the audio isn't clipping or dropping out.
 
-Soundboard does that work first and asks Nathan for one decision. It never hands him a list of options or a blank form.
+Soundboard produces one complete draft of that metadata for Nathan to review, instead of a set of options to choose from.
 
-The model is **Gemma 4 12B-it**, open-weight under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms), running on a GPU in our own Google Cloud project. No inference provider sees Nathan's unreleased audio. That's the whole reason this is built on open weights.
+The model is Gemma 4 12B-it, an open-weight model released under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). It runs on a GPU in our own Google Cloud project, so unreleased audio is never sent to a third-party inference provider.
 
 ---
 
 ## Features
 
-| Feature                   | What it does                                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------- |
-| 🎧 Watches and listens    | Every 29.5 seconds of audio plus 8 frames per window go to Gemma; it describes what it hears and sees   |
-| 📏 Real measurements      | Loudness, true peak, clipping, and silence come from ffmpeg — the model never invents a number          |
-| 🎯 One recommendation     | Title, description, hashtags, and tags in one draft, matched to the channel's 5 most recent videos      |
-| #️⃣ Hashtags from a search | Candidates come from a deterministic search of real videos; the model picks from them and nothing else  |
-| 🔁 Re-run, edit, approve  | Edit in place or re-run for a new take; Soundboard learns from both                                     |
-| ✅ Verified uploads       | Uploads as private, then reads the video back from YouTube before calling it done                       |
-| 🔍 Before / after diff    | For existing videos, shows current vs proposed metadata field by field, with the reason for each change |
-| 📡 Agent traces           | One Sentry trace per job, with Gemma calls as AI-agent spans                                            |
+| Feature                  | Description                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                           |
+| Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model         |
+| Metadata draft           | One title, description, hashtag set, and tag set, compared against the channel's 5 most recent videos   |
+| Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                      |
+| Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts             |
+| Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified           |
+| Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change |
+| Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                             |
 
 ---
 
@@ -95,9 +97,9 @@ flowchart LR
   APP -. "gen_ai spans" .-> S
 ```
 
-- **One service, one GPU.** The app and the model share an instance and talk over `localhost`. Max one instance, scale to zero: it costs nothing while nobody's using it.
-- **The page drives the run.** Each step (prep, one chunk, pick) is its own short request, so a reload picks up where it left off.
-- **Full design:** [docs/prd.md](docs/prd.md).
+- The app and the model run as two containers in one Cloud Run instance and communicate over `localhost`. The service runs at most one instance and scales to zero when idle.
+- The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft). Reloading the page resumes from the next unfinished step.
+- The full design is in [docs/prd.md](docs/prd.md).
 
 ---
 
@@ -113,66 +115,69 @@ make install
 make dev
 ```
 
-| Command          | What it does                         |
-| ---------------- | ------------------------------------ |
-| `make dev`       | Start the dev server                 |
-| `make ai-checks` | Format, lint, typecheck, test, build |
-| `make e2e`       | Playwright end-to-end tests          |
-| `make deploy`    | Build and deploy to Cloud Run        |
+| Command          | What it does                                                  |
+| ---------------- | ------------------------------------------------------------- |
+| `make dev`       | Start the dev server                                          |
+| `make ai-checks` | Format, lint, typecheck, test, build                          |
+| `make e2e`       | Playwright end-to-end tests                                   |
+| `make deploy`    | Build and deploy to Cloud Run (requires a clean working tree) |
 
 ---
 
 ## Configuration
 
-All values live in `.env` locally and in Secret Manager or service env vars on Cloud Run. Never commit real values.
+Values live in `.env` for local development and in Secret Manager or Cloud Run environment variables when deployed. Do not commit real values.
 
-| Variable                                                | Purpose                                                                  |
-| ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                    |
-| `GCS_BUCKET`                                            | Bucket for uploads (7-day delete rule)                                   |
-| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar |
-| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project (search and catalog reads)       |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                         |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                          |
-| `ALLOWLIST_EMAILS`                                      | Comma-separated emails that can target Nathan's channel                  |
-| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                         |
-| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                            |
+| Variable                                                | Purpose                                                                    |
+| ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                      |
+| `GCS_BUCKET`                                            | Bucket for uploads                                                         |
+| `MODEL_URL`                                             | `llama-server` base URL; `http://127.0.0.1:8081` in the deployed sidecar   |
+| `MODEL_IMAGE`                                           | Container image for the model sidecar; required by `deploy.sh`             |
+| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads |
+| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                           |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                            |
+| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel               |
+| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                           |
+| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                              |
 
 ---
 
 ## Security
 
-- **Audio stays home.** Media goes only to Cloud Storage and the in-instance model. Sentry receives text and size-only placeholders for audio and images.
-- **Two kinds of visitor.** Signed out, you can run everything against a throwaway channel. Only allowlisted Google accounts can touch Nathan's channel, his jobs, or his learned preferences.
-- **Secrets** live in Secret Manager or a local `.env`. YouTube refresh tokens never reach the browser.
-- **Firestore** rules deny all client access; only the app's service account reads and writes.
-- **Uploads** are size-capped at the signed URL and deleted after 7 days.
+Planned controls, from [docs/prd.md](docs/prd.md):
+
+- Video and audio are stored only in Cloud Storage and processed only by the model running in the same Cloud Run instance. Sentry receives text, with audio and images replaced by size-only placeholders.
+- Signed-out visitors run against a separate test channel. Only allowlisted Google accounts can upload to Nathan's channel or read his jobs and stored preferences.
+- Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server.
+- Firestore denies all client access; only the app's service account reads and writes.
+- Upload URLs are size-capped, and uploaded files are deleted after 7 days.
 
 ---
 
 ## How to Contribute
 
-This is a weekend build for one person, but issues and PRs are welcome.
+Issues and pull requests are welcome.
 
-- Branch from `main`; open a PR. Nothing lands on `main` directly.
-- [Conventional Commits](https://www.conventionalcommits.org), GPG-signed, with an AI attribution footer and `Signed-off-by` (enforced by commitlint and [rai-lint](https://github.com/anchildress1/rai-lint)).
-- `make ai-checks` passes before you push.
+- Branch from `main` and open a pull request; `main` is not committed to directly.
+- Use [Conventional Commits](https://www.conventionalcommits.org), GPG-signed, with an AI attribution footer and `Signed-off-by`. commitlint and [rai-lint](https://github.com/anchildress1/rai-lint) enforce this.
+- Run `make ai-checks` before pushing.
 
 ---
 
 ## License
 
-[MIT](LICENSE). Use it, fork it, sell it, rename it — just keep the copyright notice.
+This repository's code is licensed under [MIT](LICENSE): you may use, modify, and redistribute it, including commercially, as long as the copyright notice is kept.
 
-The MIT license covers this repository's code only. **Gemma's weights are not MIT:** they're licensed separately under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms), and anyone deploying this inherits those terms.
+Gemma's model weights are not covered by this license. They are distributed under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms), which apply to anyone who deploys this project.
 
 ---
 
 ## Acknowledgements
 
-- **Nathan**, for making the music and letting a robot critique it.
-- **DEV** and **MLH**, for the Hacktoberfest Weekend Challenge that finally made me build the thing.
-- **Google DeepMind** for Gemma, and the **llama.cpp** maintainers for making a 12B multimodal model run on one GPU.
+- **Nathan (Flies Like Robots)**, for the music and for being the first user.
+- **DEV** and **MLH**, for running the Hacktoberfest Weekend Challenge that prompted this build.
+- **Google DeepMind** for Gemma, and the **llama.cpp** maintainers for `llama-server`.
 
 ---
 
@@ -184,4 +189,4 @@ The MIT license covers this repository's code only. **Gemma's weights are not MI
 
 ## Commits after 2026-10-05 06:59 UTC
 
-None yet. Any commit after the challenge deadline will be listed here with what it changed.
+None yet. Any commit made after the challenge deadline will be listed here with a description of what it changed.
