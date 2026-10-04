@@ -47,7 +47,7 @@ describe('Heard', () => {
   it('names the comparison set', () => {
     render(Heard, { tags: [], measurements: null });
     expect(
-      screen.getByText('Matched against the 5 most recent Flies Like Robots uploads.'),
+      screen.getByText('Grounded in the most-viewed music videos for this genre.'),
     ).toBeInTheDocument();
   });
 

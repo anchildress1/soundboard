@@ -6,7 +6,7 @@ Soundboard analyzes a finished music video and drafts its YouTube title, descrip
 
 Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an entry in the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01).
 
-> **Status:** in development during the challenge weekend (October 3–5, 2026). The P0 pipeline from [docs/prd.md](docs/prd.md) is implemented; the brand guide (P1) is not.
+> **Status:** in development during the challenge weekend (October 3–5, 2026). The P0 pipeline and the P1 brand guide from [docs/prd.md](docs/prd.md) are implemented.
 
 ---
 
@@ -39,16 +39,17 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 
 ## Features
 
-| Feature                  | Description                                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                           |
-| Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model         |
-| Metadata draft           | One title, description, hashtag set, and tag set, compared against the channel's 5 most recent videos   |
-| Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                      |
-| Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts             |
-| Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified           |
-| Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change |
-| Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                             |
+| Feature                  | Description                                                                                                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                                                                                    |
+| Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model                                                                  |
+| Metadata draft           | One title, description, hashtag set, and tag set, grounded in the most-viewed music videos for its genre                                                         |
+| Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                                                                               |
+| Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts                                                                      |
+| Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                    |
+| Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change                                                          |
+| Brand guide              | Reads the channel's 30 latest videos and 10 thumbnails and proposes keep / fix / drop rules; once Nathan approves them, every draft for his channel follows them |
+| Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                                                                                      |
 
 ---
 
@@ -127,6 +128,7 @@ make dev
 
 - **Connect channels:** sign in with an allowlisted account, then use the footer's _Connect channel_ links. _Nathan_ must be consented by Nathan's Google account; _Sandbox_ by the throwaway channel's. Each stores a YouTube refresh token in Secret Manager (`yt-refresh-nathan`, `yt-refresh-sandbox`).
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `<service-url>/auth/callback` as a redirect URI after the first deploy.
+- **Brand guide:** allowlisted accounts get a _Brand guide_ footer link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; visitor runs never read it.
 - **Samples:** `scripts/add-sample.sh <video> <youtube-video-id> "<song title>"` cuts the loudest 30 seconds, uploads it to `samples/`, and registers it on the home page.
 
 ---

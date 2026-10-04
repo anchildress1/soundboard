@@ -45,6 +45,12 @@ function seed(id: string, patch: Record<string, unknown> = {}) {
     songTitle: 'PeekaBoo',
     hashtagCandidates: CANDIDATES,
     consecutiveFailures: 0,
+    audience: {
+      query: 'synthwave music video',
+      hashtags: CANDIDATES,
+      tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag, usedBy: 1 })),
+      top: [],
+    },
     pickVersion: 1,
     ...patch,
   });
@@ -66,7 +72,7 @@ const job = (id: string) => store.get(`jobs/${id}`) as Record<string, unknown>;
 const fields = {
   title: 'PeekaBoo (Official Video)',
   description: 'Night drive. #synthwave #retrowave',
-  tags: 'synthwave, PeekaBoo',
+  tags: 'synthwave, outrun',
   pickVersion: 1,
 };
 
@@ -88,7 +94,7 @@ describe('POST /api/jobs/[id]/approve', () => {
       title: 'PeekaBoo (Official Video)',
       description: 'Night drive. #synthwave #retrowave',
       hashtags: ['#synthwave', '#RetroWave'],
-      tags: ['synthwave', 'PeekaBoo'],
+      tags: ['synthwave', 'outrun'],
     });
     // Visitor feedback stays on the job.
     expect([...store.keys()].some((k) => k.startsWith('jobs/j/feedback/'))).toBe(true);

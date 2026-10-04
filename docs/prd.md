@@ -13,7 +13,7 @@
 
 ## Product
 
-- A web app that watches and listens to a music video, compares it to FLR's 5 most recent videos, and smart-picks one YouTube title, description (with hashtags), and tag set.
+- A web app that watches and listens to a music video, grounds it in the most-viewed music videos for its genre, and smart-picks one YouTube title, description (with hashtags), and tag set.
 - Nathan edits in place, re-runs the model, or approves. On approval it uploads the video as private and verifies it by reading it back.
 - It learns from every edit, re-run, and approval.
 - The model is Gemma 4 12B-it, open-weight under Apache 2.0, self-hosted on Ashley's GCP project. Nathan's audio stays there.
@@ -21,9 +21,9 @@
 ## Principles
 
 - **One recommendation.** The AI does the thinking; Nathan reacts.
-- **Improve without butchering.** Keep what already works on his channel.
+- **Grounded in the audience.** The genre search shows what reaches listeners. His channel supplies identity (name, credits, links), not the pattern to copy; its current metadata isn't reaching people.
 - **Numbers come from ffmpeg.** The model gives perceptual judgment only.
-- **Hashtags come from a search.** The model picks from real candidates.
+- **Hashtags and tags come from a search.** The model picks from real candidates.
 - **Verified means read back.**
 
 ## Goals
@@ -40,7 +40,7 @@
 - Social posting, Bandcamp, website, email marketing, merch, content calendar.
 - Playlists.
 - Lyrics transcription.
-- Competitor research.
+- Competitor research beyond the genre search (R4).
 - Downloading videos from YouTube.
 - Browser automation.
 - Multi-artist or collaboration.
@@ -85,25 +85,33 @@
 
 **R4 · Smart pick**
 
-- Chunk results + FLR's 5 most recent videos + Nathan's feedback + hashtag candidates → one `title, description, hashtags[], tags[], flags[], brandCheck`.
-- **Hashtag candidates (deterministic):**
-  - Parse every `#hashtag` from the descriptions of FLR's 5 recent videos.
-  - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 25), then `videos.list` for full descriptions; parse their hashtags.
-  - Rank by frequency; keep the top 30.
-  - Candidates are stored on the job, so re-runs reuse them.
+- Chunk results + audience evidence + FLR's 5 most recent videos (identity only) + Nathan's feedback → one `title, description, hashtags[], tags[], flags[], brandCheck`.
+- **Audience evidence (deterministic, one genre search):**
+  - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
+  - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.
+  - Genre terms fold into the more specific heard genre that contains them ("electronic" into "industrial electronic") before the top two seed the query.
+  - Hashtag candidates: every `#hashtag` in those descriptions, ranked by frequency; top 30.
+  - Tag candidates: their tags and description hashtags, ranked by how many videos use them, then by those videos' views; top 40.
+  - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
+  - Stored on the job, so re-runs reuse it.
+- FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
+- Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description.
-- `tags[]` (the YouTube tags field) are plain terms: genre, song title, artist name.
+- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
+- `why` names the evidence behind each field.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.
-- [ ] Every hashtag in the description is in the job's candidate list.
+- [ ] Every hashtag in the description and every tag is in the job's candidate lists.
+- [ ] No tag contains the song title.
 - [ ] Description links come from FACT or APPROVED records.
 - [ ] YouTube limits hold: title ≤ 100, tags ≤ 500 total, description ≤ 5000.
 
 **R5 · Review**
 
 - One recommendation. Every field is editable in place. Actions: **Approve & upload**, **Re-run model**, **Discard**.
-- Re-run model reruns smart pick only, with this job's skipped versions in the prompt. Signed-out own-video runs keep their fixed title (R8); their re-runs refresh description, tags, and hashtags.
+- Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
+- Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
 - [ ] Each re-run produces a new title.
@@ -125,7 +133,7 @@
 **R8 · Public home page**
 
 - The home page is the app. Signed out: zero cookies, 30-second FLR samples cut from the strongest part of each song (one tap) plus own-video upload.
-- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload, titled `<song title> (Official Video)`, without the FLR name.
+- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload and read as Nathan, with his name and credits.
 - Caps: 40 runs/day, 5 per IP. When upload quota is spent, runs end at the would-be payload.
 - DEV embeds Cloud Run through `{% embed https://<service>.run.app %}` and nothing else from an arbitrary domain, so the post uses the default `run.app` URL ([DEV editor guide](https://dev.to/p/editor_guide)).
 - [ ] Embeds in a DEV draft with `frame-ancestors 'self' https://dev.to https://*.dev.to` and completes a sample run on a phone.
@@ -197,7 +205,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution, and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
-  - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation, vocals).
+  - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
 - **Right pane, the label:**
   - Title in a white speech bubble with a live `n / 100` counter.
   - Description textarea, labeled "model draft", ending in the picked hashtags.
@@ -208,7 +216,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.
 - **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #1f6fe8`, `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
 - **Type:** Mr Dafoe wordmark, Rubik 700/900 labels and buttons, Inter body, JetBrains Mono for tags, counters, and metadata.
-- **Mockup copy that the build replaces:** hashtags in the tags field (they move to the description; tags are plain terms), "118 bpm" and lyric fragments in "What the model heard" (numbers come from ffmpeg; lyrics are a non-goal), "last 10 uploads" (the comparison set is 5), the Public/Scheduled/Unlisted options, the Playlist picker, and "Live on YouTube".
+- **Mockup copy that the build replaces:** hashtags in the tags field (they move to the description; tags are plain terms), "118 bpm" and lyric fragments in "What the model heard" (numbers come from ffmpeg; lyrics are a non-goal), "last 10 uploads" (the grounding is the genre search), the Public/Scheduled/Unlisted options, the Playlist picker, and "Live on YouTube".
 
 ## Success Metrics
 

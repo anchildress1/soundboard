@@ -5,6 +5,16 @@ export const DESCRIPTION_MAX = 5000;
 // A hashtag starts the text or follows whitespace, so URL fragments (`page#top`) don't count.
 const HASHTAG = /(?<!\S)#([\p{L}\p{N}_]+)/gu;
 
+const words = (text: string) =>
+  ` ${text
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()} `;
+
+/** Whole-word containment, so the title "Pop" rules out "pop music" but not "synthpop". */
+export const containsWords = (text: string, phrase: string) =>
+  phrase.trim() !== '' && words(text).includes(words(phrase));
+
 /** Every `#hashtag` in a text, lowercased, in order of first appearance. */
 export function parseHashtags(text: string): string[] {
   const seen = new Set<string>();

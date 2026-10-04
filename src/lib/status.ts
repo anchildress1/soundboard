@@ -57,7 +57,8 @@ export function heardTags(view: JobView, limit = 8): string[] {
   for (const chunk of view.chunks) {
     const music = chunk.analysis?.music;
     if (!music) continue;
-    for (const tag of [...music.genre, music.tempoFeel, ...music.instrumentation, music.vocals]) {
+    // Vocals is a free-text description ("none", "processed male vocals"), not a tag.
+    for (const tag of [...music.genre, music.tempoFeel, ...music.instrumentation]) {
       add(tag);
     }
   }

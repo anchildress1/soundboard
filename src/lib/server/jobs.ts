@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Transaction } from '@google-cloud/firestore';
 import type { Channel, Chunk, JobOwner, JobState, Pick, PickFields, PublicJob } from '$lib/types';
 import { db } from './clients';
+import type { AudienceEvidence } from './hashtags';
 
 /** A step's claim on a job; an aborted request frees the job when it lapses. */
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
@@ -21,6 +22,8 @@ export type JobDoc = PublicJob & {
   finalFields: PickFields | null;
   /** Version of the recommendation on screen; approve must name it. */
   pickVersion: number | null;
+  /** The genre search behind the pick; re-runs reuse it. */
+  audience: AudienceEvidence | null;
   verifyAttempts: number;
   updatedAt: number;
 };
@@ -76,6 +79,7 @@ export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc>
     claim: null,
     trace: input.trace,
     hashtagCandidates: null,
+    audience: null,
     upload: null,
     finalFields: null,
     pickVersion: null,

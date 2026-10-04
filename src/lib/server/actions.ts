@@ -1,8 +1,8 @@
-import { parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
+import { containsWords, parseHashtags, validateFields, type FieldErrors } from '$lib/metadata';
 import type { JobState, Pick, PickFields } from '$lib/types';
 import { db } from './clients';
 import { jobRef, latestPick, pickKey, skipAndRepick, transitionJob, type JobDoc } from './jobs';
-import { approvalFeedback, writeFeedback } from './memory';
+import { approvalFeedback, ARTIST_NAME, writeFeedback } from './memory';
 import { takeUploadSlot } from './quota';
 import { getRefreshToken } from './tokens';
 
@@ -23,6 +23,18 @@ function requireState(job: JobDoc, states: JobState[]): void {
 
 const allowlistedFor = (job: JobDoc) => job.owner === 'nathan';
 
+/** Edited tags follow the pick's rules: the job's tag candidates or the artist name, never the title. */
+function tagError(tags: string[], job: JobDoc): string | undefined {
+  const titled = tags.filter((tag) => containsWords(tag, job.songTitle));
+  if (titled.length > 0) return `Tags can't contain the song title: ${titled.join(', ')}`;
+  const allowed = new Set(
+    [...(job.audience?.tags ?? []).map((c) => c.tag), ARTIST_NAME].map((t) => t.toLowerCase()),
+  );
+  const stray = tags.filter((tag) => !allowed.has(tag.trim().toLowerCase()));
+  if (stray.length > 0) return `Not in this job's tag list: ${stray.join(', ')}`;
+  return undefined;
+}
+
 /**
  * Approves the edited fields of the recommendation on screen. One transaction re-checks REVIEW and
  * the pick version, takes the day's upload slot, moves the job, and records the feedback, so a
@@ -36,6 +48,8 @@ export async function approve(
   requireState(job, ['REVIEW']);
   const candidates = job.hashtagCandidates ?? [];
   const errors = validateFields(input, candidates);
+  const tags = errors.tags ?? tagError(input.tags, job);
+  if (tags) errors.tags = tags;
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
   if (!Number.isInteger(input.pickVersion)) {

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { action, ApiError, step, uploadToGcs } from '$lib/api';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
@@ -68,6 +70,10 @@
     serverErrors = {};
     try {
       view = await action(job.id, name, data.trace, body);
+      if (view.job.state === 'DISCARDED') {
+        await goto(resolve('/'));
+        return;
+      }
       message = view.job.error ?? '';
       if (DRIVEN_STATES.includes(view.job.state)) void run();
     } catch (error) {

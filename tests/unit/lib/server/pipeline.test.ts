@@ -265,6 +265,7 @@ function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     claim: null,
     trace: null,
     hashtagCandidates: null,
+    audience: null,
     upload: null,
     finalFields: null,
     pickVersion: null,
@@ -585,6 +586,10 @@ describe('runStep: PICK', () => {
       feedback: unknown[];
       skippedVersions?: { title: string }[];
       candidateHashtags: string[];
+      candidateTags: { tag: string; usedBy: number }[];
+      audienceTopVideos: unknown[];
+      recentUploads?: unknown[];
+      brandGuide?: unknown;
     };
   };
 
@@ -593,7 +598,7 @@ describe('runStep: PICK', () => {
     store.set('jobs/j1/chunks/0001', chunkDoc(1));
   });
 
-  it('stores candidates and pick version 1 for a visitor job using public facts only', async () => {
+  it('stores candidates and pick version 1 for a visitor job, named as the artist with public facts only', async () => {
     expect(await runStep(seed({ state: 'PICK', measurements: MEASURED }))).toEqual({});
     const job = saved();
     expect(job.state).toBe('REVIEW');
@@ -604,12 +609,16 @@ describe('runStep: PICK', () => {
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
 
     const ctx = context();
-    expect(ctx.artist).toBeNull();
+    expect(ctx.artist).toBe('Flies Like Robots');
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name']);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
     expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+    // Visitor runs read like Nathan too, so his uploads supply the credits.
+    expect(called(/playlistItems/).length).toBeGreaterThan(0);
+    expect(ctx.recentUploads).toHaveLength(5);
+    expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
   });
 
   it('names the artist for a sample and leaves its live video out of the comparison set', async () => {
@@ -642,6 +651,15 @@ describe('runStep: PICK', () => {
         owner: 'nathan',
         channel: 'nathan',
         hashtagCandidates: ['#synthwave', '#retrowave', '#newmusic'],
+        audience: {
+          query: 'synthwave music video',
+          hashtags: ['#synthwave', '#retrowave', '#newmusic'],
+          tags: [
+            { tag: 'synthwave', usedBy: 9 },
+            { tag: 'outrun', usedBy: 4 },
+          ],
+          top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
+        },
       }),
     );
     expect(saved().state).toBe('REVIEW');
@@ -649,6 +667,14 @@ describe('runStep: PICK', () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');
+    expect(ctx.candidateTags).toEqual([
+      { tag: 'synthwave', usedBy: 9 },
+      { tag: 'outrun', usedBy: 4 },
+      { tag: 'Flies Like Robots', usedBy: 0 },
+    ]);
+    expect(ctx.audienceTopVideos).toEqual([
+      { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
+    ]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name', 'home']);
     expect(ctx.feedback).toHaveLength(1);
@@ -658,12 +684,46 @@ describe('runStep: PICK', () => {
     expect(store.has('artists/flr/facts/home')).toBe(true);
   });
 
+  const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
+  const approveGuide = () =>
+    store.set('artists/flr/brand/approved', {
+      ...GUIDE,
+      status: 'APPROVED',
+      basedOn: ['v1'],
+      createdAt: 1,
+      approvedAt: 2,
+    });
+
+  it("follows Nathan's approved brand guide", async () => {
+    approveGuide();
+    await runStep(seed({ state: 'PICK', owner: 'nathan', channel: 'nathan' }));
+    expect(context().brandGuide).toEqual(GUIDE);
+  });
+
+  it('keeps the brand guide out of visitor jobs', async () => {
+    approveGuide();
+    await runStep(seed({ state: 'PICK', sampleId: 'smp', channel: 'sandbox' }));
+    expect(context()).not.toHaveProperty('brandGuide');
+  });
+
   it('counts an unparseable recommendation as a failure', async () => {
     on(/chat\/completions$/, () => completion('{"title": 1}'));
     await runStep(seed({ state: 'PICK' }));
     expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect(saved().error).toBe('The model reply did not parse as a recommendation.');
     expect(store.has('jobs/j1/pick/0001')).toBe(false);
+  });
+
+  it('keeps the genre search when the model fails, so the retry does not search again', async () => {
+    on(/chat\/completions$/, () => completion('{"title": 1}'));
+    await runStep(seed({ state: 'PICK' }));
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+    expect(saved().audience).toMatchObject({ hashtags: ['#synthwave', '#retrowave', '#newmusic'] });
+
+    on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
+    await runStep(saved());
+    expect(saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
   });
 });
 

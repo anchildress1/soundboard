@@ -2,8 +2,10 @@ Read `docs/prd.md` before changing behavior. It is the source of truth; when cod
 
 ## Hard rules
 
-- Write the artist as "Nathan" or "Flies Like Robots". Never his surname — in code, fixtures, seeds, prompts, commits, or docs.
-- No voice, persona, or chatbot copy anywhere. UI text is plain labels.
+- Write the artist as "Nathan" or "Flies Like Robots". Never write his surname in code, fixtures, seeds, prompt text, commits, or docs.
+- Do not filter or redact his surname from runtime data. Credits in his channel's descriptions pass through to the model, and generated descriptions may repeat them in every run, samples included.
+- No persona or chatbot copy anywhere. UI text is plain labels.
+- Generated descriptions follow Nathan's own writing voice (`ARTIST_VOICE` in smart pick), distilled from his YouTube descriptions and comments. Change it only from new evidence of how he writes.
 - Audio-engineering numbers (LUFS, peak, clipping, silence) come from ffmpeg only. Strip numerics the model emits.
 - Hashtags come only from the job's deterministic candidate list (PRD R4). Reject any hashtag not in it.
 - A publish is `VERIFIED` only after `videos.list` returns it. The insert response sets `CLAIMED_COMPLETE`.

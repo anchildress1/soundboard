@@ -133,7 +133,7 @@ describe('jobStatus', () => {
 });
 
 describe('heardTags', () => {
-  it('ranks genre, tempo feel, instrumentation, and vocals by frequency, case-folded', () => {
+  it('ranks genre, tempo feel, and instrumentation by frequency, case-folded', () => {
     const v = view(
       {},
       {
@@ -170,10 +170,8 @@ describe('heardTags', () => {
     );
     const tags = heardTags(v);
     expect(tags.slice(0, 2)).toEqual(['synthwave', 'driving']);
-    expect(tags).toEqual(
-      expect.arrayContaining(['synth bass', 'male lead', 'indie', 'drum machine']),
-    );
-    expect(tags).toHaveLength(6);
+    expect(tags).toEqual(expect.arrayContaining(['synth bass', 'indie', 'drum machine']));
+    expect(tags).toHaveLength(5);
   });
 
   it('ignores mood and quality flags, blanks, and chunks without analysis', () => {
@@ -187,6 +185,19 @@ describe('heardTags', () => {
       },
     );
     expect(heardTags(v)).toEqual([]);
+  });
+
+  it('never shows the vocals description, including "none"', () => {
+    const v = view(
+      {},
+      {
+        chunks: [
+          chunk(0, music({ genre: ['glitch'], vocals: 'None' })),
+          chunk(1, music({ vocals: 'none' })),
+        ],
+      },
+    );
+    expect(heardTags(v)).not.toContain('none');
   });
 
   it('honours the limit', () => {
