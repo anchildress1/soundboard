@@ -79,8 +79,11 @@ if ! gcloud storage buckets describe "gs://${GCS_BUCKET}" --project "$GCP_PROJEC
     --location "$REGION" --default-storage-class STANDARD \
     --uniform-bucket-level-access --public-access-prevention --soft-delete-duration 0
 fi
-gcloud storage buckets update "gs://${GCS_BUCKET}" --lifecycle-file gcs-lifecycle.json \
-  --project "$GCP_PROJECT_ID" --quiet > /dev/null
+# Reconciled on every deploy, not just at creation, so an existing or drifted bucket gets the
+# same protections.
+gcloud storage buckets update "gs://${GCS_BUCKET}" --project "$GCP_PROJECT_ID" \
+  --uniform-bucket-level-access --public-access-prevention --clear-soft-delete \
+  --lifecycle-file gcs-lifecycle.json --quiet > /dev/null
 gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
   --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/storage.objectAdmin \
   --project "$GCP_PROJECT_ID" --quiet > /dev/null
