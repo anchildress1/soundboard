@@ -3,6 +3,7 @@ set -euo pipefail
 
 SERVICE="soundboard"
 REGION="us-central1"
+APP_DOMAIN="https://soundboard.anchildress1.dev"
 SEPARATOR="=================================================="
 
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
@@ -286,11 +287,11 @@ SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(status.url)')"
 
 # Browsers PUT uploads and stream playback straight from GCS, so the bucket must allow the app's
-# origin (and the local dev server).
+# origins: the custom domain, the run.app URL, and the local dev server.
 cors="$(mktemp)"
 trap 'rm -f "$rendered" "$cors"' EXIT
 cat > "$cors" << CORS
-[{"origin": ["${SERVICE_URL}", "http://localhost:5173"],
+[{"origin": ["${APP_DOMAIN}", "${SERVICE_URL}", "http://localhost:5173"],
   "method": ["GET", "PUT"],
   "responseHeader": ["Content-Type", "Content-Range", "Accept-Ranges", "Range",
     "x-goog-content-length-range"],

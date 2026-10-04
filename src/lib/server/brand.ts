@@ -21,6 +21,22 @@ import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracin
 import { recentVideos, thumbnailDataUrl, type CatalogVideo } from './youtube';
 
 const DESCRIPTION_CHARS = 200;
+/** Uploads carry 14 to 44 tags each; uncapped, they filled the 8K context and cut off the reply. */
+const TAGS_PER_VIDEO = 8;
+/** A count cap alone still lets long tags through, so the text is capped too. */
+const TAG_CHARS = 120;
+
+/** The upload's first tags, at most 8 and 120 characters together. */
+function leadingTags(tags: string[]): string[] {
+  const kept: string[] = [];
+  let chars = 0;
+  for (const tag of tags.slice(0, TAGS_PER_VIDEO)) {
+    chars += tag.length;
+    if (chars > TAG_CHARS) break;
+    kept.push(tag);
+  }
+  return kept;
+}
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
@@ -62,7 +78,7 @@ export function buildBrandMessages(
   const uploads = videos.map((v) => ({
     title: v.title,
     description: v.description.slice(0, DESCRIPTION_CHARS),
-    tags: v.tags,
+    tags: leadingTags(v.tags),
     publishedAt: v.publishedAt,
   }));
   const thumbnails = videos

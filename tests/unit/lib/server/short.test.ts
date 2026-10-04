@@ -530,7 +530,8 @@ describe('hookStep', () => {
     let calls = 0;
     fetchMock.mockImplementation(async () => {
       calls++;
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // Timers can fire a millisecond early by Date.now, so sleep well past the asserted 5 ms.
+      await new Promise((resolve) => setTimeout(resolve, 10));
       return completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' }));
     });
     const patch = await hookStep(shortJob({}, { modelMs: 40_000 }));

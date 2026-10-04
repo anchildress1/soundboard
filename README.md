@@ -1,16 +1,27 @@
-<p align="center">
-  <img src="https://repository-images.githubusercontent.com/1403741741/0398d426-9953-4134-8e03-dcbfdb73fd4c" alt="Soundboard" width="100%" />
-</p>
-
 # 🎛️ Soundboard
 
 Soundboard analyzes a finished music video and drafts its YouTube title, description, hashtags, and tags. The artist approves, edits, or re-runs the draft; on approval, Soundboard uploads the video as private and confirms the upload through the YouTube API.
 
+[![Live app](https://img.shields.io/badge/live-soundboard.anchildress1.dev-ff2e88)](https://soundboard.anchildress1.dev)
+[![DEV submission](https://img.shields.io/badge/DEV-challenge%20submission-0a0a0a?logo=devdotto&logoColor=white)](https://dev.to/anchildress1/20-years-of-friendship-one-weekend-to-build-his-marketing-department-23c9-temp-slug-938322?preview=f731687adb96e0fe58253c4699ccf0957b2dc3e5a70455cc0e76de3a9787cd2e234b928b92371a51327d88b5d479b434078e40ffbedef2978b9b0cc1)
+[![CI](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=coverage)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an entry in the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01).
+![Node 24](https://img.shields.io/badge/Node-24-5FA04E?logo=nodedotjs&logoColor=white)
+![SvelteKit 2](https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white)
+![Gemma 4](https://img.shields.io/badge/Gemma%204-12B--it-4285F4?logo=google&logoColor=white)
+![Vertex AI](https://img.shields.io/badge/Vertex%20AI-NVIDIA%20L4-4285F4?logo=googlecloud&logoColor=white)
+![Cloud Run](https://img.shields.io/badge/Cloud%20Run-us--central1-4285F4?logo=googlecloud&logoColor=white)
+![Sentry](https://img.shields.io/badge/Sentry-AI%20agent%20tracing-362D59?logo=sentry&logoColor=white)
 
-> **Status:** in development during the challenge weekend (October 3–5, 2026). The P0 pipeline and the P1 brand guide from [docs/prd.md](docs/prd.md) are implemented.
+Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an entry in the [DEV Hacktoberfest Weekend Challenge: Build for a Friend](https://dev.to/challenges/hacktoberfest-weekend-2026-10-01). Try it at [soundboard.anchildress1.dev](https://soundboard.anchildress1.dev), and read [the submission](https://dev.to/anchildress1/20-years-of-friendship-one-weekend-to-build-his-marketing-department-23c9-temp-slug-938322?preview=f731687adb96e0fe58253c4699ccf0957b2dc3e5a70455cc0e76de3a9787cd2e234b928b92371a51327d88b5d479b434078e40ffbedef2978b9b0cc1).
+
+<p align="center">
+  <img src="https://repository-images.githubusercontent.com/1403741741/0398d426-9953-4134-8e03-dcbfdb73fd4c" alt="Soundboard" width="100%" />
+</p>
 
 ---
 
@@ -27,7 +38,6 @@ Built for [Flies Like Robots](https://www.youtube.com/@flieslikerobots) as an en
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 - [Author](#author)
-- [Commits after 2026-10-05 06:59 UTC](#commits-after-2026-10-05-0659-utc)
 
 ---
 
@@ -43,18 +53,19 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 
 ## Features
 
-| Feature                  | Description                                                                                                                                                      |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                                                                                    |
-| Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model                                                                  |
-| Metadata draft           | One title, description, hashtag set, and tag set, grounded in the most-viewed music videos for its genre                                                         |
-| Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                                                                               |
-| Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts                                                                      |
-| Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                    |
-| Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change                                                          |
-| Brand guide              | Reads the channel's 30 latest videos and 10 thumbnails and proposes keep / fix / drop rules; once Nathan approves them, every draft for his channel follows them |
-| Short                    | Gemma picks the hook, ffmpeg's loudness places the cut, and ffmpeg fits it to 9:16 for review and the same private, verified upload; no generated frames         |
-| Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                                                                                      |
+| Feature                  | Description                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio and video analysis | Each 29.5-second window of audio, plus 8 frames from it, is analyzed by Gemma                                                                                                                                           |
+| Audio measurements       | Loudness, true peak, clipping, and silence are measured with ffmpeg, not estimated by the model                                                                                                                         |
+| Upload checks            | "Check before uploading" lists only measured problems: ffmpeg's findings, the Short notice for vertical or square videos of 3 minutes or less, and problems a window analysis heard or saw. The model can't add its own |
+| Metadata draft           | One title, description, hashtag set, and tag set, grounded in the most-viewed music videos for its genre                                                                                                                |
+| Hashtag candidates       | Hashtags are chosen from a deterministic search of existing videos                                                                                                                                                      |
+| Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts                                                                                                                             |
+| Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                                                                           |
+| Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change                                                                                                                 |
+| Brand guide              | Reads the channel's 30 latest videos (up to 8 tags each, to fit the model's 8K context) and 10 thumbnails and proposes keep / fix / drop rules; once Nathan approves them, every draft for his channel follows them     |
+| Short                    | Gemma picks the hook, ffmpeg's loudness places the cut, and ffmpeg fits it to 9:16 for review and the same private, verified upload; no generated frames                                                                |
+| Tracing                  | One Sentry trace per job, with each Gemma call recorded as an AI agent span                                                                                                                                             |
 
 ---
 
@@ -104,6 +115,7 @@ flowchart LR
 ```
 
 - The app runs on Cloud Run with no GPU. The model runs on a Vertex AI dedicated endpoint, which the app calls with its service account. Both run at most one instance and scale to zero when idle; the first call to a sleeping model wakes it, and the page shows "waking model" until it answers.
+- The model costs about $0.81/hour while its replica is up (`g2-standard-4` with the L4) and nothing while scaled to zero. A wake bills at least 5 minutes.
 - The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft; a Short adds a hook pick and a render). Reloading the page resumes from the next unfinished step.
 - The full design is in [docs/prd.md](docs/prd.md).
 
@@ -132,8 +144,9 @@ make dev
 ### Operating it
 
 - **Connect channels:** sign in with an allowlisted account, then use the footer's _Connect channel_ links. _Nathan_ must be consented by Nathan's Google account; _Sandbox_ by the throwaway channel's. Each stores a YouTube refresh token in Secret Manager (`yt-refresh-nathan`, `yt-refresh-sandbox`).
-- **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `<service-url>/auth/callback` as a redirect URI after the first deploy.
+- **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the visitor used.
 - **Brand guide:** allowlisted accounts get a _Brand guide_ footer link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; visitor runs never read it.
+- **Model deploys:** the first `make deploy` uploads the model image and deploys it to the endpoint; expect 20+ minutes. Vertex can fail a deploy with a generic system error when no L4 is free in us-central1. Check the operation before running `make deploy` again, since a rerun while one is still running starts a second deploy. A model left idle for 30 days is undeployed automatically; `make deploy` puts it back.
 - **Samples:** `scripts/add-sample.sh <video> <youtube-video-id> "<song title>"` cuts the loudest 30 seconds, uploads it to `samples/`, and registers it on the home page.
 
 ---
@@ -198,9 +211,3 @@ Gemma 4's model weights are not part of this repository. Google DeepMind distrib
 ## Author
 
 **Ashley Childress** — [@anchildress1](https://github.com/anchildress1) · [dev.to/anchildress1](https://dev.to/anchildress1)
-
----
-
-## Commits after 2026-10-05 06:59 UTC
-
-None yet. Any commit made after the challenge deadline will be listed here with a description of what it changed.
