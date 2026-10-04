@@ -68,9 +68,13 @@ export function heardTags(view: JobView, limit = 8): string[] {
     .map(([tag]) => tag);
 }
 
-/** Whether a model call is running now: a chunk or the pick, not waiting on the model to load. */
+/**
+ * Whether the pick's model call is running now. Only the pick ticks live: a pick step is almost all
+ * model time, while a chunk step also spends seconds in ffmpeg and GCS, so a live clock there would
+ * overshoot and jump back when the chunk's measured time lands.
+ */
 export function modelWorking(view: JobView): boolean {
-  return (view.job.state === 'ANALYZE' || view.job.state === 'PICK') && !view.wait;
+  return view.job.state === 'PICK' && !view.wait;
 }
 
 /**

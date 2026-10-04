@@ -248,13 +248,13 @@ describe('modelSeconds', () => {
 });
 
 describe('modelWorking', () => {
-  it('is true while a chunk or the pick runs', () => {
-    expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(true);
+  it('is true while the pick runs', () => {
     expect(modelWorking(view({ state: 'PICK' }))).toBe(true);
   });
 
-  it('is false while the model loads or outside model states', () => {
+  it('is false while the model loads, during chunks, or outside model states', () => {
     expect(modelWorking(view({ state: 'PICK' }, { wait: 'waking model' }))).toBe(false);
+    expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(false);
     expect(modelWorking(view({ state: 'PREP' }))).toBe(false);
     expect(modelWorking(view({ state: 'REVIEW' }))).toBe(false);
   });

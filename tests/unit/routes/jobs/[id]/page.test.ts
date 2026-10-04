@@ -168,7 +168,7 @@ describe('job page: status chip', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       fetchMock.mockImplementation(hang);
-      setup(view({ state: 'ANALYZE' }, { chunks: [chunk(0)], wait: 'waking model' }));
+      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: 'waking model' }));
       await vi.advanceTimersByTimeAsync(3000);
       expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
     } finally {
