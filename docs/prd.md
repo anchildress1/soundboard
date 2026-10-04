@@ -16,7 +16,7 @@
 - A web app that watches and listens to a music video, compares it to FLR's 5 most recent videos, and smart-picks one YouTube title, description (with hashtags), and tag set.
 - Nathan edits in place, re-runs the model, or approves. On approval it uploads the video as private and verifies it by reading it back.
 - It learns from every edit, re-run, and approval.
-- The model is Gemma 4 12B-it, open-weight under the Gemma Terms of Use, self-hosted on Ashley's GCP project. Nathan's audio stays there.
+- The model is Gemma 4 12B-it, open-weight under Apache 2.0, self-hosted on Ashley's GCP project. Nathan's audio stays there.
 
 ## Principles
 
@@ -161,10 +161,10 @@
 
 One Cloud Run service with an L4 GPU, two containers sharing `localhost`.
 
-| Container                        | Runs                                                                                                                                   |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `app` (ingress)                  | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                   |
-| `model` (sidecar, holds the GPU) | `llama-server` + Gemma 4 12B Q4_K_M + f16 mmproj, weights baked in, bound to `localhost`; `/props` reports `vision: true, audio: true` |
+| Container                        | Runs                                                                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app` (ingress)                  | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                                                                                   |
+| `model` (sidecar, holds the GPU) | `llama-server` + Google's official Gemma 4 12B-it QAT Q4_0 GGUF + its mmproj, weights baked in and checksum-verified, port 8081 inside the instance only; `/props` reports `vision: true, audio: true` |
 
 - **Service:** model container 4 vCPU / 16 GiB (the L4 minimum) + app container 2 vCPU / 8 GiB, max 1, min 0, instance-based billing (required for GPUs), 60-min request timeout. Cloud Run gives the GPU to one container per instance ([GPU support for services](https://docs.cloud.google.com/run/docs/configuring/services/gpu)).
 - **Startup:** the `model` sidecar's startup probe is a TCP check, so the page serves within seconds while weights load; `/health` drives "waking model".
