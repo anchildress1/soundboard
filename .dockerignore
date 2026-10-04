@@ -1,0 +1,23 @@
+node_modules
+.git
+.github
+.svelte-kit
+build
+coverage
+playwright-report
+test-results
+.lighthouseci
+docs
+tests
+# Secrets never enter the build context
+.env
+.env.*
+*.env
+*.pem
+*.key
+# Media and weights
+*.mp4
+*.mov
+*.webm
+*.wav
+*.gguf
