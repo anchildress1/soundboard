@@ -586,7 +586,7 @@ describe('runStep: PICK', () => {
       feedback: unknown[];
       skippedVersions?: { title: string }[];
       candidateHashtags: string[];
-      candidateTags: string[];
+      candidateTags: { tag: string; usedBy: number }[];
       audienceTopVideos: unknown[];
       recentUploads?: unknown[];
       brandGuide?: unknown;
@@ -598,7 +598,7 @@ describe('runStep: PICK', () => {
     store.set('jobs/j1/chunks/0001', chunkDoc(1));
   });
 
-  it('stores candidates and pick version 1 for a visitor job using public facts only', async () => {
+  it('stores candidates and pick version 1 for a visitor job, named as the artist with public facts only', async () => {
     expect(await runStep(seed({ state: 'PICK', measurements: MEASURED }))).toEqual({});
     const job = saved();
     expect(job.state).toBe('REVIEW');
@@ -609,15 +609,15 @@ describe('runStep: PICK', () => {
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
 
     const ctx = context();
-    expect(ctx.artist).toBeNull();
+    expect(ctx.artist).toBe('Flies Like Robots');
     expect(ctx.facts.map((f) => f.key)).toEqual(['artist-name']);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
     expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    // Own-video visitor runs never read FLR's catalog, so his credits can't reach the prompt.
-    expect(called(/playlistItems/)).toHaveLength(0);
-    expect(ctx.recentUploads).toBeUndefined();
+    // Visitor runs read like Nathan too, so his uploads supply the credits.
+    expect(called(/playlistItems/).length).toBeGreaterThan(0);
+    expect(ctx.recentUploads).toHaveLength(5);
     expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
   });
 
@@ -654,7 +654,10 @@ describe('runStep: PICK', () => {
         audience: {
           query: 'synthwave music video',
           hashtags: ['#synthwave', '#retrowave', '#newmusic'],
-          tags: ['synthwave', 'outrun'],
+          tags: [
+            { tag: 'synthwave', usedBy: 9 },
+            { tag: 'outrun', usedBy: 4 },
+          ],
           top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
         },
       }),
@@ -664,7 +667,11 @@ describe('runStep: PICK', () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe('Flies Like Robots');
-    expect(ctx.candidateTags).toEqual(['synthwave', 'outrun', 'Flies Like Robots']);
+    expect(ctx.candidateTags).toEqual([
+      { tag: 'synthwave', usedBy: 9 },
+      { tag: 'outrun', usedBy: 4 },
+      { tag: 'Flies Like Robots', usedBy: 0 },
+    ]);
     expect(ctx.audienceTopVideos).toEqual([
       { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
     ]);

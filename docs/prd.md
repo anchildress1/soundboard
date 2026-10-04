@@ -93,10 +93,10 @@
   - Tag candidates: their tags, ranked by how many videos use them, then by those videos' views; top 40.
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
   - Stored on the job, so re-runs reuse it.
-- FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied. Signed-out own-video runs get none of them.
-- On runs that may name him, the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
+- FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
+- Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description.
-- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name when the run may name him. Never the song title.
+- `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. Never the song title.
 - `why` names the evidence behind each field.
 - For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
@@ -109,7 +109,7 @@
 **R5 · Review**
 
 - One recommendation. Every field is editable in place. Actions: **Approve & upload**, **Re-run model**, **Discard**.
-- Re-run model reruns smart pick only, with this job's skipped versions in the prompt. Signed-out own-video runs keep their fixed title (R8); their re-runs refresh description, tags, and hashtags.
+- Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
 - Discard ends the job; nothing is learned from it.
 - [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
 - [ ] Each re-run produces a new title.
@@ -131,7 +131,7 @@
 **R8 · Public home page**
 
 - The home page is the app. Signed out: zero cookies, 30-second FLR samples cut from the strongest part of each song (one tap) plus own-video upload.
-- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload, titled `<song title> (Official Video)`, without the FLR name.
+- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload and read as Nathan, with his name and credits.
 - Caps: 40 runs/day, 5 per IP. When upload quota is spent, runs end at the would-be payload.
 - DEV embeds Cloud Run through `{% embed https://<service>.run.app %}` and nothing else from an arbitrary domain, so the post uses the default `run.app` URL ([DEV editor guide](https://dev.to/p/editor_guide)).
 - [ ] Embeds in a DEV draft with `frame-ancestors 'self' https://dev.to https://*.dev.to` and completes a sample run on a phone.

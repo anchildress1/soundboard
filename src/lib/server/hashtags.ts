@@ -14,6 +14,9 @@ const TOP_DESCRIPTION_CHARS = 700;
 /** One of the most-viewed genre search results, as the model sees it. */
 export type AudienceVideo = { title: string; description: string; tags: string[]; views: number };
 
+/** A tag from the genre search and how many of its results use it. */
+export type TagCandidate = { tag: string; usedBy: number };
+
 /**
  * What the genre's audience responds to, from the genre search: the deterministic hashtag and tag
  * candidates, and the most-viewed results as examples. Stored on the job so re-runs reuse it.
@@ -21,7 +24,7 @@ export type AudienceVideo = { title: string; description: string; tags: string[]
 export type AudienceEvidence = {
   query: string;
   hashtags: string[];
-  tags: string[];
+  tags: TagCandidate[];
   top: AudienceVideo[];
 };
 
@@ -56,7 +59,7 @@ export function rankHashtags(descriptions: string[], limit = CANDIDATE_LIMIT): s
  * Plain tags across videos ranked by how many videos use them, then by those videos' total views.
  * Case-folded for counting; the first spelling seen is kept.
  */
-export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): string[] {
+export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): TagCandidate[] {
   const stats = new Map<string, { tag: string; videos: number; views: number }>();
   for (const video of videos) {
     const seen = new Set<string>();
@@ -74,7 +77,7 @@ export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): s
   return [...stats.values()]
     .sort((a, b) => b.videos - a.videos || b.views - a.views)
     .slice(0, limit)
-    .map((entry) => entry.tag);
+    .map((entry) => ({ tag: entry.tag, usedBy: entry.videos }));
 }
 
 export function topVideos(videos: CatalogVideo[], count = TOP_VIDEO_COUNT): AudienceVideo[] {
@@ -135,7 +138,7 @@ export async function audienceEvidence(
     });
     span.setAttribute(
       'gen_ai.tool.call.result',
-      JSON.stringify({ hashtags: evidence.hashtags, tags: evidence.tags }),
+      JSON.stringify({ hashtags: evidence.hashtags, tags: evidence.tags.map((t) => t.tag) }),
     );
     return evidence;
   });

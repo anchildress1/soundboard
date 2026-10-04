@@ -4,7 +4,7 @@ import type { Chunk, Measurements, Pick } from '$lib/types';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
-import type { AudienceVideo } from './hashtags';
+import type { AudienceVideo, TagCandidate } from './hashtags';
 import type { ChatMessage } from './tracing';
 import type { CatalogVideo } from './youtube';
 
@@ -61,15 +61,13 @@ export function isRawPick(value: unknown): value is RawPick {
 export type PickContext = {
   songTitle: string;
   notes: string;
-  /** False for signed-out own-video runs: the proposal must not carry the FLR name. */
-  useArtistName: boolean;
   chunks: Chunk[];
   measurements: Measurements | null;
   recent: (CatalogVideo & { thumbnail: string | null })[];
   /** Hashtag candidates from the genre search (R4). */
   candidates: string[];
   /** Tag candidates from the genre search's results. */
-  tagCandidates: string[];
+  tagCandidates: TagCandidate[];
   /** The genre search's most-viewed results: the evidence for what reaches listeners. */
   audience: AudienceVideo[];
   facts: Fact[];
@@ -93,8 +91,9 @@ export const ARTIST_VOICE = [
   '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
   '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
   '- Keep his contact line from recentUploads.',
-  '- Dry, self-mocking humor: offhand labels ("official visualization thingy"), genre doubt out loud ("Hyperpop? You tell me.").',
-  '- At most one aside like "hehe" or "Har! Har!", and at most one word in caps for emphasis.',
+  '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
+  '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
+  '- Quoted phrases here show his style. Never copy them word for word, except the credit line.',
   '- No marketing copy: no "explores", "journey", "sonic", "soundscape", "for fans of", no calls to like or subscribe, no emoji.',
 ].join('\n');
 
@@ -125,45 +124,31 @@ export function weighFeedback(feedback: Feedback[]) {
   }));
 }
 
-function skippedRule(ctx: PickContext): string {
-  if (ctx.skipped.length === 0) return '';
-  return ctx.useArtistName
-    ? 'Do not repeat any skipped version; write a different title.'
-    : 'Do not repeat any skipped version; write a different description and tags.';
-}
-
-const namesArtist = (text: string) => /\b(?:flies like robots|flr)\b/iu.test(text);
-
-/** Tags the pick may use: the genre search's tags, plus the artist name when the run may name him. */
-export function tagPool(fix: { tagCandidates: string[]; useArtistName: boolean }): string[] {
-  return fix.useArtistName
-    ? [...fix.tagCandidates, ARTIST_NAME]
-    : fix.tagCandidates.filter((tag) => !namesArtist(tag));
+/** Tags the pick may use: the genre search's tags plus the artist name. */
+export function tagPool(fix: { tagCandidates: TagCandidate[] }): TagCandidate[] {
+  return [...fix.tagCandidates, { tag: ARTIST_NAME, usedBy: 0 }];
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
-  const artist = ctx.useArtistName ? ARTIST_NAME : null;
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     "audienceTopVideos are the most-viewed music videos in this genre, ranked by views. They are the evidence for what reaches listeners: model the title format and the description's structure and length on them.",
-    artist
-      ? "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags."
-      : '',
-    `title: at most ${TITLE_MAX} characters.${artist ? '' : ' The title is set separately; name no artist anywhere.'}`,
-    `description: plain text whose structure and length follow the audienceTopVideos descriptions${artist ? '; its wording follows the artist voice below' : ''}. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
-    artist ? ARTIST_VOICE : '',
+    "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags.",
+    `title: at most ${TITLE_MAX} characters.`,
+    `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
+    ARTIST_VOICE,
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags. Never invent one.',
-    `tags: pick 5 to 15, copied exactly from candidateTags. Never the song title. Never invent one. Under ${TAGS_MAX} characters combined.`,
+    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones. Include "${ARTIST_NAME}". Never the song title. Never invent one.`,
     'flags: problems a viewer would notice, taken from the window analysis. No loudness, level, or tempo numbers.',
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
-    skippedRule(ctx),
+    ctx.skipped.length > 0 ? 'Do not repeat any skipped version; write a different title.' : '',
   ].filter(Boolean);
   const context = {
-    artist,
+    artist: ARTIST_NAME,
     songTitle: ctx.songTitle,
     artistNotes: ctx.notes || undefined,
     // Private facts never reach the model, so they can't surface in publishable copy.
@@ -177,14 +162,11 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       })),
     windows: digestChunks(ctx.chunks),
     ffmpeg: ctx.measurements ?? undefined,
-    // Signed-out own-video runs get no artist uploads, so his credits can't land on a stranger's video.
-    recentUploads: artist
-      ? ctx.recent.map((v) => ({
-          title: v.title,
-          description: v.description.slice(0, RECENT_DESCRIPTION_CHARS),
-          publishedAt: v.publishedAt,
-        }))
-      : undefined,
+    recentUploads: ctx.recent.map((v) => ({
+      title: v.title,
+      description: v.description.slice(0, RECENT_DESCRIPTION_CHARS),
+      publishedAt: v.publishedAt,
+    })),
     audienceTopVideos: ctx.audience,
     brandGuide: ctx.brand ?? undefined,
     candidateHashtags: ctx.candidates,
@@ -192,7 +174,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,
   };
-  const thumbnails = (artist ? ctx.recent : [])
+  const thumbnails = ctx.recent
     .map((v) => v.thumbnail)
     .filter((t): t is string => Boolean(t))
     .map((url) => ({ type: 'image_url' as const, image_url: { url } }));
@@ -223,37 +205,6 @@ export function allowedLinks(text: string, facts: Fact[]): string {
   return text.replaceAll(URL_PATTERN, (url) => (allowed.includes(url) ? url : ''));
 }
 
-const ARTIST_PATTERN = /\b(?:flies like robots|flr)\b/giu;
-const ARTIST_HASHTAG = /^#(?:flieslikerobots|flr)/i;
-const SEPARATORS = new Set(['-', '–', '|', '·']);
-const CUT = '\u0000';
-
-function removeArtistFromLine(line: string): string {
-  const tokens = line
-    .replaceAll(/[ \t]+/g, ' ')
-    .replaceAll(ARTIST_PATTERN, ` ${CUT} `)
-    .split(' ');
-  const out: string[] = [];
-  let afterCut = false;
-  for (const token of tokens) {
-    if (!token) continue;
-    if (token === CUT) {
-      if (SEPARATORS.has(out.at(-1) ?? '')) out.pop();
-      afterCut = true;
-      continue;
-    }
-    if (afterCut && SEPARATORS.has(token)) continue;
-    afterCut = false;
-    out.push(token);
-  }
-  while (SEPARATORS.has(out[0] ?? '')) out.shift();
-  while (SEPARATORS.has(out.at(-1) ?? '')) out.pop();
-  return out.join(' ').replaceAll(/ ([,.;:!?)])/g, '$1');
-}
-
-/** Drops the artist name with the separator next to it, so "Song - Flies Like Robots" leaves "Song". */
-const removeArtist = (text: string) => text.split('\n').map(removeArtistFromLine).join('\n');
-
 const BODY_HASHTAG = /(?<!\S)#[\p{L}\p{N}_]+/gu;
 
 const tidy = (text: string) =>
@@ -273,19 +224,11 @@ function clip(text: string, max: number): string {
   return (space > max * 0.6 ? cut.slice(0, space) : cut).trim();
 }
 
-const VISITOR_SUFFIX = ' (Official Video)';
-
-/** Signed-out own-video payloads carry a fixed title: the song, then "(Official Video)" (R8). */
-export function visitorTitle(songTitle: string): string {
-  return `${clip(tidy(songTitle), TITLE_MAX - VISITOR_SUFFIX.length)}${VISITOR_SUFFIX}`;
-}
-
 export type PickFixups = {
   songTitle: string;
   candidates: string[];
-  tagCandidates: string[];
+  tagCandidates: TagCandidate[];
   facts: Fact[];
-  useArtistName: boolean;
   measurements: Measurements | null;
 };
 
@@ -322,19 +265,20 @@ function pickHashtags(draft: RawPick, pool: string[]): string[] {
   return picked.map((t) => byLower.get(t)!);
 }
 
-const MIN_TAGS = 5;
+const MIN_TAGS = 3;
+const MAX_TAGS = 10;
 
 /**
- * Tags only from the pool, never containing the song title: the model's picks first, padded from
- * the top of the pool, within YouTube's 500-character total.
+ * Tags only from the pool, never containing the song title: the model's picks first (at most 10),
+ * padded to 3 from the top of the pool, within YouTube's 500-character total.
  */
 function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
   const byLower = new Map(pool.map((t) => [t.toLowerCase(), t]));
   const title = songTitle.trim().toLowerCase();
   const allowed = (key: string) => byLower.has(key) && !(title && key.includes(title));
-  const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))].filter(
-    allowed,
-  );
+  const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))]
+    .filter(allowed)
+    .slice(0, MAX_TAGS);
   for (const candidate of pool) {
     if (keys.length >= MIN_TAGS) break;
     const key = candidate.toLowerCase();
@@ -353,35 +297,28 @@ function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
  */
 export function finalizePick(raw: RawPick, fix: PickFixups): RawPick {
   const draft = stripDeep(raw);
-  // Signed-out own-video payloads must not name the artist, hashtags included.
-  const pool = fix.useArtistName
-    ? fix.candidates
-    : fix.candidates.filter((c) => !ARTIST_HASHTAG.test(c));
-  const hashtags = pickHashtags(draft, pool);
+  const hashtags = pickHashtags(draft, fix.candidates);
 
-  const scrub = fix.useArtistName ? (t: string) => t : removeArtist;
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
-  let body = tidy(
-    tidy(scrub(allowedLinks(draft.description, fix.facts))).replaceAll(BODY_HASHTAG, ''),
-  );
+  let body = tidy(tidy(allowedLinks(draft.description, fix.facts)).replaceAll(BODY_HASHTAG, ''));
   const closing = hashtags.join(' ');
   body = clip(body, DESCRIPTION_MAX - closing.length - 2);
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
 
-  const tags = pickTags(draft.tags, tagPool(fix), fix.songTitle);
+  const tags = pickTags(
+    draft.tags,
+    tagPool(fix).map((c) => c.tag),
+    fix.songTitle,
+  );
 
   return {
-    title: fix.useArtistName ? clip(tidy(draft.title), TITLE_MAX) : visitorTitle(fix.songTitle),
+    title: clip(tidy(draft.title), TITLE_MAX),
     description,
     hashtags,
     tags,
-    flags: [...measuredFlags(fix.measurements), ...draft.flags.map(scrub).filter(Boolean)],
-    brandCheck: scrub(draft.brandCheck),
-    why: {
-      title: scrub(draft.why.title),
-      description: scrub(draft.why.description),
-      tags: scrub(draft.why.tags),
-    },
+    flags: [...measuredFlags(fix.measurements), ...draft.flags.filter(Boolean)],
+    brandCheck: draft.brandCheck,
+    why: draft.why,
   };
 }
 
@@ -409,8 +346,7 @@ export async function runPick(
     ms += took;
     if (!value) return null;
     const pick = finalizePick(value, ctx);
-    // A fixed visitor title can't change, so only model-written titles must differ on a re-run.
-    const repeats = ctx.useArtistName && ctx.skipped.some((s) => sameTitle(s.title, pick.title));
+    const repeats = ctx.skipped.some((s) => sameTitle(s.title, pick.title));
     if (!repeats) return { pick, ms };
     // A re-run must produce a new title; a second repeat fails the pick so the step retries.
     if (attempt === 1) return null;

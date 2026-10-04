@@ -155,11 +155,18 @@ describe('rankTags', () => {
       video('b', 500, ['synthwave', 'darkwave']),
       video('c', 20, ['SYNTHWAVE', 'outrun']),
     ]);
-    expect(tags).toEqual(['Synthwave', 'outrun', 'darkwave', 'retro']);
+    expect(tags).toEqual([
+      { tag: 'Synthwave', usedBy: 3 },
+      { tag: 'outrun', usedBy: 2 },
+      { tag: 'darkwave', usedBy: 1 },
+      { tag: 'retro', usedBy: 1 },
+    ]);
   });
 
   it('drops hashtags, blanks, and repeats within one video', () => {
-    expect(rankTags([video('a', 1, ['#synthwave', '  ', 'retro', 'Retro '])])).toEqual(['retro']);
+    expect(rankTags([video('a', 1, ['#synthwave', '  ', 'retro', 'Retro '])])).toEqual([
+      { tag: 'retro', usedBy: 1 },
+    ]);
   });
 
   it('honours the limit and returns nothing for untagged videos', () => {
@@ -213,7 +220,10 @@ describe('audienceEvidence', () => {
 
     expect(evidence.query).toBe('synthwave music video');
     expect(evidence.hashtags).toEqual(['#synthwave', '#retro', '#80s']);
-    expect(evidence.tags).toEqual(['synthwave', '80s']);
+    expect(evidence.tags).toEqual([
+      { tag: 'synthwave', usedBy: 2 },
+      { tag: '80s', usedBy: 1 },
+    ]);
     expect(evidence.top.map((v) => v.title)).toEqual(['Two', 'One']);
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
     expect(searchUrl.pathname).toBe('/youtube/v3/search');
@@ -264,7 +274,7 @@ describe('audienceEvidence', () => {
     expect(searchUrl.searchParams.get('videoDuration')).toBe('short');
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.hashtags).toEqual(['#industrial']);
-    expect(evidence.tags).toEqual(['industrial']);
+    expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
   });
 
   it('returns empty evidence when no result is close to the upload length', async () => {

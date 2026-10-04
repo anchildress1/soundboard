@@ -16,7 +16,6 @@ import {
   type PickContext,
   type PickFixups,
   type RawPick,
-  visitorTitle,
 } from '$lib/server/smart-pick';
 import type { Chunk, Measurements } from '$lib/types';
 
@@ -32,7 +31,9 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
 });
 
 const candidates = ['#synthwave', '#retrowave', '#newmusic', '#electronic', '#indie', '#80s'];
-const tagCandidates = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'outrun'];
+const tagNames = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'outrun'];
+const cands = (...tags: string[]) => tags.map((tag) => ({ tag, usedBy: 1 }));
+const tagCandidates = cands(...tagNames);
 
 const facts: Fact[] = [
   { key: 'artist-name', value: 'Flies Like Robots', kind: 'FACT', public: true },
@@ -51,7 +52,6 @@ const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   candidates,
   tagCandidates,
   facts,
-  useArtistName: true,
   measurements: null,
   ...over,
 });
@@ -98,7 +98,6 @@ const feedback = (kind: Feedback['kind'], over: Partial<Feedback> = {}): Feedbac
 const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   songTitle: 'PeekaBoo',
   notes: '',
-  useArtistName: true,
   chunks: [chunk(0)],
   measurements: null,
   recent: [],
@@ -215,15 +214,10 @@ describe('buildPickMessages', () => {
     const rules = system(buildPickMessages(ctx()));
     expect(rules).toContain(ARTIST_VOICE);
     expect(rules).toContain('hacked and slashed');
-    expect(rules).toContain('Hyperpop? You tell me.');
+    expect(rules).toContain('Never copy them word for word, except the credit line.');
+    expect(rules).toContain('never on its own line');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);
-  });
-
-  it('leaves the artist voice out of signed-out own-video runs', () => {
-    const rules = system(buildPickMessages(ctx({ useArtistName: false })));
-    expect(rules).not.toContain(ARTIST_VOICE);
-    expect(rules).not.toContain('artist voice');
   });
 
   const userParts = (messages: ReturnType<typeof buildPickMessages>) =>
@@ -240,7 +234,7 @@ describe('buildPickMessages', () => {
     expect(body.artist).toBe('Flies Like Robots');
     expect(body.artistNotes).toBe('live take');
     expect(body.candidateHashtags).toEqual(candidates);
-    expect(body.candidateTags).toEqual([...tagCandidates, 'Flies Like Robots']);
+    expect(body.candidateTags).toEqual([...tagCandidates, { tag: 'Flies Like Robots', usedBy: 0 }]);
     expect(body.ffmpeg).toEqual(measurements());
     expect(system(messages)).toContain("recentUploads are the artist's own uploads");
     expect(system(messages)).toContain('credit lines');
@@ -253,7 +247,10 @@ describe('buildPickMessages', () => {
     const body = context(messages);
     expect(body.audienceTopVideos).toEqual(audience);
     expect(system(messages)).toContain('most-viewed music videos in this genre');
-    expect(system(messages)).toContain('copied exactly from candidateTags');
+    expect(system(messages)).toContain('copied exactly from a candidateTags tag');
+    expect(system(messages)).toContain('must name something the windows heard');
+    expect(system(messages)).toContain('Skip mood, scene, and decade words');
+    expect(system(messages)).toContain('Include "Flies Like Robots".');
     expect(system(messages)).toContain('Never the song title');
     expect(system(messages)).not.toMatch(/keep what already works/i);
   });
@@ -276,42 +273,6 @@ describe('buildPickMessages', () => {
     expect(uploads).toEqual([
       { title: 'A', description: 'Written and performed by Nathan.', publishedAt: 'p' },
     ]);
-  });
-
-  it('sets artist null and forbids naming one when useArtistName is false', () => {
-    const messages = buildPickMessages(ctx({ useArtistName: false }));
-    expect(context(messages).artist).toBeNull();
-    expect(system(messages)).toContain('name no artist');
-    expect(system(messages)).not.toContain('recentUploads');
-    expect(JSON.stringify(messages)).not.toMatch(/"artist":"Flies Like Robots"/);
-  });
-
-  it("gives signed-out own-video runs none of the artist's uploads, thumbnails, or name tags", () => {
-    const recent = [
-      {
-        videoId: 'a',
-        title: 'A',
-        description: 'Written and performed by Nathan.',
-        tags: [],
-        publishedAt: 'p',
-        thumbnailUrl: 'u',
-        views: 3,
-        durationSec: 0,
-        thumbnail: 'data:image/jpeg;base64,AAA',
-      },
-    ];
-    const messages = buildPickMessages(
-      ctx({
-        useArtistName: false,
-        recent,
-        tagCandidates: ['synthwave', 'Flies Like Robots', 'flr live'],
-      }),
-    );
-    const body = context(messages);
-    expect(body).not.toHaveProperty('recentUploads');
-    expect(body.candidateTags).toEqual(['synthwave']);
-    expect(userParts(messages)).toHaveLength(1);
-    expect(JSON.stringify(messages)).not.toContain('Written and performed');
   });
 
   it('omits empty notes, measurements, and skipped versions', () => {
@@ -605,50 +566,52 @@ describe('finalizePick', () => {
       raw({ tags: ['#Synthwave', '##RETROWAVE', 'synthwave', 'synthpop', 'invented', '  '] }),
       fix(),
     );
-    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', 'new music', '80s']);
-    expect(pick.tags.every((t) => tagCandidates.includes(t))).toBe(true);
+    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop']);
   });
 
   it('never uses the song title as a tag, even when the search returns it', () => {
     const pick = finalizePick(
       raw({ tags: ['PeekaBoo', 'peekaboo official video', 'synthwave'] }),
-      fix({ tagCandidates: ['PeekaBoo', 'peekaboo official video', ...tagCandidates] }),
+      fix({ tagCandidates: cands('PeekaBoo', 'peekaboo official video', ...tagNames) }),
     );
     expect(pick.tags.some((t) => t.toLowerCase().includes('peekaboo'))).toBe(false);
     expect(pick.tags[0]).toBe('synthwave');
   });
 
-  it('pads to 5 from the top of the pool when the model picks nothing usable', () => {
+  it('pads to 3 from the top of the pool when the model picks nothing usable', () => {
     const pick = finalizePick(raw({ tags: ['made up', 'PeekaBoo'] }), fix());
-    expect(pick.tags).toEqual(tagCandidates.slice(0, 5));
+    expect(pick.tags).toEqual(tagNames.slice(0, 3));
   });
 
-  it('keeps more than 5 model picks without padding', () => {
-    const pick = finalizePick(raw({ tags: [...tagCandidates].reverse() }), fix());
-    expect(pick.tags).toEqual([...tagCandidates].reverse());
+  it('keeps the model picks without padding once there are 3', () => {
+    const pick = finalizePick(raw({ tags: ['outrun', '80s', 'new music'] }), fix());
+    expect(pick.tags).toEqual(['outrun', '80s', 'new music']);
   });
 
-  it('returns no tags when the search found none and the artist may not be named', () => {
-    const pick = finalizePick(
-      raw({ tags: ['synthwave'] }),
-      fix({ tagCandidates: [], useArtistName: false }),
-    );
-    expect(pick.tags).toEqual([]);
+  it('caps the model picks at 10', () => {
+    const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
+    const pick = finalizePick(raw({ tags: names }), fix({ tagCandidates: cands(...names) }));
+    expect(pick.tags).toEqual(names.slice(0, 10));
+  });
+
+  it('falls back to the artist name alone when the search found no tags', () => {
+    const pick = finalizePick(raw({ tags: ['synthwave'] }), fix({ tagCandidates: [] }));
+    expect(pick.tags).toEqual(['Flies Like Robots']);
   });
 
   it('keeps tags within 500 characters by YouTube counting', () => {
-    const tags = Array.from({ length: 60 }, (_, i) => `tag number ${i}`);
-    const pick = finalizePick(raw({ tags }), fix({ tagCandidates: tags }));
+    const names = Array.from({ length: 10 }, (_, i) => `tag number ${i} ${'x'.repeat(45)}`);
+    const pick = finalizePick(raw({ tags: names }), fix({ tagCandidates: cands(...names) }));
     expect(tagsLength(pick.tags)).toBeLessThanOrEqual(TAGS_MAX);
-    expect(pick.tags.length).toBeGreaterThan(10);
-    expect(pick.tags.length).toBeLessThan(tags.length);
-    expect(pick.tags[0]).toBe('tag number 0');
+    expect(pick.tags.length).toBeGreaterThan(5);
+    expect(pick.tags.length).toBeLessThan(names.length);
+    expect(pick.tags[0]).toBe(names[0]);
   });
 
   it('skips one oversize tag but keeps later ones that fit', () => {
     const pool = ['a', 'x'.repeat(600), 'b'];
-    const pick = finalizePick(raw({ tags: pool }), fix({ tagCandidates: pool }));
-    expect(pick.tags).toEqual(['a', 'b', 'Flies Like Robots']);
+    const pick = finalizePick(raw({ tags: pool }), fix({ tagCandidates: cands(...pool) }));
+    expect(pick.tags).toEqual(['a', 'b']);
   });
 
   it('clips the title to 100 characters at a word boundary', () => {
@@ -688,75 +651,13 @@ describe('finalizePick', () => {
     expect(pick.flags).toEqual(['True peak -0.3 dBTP, above the -1 dBTP ceiling', 'Too loud at']);
   });
 
-  it('removes the FLR name everywhere when useArtistName is false', () => {
-    const pick = finalizePick(
-      raw({
-        title: 'PeekaBoo - Flies Like Robots',
-        description: 'New from FLR. Flies  like robots fans rejoice.',
-        tags: ['Flies Like Robots', 'FLR', 'PeekaBoo', 'flr synthwave', 'outrun'],
-      }),
-      fix({
-        useArtistName: false,
-        tagCandidates: ['Flies Like Robots', 'flr synthwave', ...tagCandidates],
-      }),
-    );
-    expect(pick.title).toBe('PeekaBoo (Official Video)');
-    expect(pick.description).not.toMatch(/flies\s+like\s+robots|\bflr\b/i);
-    expect(pick.tags[0]).toBe('outrun');
-    expect(pick.tags.some((t) => /flies like robots|\bflr\b|peekaboo/i.test(t))).toBe(false);
-  });
-
-  it('keeps the FLR name when useArtistName is true', () => {
+  it('keeps the FLR name in the title and tags on every run', () => {
     const pick = finalizePick(
       raw({ title: 'PeekaBoo - Flies Like Robots', tags: ['Flies Like Robots'] }),
       fix(),
     );
     expect(pick.title).toBe('PeekaBoo - Flies Like Robots');
     expect(pick.tags[0]).toBe('Flies Like Robots');
-  });
-
-  it('ignores a model title that leads with the artist', () => {
-    const pick = finalizePick(
-      raw({ title: 'Flies Like Robots - PeekaBoo' }),
-      fix({ useArtistName: false }),
-    );
-    expect(pick.title).toBe('PeekaBoo (Official Video)');
-  });
-
-  it('keeps paragraph breaks when dropping the artist from a description', () => {
-    const pick = finalizePick(
-      raw({ description: 'First line by Flies Like Robots.\n\nSecond paragraph.' }),
-      fix({ useArtistName: false }),
-    );
-    expect(pick.description).toMatch(/^First line by\.\n\nSecond paragraph\.\n\n#/);
-  });
-
-  it('titles signed-out own-video picks "<song> (Official Video)"', () => {
-    const pick = finalizePick(
-      raw({ title: 'PeekaBoo - Flies Like Robots (Official Music Video)' }),
-      fix({ useArtistName: false, songTitle: 'PeekaBoo' }),
-    );
-    expect(pick.title).toBe('PeekaBoo (Official Video)');
-  });
-
-  it('shortens a long song title so the visitor title stays within 100 characters', () => {
-    const title = visitorTitle('word '.repeat(30));
-    expect(title.length).toBeLessThanOrEqual(100);
-    expect(title.endsWith(' (Official Video)')).toBe(true);
-  });
-
-  it('scrubs the artist from flags, brand check, and reasons when the name is off', () => {
-    const pick = finalizePick(
-      raw({
-        flags: ['Flies Like Robots logo flickers'],
-        brandCheck: 'Matches Flies Like Robots uploads.',
-        why: { title: 'FLR style', description: 'Flies Like Robots tone', tags: 'by FLR' },
-      }),
-      fix({ useArtistName: false }),
-    );
-    expect(JSON.stringify([pick.flags, pick.brandCheck, pick.why])).not.toMatch(
-      /flies like robots|flr/i,
-    );
   });
 
   it('keeps the #fragment of an allowed link', () => {
@@ -767,16 +668,6 @@ describe('finalizePick', () => {
     );
     expect(pick.description).toContain(link);
     expect(allInCandidates(pick.description)).toBe(true);
-  });
-
-  it('never picks artist hashtags when the artist name is off', () => {
-    const pick = finalizePick(
-      raw({ hashtags: ['#flieslikerobots', '#FLR'], description: 'x #flr' }),
-      fix({ useArtistName: false, candidates: ['#flieslikerobots', '#flr', ...candidates] }),
-    );
-    expect(pick.hashtags.some((t) => /flieslikerobots|flr/i.test(t))).toBe(false);
-    expect(pick.description).not.toMatch(/flieslikerobots|#flr/i);
-    expect(pick.hashtags.length).toBeGreaterThanOrEqual(3);
   });
 
   it('passes brandCheck and why through', () => {
@@ -846,21 +737,6 @@ describe('runPick', () => {
       role: 'user',
       content: '"Old Title" was already skipped. Write a different title.',
     });
-  });
-
-  it('lets a signed-out own-video re-run keep its fixed title', async () => {
-    fetchMock.mockImplementation(async () => reply(JSON.stringify(raw())));
-    const result = await runPick(
-      ctx({
-        useArtistName: false,
-        skipped: [{ title: 'PeekaBoo (Official Video)', description: 'old' }],
-      }),
-    );
-    expect(result!.pick.title).toBe('PeekaBoo (Official Video)');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(fetchMock.mock.calls[0])).toContain(
-      'write a different description and tags',
-    );
   });
 
   it('fails the pick when the retry repeats a skipped title again', async () => {

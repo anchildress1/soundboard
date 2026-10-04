@@ -88,11 +88,10 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
   const nathan = job.owner === 'nathan';
-  const useArtistName = nathan || job.sampleId !== null;
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),
-    useArtistName ? recentVideos(RECENT_COUNT, job.liveVideoId) : [],
+    recentVideos(RECENT_COUNT, job.liveVideoId),
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
@@ -110,7 +109,6 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       {
         songTitle: job.songTitle,
         notes: job.notes,
-        useArtistName,
         chunks,
         measurements: job.measurements,
         recent: withThumbs,
