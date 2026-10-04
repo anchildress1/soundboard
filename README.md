@@ -33,7 +33,7 @@ Nathan writes, records, and films his own music. Publishing each video still tak
 
 Soundboard produces one complete draft of that metadata for Nathan to review, instead of a set of options to choose from.
 
-The model is Gemma 4 12B-it, an open-weight model released under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). It runs on a GPU in our own Google Cloud project, so unreleased audio is never sent to a third-party inference provider.
+The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind under [Apache 2.0](https://huggingface.co/google/gemma-4-12B-it). It runs on a GPU in our own Google Cloud project, so unreleased audio is never sent to a third-party inference provider.
 
 ---
 
@@ -54,16 +54,16 @@ The model is Gemma 4 12B-it, an open-weight model released under the [Gemma Term
 
 ## Tech Stack
 
-| Layer         | Choice                                                                              |
-| ------------- | ----------------------------------------------------------------------------------- |
-| App           | SvelteKit 2 + Svelte 5, TypeScript, Node 24                                         |
-| Model         | Gemma 4 12B-it (Q4_K_M GGUF + vision/audio projector) on `llama-server` (llama.cpp) |
-| Media         | ffmpeg                                                                              |
-| Hosting       | One Cloud Run service with an NVIDIA L4 GPU, us-central1                            |
-| Data          | Firestore, Cloud Storage, Secret Manager                                            |
-| YouTube       | YouTube Data API v3                                                                 |
-| Observability | Sentry (AI agent tracing)                                                           |
-| Tooling       | pnpm, Vitest, Playwright, ESLint, Prettier, Lefthook, commitlint, Release Please    |
+| Layer         | Choice                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| App           | SvelteKit 2 + Svelte 5, TypeScript, Node 24                                                             |
+| Model         | Gemma 4 12B-it, Google's official QAT Q4_0 GGUF + vision/audio projector, on `llama-server` (llama.cpp) |
+| Media         | ffmpeg                                                                                                  |
+| Hosting       | One Cloud Run service with an NVIDIA L4 GPU, us-central1                                                |
+| Data          | Firestore, Cloud Storage, Secret Manager                                                                |
+| YouTube       | YouTube Data API v3                                                                                     |
+| Observability | Sentry (AI agent tracing)                                                                               |
+| Tooling       | pnpm, Vitest, Playwright, ESLint, Prettier, Lefthook, commitlint, Release Please                        |
 
 ---
 
@@ -115,12 +115,13 @@ make install
 make dev
 ```
 
-| Command          | What it does                                                  |
-| ---------------- | ------------------------------------------------------------- |
-| `make dev`       | Start the dev server                                          |
-| `make ai-checks` | Format, lint, typecheck, test, build                          |
-| `make e2e`       | Playwright end-to-end tests                                   |
-| `make deploy`    | Build and deploy to Cloud Run (requires a clean working tree) |
+| Command            | What it does                                                                     |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `make dev`         | Start the dev server                                                             |
+| `make ai-checks`   | Format, lint, typecheck, test, build                                             |
+| `make e2e`         | Playwright end-to-end tests                                                      |
+| `make deploy`      | Build and deploy to Cloud Run (requires a clean working tree)                    |
+| `make model-image` | Build the Gemma 4 sidecar image on Cloud Build; skipped if `model/` is unchanged |
 
 ---
 
@@ -169,7 +170,7 @@ Issues and pull requests are welcome.
 
 This repository's code is licensed under [MIT](LICENSE): you may use, modify, and redistribute it, including commercially, as long as the copyright notice is kept.
 
-Gemma's model weights are not covered by this license. They are distributed under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms), which apply to anyone who deploys this project.
+Gemma 4's model weights are not part of this repository. Google DeepMind distributes them separately under [Apache 2.0](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf).
 
 ---
 
