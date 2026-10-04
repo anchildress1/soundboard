@@ -57,8 +57,10 @@ if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT" \
     --display-name "Soundboard runtime" --project "$GCP_PROJECT_ID"
 fi
 DEPLOYER="$(gcloud config get-value account 2> /dev/null)"
+DEPLOYER_TYPE="user"
+[[ "$DEPLOYER" == *.gserviceaccount.com ]] && DEPLOYER_TYPE="serviceAccount"
 gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
-  --member "user:${DEPLOYER}" --role roles/iam.serviceAccountUser \
+  --member "${DEPLOYER_TYPE}:${DEPLOYER}" --role roles/iam.serviceAccountUser \
   --project "$GCP_PROJECT_ID" --quiet > /dev/null
 
 if ! gcloud artifacts repositories describe "$SERVICE" \
