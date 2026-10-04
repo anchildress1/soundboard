@@ -12,7 +12,7 @@ import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
 import type { AudienceVideo, TagCandidate } from './hashtags';
-import type { ChatMessage } from './tracing';
+import { agentInput, agentOutput, type AgentSpan, type ChatMessage } from './tracing';
 import type { CatalogVideo } from './youtube';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
@@ -411,9 +411,11 @@ export const sameText = (a: string, b: string) => {
 export async function runPick(
   ctx: PickContext,
   deadline = stepDeadline(),
+  span?: AgentSpan,
 ): Promise<{ pick: RawPick; ms: number } | null> {
   let ms = 0;
   let messages = buildPickMessages(ctx);
+  if (span) agentInput(span, messages);
   for (let attempt = 0; attempt < 2; attempt++) {
     const { value, ms: took } = await chatJson(
       messages,
@@ -429,7 +431,10 @@ export async function runPick(
       ...(sameText(s.title, pick.title) ? ['title'] : []),
       ...(sameText(s.description, pick.description) ? ['description'] : []),
     ]);
-    if (repeated.length === 0) return { pick, ms };
+    if (repeated.length === 0) {
+      if (span) agentOutput(span, JSON.stringify(pick));
+      return { pick, ms };
+    }
     // A re-run must produce a new title and description; a second repeat fails the pick so the step retries.
     if (attempt === 1) return null;
     const unique = [...new Set(repeated)];

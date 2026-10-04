@@ -16,7 +16,7 @@ import { db } from './clients';
 import { ARTIST_ID } from './memory';
 import { chatJson, modelStatus, stepDeadline } from './model';
 import { stripDeep } from './numerics';
-import { invokeAgent, type ChatMessage } from './tracing';
+import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracing';
 import { recentVideos, thumbnailDataUrl, type CatalogVideo } from './youtube';
 
 const DESCRIPTION_CHARS = 200;
@@ -163,20 +163,19 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
 
   const guide = await invokeAgent('brand-guide', async (span) => {
     span.setAttribute('brand.video_count', videos.length);
-    const { value } = await chatJson(
-      buildBrandMessages(withThumbs),
-      'brand_guide',
-      BRAND_SCHEMA,
-      isBrandGuide,
-      deadline,
-    );
-    return value;
+    const messages = buildBrandMessages(withThumbs);
+    agentInput(span, messages);
+    const { value } = await chatJson(messages, 'brand_guide', BRAND_SCHEMA, isBrandGuide, deadline);
+    if (!value) return null;
+    const cleaned = cleanGuide(value);
+    agentOutput(span, JSON.stringify(cleaned));
+    return cleaned;
   });
   if (!guide)
     throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
 
   const proposal: StoredBrand = {
-    ...cleanGuide(guide),
+    ...guide,
     status: 'PROPOSED',
     basedOn: videos.map((v) => v.videoId),
     createdAt: Date.now(),

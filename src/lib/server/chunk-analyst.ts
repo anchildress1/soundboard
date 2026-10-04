@@ -2,7 +2,7 @@ import type { Chunk, ChunkAnalysis, Measurements } from '$lib/types';
 import { extractWindow } from './ffmpeg';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep, stripNumerics } from './numerics';
-import { invokeAgent, type ChatMessage } from './tracing';
+import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracing';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
@@ -103,6 +103,7 @@ export async function analyzeChunk(input: {
   return invokeAgent('chunk-analyst', async (span) => {
     span.setAttribute('chunk.index', input.index);
     const messages = buildChunkMessages({ ...input, ...window });
+    agentInput(span, messages);
     const { value, raw, ms } = await chatJson(
       messages,
       'chunk_analysis',
@@ -110,13 +111,16 @@ export async function analyzeChunk(input: {
       isChunkAnalysis,
       deadline,
     );
+    const analysis = value ? stripDeep(value) : null;
+    const stripped = value ? null : stripNumerics(raw);
+    agentOutput(span, analysis ? JSON.stringify(analysis) : (stripped ?? ''));
     return {
       index: input.index,
       startSec: input.startSec,
       durationSec: input.durationSec,
       measurements: window.measurements,
-      analysis: value ? stripDeep(value) : null,
-      raw: value ? null : stripNumerics(raw),
+      analysis,
+      raw: stripped,
       modelMs: ms,
     };
   });

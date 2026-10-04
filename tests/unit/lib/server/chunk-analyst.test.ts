@@ -9,6 +9,7 @@ import {
   isChunkAnalysis,
 } from '$lib/server/chunk-analyst';
 import type { ChunkAnalysis, Measurements } from '$lib/types';
+import { agentSpanIO, clearAgentSpan } from '../../../helpers/agent-span';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const spawnMock = vi.mocked(spawn);
@@ -80,6 +81,7 @@ const input = {
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  clearAgentSpan();
   spawnMock.mockReset();
   vi.stubEnv('MODEL_URL', 'http://model.test');
   fetchMock = vi.fn();
@@ -266,6 +268,28 @@ describe('analyzeChunk', () => {
     const chunk = await analyzeChunk(input);
     expect(chunk.analysis?.visual).toBe('Calm');
     expect(chunk.raw).toBeNull();
+  });
+
+  it('records the redacted request and the stripped analysis on the agent span', async () => {
+    ffmpegRun();
+    fetchMock.mockResolvedValueOnce(completion(JSON.stringify(analysis)));
+    const chunk = await analyzeChunk(input);
+
+    const { input: recorded, output } = agentSpanIO();
+    expect(recorded).toHaveLength(1);
+    const sent = recorded[0]!['gen_ai.input.messages']!;
+    expect(sent).toContain('PeekaBoo');
+    expect(sent).toContain('"type":"audio"');
+    expect(sent).not.toContain(WAV.toString('base64'));
+    expect(recorded[0]!['gen_ai.system_instructions']).toBeDefined();
+    expect(output).toEqual([JSON.stringify(chunk.analysis)]);
+  });
+
+  it('records the stripped raw reply as the agent output when parsing fails', async () => {
+    ffmpegRun();
+    fetchMock.mockImplementation(async () => completion('Sorry, -9 LUFS {not json'));
+    await analyzeChunk(input);
+    expect(agentSpanIO().output).toEqual(['Sorry, {not json']);
   });
 
   it('rejects without calling the model when ffmpeg fails', async () => {

@@ -2,6 +2,8 @@
 import * as Sentry from '@sentry/sveltekit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  agentInput,
+  agentOutput,
   chatSpan,
   invokeAgent,
   MODEL_NAME,
@@ -124,6 +126,48 @@ describe('invokeAgent', () => {
         throw new Error('model down');
       }),
     ).rejects.toThrow('model down');
+  });
+});
+
+describe('agentInput', () => {
+  it('records system instructions and the redacted request on the agent span', () => {
+    agentInput(span as unknown as Sentry.Span, multimodal);
+    const attributes = span.setAttributes.mock.calls[0]![0] as Record<string, string>;
+    expect(JSON.parse(attributes['gen_ai.system_instructions']!)).toEqual([
+      { type: 'text', content: 'Instructions' },
+    ]);
+    expect(JSON.parse(attributes['gen_ai.input.messages']!)).toEqual(
+      redactMessages(multimodal.slice(1)),
+    );
+    expect(JSON.stringify(attributes)).not.toContain(IMAGE_B64);
+    expect(JSON.stringify(attributes)).not.toContain(AUDIO_B64);
+  });
+
+  it('omits system instructions when the request has none', () => {
+    agentInput(span as unknown as Sentry.Span, multimodal.slice(1));
+    expect(span.setAttributes).toHaveBeenCalledWith({
+      'gen_ai.input.messages': JSON.stringify(redactMessages(multimodal.slice(1))),
+    });
+  });
+});
+
+describe('agentOutput', () => {
+  it('records the answer as one assistant text part', () => {
+    agentOutput(span as unknown as Sentry.Span, '{"title":"PeekaBoo"}');
+    expect(span.setAttribute).toHaveBeenCalledWith(
+      'gen_ai.output.messages',
+      JSON.stringify([
+        { role: 'assistant', parts: [{ type: 'text', content: '{"title":"PeekaBoo"}' }] },
+      ]),
+    );
+  });
+
+  it('records an empty answer as an empty text part', () => {
+    agentOutput(span as unknown as Sentry.Span, '');
+    const [, value] = span.setAttribute.mock.calls[0]!;
+    expect(JSON.parse(value as string)).toEqual([
+      { role: 'assistant', parts: [{ type: 'text', content: '' }] },
+    ]);
   });
 });
 
