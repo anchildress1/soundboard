@@ -14,10 +14,14 @@ RUN curl -fsSL -o model.gguf "$HF_REPO/gemma-4-12b-it-qat-q4_0.gguf" \
 # Weights are baked in: a cold start reads them from local disk instead of pulling ~7 GB while the
 # GPU bills.
 FROM ghcr.io/ggml-org/llama.cpp:server-cuda-v0.5.0@sha256:52192a23c7b258044463aebba78826cdff39a7393b713edc313324b343a7b836
-COPY --from=weights /home/curl_user/model.gguf /home/curl_user/mmproj.gguf /models/
-# Thinking is capped at 1024 tokens: every token is billed GPU time.
-ENV LLAMA_ARG_MODEL=/models/model.gguf \
-    LLAMA_ARG_MMPROJ=/models/mmproj.gguf \
+# Not /models: Vertex AI serving leaves that directory empty at runtime.
+COPY --from=weights /home/curl_user/model.gguf /home/curl_user/mmproj.gguf /opt/gemma/
+# Vertex AI serves on GKE, which mounts the NVIDIA driver at /usr/local/nvidia/lib64; without it
+# on the library path llama-server finds no GPU. Thinking is capped at 1024 tokens: every token is
+# billed GPU time.
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
+    LLAMA_ARG_MODEL=/opt/gemma/model.gguf \
+    LLAMA_ARG_MMPROJ=/opt/gemma/mmproj.gguf \
     LLAMA_ARG_PORT=8081 \
     LLAMA_ARG_N_GPU_LAYERS=999 \
     LLAMA_ARG_CTX_SIZE=8192 \
