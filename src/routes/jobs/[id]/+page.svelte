@@ -94,7 +94,12 @@
     }
     localUrl = pending.objectUrl;
     try {
-      await uploadToGcs(pending.uploadUrl, pending.file, (pct) => (uploadPct = pct));
+      await uploadToGcs(
+        pending.uploadUrl,
+        pending.file,
+        pending.contentType,
+        (pct) => (uploadPct = pct),
+      );
       for (let i = 0; i < 5 && view.job.state === 'AWAITING_UPLOAD' && !stopped; i++) {
         view = await step(job.id, data.trace);
         if (view.job.state === 'AWAITING_UPLOAD') await sleep(1000);

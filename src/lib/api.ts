@@ -76,12 +76,13 @@ export function action(
 export function uploadToGcs(
   url: string,
   file: File,
+  contentType: string,
   onProgress: (pct: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
-    xhr.setRequestHeader('content-type', file.type);
+    xhr.setRequestHeader('content-type', contentType);
     xhr.setRequestHeader('x-goog-content-length-range', '1,2147483648');
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));

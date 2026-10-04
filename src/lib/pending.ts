@@ -1,5 +1,11 @@
 /** A picked file waiting to upload, handed from the home page to its job page within one tab. */
-export type PendingUpload = { file: File; uploadUrl: string; objectUrl: string };
+export type PendingUpload = {
+  file: File;
+  uploadUrl: string;
+  objectUrl: string;
+  /** The type the upload URL was signed with; the PUT must send exactly this. */
+  contentType: string;
+};
 
 const pending = new Map<string, PendingUpload>();
 

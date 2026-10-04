@@ -126,6 +126,7 @@ describe('home page: form', () => {
       file: video,
       uploadUrl: 'https://storage.googleapis.com/put',
       objectUrl: 'blob:local-1',
+      contentType: 'video/mp4',
     });
   });
 
@@ -138,6 +139,18 @@ describe('home page: form', () => {
     await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job3'));
     expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)).contentType).toBe('video/mp4');
     expect(takePending('job3')).toBeUndefined();
+  });
+
+  it('hands the job page the signed type for an untyped file', async () => {
+    fetchMock.mockResolvedValue(
+      json({ id: 'job4', uploadUrl: 'https://storage.googleapis.com/put' }),
+    );
+    const { container } = setup();
+    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
+    await pickFile(container, new File(['x'], 'clip', { type: '' }));
+    await fireEvent.click(analyze());
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job4'));
+    expect(takePending('job4')?.contentType).toBe('video/mp4');
   });
 
   it('shows the API error and re-enables the form', async () => {

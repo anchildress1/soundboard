@@ -42,16 +42,18 @@
     if (!file || !objectUrl || !canStart) return;
     busy = true;
     message = '';
+    // Browsers report an empty type for some containers; the URL is signed with this exact value.
+    const contentType = file.type || 'video/mp4';
     try {
       const { id, uploadUrl } = await createJob({
         songTitle: songTitle.trim(),
         notes: notes.trim(),
         filename: file.name,
-        contentType: file.type || 'video/mp4',
+        contentType,
         size: file.size,
         durationSec: duration,
       });
-      if (uploadUrl) setPending(id, { file, uploadUrl, objectUrl });
+      if (uploadUrl) setPending(id, { file, uploadUrl, objectUrl, contentType });
       objectUrl = null;
       await goto(resolve('/jobs/[id]', { id }));
     } catch (error) {

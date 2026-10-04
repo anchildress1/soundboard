@@ -382,6 +382,7 @@ describe('job page: upload hand-off', () => {
       file,
       uploadUrl: 'https://storage.googleapis.com/put?sig=1',
       objectUrl: 'blob:local',
+      contentType: 'video/mp4',
     });
     fetchMock
       .mockResolvedValueOnce(json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })))
@@ -409,6 +410,7 @@ describe('job page: upload hand-off', () => {
       file,
       uploadUrl: 'https://storage.googleapis.com/put',
       objectUrl: 'blob:x',
+      contentType: 'video/mp4',
     });
     setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), { playbackUrl: null });
     expect(await screen.findByText('Upload failed (403)')).toBeInTheDocument();

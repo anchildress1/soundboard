@@ -5,6 +5,7 @@ const upload = (name: string): PendingUpload => ({
   file: new File(['x'], name, { type: 'video/mp4' }),
   uploadUrl: `https://storage.example/${name}?sig=1`,
   objectUrl: `blob:${name}`,
+  contentType: 'video/mp4',
 });
 
 describe('pending uploads', () => {

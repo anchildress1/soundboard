@@ -145,7 +145,7 @@ describe('uploadToGcs', () => {
 
   it('PUTs the file with the signed headers and reports progress', async () => {
     const progress = vi.fn();
-    const done = uploadToGcs('https://storage.example/u?sig=1', file, progress);
+    const done = uploadToGcs('https://storage.example/u?sig=1', file, 'video/mp4', progress);
     const xhr = lastXhr;
     expect(xhr.open).toHaveBeenCalledWith('PUT', 'https://storage.example/u?sig=1');
     expect(xhr.setRequestHeader).toHaveBeenCalledWith('content-type', 'video/mp4');
@@ -162,26 +162,32 @@ describe('uploadToGcs', () => {
     await expect(done).resolves.toBeUndefined();
   });
 
+  it('sends the signed content type, not the browser-reported one', async () => {
+    const untyped = new File(['abc'], 'clip.mkv');
+    void uploadToGcs('u', untyped, 'video/mp4', () => {});
+    expect(lastXhr.setRequestHeader).toHaveBeenCalledWith('content-type', 'video/mp4');
+  });
+
   it('rejects with the HTTP status on a failed upload', async () => {
-    const done = uploadToGcs('u', file, () => {});
+    const done = uploadToGcs('u', file, 'video/mp4', () => {});
     lastXhr.status = 403;
     lastXhr.onload!();
     await expect(done).rejects.toMatchObject({ status: 403, message: 'Upload failed (403)' });
   });
 
   it('treats 299 as success and 300 as failure', async () => {
-    const ok = uploadToGcs('u', file, () => {});
+    const ok = uploadToGcs('u', file, 'video/mp4', () => {});
     lastXhr.status = 299;
     lastXhr.onload!();
     await expect(ok).resolves.toBeUndefined();
-    const redirect = uploadToGcs('u', file, () => {});
+    const redirect = uploadToGcs('u', file, 'video/mp4', () => {});
     lastXhr.status = 300;
     lastXhr.onload!();
     await expect(redirect).rejects.toBeInstanceOf(ApiError);
   });
 
   it('rejects with status 0 on a network error', async () => {
-    const done = uploadToGcs('u', file, () => {});
+    const done = uploadToGcs('u', file, 'video/mp4', () => {});
     lastXhr.onerror!();
     await expect(done).rejects.toMatchObject({
       status: 0,
