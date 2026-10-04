@@ -96,7 +96,8 @@
   - Stored on the job, so re-runs reuse it.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
 - Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy. Structure and length still follow the audience evidence.
-- The model picks 3–5 hashtags from the candidates; they close the description.
+- The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
+- The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
 - The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
@@ -210,13 +211,11 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - Video monitor (R2), with filename, resolution, and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 12s`).
   - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
-- **Right pane, the label:**
-  - Title in a white speech bubble with a live `n / 100` counter.
-  - Description textarea, labeled "model draft", ending in the picked hashtags.
-  - Tags in mono with a live `n / 500` counter. Approve disables past 500.
-  - Visibility shown as **Private** (fixed: uploads are private).
-  - Actions: Discard (left), Re-run model, Approve & upload (magenta, offset shadow).
-- **Under 820px:** panes stack, tape first.
+- **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
+  - **YouTube** (done once verified): "Check before uploading" flags first, then the title as a plain field with a live `n / 100` counter, the description ("model draft", ending in the picked hashtags), tags in mono with a live `n / 500` counter (Approve disables past 500), and Visibility fixed at **Private**. Actions sit together: Discard, Re-run model, Approve & upload (magenta, offset shadow).
+  - **Bandcamp** (done once every field is copied): track name, About, credits, and tags with a Copy button each, and Bandcamp's new-track page opened in its own window.
+  - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
+- **Under 820px:** one column in reading order: the video and status, the tabs, then "What the model heard". The actions stack as one block, Approve first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
 - **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
 - **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.

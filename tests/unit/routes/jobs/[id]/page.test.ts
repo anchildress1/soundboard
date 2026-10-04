@@ -177,11 +177,14 @@ describe('job page: status chip', () => {
   it('reads "Needs review" with the recommendation and does not drive', async () => {
     setup(view({ state: 'REVIEW' }, { pick: PICK, chunks: [chunk(0)] }));
     expect(chip()).toHaveTextContent('Needs review');
-    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(PICK.title);
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe(PICK.title);
     expect(screen.getByText('Silence 80.0s to 83.0s')).toBeInTheDocument();
-    expect(screen.getByText('Keeps the naming pattern.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Check before uploading' })).toBeInTheDocument();
+    expect(screen.queryByText('Keeps the naming pattern.')).toBeNull();
     expect(screen.getByText('gemma-4-12b-it · 12s')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('To do');
+    await fireEvent.click(screen.getByRole('tab', { name: /Bandcamp/ }));
+    expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeVisible();
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -192,10 +195,10 @@ describe('job page: status chip', () => {
     expect(screen.queryByRole('heading', { name: 'Brand check' })).toBeNull();
   });
 
-  it('shows brand check alone when there are no flags', () => {
+  it('never shows the brand check, which is the model grading itself', () => {
     setup(view({ state: 'REVIEW' }, { pick: { ...PICK, flags: [] } }));
-    expect(screen.queryByRole('heading', { name: 'Flags' })).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Brand check' })).toBeInTheDocument();
+    expect(screen.queryByText('Keeps the naming pattern.')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Check before uploading' })).toBeNull();
   });
 
   it('reads "Verified · private" with the video link', () => {
@@ -216,7 +219,7 @@ describe('job page: status chip', () => {
       snippet: { title: 'PeekaBoo', description: 'd', tags: ['synthwave'], categoryId: '10' },
       status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
     });
-    expect((screen.getByLabelText('Title') as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
   });
 
   it('renders the live-video diff for a sample', () => {
@@ -315,7 +318,7 @@ describe('job page: actions', () => {
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
     await fireEvent.click(screen.getByRole('button', { name: 'Re-run model' }));
     await waitFor(() =>
-      expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Second take'),
+      expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Second take'),
     );
     expect(paths()).toEqual(['/api/jobs/j1/rerun', '/api/jobs/j1/step']);
   });

@@ -22,6 +22,7 @@ const pick: Pick = {
 const writeText = vi.fn<(text: string) => Promise<void>>();
 
 beforeEach(() => {
+  localStorage.clear();
   writeText.mockReset().mockResolvedValue();
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
 });
@@ -30,15 +31,54 @@ const field = (label: string) => screen.getByText(label, { selector: 'dt' }).clo
 
 describe('Bandcamp', () => {
   it('shows the track name, about, credits, and tags for the editor', () => {
-    render(Bandcamp, { songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
     expect(within(field('Track name') as HTMLElement).getByText('Vaporgram')).toBeInTheDocument();
     expect(screen.getByText('A terminal screen and some noise.')).toBeInTheDocument();
     expect(screen.getByText(/hacked and slashed by Nathan/)).toBeInTheDocument();
     expect(screen.getByText('vaporwave, glitch, Flies Like Robots')).toBeInTheDocument();
   });
 
+  it('marks itself done once every field is copied, and remembers it per pick', async () => {
+    let done = false;
+    const props = {
+      jobId: 'j1',
+      songTitle: 'Vaporgram',
+      pick,
+      ondone: (value: boolean) => (done = value),
+    };
+    const { unmount } = render(Bandcamp, props);
+    for (const label of ['Track name', 'About', 'Credits']) {
+      await fireEvent.click(screen.getByRole('button', { name: `Copy ${label}` }));
+    }
+    expect(done).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy Tags' }));
+    expect(done).toBe(true);
+    unmount();
+    render(Bandcamp, props);
+    expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copied');
+  });
+
+  it('opens the editor in its own window, falling back to a tab when popups are blocked', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValueOnce({} as Window);
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
+    const link = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
+    const opened = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(opened);
+    expect(open).toHaveBeenCalledWith(
+      'https://flieslikerobots.bandcamp.com/edit_track',
+      'bandcamp',
+      'popup,width=1200,height=900',
+    );
+    expect(opened.defaultPrevented).toBe(true);
+    open.mockReturnValueOnce(null);
+    const blocked = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(blocked);
+    expect(blocked.defaultPrevented).toBe(false);
+    open.mockRestore();
+  });
+
   it("opens Bandcamp's new-track page in a new tab", () => {
-    render(Bandcamp, { songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
     const open = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
     expect(open).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com/edit_track');
     expect(open).toHaveAttribute('target', '_blank');
@@ -46,7 +86,7 @@ describe('Bandcamp', () => {
   });
 
   it('copies one field and says so', async () => {
-    render(Bandcamp, { songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
     await fireEvent.click(screen.getByRole('button', { name: 'Copy About' }));
     expect(writeText).toHaveBeenCalledWith('A terminal screen and some noise.');
     expect(screen.getByRole('button', { name: 'Copy About' })).toHaveTextContent('Copied');
@@ -56,7 +96,7 @@ describe('Bandcamp', () => {
 
   it('shows no copied state when the clipboard refuses', async () => {
     writeText.mockRejectedValue(new Error('denied'));
-    render(Bandcamp, { songTitle: 'Vaporgram', pick });
+    render(Bandcamp, { jobId: 'j1', songTitle: 'Vaporgram', pick });
     await fireEvent.click(screen.getByRole('button', { name: 'Copy Tags' }));
     expect(screen.getByRole('button', { name: 'Copy Tags' })).toHaveTextContent('Copy');
     expect(screen.queryByText(/copied$/)).toBeNull();
@@ -64,6 +104,7 @@ describe('Bandcamp', () => {
 
   it('disables copying an empty field', () => {
     render(Bandcamp, {
+      jobId: 'j1',
       songTitle: 'Vaporgram',
       pick: { ...pick, bandcamp: { about: '', credits: 'x' } },
     });

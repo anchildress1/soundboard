@@ -4,6 +4,7 @@
   import { resolve } from '$app/paths';
   import { action, ApiError, step, uploadToGcs } from '$lib/api';
   import Bandcamp from '$lib/components/Bandcamp.svelte';
+  import Destinations from '$lib/components/Destinations.svelte';
   import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
@@ -25,6 +26,7 @@
   let busy = $state(false);
   let message = $state('');
   let serverErrors = $state<FieldErrors>({});
+  let bandcampDone = $state(false);
   let stopped = false;
   let driving = false;
 
@@ -138,65 +140,67 @@
         >
       </p>
     {/if}
-    <Heard tags={heardTags(view)} measurements={job.measurements} />
-    {#if data.live && view.pick}
-      <Diff live={data.live} pick={view.pick} />
-    {/if}
   </section>
 
   <div class="right">
     {#if fields && view.pick}
-      {#key view.pick.version}
-        <Label
-          {fields}
-          candidates={job.hashtagCandidates ?? []}
-          {editable}
-          {busy}
-          {done}
-          {serverErrors}
-          onapprove={(f) => act('approve', { ...f, pickVersion: view.pick?.version })}
-          onrerun={() => act('rerun')}
-          ondiscard={() => act('discard')}
-        />
-      {/key}
-      {#if view.pick.flags.length > 0 || view.pick.brandCheck}
-        <div class="notes">
-          {#if view.pick.flags.length > 0}
-            <h2>Flags</h2>
-            <ul>
-              {#each view.pick.flags as flag (flag)}<li>{flag}</li>{/each}
-            </ul>
+      {@const pick = view.pick}
+      <Destinations youtubeDone={job.state === 'VERIFIED'} {bandcampDone}>
+        {#snippet youtube()}
+          {#if pick.flags.length > 0}
+            <!-- Checks come before the fields: they're what to fix or accept before uploading. -->
+            <div class="notes">
+              <h2>Check before uploading</h2>
+              <ul>
+                {#each pick.flags as flag (flag)}<li>{flag}</li>{/each}
+              </ul>
+            </div>
           {/if}
-          {#if view.pick.brandCheck}
-            <h2>Brand check</h2>
-            <p>{view.pick.brandCheck}</p>
+          {#key pick.version}
+            <Label
+              {fields}
+              candidates={job.hashtagCandidates ?? []}
+              {editable}
+              {busy}
+              {done}
+              {serverErrors}
+              onapprove={(f) => act('approve', { ...f, pickVersion: pick.version })}
+              onrerun={() => act('rerun')}
+              ondiscard={() => act('discard')}
+            />
+          {/key}
+          {#if job.state === 'PAYLOAD' && job.payload}
+            <section class="payload" aria-label="Would-be upload payload">
+              <h2>Would-be payload</h2>
+              <pre>{JSON.stringify(
+                  {
+                    snippet: {
+                      title: job.payload.title,
+                      description: job.payload.description,
+                      tags: job.payload.tags,
+                      categoryId: '10',
+                    },
+                    status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
+                  },
+                  null,
+                  2,
+                )}</pre>
+            </section>
           {/if}
-        </div>
-      {/if}
-      <Bandcamp songTitle={job.songTitle} pick={view.pick} />
+        {/snippet}
+        {#snippet bandcamp()}
+          <Bandcamp
+            jobId={job.id}
+            songTitle={job.songTitle}
+            {pick}
+            ondone={(d) => (bandcampDone = d)}
+          />
+        {/snippet}
+      </Destinations>
     {:else}
       <section class="placeholder" aria-label="What goes to YouTube">
         <h2>{job.songTitle}</h2>
         <p>The recommendation appears here once every chunk is analyzed.</p>
-      </section>
-    {/if}
-
-    {#if job.state === 'PAYLOAD' && job.payload}
-      <section class="payload" aria-label="Would-be upload payload">
-        <h2>Would-be payload</h2>
-        <pre>{JSON.stringify(
-            {
-              snippet: {
-                title: job.payload.title,
-                description: job.payload.description,
-                tags: job.payload.tags,
-                categoryId: '10',
-              },
-              status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-            },
-            null,
-            2,
-          )}</pre>
       </section>
     {/if}
 
@@ -212,24 +216,52 @@
     {/if}
     <p class="toast" aria-live="polite">{message}</p>
   </div>
+
+  <!-- After the tabs in reading order, so phones reach the review first; desktop places it under the video. -->
+  <section class="details" aria-label="What the model heard">
+    <Heard tags={heardTags(view)} measurements={job.measurements} />
+    {#if data.live && view.pick}
+      <Diff live={data.live} pick={view.pick} />
+    {/if}
+  </section>
 </main>
 
 <style>
   main {
     display: grid;
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-areas:
+      'tape right'
+      'details right';
+    grid-template-rows: auto 1fr;
     gap: 20px;
     align-items: start;
   }
 
+  .tape {
+    grid-area: tape;
+  }
+
+  .right {
+    grid-area: right;
+  }
+
+  .details {
+    grid-area: details;
+  }
+
+  /* Phones read top to bottom: the video, then the review, then what the model heard. */
   @media (max-width: 820px) {
     main {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'tape' 'right' 'details';
+      grid-template-rows: auto;
     }
   }
 
   .tape,
-  .right {
+  .right,
+  .details {
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -264,12 +296,6 @@
   }
 
   .placeholder p,
-  .notes p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 13px;
-  }
-
   .notes ul {
     margin: 0 0 10px;
     padding-left: 18px;
