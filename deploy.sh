@@ -36,12 +36,19 @@ fi
 
 require_env GCP_PROJECT_ID
 require_env GCS_BUCKET
-require_env MODEL_IMAGE
 require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
 require_env ALLOWLIST_EMAILS
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
 DEMO_EMAILS="${DEMO_EMAILS:-}"
+
+# The model image is named by the git tree hash of model/, as build-model.sh tags it, so a stale
+# value in .env can't deploy an old image.
+MODEL_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/model:$(git rev-parse --short=12 HEAD:model)"
+if ! gcloud artifacts docker images describe "$MODEL_IMAGE" --project "$GCP_PROJECT_ID" &> /dev/null; then
+  echo "Error: $MODEL_IMAGE is not built; run make model-image first." >&2
+  exit 1
+fi
 
 export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID ALLOWLIST_EMAILS \
   PUBLIC_SENTRY_DSN DEMO_EMAILS
@@ -221,12 +228,37 @@ MODEL_ID="$(model_id)"
 DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(deployedModels.model)')"
 if [[ "${DEPLOYED};" != *"/models/${MODEL_ID};"* ]]; then
-  # One L4, scale to zero after 5 idle minutes (the floor for both periods).
+  # gcloud stops waiting after 30 minutes while the deploy carries on server side, and a deploy can
+  # wait far longer for an L4. Queuing a second one behind it only holds another GPU of quota.
+  PENDING="$(python3 - "${VERTEX}/endpoints/${ENDPOINT_ID}/operations" \
+    "$(gcloud auth print-access-token)" << 'PY'
+import json, sys, urllib.parse, urllib.request
+url, token, page = sys.argv[1], sys.argv[2], ""
+while True:
+    query = "?" + urllib.parse.urlencode({"pageToken": page}) if page else ""
+    request = urllib.request.Request(url + query, headers={"Authorization": f"Bearer {token}"})
+    body = json.load(urllib.request.urlopen(request))
+    for op in body.get("operations", []):
+        kind = op.get("metadata", {}).get("@type", "")
+        if not op.get("done") and kind.endswith("DeployModelOperationMetadata"):
+            print(op["name"])
+    page = body.get("nextPageToken", "")
+    if not page:
+        break
+PY
+)"
+  if [[ -n "$PENDING" ]]; then
+    echo "Error: a model deploy is still running; rerun once it finishes: $PENDING" >&2
+    exit 1
+  fi
+  # One L4, scale to zero after 5 idle minutes (the floor for both periods). Container logs are the
+  # only record of why a model server failed to start.
   gcloud beta ai endpoints deploy-model "$ENDPOINT_ID" --region "$REGION" \
     --project "$GCP_PROJECT_ID" --model "$MODEL_ID" --display-name "$MODEL_NAME" \
     --machine-type g2-standard-4 --accelerator type=nvidia-l4,count=1 \
     --min-replica-count 0 --max-replica-count 1 \
-    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100
+    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100 \
+    --enable-container-logging
   for old in $(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
     --project "$GCP_PROJECT_ID" --format json | python3 -c '
 import json, sys
@@ -285,13 +317,20 @@ gcloud run services add-iam-policy-binding "$SERVICE" \
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(status.url)')"
+# Cloud Run serves the app at more than one run.app URL; status.url names only one of them.
+RUN_ORIGINS="$(gcloud run services describe "$SERVICE" --region "$REGION" \
+  --project "$GCP_PROJECT_ID" --format json |
+  python3 -c 'import json, sys
+s = json.load(sys.stdin)
+urls = json.loads(s["metadata"]["annotations"].get("run.googleapis.com/urls", "[]"))
+print(", ".join(json.dumps(u) for u in urls or [s["status"]["url"]]))')"
 
 # Browsers PUT uploads and stream playback straight from GCS, so the bucket must allow the app's
-# origins: the custom domain, the run.app URL, and the local dev server.
+# origins: the custom domain, every run.app URL, and the local dev server.
 cors="$(mktemp)"
 trap 'rm -f "$rendered" "$cors"' EXIT
 cat > "$cors" << CORS
-[{"origin": ["${APP_DOMAIN}", "${SERVICE_URL}", "http://localhost:5173"],
+[{"origin": ["${APP_DOMAIN}", ${RUN_ORIGINS}, "http://localhost:5173"],
   "method": ["GET", "PUT"],
   "responseHeader": ["Content-Type", "Content-Range", "Accept-Ranges", "Range",
     "x-goog-content-length-range"],

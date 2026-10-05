@@ -44,4 +44,4 @@ else
   gcloud builds submit model --tag "$IMAGE" --timeout 3600s --project "$GCP_PROJECT_ID"
 fi
 
-echo "MODEL_IMAGE=$IMAGE"
+echo "Model image: $IMAGE"
