@@ -138,14 +138,14 @@ make dev
 | `make ai-checks`   | Format, lint, typecheck, test, build                                                                          |
 | `make e2e`         | Playwright end-to-end tests                                                                                   |
 | `make deploy`      | Deploy the model endpoint if its image changed, then build and deploy the app (requires a clean working tree) |
-| `make model-image` | Build the Gemma 4 model image on Cloud Build; skipped if `model/` is unchanged                                |
+| `make model-image` | Build the Gemma 4 model image on Cloud Build, tagged by the `model/` tree; skipped if already built           |
 
 ### Operating it
 
 - **Connect channels:** sign in with an allowlisted account, then use the footer's _Connect channel_ links. _Nathan_ must be consented by Nathan's Google account; _Sandbox_ by the throwaway channel's. Each stores a YouTube refresh token in Secret Manager (`yt-refresh-nathan`, `yt-refresh-sandbox`).
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the visitor used.
 - **Brand guide:** allowlisted accounts get a _Brand guide_ footer link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; visitor runs never read it.
-- **Model deploys:** the first `make deploy` uploads the model image and deploys it to the endpoint; expect 20+ minutes. Vertex can fail a deploy with a generic system error when no L4 is free in us-central1. Check the operation before running `make deploy` again, since a rerun while one is still running starts a second deploy. A model left idle for 30 days is undeployed automatically; `make deploy` puts it back.
+- **Model deploys:** the first `make deploy` uploads the model image and deploys it to the endpoint; expect 20+ minutes. Vertex can fail a deploy with a generic system error when no L4 is free in us-central1. Check the operation before running `make deploy` again, since a rerun while one is still running starts a second deploy. `make deploy` uses the image tagged for the current `model/` tree. A model left idle for 30 days is undeployed automatically; `make deploy` puts it back.
 - **Samples:** `scripts/add-sample.sh <video> <youtube-video-id> "<song title>"` cuts the loudest 30 seconds, uploads it to `samples/`, and registers it on the home page.
 
 ---
@@ -159,7 +159,6 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 | `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                                            |
 | `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)                   |
 | `MODEL_URL`                                             | `llama-server` base URL for local development; `deploy.sh` sets the Vertex endpoint's invoke URL |
-| `MODEL_IMAGE`                                           | Model container image from `make model-image`; required by `deploy.sh`                           |
 | `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
 | `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                                 |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |

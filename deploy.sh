@@ -36,12 +36,19 @@ fi
 
 require_env GCP_PROJECT_ID
 require_env GCS_BUCKET
-require_env MODEL_IMAGE
 require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
 require_env ALLOWLIST_EMAILS
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
 DEMO_EMAILS="${DEMO_EMAILS:-}"
+
+# The model image is named by the git tree hash of model/, as build-model.sh tags it, so a stale
+# value in .env can't deploy an old image.
+MODEL_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/model:$(git rev-parse --short=12 HEAD:model)"
+if ! gcloud artifacts docker images describe "$MODEL_IMAGE" --project "$GCP_PROJECT_ID" &> /dev/null; then
+  echo "Error: $MODEL_IMAGE is not built; run make model-image first." >&2
+  exit 1
+fi
 
 export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID ALLOWLIST_EMAILS \
   PUBLIC_SENTRY_DSN DEMO_EMAILS
