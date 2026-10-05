@@ -285,13 +285,20 @@ gcloud run services add-iam-policy-binding "$SERVICE" \
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(status.url)')"
+# Cloud Run serves the app at more than one run.app URL; status.url names only one of them.
+RUN_ORIGINS="$(gcloud run services describe "$SERVICE" --region "$REGION" \
+  --project "$GCP_PROJECT_ID" --format json |
+  python3 -c 'import json, sys
+s = json.load(sys.stdin)
+urls = json.loads(s["metadata"]["annotations"].get("run.googleapis.com/urls", "[]"))
+print(", ".join(json.dumps(u) for u in urls or [s["status"]["url"]]))')"
 
 # Browsers PUT uploads and stream playback straight from GCS, so the bucket must allow the app's
-# origins: the custom domain, the run.app URL, and the local dev server.
+# origins: the custom domain, every run.app URL, and the local dev server.
 cors="$(mktemp)"
 trap 'rm -f "$rendered" "$cors"' EXIT
 cat > "$cors" << CORS
-[{"origin": ["${APP_DOMAIN}", "${SERVICE_URL}", "http://localhost:5173"],
+[{"origin": ["${APP_DOMAIN}", ${RUN_ORIGINS}, "http://localhost:5173"],
   "method": ["GET", "PUT"],
   "responseHeader": ["Content-Type", "Content-Range", "Accept-Ranges", "Range",
     "x-goog-content-length-range"],
