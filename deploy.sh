@@ -228,12 +228,26 @@ MODEL_ID="$(model_id)"
 DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
   --project "$GCP_PROJECT_ID" --format 'value(deployedModels.model)')"
 if [[ "${DEPLOYED};" != *"/models/${MODEL_ID};"* ]]; then
-  # One L4, scale to zero after 5 idle minutes (the floor for both periods).
+  # gcloud stops waiting after 30 minutes while the deploy carries on server side, and a deploy can
+  # wait far longer for an L4. Queuing a second one behind it only holds another GPU of quota.
+  PENDING="$(curl -fsS "${VERTEX}/endpoints/${ENDPOINT_ID}/operations" \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" | python3 -c '
+import json, sys
+for op in json.load(sys.stdin).get("operations", []):
+    if not op.get("done") and op.get("metadata", {}).get("@type", "").endswith("DeployModelOperationMetadata"):
+        print(op["name"])')"
+  if [[ -n "$PENDING" ]]; then
+    echo "Error: a model deploy is still running; rerun once it finishes: $PENDING" >&2
+    exit 1
+  fi
+  # One L4, scale to zero after 5 idle minutes (the floor for both periods). Container logs are the
+  # only record of why a model server failed to start.
   gcloud beta ai endpoints deploy-model "$ENDPOINT_ID" --region "$REGION" \
     --project "$GCP_PROJECT_ID" --model "$MODEL_ID" --display-name "$MODEL_NAME" \
     --machine-type g2-standard-4 --accelerator type=nvidia-l4,count=1 \
     --min-replica-count 0 --max-replica-count 1 \
-    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100
+    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100 \
+    --enable-container-logging
   for old in $(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
     --project "$GCP_PROJECT_ID" --format json | python3 -c '
 import json, sys
