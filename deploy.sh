@@ -230,12 +230,23 @@ DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
 if [[ "${DEPLOYED};" != *"/models/${MODEL_ID};"* ]]; then
   # gcloud stops waiting after 30 minutes while the deploy carries on server side, and a deploy can
   # wait far longer for an L4. Queuing a second one behind it only holds another GPU of quota.
-  PENDING="$(curl -fsS "${VERTEX}/endpoints/${ENDPOINT_ID}/operations" \
-    -H "Authorization: Bearer $(gcloud auth print-access-token)" | python3 -c '
-import json, sys
-for op in json.load(sys.stdin).get("operations", []):
-    if not op.get("done") and op.get("metadata", {}).get("@type", "").endswith("DeployModelOperationMetadata"):
-        print(op["name"])')"
+  PENDING="$(python3 - "${VERTEX}/endpoints/${ENDPOINT_ID}/operations" \
+    "$(gcloud auth print-access-token)" << 'PY'
+import json, sys, urllib.parse, urllib.request
+url, token, page = sys.argv[1], sys.argv[2], ""
+while True:
+    query = "?" + urllib.parse.urlencode({"pageToken": page}) if page else ""
+    request = urllib.request.Request(url + query, headers={"Authorization": f"Bearer {token}"})
+    body = json.load(urllib.request.urlopen(request))
+    for op in body.get("operations", []):
+        kind = op.get("metadata", {}).get("@type", "")
+        if not op.get("done") and kind.endswith("DeployModelOperationMetadata"):
+            print(op["name"])
+    page = body.get("nextPageToken", "")
+    if not page:
+        break
+PY
+)"
   if [[ -n "$PENDING" ]]; then
     echo "Error: a model deploy is still running; rerun once it finishes: $PENDING" >&2
     exit 1
