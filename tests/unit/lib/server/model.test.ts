@@ -215,6 +215,13 @@ describe('chat', () => {
     expect(err).not.toBeInstanceOf(ModelWaking);
     expect((err as Error).message).toBe('llama-server 429: Quota exceeded for aiplatform');
   });
+
+  it('fails on a 429 with no body to recognise', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 429 }));
+    const err = await chat(messages, 'smart_pick', schema).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(ModelWaking);
+    expect((err as Error).message).toBe('llama-server 429: ');
+  });
 });
 
 describe('step budget', () => {

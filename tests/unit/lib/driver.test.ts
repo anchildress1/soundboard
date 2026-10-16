@@ -137,12 +137,14 @@ describe('drive', () => {
     expect(d.onError).toHaveBeenCalledWith('Failed to fetch');
   });
 
-  it('reports and stops on a thrown non-Error, which p-retry never retries', async () => {
-    const d = deps(['weird', view('REVIEW')]);
+  it('reports and stops on a TypeError that is not a network failure', async () => {
+    const d = deps([new TypeError('view.job is undefined'), view('REVIEW')]);
     const initial = view('PICK');
-    expect((await run(initial, d)).final).toBe(initial);
+    const { final, slept } = await run(initial, d);
+    expect(final).toBe(initial);
+    expect(d.onError).toHaveBeenCalledWith('view.job is undefined');
     expect(d.step).toHaveBeenCalledTimes(1);
-    expect(d.onError).toHaveBeenCalledOnce();
+    expect(slept).toBe(0);
   });
 
   it.each([404, 403])('stops on a %i without backing off', async (status) => {
