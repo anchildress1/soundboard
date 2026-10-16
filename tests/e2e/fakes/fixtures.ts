@@ -1,6 +1,6 @@
 // Jobs the E2E server starts with. Each test owns its job IDs, so parallel tests and both
 // Playwright projects never share mutable state.
-import type { JobDoc } from '$lib/server/jobs';
+import type { JobDoc } from '$lib/server/jobs/jobs';
 import type { Chunk, Pick, Short } from '$lib/types';
 
 const SYNTHWAVE = '#synthwave';

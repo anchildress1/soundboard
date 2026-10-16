@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/clients';
+import { resetClients } from '$lib/server/core/clients';
 import { load } from '$routes/+page.server';
 
 vi.mock('@google-cloud/firestore', async () =>

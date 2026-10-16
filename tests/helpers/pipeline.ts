@@ -1,6 +1,6 @@
 // Pure fixtures and fakes for the pipeline tests; the module mocks stay in the test file.
 import { EventEmitter } from 'node:events';
-import type { JobDoc } from '$lib/server/jobs';
+import type { JobDoc } from '$lib/server/jobs/jobs';
 
 export const SYNTHWAVE = '#synthwave';
 export const RETROWAVE = '#retrowave';

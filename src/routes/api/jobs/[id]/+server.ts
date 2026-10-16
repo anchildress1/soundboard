@@ -1,5 +1,5 @@
-import { respond } from '$lib/server/http';
-import { authorizedJob, buildView } from '$lib/server/view';
+import { respond } from '$lib/server/core/http';
+import { authorizedJob, buildView } from '$lib/server/jobs/view';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = ({ params, locals }) =>

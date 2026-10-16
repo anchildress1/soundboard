@@ -1,5 +1,5 @@
 import { error, redirect } from '@sveltejs/kit';
-import { authUrl, newOAuthState, OAUTH_COOKIE, sign } from '$lib/server/auth';
+import { authUrl, newOAuthState, OAUTH_COOKIE, sign } from '$lib/server/auth/auth';
 import type { RequestHandler } from './$types';
 
 /**

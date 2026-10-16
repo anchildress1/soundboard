@@ -1,4 +1,4 @@
-import type { Session } from '$lib/server/auth';
+import type { Session } from '$lib/server/auth/auth';
 
 declare global {
   namespace App {

@@ -1,5 +1,5 @@
-import { proposeBrand, requireAllowlisted } from '$lib/server/brand';
-import { respond } from '$lib/server/http';
+import { proposeBrand, requireAllowlisted } from '$lib/server/artist/brand';
+import { respond } from '$lib/server/core/http';
 import type { RequestHandler } from './$types';
 
 /** Answers `{wait}` while the model is loading or busy; the page calls again. */

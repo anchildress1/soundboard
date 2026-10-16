@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OAUTH_COOKIE, unsign, type OAuthState } from '$lib/server/auth';
+import { OAUTH_COOKIE, unsign, type OAuthState } from '$lib/server/auth/auth';
 import { GET } from '$routes/auth/login/+server';
 
 type Event = Parameters<typeof GET>[0];

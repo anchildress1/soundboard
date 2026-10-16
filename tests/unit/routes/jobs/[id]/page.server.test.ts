@@ -2,7 +2,7 @@
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/clients';
+import { resetClients } from '$lib/server/core/clients';
 import { load } from '$routes/jobs/[id]/+page.server';
 import type { JobView, LiveMetadata } from '$lib/types';
 

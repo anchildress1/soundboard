@@ -1,4 +1,4 @@
-import { listSamples } from '$lib/server/samples';
+import { listSamples } from '$lib/server/jobs/samples';
 import type { Sample } from '$lib/types';
 import type { PageServerLoad } from './$types';
 

@@ -1,8 +1,8 @@
-import { approve } from '$lib/server/actions';
-import { num, readBody, respond, text } from '$lib/server/http';
-import { getJob } from '$lib/server/jobs';
+import { approve } from '$lib/server/jobs/actions';
+import { num, readBody, respond, text } from '$lib/server/core/http';
+import { getJob } from '$lib/server/jobs/jobs';
 import { splitTags } from '$lib/metadata';
-import { authorizedJob, buildView } from '$lib/server/view';
+import { authorizedJob, buildView } from '$lib/server/jobs/view';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ params, request, locals }) =>
