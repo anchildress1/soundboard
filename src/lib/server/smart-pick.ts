@@ -1,3 +1,4 @@
+import pRetry from 'p-retry';
 import type { BrandGuide } from '$lib/brand';
 import {
   containsWords,
@@ -8,6 +9,7 @@ import {
   TITLE_MAX,
 } from '$lib/metadata';
 import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
+import { REASK_ONCE } from '$lib/retry';
 import { ARTIST_NAME, type Fact, type Feedback } from './memory';
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
@@ -406,6 +408,15 @@ const normText = (t: string) =>
 /** Same words, ignoring case, spacing, and hashtags, so a reshuffled closing line doesn't count as new. */
 export const sameText = (a: string, b: string) => normText(a) === normText(b);
 
+class Repeated extends Error {
+  constructor(
+    readonly value: RawPick,
+    readonly fields: string[],
+  ) {
+    super('The pick repeats a skipped version.');
+  }
+}
+
 /**
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the
  * model's reply never parses.
@@ -418,38 +429,48 @@ export async function runPick(
   let ms = 0;
   let messages = buildPickMessages(ctx);
   if (span) agentInput(span, messages);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const { value, ms: took } = await chatJson(
-      messages,
-      'smart_pick',
-      PICK_SCHEMA,
-      isRawPick,
-      deadline,
-    );
-    ms += took;
-    if (!value) return null;
-    const pick = finalizePick(value, ctx);
-    const repeated = ctx.skipped.flatMap((s) => [
-      ...(sameText(s.title, pick.title) ? ['title'] : []),
-      ...(sameText(s.description, pick.description) ? ['description'] : []),
-    ]);
-    if (repeated.length === 0) {
-      if (span) agentOutput(span, JSON.stringify(pick));
-      return { pick, ms };
-    }
-    // A re-run must produce a new title and description; a second repeat fails the pick so the step retries.
-    if (attempt === 1) return null;
-    const unique = [...new Set(repeated)];
-    const fields = unique.join(' and ');
-    const verb = unique.length > 1 ? 'repeat' : 'repeats';
-    messages = [
-      ...messages,
-      { role: 'assistant', content: JSON.stringify(value) },
-      {
-        role: 'user',
-        content: `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
+  try {
+    return await pRetry(
+      async () => {
+        const { value, ms: took } = await chatJson(
+          messages,
+          'smart_pick',
+          PICK_SCHEMA,
+          isRawPick,
+          deadline,
+        );
+        ms += took;
+        if (!value) return null;
+        const pick = finalizePick(value, ctx);
+        const repeated = ctx.skipped.flatMap((s) => [
+          ...(sameText(s.title, pick.title) ? ['title'] : []),
+          ...(sameText(s.description, pick.description) ? ['description'] : []),
+        ]);
+        if (repeated.length > 0) throw new Repeated(value, [...new Set(repeated)]);
+        if (span) agentOutput(span, JSON.stringify(pick));
+        return { pick, ms };
       },
-    ];
+      {
+        ...REASK_ONCE,
+        onFailedAttempt: ({ error }) => {
+          if (!(error instanceof Repeated)) return;
+          const fields = error.fields.join(' and ');
+          const verb = error.fields.length > 1 ? 'repeat' : 'repeats';
+          messages = [
+            ...messages,
+            { role: 'assistant', content: JSON.stringify(error.value) },
+            {
+              role: 'user',
+              content: `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
+            },
+          ];
+        },
+        shouldRetry: ({ error }) => error instanceof Repeated,
+      },
+    );
+  } catch (error) {
+    // A re-run must produce a new title and description; a second repeat fails the pick so the step retries.
+    if (error instanceof Repeated) return null;
+    throw error;
   }
-  return null;
 }

@@ -1,4 +1,6 @@
 import { GoogleAuth } from 'google-auth-library';
+import pRetry from 'p-retry';
+import { REASK_ONCE } from '$lib/retry';
 import { modelUrl } from './env';
 import { chatSpan, MODEL_NAME, type AgentName, type ChatMessage, type ChatReply } from './tracing';
 
@@ -138,6 +140,8 @@ export async function chat(
   });
 }
 
+class Unparsed extends Error {}
+
 /**
  * Parses the model's JSON reply, retrying the call once on a parse failure while the step budget
  * allows. A failure that can't be retried keeps the raw text instead of throwing.
@@ -151,17 +155,29 @@ export async function chatJson<T>(
 ): Promise<{ value: T | null; raw: string; ms: number }> {
   let ms = 0;
   let raw = '';
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0 && deadline - Date.now() < MIN_CALL_MS) break;
-    const result = await chat(messages, schemaName, schema, deadline);
-    ms += result.ms;
-    raw = result.content;
-    try {
-      const value: unknown = JSON.parse(raw);
-      if (validate(value)) return { value, raw, ms };
-    } catch {
-      // Falls through to the retry.
-    }
+  try {
+    return await pRetry(
+      async () => {
+        const result = await chat(messages, schemaName, schema, deadline);
+        ms += result.ms;
+        raw = result.content;
+        let value: unknown;
+        try {
+          value = JSON.parse(raw);
+        } catch {
+          throw new Unparsed();
+        }
+        if (!validate(value)) throw new Unparsed();
+        return { value, raw, ms };
+      },
+      {
+        ...REASK_ONCE,
+        shouldRetry: ({ error }) =>
+          error instanceof Unparsed && deadline - Date.now() >= MIN_CALL_MS,
+      },
+    );
+  } catch (error) {
+    if (error instanceof Unparsed) return { value: null, raw, ms };
+    throw error;
   }
-  return { value: null, raw, ms };
 }
