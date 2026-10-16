@@ -387,6 +387,33 @@ describe('runStep: ANALYZE', () => {
     expect(store.has(FIRST_CHUNK)).toBe(true);
   });
 
+  it('waits without a failure when the model scales to zero mid-step', async () => {
+    on(
+      /chat\/completions$/,
+      () => new Response('Model is not yet ready for inference.', { status: 429 }),
+    );
+    const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    expect(result).toEqual({ wait: WAKING });
+    expect(saved()).toMatchObject({
+      state: 'ANALYZE',
+      chunkIndex: 0,
+      consecutiveFailures: 0,
+      error: null,
+      claim: null,
+    });
+    expect(store.has(FIRST_CHUNK)).toBe(false);
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it('counts a quota 429 as a failure and reports it', async () => {
+    on(/chat\/completions$/, () => new Response('Quota exceeded', { status: 429 }));
+    const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    expect(result).toEqual({});
+    expect(saved()).toMatchObject({ state: 'ANALYZE', consecutiveFailures: 1 });
+    expect(saved().error).toBe('llama-server 429: Quota exceeded');
+    expect(captureException).toHaveBeenCalledOnce();
+  });
+
   it('resets the failure count after a step succeeds', async () => {
     await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, consecutiveFailures: 1 }));
     expect(saved()).toMatchObject({ consecutiveFailures: 0, error: null, chunkIndex: 1 });
@@ -628,6 +655,17 @@ describe("runStep: PICK with Nathan's memory", () => {
     await runStep(saved());
     expect(saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+  });
+
+  it('keeps the genre search and waits when the model scales to zero mid-pick', async () => {
+    on(
+      /chat\/completions$/,
+      () => new Response('Model is not yet ready for inference.', { status: 429 }),
+    );
+    expect(await runStep(seed({ state: 'PICK' }))).toEqual({ wait: WAKING });
+    expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
+    expect(saved().audience).toMatchObject({ hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'] });
+    expect(captureException).not.toHaveBeenCalled();
   });
 });
 

@@ -59,6 +59,12 @@ export async function modelStatus(): Promise<ModelStatus> {
   }
 }
 
+/** The endpoint scaled to zero after `modelStatus` read it ready; callers wait instead of failing. */
+export class ModelWaking extends Error {}
+
+/** Vertex's 429 body while a replica starts: "Model is not yet ready for inference...". */
+const SCALING_FROM_ZERO = /not yet ready for inference/i;
+
 export type ChatResult = ChatReply & { ms: number };
 
 /** Each JSON schema belongs to one agent, which names its model spans. */
@@ -112,7 +118,12 @@ export async function chat(
       }),
     });
     if (!response.ok) {
-      throw new Error(`llama-server ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      const message = `llama-server ${response.status}: ${(await response.text()).slice(0, 200)}`;
+      // Only the scale-from-zero 429 is a wait; a quota or rate-limit 429 must still fail the step.
+      if (response.status === 429 && SCALING_FROM_ZERO.test(message)) {
+        throw new ModelWaking(message);
+      }
+      throw new Error(message);
     }
     const body = (await response.json()) as CompletionResponse;
     const choice = body.choices?.[0];

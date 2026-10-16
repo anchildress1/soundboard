@@ -18,7 +18,7 @@ import {
   type JobDoc,
 } from './jobs';
 import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from './memory';
-import { modelStatus, stepDeadline } from './model';
+import { ModelWaking, modelStatus, stepDeadline } from './model';
 import { hookStep, renderStep } from './short';
 import { runPick } from './smart-pick';
 import { accessToken } from './tokens';
@@ -38,7 +38,7 @@ const RECENT_COUNT = 3;
 
 type Patch = Partial<JobDoc>;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
-type StepOutput = Patch & { pick?: Pick; chunk?: Chunk };
+type StepOutput = Patch & { pick?: Pick; chunk?: Chunk; wait?: Wait };
 
 /** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
 class StepFailure extends Error {
@@ -300,7 +300,10 @@ async function modelWait(): Promise<Wait | undefined> {
   return undefined;
 }
 
-/** Runs the claimed step's handler; a throw becomes the failure patch, keeping any finished output. */
+/**
+ * Runs the claimed step's handler; a throw becomes the failure patch, keeping any finished output.
+ * A model that scaled to zero mid-step is a wait, not a failure.
+ */
 async function runHandler(
   job: JobDoc,
   handler: (job: JobDoc) => Promise<StepOutput>,
@@ -316,7 +319,9 @@ async function runHandler(
     );
   } catch (error) {
     const failure = error instanceof StepFailure ? error : null;
-    captureException(failure ? failure.cause : error, { tags: { step: job.state } });
+    const cause = failure ? failure.cause : error;
+    if (cause instanceof ModelWaking) return { ...failure?.keep, wait: 'waking model' };
+    captureException(cause, { tags: { step: job.state } });
     return { ...failurePatch(job, error), ...failure?.keep };
   }
 }
@@ -348,13 +353,14 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   }
 
   const output = await runHandler(job, handler);
-  const { pick: newPick, chunk, ...patch } = output;
+  const { pick: newPick, chunk, wait: woke, ...patch } = output;
   if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
     captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },
     });
   }
+  if (woke) return { wait: woke };
   const stillVerifying = job.state === 'CLAIMED_COMPLETE' && patch.state === undefined;
   return stillVerifying ? { wait: 'waiting on YouTube' } : {};
 }

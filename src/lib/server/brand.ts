@@ -14,7 +14,7 @@ import { ActionError } from './actions';
 import type { Session } from './auth';
 import { db } from './clients';
 import { ARTIST_ID } from './memory';
-import { chatJson, modelStatus, stepDeadline } from './model';
+import { chatJson, ModelWaking, modelStatus, stepDeadline } from './model';
 import { stripDeep } from './numerics';
 import { isString, isStrings, shape } from './shape';
 import { agentInput, agentOutput, invokeAgent, type ChatMessage } from './tracing';
@@ -183,7 +183,11 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
     const cleaned = cleanGuide(value);
     agentOutput(span, JSON.stringify(cleaned));
     return cleaned;
+  }).catch((error: unknown) => {
+    if (error instanceof ModelWaking) return 'waking' as const;
+    throw error;
   });
+  if (guide === 'waking') return { wait: 'waking model' };
   if (!guide)
     throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
 
