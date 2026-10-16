@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api';
-import { drive, ERROR_BACKOFF_MS, sleep, WAIT_MS, type DriverDeps } from '$lib/driver';
+import { drive, type DriverDeps } from '$lib/driver';
+import { POLL_BACKOFF } from '$lib/retry';
 import type { JobState, JobView, Wait } from '$lib/types';
 
 const view = (state: JobState, wait?: Wait): JobView => ({
@@ -41,95 +42,139 @@ function deps(steps: (JobView | Error | string)[], stopped = () => false) {
       if (typeof next === 'string' || next instanceof Error) throw next;
       return next;
     }),
-    sleep: vi.fn(async () => {}),
     stopped: vi.fn(stopped),
     onView: vi.fn(),
     onError: vi.fn(),
   } satisfies DriverDeps;
 }
 
+/** Runs the drive to completion under fake timers, returning the ms of backoff it slept. */
+async function run(initial: JobView, d: DriverDeps) {
+  const started = Date.now();
+  const done = drive(initial, d);
+  await vi.runAllTimersAsync();
+  return { final: await done, slept: Date.now() - started };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe('drive', () => {
-  it('steps until the job leaves the driven states', async () => {
+  it('steps until the job leaves the driven states, without backing off', async () => {
     const d = deps([view('ANALYZE'), view('PICK'), view('REVIEW')]);
-    const final = await drive(view('PREP'), d);
+    const { final, slept } = await run(view('PREP'), d);
     expect(final.job.state).toBe('REVIEW');
     expect(d.step).toHaveBeenCalledTimes(3);
     expect(d.onView).toHaveBeenCalledTimes(3);
-    expect(d.sleep).not.toHaveBeenCalled();
+    expect(slept).toBe(0);
   });
 
   it('does not step a job that is not in a driven state', async () => {
     const d = deps([]);
     const initial = view('REVIEW');
-    expect(await drive(initial, d)).toBe(initial);
+    expect((await run(initial, d)).final).toBe(initial);
     expect(d.step).not.toHaveBeenCalled();
   });
 
-  it('sleeps for the named wait interval', async () => {
+  it('backs off exponentially through a run of waits without reporting an error', async () => {
     const d = deps([
       view('ANALYZE', 'waking model'),
-      view('PUBLISHING', 'waiting on YouTube'),
-      view('VERIFIED'),
+      view('ANALYZE', 'waking model'),
+      view('ANALYZE', 'waking model'),
+      view('REVIEW'),
     ]);
-    await drive(view('ANALYZE'), d);
-    expect(d.sleep.mock.calls).toEqual([
-      [WAIT_MS['waking model']],
-      [WAIT_MS['waiting on YouTube']],
-    ]);
+    const { final, slept } = await run(view('ANALYZE'), d);
+    expect(final.job.state).toBe('REVIEW');
+    const { minTimeout, factor } = POLL_BACKOFF;
+    expect(slept).toBe(minTimeout + minTimeout * factor + minTimeout * factor ** 2);
+    expect(d.onView).toHaveBeenCalledTimes(4);
+    expect(d.onError).not.toHaveBeenCalled();
   });
 
-  it('backs off and retries after a request error', async () => {
+  it('caps the delay between calls during a long wait', async () => {
+    const waits = Array.from({ length: 12 }, () => view('ANALYZE', 'waking model'));
+    const d = deps([...waits, view('REVIEW')]);
+    const done = drive(view('ANALYZE'), d);
+    await vi.advanceTimersByTimeAsync(POLL_BACKOFF.maxTimeout * 20);
+    await done;
+    expect(d.step).toHaveBeenCalledTimes(13);
+  });
+
+  it('starts the backoff over after a step makes progress', async () => {
+    const d = deps([
+      view('ANALYZE', 'waking model'),
+      view('PICK'),
+      view('PICK', 'waiting on another run'),
+      view('REVIEW'),
+    ]);
+    const { slept } = await run(view('ANALYZE'), d);
+    expect(slept).toBe(POLL_BACKOFF.minTimeout * 2);
+  });
+
+  it('does not back off on a wait that left the driven states', async () => {
+    const d = deps([view('REVIEW', 'waiting on YouTube')]);
+    const { final, slept } = await run(view('PUBLISHING'), d);
+    expect(final.job.state).toBe('REVIEW');
+    expect(slept).toBe(0);
+  });
+
+  it('reports request errors and retries them with backoff', async () => {
     const d = deps([new ApiError(500, 'Internal'), new Error('offline'), view('REVIEW')]);
-    const final = await drive(view('PICK'), d);
+    const { final, slept } = await run(view('PICK'), d);
     expect(final.job.state).toBe('REVIEW');
     expect(d.onError.mock.calls).toEqual([['Internal'], ['offline']]);
-    expect(d.sleep.mock.calls).toEqual([[ERROR_BACKOFF_MS], [ERROR_BACKOFF_MS]]);
+    expect(slept).toBe(POLL_BACKOFF.minTimeout * (1 + POLL_BACKOFF.factor));
   });
 
-  it('reports a generic message for non-Error throws', async () => {
+  it('retries a network failure', async () => {
+    const d = deps([new TypeError('Failed to fetch'), view('REVIEW')]);
+    expect((await run(view('PICK'), d)).final.job.state).toBe('REVIEW');
+    expect(d.onError).toHaveBeenCalledWith('Failed to fetch');
+  });
+
+  it('reports and stops on a thrown non-Error, which p-retry never retries', async () => {
     const d = deps(['weird', view('REVIEW')]);
-    await drive(view('PICK'), d);
-    expect(d.onError).toHaveBeenCalledWith('Step failed');
+    const initial = view('PICK');
+    expect((await run(initial, d)).final).toBe(initial);
+    expect(d.step).toHaveBeenCalledTimes(1);
+    expect(d.onError).toHaveBeenCalledOnce();
   });
 
   it.each([404, 403])('stops on a %i without backing off', async (status) => {
     const d = deps([new ApiError(status, 'Job not found')]);
     const initial = view('ANALYZE');
-    expect(await drive(initial, d)).toBe(initial);
+    const { final, slept } = await run(initial, d);
+    expect(final).toBe(initial);
     expect(d.onError).toHaveBeenCalledWith('Job not found');
-    expect(d.sleep).not.toHaveBeenCalled();
+    expect(slept).toBe(0);
     expect(d.step).toHaveBeenCalledTimes(1);
   });
 
-  it('stops when the caller says so', async () => {
+  it('stops when the caller says so between steps', async () => {
     let calls = 0;
     const d = deps([view('ANALYZE'), view('ANALYZE'), view('ANALYZE')], () => {
       calls += 1;
-      return calls > 2;
+      return calls > 3;
     });
-    const final = await drive(view('ANALYZE'), d);
-    expect(d.step).toHaveBeenCalledTimes(2);
+    const { final } = await run(view('ANALYZE'), d);
+    expect(d.step).toHaveBeenCalledTimes(1);
     expect(final.job.state).toBe('ANALYZE');
   });
 
-  it('has an interval for every wait reason', () => {
-    expect(Object.values(WAIT_MS).every((ms) => ms > 0)).toBe(true);
-  });
-});
-
-describe('sleep', () => {
-  it('resolves after the given delay', async () => {
-    vi.useFakeTimers();
-    let done = false;
-    const p = sleep(1000).then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(999);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await p;
-    expect(done).toBe(true);
+  it('stops during a wait without another step', async () => {
+    let stop = false;
+    const d = deps([view('ANALYZE', 'waking model'), view('REVIEW')], () => stop);
+    const done = drive(view('ANALYZE'), d);
+    await vi.advanceTimersByTimeAsync(0);
+    stop = true;
+    await vi.runAllTimersAsync();
+    expect((await done).job.state).toBe('ANALYZE');
+    expect(d.step).toHaveBeenCalledTimes(1);
+    expect(d.onError).not.toHaveBeenCalled();
   });
 });

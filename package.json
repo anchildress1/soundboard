@@ -61,6 +61,7 @@
     "@google-cloud/secret-manager": "7.1.0",
     "@google-cloud/storage": "8.2.0",
     "@sentry/sveltekit": "11.4.0",
-    "google-auth-library": "11.1.0"
+    "google-auth-library": "11.1.0",
+    "p-retry": "8.0.1"
   }
 }
