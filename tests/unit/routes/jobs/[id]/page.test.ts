@@ -520,6 +520,24 @@ describe('job page: upload hand-off', () => {
     }
   });
 
+  it('stops looking for the upload once the page is left', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pend();
+      fetchMock.mockImplementation(async () => awaiting());
+      const { unmount } = setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), {
+        playbackUrl: null,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      unmount();
+      await vi.runAllTimersAsync();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a step error while looking for the upload', async () => {
     pend();
     fetchMock.mockResolvedValueOnce(json({ error: 'Internal' }, 500));

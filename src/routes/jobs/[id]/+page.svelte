@@ -12,7 +12,7 @@
   import Payload from '$lib/components/Payload.svelte';
   import Short from '$lib/components/Short.svelte';
   import Track from '$lib/components/Track.svelte';
-  import pRetry from 'p-retry';
+  import pRetry, { AbortError } from 'p-retry';
   import { drive } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
@@ -197,14 +197,11 @@
       // A few looks for the landed object; past that, run() takes over with whatever state it reads.
       await pRetry(
         async () => {
+          if (stopped) throw new AbortError(new Waiting('stopped'));
           view = await step(job.id, data.trace);
           if (view.job.state === 'AWAITING_UPLOAD') throw new Waiting('upload not landed');
         },
-        {
-          ...POLL_BACKOFF,
-          retries: 4,
-          shouldRetry: ({ error }) => error instanceof Waiting && !stopped,
-        },
+        { ...POLL_BACKOFF, retries: 4, shouldRetry: ({ error }) => error instanceof Waiting },
       ).catch((error: unknown) => {
         if (!(error instanceof Waiting)) throw error;
       });
