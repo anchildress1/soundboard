@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StoredBrand } from '$lib/brand';
-import { WAIT_MS } from '$lib/driver';
+import { POLL_BACKOFF } from '$lib/retry';
 import Page from '$routes/brand/+page.svelte';
 
 const GUIDE = {
@@ -81,9 +81,21 @@ describe('brand page: proposing', () => {
       expect(screen.getByRole('button', { name: 'waking model' })).toBeDisabled(),
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(WAIT_MS['waking model']);
+    await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
     await waitFor(() => expect(screen.getByLabelText(/^Statement/)).toHaveValue(GUIDE.statement));
     expect(urls()).toEqual(['/api/brand/propose', '/api/brand/propose']);
+  });
+
+  it('stops asking once the page is left mid-wait', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(json({ wait: 'waking model' }));
+    const { unmount } = setup();
+    await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    unmount();
+    await vi.runAllTimersAsync();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('shows a failed proposal and does not retry it on its own', async () => {

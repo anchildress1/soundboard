@@ -12,7 +12,8 @@
     STATEMENT_MAX,
     type StoredBrand,
   } from '$lib/brand';
-  import { sleep, WAIT_MS } from '$lib/driver';
+  import pRetry, { AbortError } from 'p-retry';
+  import { POLL_BACKOFF, Waiting } from '$lib/retry';
   import type { Wait } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -64,19 +65,27 @@
     busy = true;
     message = '';
     try {
-      while (!stopped) {
-        const result = await proposeBrand();
-        if ('proposal' in result) {
-          draft = toDraft(result.proposal);
-          proposedAt = result.proposal.createdAt;
-          return;
-        }
-        wait = result.wait;
-        await sleep(WAIT_MS[result.wait]);
-      }
+      const proposal = await pRetry(
+        async () => {
+          if (stopped) throw new AbortError(new Waiting('stopped'));
+          const result = await proposeBrand();
+          if ('proposal' in result) return result.proposal;
+          wait = result.wait;
+          throw new Waiting(result.wait);
+        },
+        {
+          ...POLL_BACKOFF,
+          retries: Infinity,
+          // A failed model call is not retried on its own: each try holds the GPU for a full call.
+          shouldRetry: ({ error }) => error instanceof Waiting,
+        },
+      );
+      draft = toDraft(proposal);
+      proposedAt = proposal.createdAt;
     } catch (error) {
-      // A failed model call is not retried on its own: each try holds the GPU for a full call.
-      message = error instanceof Error ? error.message : 'Proposal failed';
+      if (!(error instanceof Waiting)) {
+        message = error instanceof Error ? error.message : 'Proposal failed';
+      }
     } finally {
       wait = null;
       busy = false;

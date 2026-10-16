@@ -1,4 +1,6 @@
 import { GoogleAuth } from 'google-auth-library';
+import pRetry from 'p-retry';
+import { REASK_ONCE } from '$lib/retry';
 import { modelUrl } from './env';
 import { chatSpan, MODEL_NAME, type AgentName, type ChatMessage, type ChatReply } from './tracing';
 
@@ -59,6 +61,12 @@ export async function modelStatus(): Promise<ModelStatus> {
   }
 }
 
+/** The endpoint scaled to zero after `modelStatus` read it ready; callers wait instead of failing. */
+export class ModelWaking extends Error {}
+
+/** Vertex's 429 body while a replica starts: "Model is not yet ready for inference...". */
+const SCALING_FROM_ZERO = /not yet ready for inference/i;
+
 export type ChatResult = ChatReply & { ms: number };
 
 /** Each JSON schema belongs to one agent, which names its model spans. */
@@ -112,7 +120,12 @@ export async function chat(
       }),
     });
     if (!response.ok) {
-      throw new Error(`llama-server ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      const message = `llama-server ${response.status}: ${(await response.text()).slice(0, 200)}`;
+      // Only the scale-from-zero 429 is a wait; a quota or rate-limit 429 must still fail the step.
+      if (response.status === 429 && SCALING_FROM_ZERO.test(message)) {
+        throw new ModelWaking(message);
+      }
+      throw new Error(message);
     }
     const body = (await response.json()) as CompletionResponse;
     const choice = body.choices?.[0];
@@ -127,6 +140,8 @@ export async function chat(
   });
 }
 
+class Unparsed extends Error {}
+
 /**
  * Parses the model's JSON reply, retrying the call once on a parse failure while the step budget
  * allows. A failure that can't be retried keeps the raw text instead of throwing.
@@ -140,17 +155,29 @@ export async function chatJson<T>(
 ): Promise<{ value: T | null; raw: string; ms: number }> {
   let ms = 0;
   let raw = '';
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0 && deadline - Date.now() < MIN_CALL_MS) break;
-    const result = await chat(messages, schemaName, schema, deadline);
-    ms += result.ms;
-    raw = result.content;
-    try {
-      const value: unknown = JSON.parse(raw);
-      if (validate(value)) return { value, raw, ms };
-    } catch {
-      // Falls through to the retry.
-    }
+  try {
+    return await pRetry(
+      async () => {
+        const result = await chat(messages, schemaName, schema, deadline);
+        ms += result.ms;
+        raw = result.content;
+        let value: unknown;
+        try {
+          value = JSON.parse(raw);
+        } catch {
+          throw new Unparsed();
+        }
+        if (!validate(value)) throw new Unparsed();
+        return { value, raw, ms };
+      },
+      {
+        ...REASK_ONCE,
+        shouldRetry: ({ error }) =>
+          error instanceof Unparsed && deadline - Date.now() >= MIN_CALL_MS,
+      },
+    );
+  } catch (error) {
+    if (error instanceof Unparsed) return { value: null, raw, ms };
+    throw error;
   }
-  return { value: null, raw, ms };
 }

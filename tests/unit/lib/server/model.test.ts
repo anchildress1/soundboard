@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startSpan } from '../../../mocks/sentry';
-import { chat, chatJson, modelStatus, STEP_BUDGET_MS, stepDeadline } from '$lib/server/model';
+import {
+  chat,
+  chatJson,
+  ModelWaking,
+  modelStatus,
+  STEP_BUDGET_MS,
+  stepDeadline,
+} from '$lib/server/model';
 import { CLAIM_TTL_MS } from '$lib/server/jobs';
 import { MODEL_NAME, type ChatMessage } from '$lib/server/tracing';
 
@@ -191,6 +198,29 @@ describe('chat', () => {
   it('propagates transport errors', async () => {
     fetchMock.mockRejectedValueOnce(new Error('timeout'));
     await expect(chat(messages, 'smart_pick', schema)).rejects.toThrow('timeout');
+  });
+
+  it('throws ModelWaking when the endpoint scaled to zero after the readiness check', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('Model is not yet ready for inference.', { status: 429 }),
+    );
+    const err = await chat(messages, 'smart_pick', schema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ModelWaking);
+    expect((err as Error).message).toBe('llama-server 429: Model is not yet ready for inference.');
+  });
+
+  it('fails on a 429 that is not the scale-from-zero reply, such as a quota limit', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('Quota exceeded for aiplatform', { status: 429 }));
+    const err = await chat(messages, 'smart_pick', schema).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(ModelWaking);
+    expect((err as Error).message).toBe('llama-server 429: Quota exceeded for aiplatform');
+  });
+
+  it('fails on a 429 with no body to recognise', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 429 }));
+    const err = await chat(messages, 'smart_pick', schema).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(ModelWaking);
+    expect((err as Error).message).toBe('llama-server 429: ');
   });
 });
 

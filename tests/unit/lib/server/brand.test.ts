@@ -233,6 +233,21 @@ describe('proposeBrand', () => {
     expect(called(/chat\/completions$/)).toHaveLength(0);
   });
 
+  it('waits when the model scales to zero after the readiness check', async () => {
+    on(
+      /chat\/completions$/,
+      () => new Response('Model is not yet ready for inference.', { status: 429 }),
+    );
+    expect(await proposeBrand()).toEqual({ wait: 'waking model' });
+    expect(store.has(PROPOSAL_DOC)).toBe(false);
+  });
+
+  it('propagates any other model error', async () => {
+    on(/chat\/completions$/, () => new Response('boom', { status: 500 }));
+    await expect(proposeBrand()).rejects.toThrow('llama-server 500: boom');
+    expect(store.has(PROPOSAL_DOC)).toBe(false);
+  });
+
   it('reads 30 uploads and 10 thumbnails and stores the proposal', async () => {
     const result = await proposeBrand();
     expect(result).toMatchObject({ proposal: { ...GUIDE, status: 'PROPOSED', approvedAt: null } });

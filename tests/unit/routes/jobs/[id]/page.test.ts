@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPending } from '$lib/pending';
+import { POLL_BACKOFF } from '$lib/retry';
 import type { Chunk, JobState, JobView, LiveMetadata, Pick, PublicJob, Short } from '$lib/types';
 import Page from '$routes/jobs/[id]/+page.svelte';
 
@@ -471,6 +472,78 @@ describe('job page: upload hand-off', () => {
     });
     unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
+  });
+
+  const pend = () =>
+    setPending('j1', {
+      file,
+      uploadUrl: 'https://storage.googleapis.com/put?sig=1',
+      objectUrl: LOCAL_BLOB,
+      contentType: 'video/mp4',
+    });
+  const awaiting = () => json(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }));
+
+  it('looks again with backoff until the upload lands', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pend();
+      fetchMock
+        .mockResolvedValueOnce(awaiting())
+        .mockResolvedValueOnce(json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })))
+        .mockImplementation(hang);
+      setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), {
+        playbackUrl: null,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
+      expect(chip()).toHaveTextContent('Measuring audio');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hands off to the steps after five looks find no upload', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pend();
+      fetchMock.mockImplementation(async () => awaiting());
+      setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), {
+        playbackUrl: null,
+      });
+      await vi.runAllTimersAsync();
+      const steps = fetchMock.mock.calls.filter(([url]) => String(url).endsWith(STEP_PATH));
+      expect(steps).toHaveLength(5);
+      expect(screen.queryByText(/failed/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops looking for the upload once the page is left', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pend();
+      fetchMock.mockImplementation(async () => awaiting());
+      const { unmount } = setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), {
+        playbackUrl: null,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      unmount();
+      await vi.runAllTimersAsync();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a step error while looking for the upload', async () => {
+    pend();
+    fetchMock.mockResolvedValueOnce(json({ error: 'Internal' }, 500));
+    setup(view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 }), { playbackUrl: null });
+    expect(await screen.findByText('Internal')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('shows a failed GCS upload', async () => {

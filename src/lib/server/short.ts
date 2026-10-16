@@ -1,6 +1,8 @@
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import pRetry from 'p-retry';
+import { REASK_ONCE } from '$lib/retry';
 import { floorTenth, lengthBounds, tenth } from '$lib/short';
 import type { Chunk, Hook, Short } from '$lib/types';
 import {
@@ -98,6 +100,12 @@ export function settleHook(raw: RawHook, ctx: HookContext): RawHook {
   };
 }
 
+class RepeatedHook extends Error {
+  constructor(readonly value: RawHook) {
+    super('The hook repeats a skipped one.');
+  }
+}
+
 const repeats = (hook: RawHook, skipped: Short['skipped']) =>
   skipped.some((s) => s.window === hook.window && s.lengthSec === hook.lengthSec);
 
@@ -114,29 +122,40 @@ export async function runHook(
   let ms = 0;
   let messages = buildHookMessages(ctx);
   if (span) agentInput(span, messages);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const { value, ms: took } = await chatJson(
-      messages,
-      'hook_pick',
-      HOOK_SCHEMA,
-      isRawHook,
-      deadline,
+  try {
+    return await pRetry(
+      async () => {
+        const { value, ms: took } = await chatJson(
+          messages,
+          'hook_pick',
+          HOOK_SCHEMA,
+          isRawHook,
+          deadline,
+        );
+        ms += took;
+        if (!value) return null;
+        const hook = settleHook(value, ctx);
+        if (repeats(hook, ctx.skipped)) throw new RepeatedHook(value);
+        if (span) agentOutput(span, JSON.stringify(hook));
+        return { hook, ms };
+      },
+      {
+        ...REASK_ONCE,
+        onFailedAttempt: ({ error }) => {
+          if (!(error instanceof RepeatedHook)) return;
+          messages = [
+            ...messages,
+            { role: 'assistant', content: JSON.stringify(error.value) },
+            { role: 'user', content: 'That repeats a skipped hook. Pick a different one.' },
+          ];
+        },
+        shouldRetry: ({ error }) => error instanceof RepeatedHook,
+      },
     );
-    ms += took;
-    if (!value) return null;
-    const hook = settleHook(value, ctx);
-    if (!repeats(hook, ctx.skipped)) {
-      if (span) agentOutput(span, JSON.stringify(hook));
-      return { hook, ms };
-    }
-    if (attempt === 1) return { hook: null, ms };
-    messages = [
-      ...messages,
-      { role: 'assistant', content: JSON.stringify(value) },
-      { role: 'user', content: 'That repeats a skipped hook. Pick a different one.' },
-    ];
+  } catch (error) {
+    if (error instanceof RepeatedHook) return { hook: null, ms };
+    throw error;
   }
-  return null;
 }
 
 /** Seconds on each side of a candidate start that are compared for a jump in loudness. */

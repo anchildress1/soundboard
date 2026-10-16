@@ -12,9 +12,11 @@
   import Payload from '$lib/components/Payload.svelte';
   import Short from '$lib/components/Short.svelte';
   import Track from '$lib/components/Track.svelte';
-  import { drive, sleep } from '$lib/driver';
+  import pRetry, { AbortError } from 'p-retry';
+  import { drive } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
+  import { POLL_BACKOFF, Waiting } from '$lib/retry';
   import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
   import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
   import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
@@ -90,7 +92,6 @@
           message = next.job.error ?? '';
         },
         onError: (text) => (message = text),
-        sleep,
       });
     } finally {
       driving = false;
@@ -119,7 +120,6 @@
           shortMessage = next.job.error ?? '';
         },
         onError: (text) => (shortMessage = text),
-        sleep,
       });
     } finally {
       drivingShort = false;
@@ -194,10 +194,17 @@
         pending.contentType,
         (pct) => (uploadPct = pct),
       );
-      for (let i = 0; i < 5 && view.job.state === 'AWAITING_UPLOAD' && !stopped; i++) {
-        view = await step(job.id, data.trace);
-        if (view.job.state === 'AWAITING_UPLOAD') await sleep(1000);
-      }
+      // A few looks for the landed object; past that, run() takes over with whatever state it reads.
+      await pRetry(
+        async () => {
+          if (stopped) throw new AbortError(new Waiting('stopped'));
+          view = await step(job.id, data.trace);
+          if (view.job.state === 'AWAITING_UPLOAD') throw new Waiting('upload not landed');
+        },
+        { ...POLL_BACKOFF, retries: 4, shouldRetry: ({ error }) => error instanceof Waiting },
+      ).catch((error: unknown) => {
+        if (!(error instanceof Waiting)) throw error;
+      });
       void run();
     } catch (error) {
       message = error instanceof Error ? error.message : 'Upload failed';

@@ -33,6 +33,8 @@ vi.mock('google-auth-library', () => ({
 }));
 
 const notFound = () => Object.assign(new Error('NOT_FOUND'), { code: 5 });
+const invalidGrant = (message: string) =>
+  Object.assign(new Error(message), { response: { data: { error: 'invalid_grant' } } });
 const denied = () => Object.assign(new Error('PERMISSION_DENIED'), { code: 7 });
 const version = (token: string) => [{ payload: { data: new TextEncoder().encode(token) } }];
 
@@ -151,10 +153,34 @@ describe('accessToken', () => {
     expect(await accessToken('nathan')).toBeNull();
   });
 
-  it('propagates a refresh failure', async () => {
+  it('returns null when Google rejects the refresh token as revoked or expired', async () => {
     sm.accessSecretVersion.mockResolvedValueOnce(version('refresh-1'));
-    oauth.getAccessToken.mockRejectedValueOnce(new Error('invalid_grant'));
-    await expect(accessToken('nathan')).rejects.toThrow('invalid_grant');
+    oauth.getAccessToken.mockRejectedValueOnce(invalidGrant('invalid_grant'));
+    expect(await accessToken('nathan')).toBeNull();
+  });
+
+  it('returns null for a reauth-required grant, whose message the library rewrites', async () => {
+    sm.accessSecretVersion.mockResolvedValueOnce(version('refresh-1'));
+    oauth.getAccessToken.mockRejectedValueOnce(
+      invalidGrant('{"error":"invalid_grant","error_description":"reauth related error"}'),
+    );
+    expect(await accessToken('nathan')).toBeNull();
+  });
+
+  it('propagates any other refresh failure', async () => {
+    sm.accessSecretVersion.mockResolvedValueOnce(version('refresh-1'));
+    oauth.getAccessToken.mockRejectedValueOnce(
+      Object.assign(new Error('invalid_client'), {
+        response: { data: { error: 'invalid_client' } },
+      }),
+    );
+    await expect(accessToken('nathan')).rejects.toThrow('invalid_client');
+  });
+
+  it('propagates a refresh failure with no response body', async () => {
+    sm.accessSecretVersion.mockResolvedValueOnce(version('refresh-1'));
+    oauth.getAccessToken.mockRejectedValueOnce(new Error('ECONNRESET'));
+    await expect(accessToken('nathan')).rejects.toThrow('ECONNRESET');
   });
 
   it('requires the OAuth client credentials', async () => {
