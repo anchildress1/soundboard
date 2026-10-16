@@ -41,7 +41,14 @@ export async function storeRefreshToken(channel: UploadChannel, token: string): 
   }
 }
 
-/** A fresh access token for the channel, or null when no refresh token is stored. */
+// Read from the response body: the library rewrites the message for reauth-required grants.
+const revoked = (error: unknown) =>
+  (error as { response?: { data?: { error?: string } } }).response?.data?.error === 'invalid_grant';
+
+/**
+ * A fresh access token for the channel, or null when no refresh token is stored or Google has
+ * revoked or expired it; either way the channel must be connected again.
+ */
 export async function accessToken(channel: UploadChannel): Promise<string | null> {
   const refreshToken = await getRefreshToken(channel);
   if (!refreshToken) return null;
@@ -50,6 +57,11 @@ export async function accessToken(channel: UploadChannel): Promise<string | null
     clientSecret: required('GOOGLE_OAUTH_CLIENT_SECRET'),
   });
   client.setCredentials({ refresh_token: refreshToken });
-  const { token } = await client.getAccessToken();
-  return token ?? null;
+  try {
+    const { token } = await client.getAccessToken();
+    return token ?? null;
+  } catch (error) {
+    if (revoked(error)) return null;
+    throw error;
+  }
 }
