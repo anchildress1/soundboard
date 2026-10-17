@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/anchildress1/soundboard/compare/v1.0.0...v1.0.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* handle revoked tokens and model scale-down, and back off retries with p-retry ([#15](https://github.com/anchildress1/soundboard/issues/15)) ([f713688](https://github.com/anchildress1/soundboard/commit/f713688fca9846fc1dedc87a88044fa29da8883c))
+
 ## 1.0.0 (2026-10-05)
 
 
