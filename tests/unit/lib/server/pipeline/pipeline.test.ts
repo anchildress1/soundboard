@@ -768,6 +768,16 @@ describe('runStep: PUBLISHING', () => {
     expect(saved()).toMatchObject({ state: 'PUBLISHING', upload: null, uploadProgress: null });
   });
 
+  it('keeps the session and counts a failure when the range read errors otherwise', async () => {
+    on(/upload\.example\/s1/, () => new Response('oops', { status: 500 }));
+    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 1,
+      upload: { sessionUri: SESSION_URI, total: 1000 },
+    });
+  });
+
   it('skips the range read when YouTube already holds every byte', async () => {
     on(/upload\.example\/s1/, () => json({ id: 'vid2' }));
     await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
