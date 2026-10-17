@@ -2,7 +2,7 @@
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, store } from '../../../../../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/clients';
+import { resetClients } from '$lib/server/core/clients';
 import { POST } from '$routes/api/jobs/[id]/step/+server';
 import type { JobView } from '$lib/types';
 

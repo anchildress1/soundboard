@@ -4,7 +4,7 @@ import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handle, replaceTraceMeta } from '$lib/../hooks.server';
-import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth';
+import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
 
 const PAGE =
   '<html><head><meta name="sentry-trace" content="req-trace"/>\n' +

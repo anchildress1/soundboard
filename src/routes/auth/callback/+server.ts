@@ -9,8 +9,8 @@ import {
   sessionCookie,
   unsign,
   type OAuthState,
-} from '$lib/server/auth';
-import { storeRefreshToken } from '$lib/server/tokens';
+} from '$lib/server/auth/auth';
+import { storeRefreshToken } from '$lib/server/platforms/youtube';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, cookies, locals }) => {

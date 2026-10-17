@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearStatsCache } from '$lib/server/youtube';
+import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 import { load } from '$routes/+layout.server';
 
 type Event = Parameters<typeof load>[0];

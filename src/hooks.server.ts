@@ -1,7 +1,7 @@
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
-import { readSession, SESSION_COOKIE } from '$lib/server/auth';
+import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
 
 const escapeAttr = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
