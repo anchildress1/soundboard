@@ -12,7 +12,7 @@ Make the app invite-only behind Google sign-in. One consent screen grants identi
 - **Tokens:** each user's YouTube refresh token is KMS-encrypted on their Firestore connection doc.
 - **Jobs:** each job gets an `ownerUid`, plus a destination channel that's pinned at approval.
 - **Removed:** visitors, demo accounts, samples, the sandbox channel and the dev.to framing.
-- **Nathan's data:** moved by an idempotent script that proves his `sub` and channel from his existing grant.
+- **Nathan:** signs in with an invite linked to `flr`. Nothing is migrated (pre-beta).
 
 ## Technical Context
 
@@ -63,11 +63,11 @@ Gates from `.specify/memory/constitution.md` v1.0.0.
 | II. Truthful Output           | ✅ `VERIFIED` still by read-back through the pinned grant. Artist tag only from the linked profile                                        |
 | III. One Service, Page-Driven | ✅ KMS is a managed API call. Lost grant and unknown outcome are wait reasons                                                             |
 | IV. Domain-Grouped Code       | ✅ New files land in domain folders; YouTube code stays in `platforms/youtube/`. ⚠️ `ARTIST_VOICE` stays shared until spec 002 (`TTD.md`) |
-| V. Tested at the Boundaries   | ✅ KMS, Firestore and Google HTTP mocked as boundaries. ⛔ Brand Account gate still open                                                  |
+| V. Tested at the Boundaries   | ✅ KMS, Firestore and Google HTTP mocked as boundaries. Brand Accounts out of scope (R2)                                                  |
 | VI. Simplicity                | ✅ No session store, no per-request invite read, no platform interface yet                                                                |
 | Media, Privacy and Secrets    | ✅ Tokens, ciphertext and ID tokens never set on spans                                                                                    |
 
-**Post-design re-check:** BLOCKED until the manual gate in [quickstart](quickstart.md#manual-brand-account-gate-t001-before-the-callback-work) passes. The KMS dependency also needs your OK, because `package.json` is a repo config file.
+**Post-design re-check:** passes.
 
 ## Project Structure
 
@@ -99,7 +99,7 @@ src/
 │   ├── jobs/jobs.ts                   # ownerUid, parentId, destination, upload markers; listJobs(uid); releaseJob keeps videoId
 │   ├── jobs/create.ts                 # drop samples, visitor runs, ownerFor
 │   ├── jobs/actions.ts                # approve pins destination + uploadSlotDay; discard in PUBLISHING/CLAIMED_COMPLETE
-│   ├── jobs/quota.ts                  # uploads only; releaseUploadSlot(day)
+│   ├── jobs/quota.ts                  # uploads only; takeUploadSlot returns the day
 │   ├── jobs/view.ts                   # authorizedJob(id, uid)
 │   ├── jobs/samples.ts     (removed)
 │   ├── artist/memory.ts               # read/write gate by artistId; PUBLIC_FACTS only when linked
@@ -121,7 +121,6 @@ src/
     └── brand/…                        # gate by user.artistId; connect links removed
 scripts/
 ├── invite.ts               (new)  # add | revoke | list; standalone Firestore client
-├── migrate-v2.ts           (new)  # R10; --expect-email, --dry-run; idempotent
 └── add-sample.sh           (removed)
 tests/
 ├── unit/…                          # mirrors src/
@@ -139,11 +138,10 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 - **Browser sessions:** a random `sid` per sign-in, bound into the OAuth state, so stale connect callbacks fail after sign-out and back in (FR-026).
 - **Refresh tokens:** KMS-encrypted in Firestore, so the connection and its token are one atomic write (R7). Cleared on `revoked`.
 - **Returning sign-in:** skips consent and keeps the stored grant if it's `connected` and `mine=true` matches (R4). With no usable stored grant and no new refresh token, sign-in goes straight to the consent flow.
+- **Channel lock:** the connect callback rejects a grant whose ID token `sub` isn't the session's `uid`. A personal Google account has one channel, so a job's channel never changes and there's no switch-before-upload path (FR-023).
 - **Destination pinning:**
   - `job.destination` and `job.uploadSlotDay` are set at approval.
   - Persist `uploadStartedAt` before the first upload-initiation request; session resets and retries never clear it.
-  - A mismatch while that marker is null sends the job back to `REVIEW` and releases its slot on `uploadSlotDay`.
-  - A mismatch after that is a wait, even if `job.upload` has been cleared.
   - Every upload step checks the pinned channel's connection is `connected` first; session PUTs carry no auth header (R6).
   - Persist top-level `job.finalChunkAt` before sending the chunk that reaches the file size.
   - Session 404 with `finalChunkAt` null → fresh session, same destination. With it set → wait "upload outcome unknown" with a YouTube Studio link (R6). The owner pastes the video URL through `POST /api/jobs/{id}/confirm-upload`; verify its channel, record the ID and continue normal read-back. Or Discard. The app never searches or re-uploads on its own.
@@ -153,26 +151,18 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 - **Header stats:** `channelStats(channelId)` through the API key, cached per channel ID. This fixes today's cache, which serves Nathan's channel to everyone (FR-030).
 - **Pick identity until spec 002:** picks use FLR data only when the job's and the owner's current `artistId` both equal `flr`. That covers `artists/flr` memory, `recentVideos(FLR_CHANNEL_ID)`, `PUBLIC_FACTS`, the `artist` field, and the forced `ARTIST_NAME` tag in the pick and in the approve-time tag check (`smart-pick.ts:143-174`, `actions.ts:46`, `memory.ts:31`). Otherwise none of them apply; feedback stays on the job. `ARTIST_VOICE` stays shared until spec 002.
 - **Signup setting:** `SIGNUP_MODE=invite|open` env var (FR-007).
-- **Nathan's migration:** his legacy grant's ID token must match `--expect-email`, before traffic moves (R10). Rehearsed on an emulator import of the export first.
 
 ## Risks
 
-- **Brand Account `sub` behavior is UNCONFIRMED.** The T001 manual gate blocks the callback work.
 - **Resuming a session after reconnect is UNCONFIRMED.** Check its status first; a 404 restarts only if the final bytes were never sent, otherwise it waits for the owner (R6).
 - **The 6-a-day figure may be stale.** Google's page now lists a separate uploads bucket (R8); read the real number in the Console.
 
-## Config changes needing your OK
+## Config changes
 
-- `package.json` / `pnpm-lock.yaml`: add `@google-cloud/kms@6.2.1`.
-- `deploy.sh`:
-  - create the KMS key ring and key
-  - grant the runtime service account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key
-  - drop the `yt-refresh-*` secret creation after cutover
-  - drop `ALLOWLIST_EMAILS` / `DEMO_EMAILS`
-  - add `SIGNUP_MODE` and `KMS_KEY`
-  - add the Firestore index
-- `service.yaml`, `.env.example`, `playwright.config.ts`: the same env changes.
-- `vite.config.ts`: alias `@google-cloud/kms` to the E2E fake.
+- **Approved:** `package.json` / `pnpm-lock.yaml` add `@google-cloud/kms@6.2.1`; `vite.config.ts` aliases it to the E2E fake.
+- **You apply** (I draft the diff):
+  - `deploy.sh`: KMS key ring and key, `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key for the runtime service account, the Firestore index, `SIGNUP_MODE` and `KMS_KEY`; drop `ALLOWLIST_EMAILS`, `DEMO_EMAILS` and the `yt-refresh-*` secret creation
+  - `service.yaml`, `.env.example`, `playwright.config.ts`: the same env changes
 
 ## Complexity Tracking
 

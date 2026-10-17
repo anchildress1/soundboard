@@ -1,6 +1,6 @@
 # Research: Google Sign-In and Connections
 
-Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google doesn't document; those items stay behind the Brand Account gate.
+Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google doesn't document; those items are checked in the deployed manual run.
 
 ## R1 · User identity key
 
@@ -8,12 +8,10 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 - **Rationale:** Google says `sub` is unique across all Google Accounts and never reused, and that apps should key on it rather than on email ([OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect)).
 - **Alternatives:** keying on email was rejected because it changes and can be reassigned. Keying on the channel ID was rejected because it isn't an identity, and a user can switch channels.
 
-## R2 · Brand Account channels (gate)
+## R2 · Brand Account channels
 
-- **Facts:** a Brand Account is managed through the person's own Google Account and has no credentials of its own ([Brand Accounts](https://support.google.com/accounts/answer/7001996)). `mine=true` returns the channel owned by the authorized account ([channels.list](https://developers.google.com/youtube/v3/docs/channels/list)).
-- **UNCONFIRMED:** whether `sub`/`email` stay the person's when they pick a Brand Account channel during consent. Community reports say the token gets tied to the chosen Brand Account ([gist](https://gist.github.com/veuncent/e0b831ab41d598961d2656c7fc5cc0f9)).
-- **Decision:** run the spec's Brand Account gate first (tasks T001). Pass means `sub` matches across a personal sign-in and a Brand-channel sign-in. Fail stops the combined flow, per the spec.
-- **Fallback if it fails:** sign in with identity scopes only, then connect YouTube separately. That's a product decision for the user to make, so it's not designed here.
+- **Decision:** out of scope. No current user has a Brand Account channel, so each grant's `mine=true` is the signed-in account's own channel.
+- **Why it matters later:** community reports say picking a Brand Account during consent ties the token to that account ([gist](https://gist.github.com/veuncent/e0b831ab41d598961d2656c7fc5cc0f9)), which could change `sub`. Supporting Brand Accounts needs its own spec and a real-account test first.
 
 ## R3 · Scopes and partial grants
 
@@ -79,16 +77,6 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 - **Facts:** unverified apps using sensitive or restricted scopes get 100 new users in total, over the project's lifetime, and it can't be reset ([unverified apps](https://support.google.com/cloud/answer/7454865), [user cap](https://support.google.com/cloud/answer/13463817)).
 - **UNCONFIRMED:** whether `youtube.upload` is classed as sensitive. Only third parties say so; the Console's Data Access page will show it.
 - **Decision:** no action for the invite phase. Open signup needs Google's verification first.
-
-## R10 · Migrating Nathan without his involvement
-
-- **Decision:** the migration refreshes the legacy `yt-refresh-nathan` token. That grant included `openid email`, so the refresh returns an ID token with his `sub` and email.
-  - The script takes `--expect-email <email>` and aborts unless the ID token's verified email matches. The token is confirmed, never trusted to name the owner, because it may have been minted by a Brand Account manager's account.
-  - It confirms `mine=true` equals `FLR_CHANNEL_ID`.
-  - It then writes `users/{sub}`, the bound invite and the encrypted connection, and maps `owner == 'nathan'` jobs to his user, with the in-flight fields in [data-model](data-model.md#jobsid-changed-fields).
-  - All of this happens before traffic moves.
-- **Rationale:** meets FR-031 (verified ID and channel before transfer) with no sign-in needed from Nathan, and keeps traffic on the old revision until the checks pass.
-- **Alternatives:** having Nathan sign in to v2 first was rejected; his jobs would 404 until the migration ran.
 
 ## R11 · Static assets and the auth gate
 

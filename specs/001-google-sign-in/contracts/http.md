@@ -33,6 +33,7 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 | Sign-in, not invited (or invite bound to another `sub`)   | 303 `/?signin=denied`; no cookie, no user, no token (FR-005)                |
 | Sign-in, invited                                          | Upsert user, bind invite, set `sb_session`, then evaluate YouTube → 303 `/` |
 | Connect, `uid` or `sid` differs from state, or no session | 303 `/connections?connect=mismatch`; no change (FR-026)                     |
+| Connect, ID token `sub` ≠ session `uid`                   | 303 `/connections?connect=wrong-account`; no change (FR-023)                |
 | Connect, valid                                            | Evaluate YouTube → 303 `/connections`                                       |
 
 **Evaluating YouTube (FR-027):**
@@ -55,14 +56,14 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## Job APIs (changed behavior)
 
-| Route                                      | Change                                                                                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                                                   |
-| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                                                            |
-| `POST /api/jobs/{id}/approve`              | 409 `"Reconnect YouTube to approve."` unless connected. 409 `"Daily upload limit reached. Try tomorrow."` when the pool is spent. Records `destination`       |
-| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing grant, a revoked grant, or a pinned-channel mismatch after upload start |
-| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                                                  |
-| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                                                           |
+| Route                                      | Change                                                                                                                                                  |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                                             |
+| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                                                      |
+| `POST /api/jobs/{id}/approve`              | 409 `"Reconnect YouTube to approve."` unless connected. 409 `"Daily upload limit reached. Try tomorrow."` when the pool is spent. Records `destination` |
+| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing or revoked grant for the pinned channel                           |
+| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                                            |
+| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                                                     |
 
 - Upload start is the durable `uploadStartedAt` marker, not the presence of `job.upload`. Session expiry and retries never unlock the destination.
 - Each upload step checks the pinned channel's connection is `connected` before touching the session, because session PUTs carry no auth header.

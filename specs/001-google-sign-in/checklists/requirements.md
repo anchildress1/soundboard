@@ -34,4 +34,3 @@
 - Named exceptions to "no implementation details" are the contracts under test: 401s, cookies, frame refusal, the `/auth/*` routes, OAuth scopes and refresh tokens, resumable-upload initiation, and signed media URLs.
 - "Session", "Connection" and "Invite" are named because the PRD Firestore table uses them.
 - AGENTS.md rules on allowlisted sessions, demo jobs and `takeVisitorRun` go stale under FR-020 and must change with the code (FR-021).
-- The Brand Account gate and the cutover are planning and release gates, tracked in the spec's gates section and in `tasks.md`, not here.

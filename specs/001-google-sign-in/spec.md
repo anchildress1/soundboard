@@ -94,12 +94,9 @@ Each signed-in user sees only their own jobs, and approvals upload only to their
 2. **Given** user A approves a job, **When** the upload runs, **Then** it uses A's channel token, never another user's.
 3. **Given** A and B signed in on separate browsers, **When** A signs out, **Then** B stays signed in and B's running job continues.
 4. **Given** one account signed in on two devices, **When** it signs out on one, **Then** the other stays signed in until its own session ends.
-5. **Given** a job approved for channel A whose upload has not started, **When** its owner connects channel B in its place, **Then** the job returns to review showing B and does not upload until the owner approves again.
-6. **Given** a job whose upload has started on channel A, **When** its owner connects channel B, **Then** the job stays bound to A, never starts or resumes on B, and pauses until access to A is restored.
-7. **Given** a job awaiting verification on channel A, **When** its owner connects channel B, **Then** verification waits for access to A and never uses B's grant.
-8. **Given** A and B interleave requests in one app process, **When** they load headers, Connections, job lists and media links or mutate Shorts, **Then** every result and mutation belongs to the requesting user; caches and credentials never cross users.
-9. **Given** a job whose upload initiation started on channel A, **When** its resumable session expires or is cleared and its owner connects channel B, **Then** its destination remains A and the job waits rather than returning to review for B.
-10. **Given** a user without an artist link, **When** their pick runs, **Then** it runs with no artist memory or identity and stores feedback only on that job; it never reads or writes FLR memory.
+5. **Given** a signed-in user, **When** they reconnect YouTube choosing a different Google account, **Then** the attempt is rejected and their existing connection stays, so a job's channel never changes.
+6. **Given** A and B interleave requests in one app process, **When** they load headers, Connections, job lists and media links or mutate Shorts, **Then** every result and mutation belongs to the requesting user; caches and credentials never cross users.
+7. **Given** a user without an artist link, **When** their pick runs, **Then** it runs with no artist memory or identity and stores feedback only on that job; it never reads or writes FLR memory.
 
 ---
 
@@ -151,7 +148,7 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 - A tampered, malformed or expired session is treated as signed out. It never errors and never grants access.
 - The user takes longer than 10 minutes on Google's screens: they come back to sign-in with a plain "sign-in expired, try again" notice.
 - A deep link opened while signed out leads to sign-in, then to the home page. Returning to the original link is out of scope.
-- The user picks a YouTube channel owned by a Brand Account during consent. The channel connected must be the one the user picked, and the user stays identified by their own Google account. This requires the planning gate below.
+- Brand Account channels are out of scope; no current user has one. Each user connects their own Google account's channel.
 - Google returns no new long-lived grant: preserve an existing valid matching grant; otherwise show YouTube as not connected and require Reconnect.
 - The shared daily upload pool runs out: approval shows a plain "daily upload limit reached, try tomorrow" message. Nothing is queued.
 - The app's OAuth verification is still pending: users see Google's unverified-app screen during consent. Expected until verification is done.
@@ -174,8 +171,8 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 - **FR-011**: Sessions MUST be independent per browser. Signing in, signing out or expiry in one MUST NOT affect another.
 - **FR-012**: Every job MUST belong to the user who created it. Other users MUST get not-found for it in every page and API.
 - **FR-013**: Each user's YouTube grant MUST be stored per user. An approval MUST upload only through its owner's grant.
-- **FR-014**: The Connections page MUST list each supported platform with its status and allow Connect, Reconnect and Disconnect. YouTube is the only platform in this spec. A user has at most one YouTube connection at a time; connecting a different channel replaces it.
-- **FR-015**: A connection MUST record its own platform account, which MAY differ from the sign-in account.
+- **FR-014**: The Connections page MUST list each supported platform with its status and allow Connect, Reconnect and Disconnect. YouTube is the only platform in this spec. A user has at most one YouTube connection, always on their own Google account.
+- **FR-015**: A connection MUST record its own platform account. YouTube MUST use the signed-in Google account; future platforms MAY use a different account.
 - **FR-016**: A revoked or missing YouTube grant MUST block approval with a "reconnect YouTube" prompt, and MUST NOT fail the job.
 - **FR-017**: Daily uploads MUST draw from one shared pool across all users, first come.
 - **FR-018**: Until spec 002, the single artist profile (memory, recent-video identity, brand guide) MUST stay as it is today for the user linked to it. Only that user's picks MAY read or write its memory or use its identity, and only that user MAY open its brand guide. Picks for users without an artist link MUST run with no artist memory or identity, and their feedback MUST stay on the job.
@@ -183,15 +180,14 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 - **FR-020**: These MUST be removed, with their code, config and tests: the anonymous visitor path and its run caps, the 5-minute visitor limit, demo accounts and `DEMO_EMAILS`, the email allowlist env, samples, the reupload diff, the sandbox channel, and per-channel connect routing.
 - **FR-021**: The PRD and AGENTS.md MUST be updated to match.
 - **FR-022**: Approval MUST display and record the exact destination YouTube channel ID and name. Publishing and verification MUST use only the job owner's grant verified for that channel, never a different currently connected channel.
-- **FR-023**: Before a YouTube resumable upload is initiated, if the connected channel differs from the approved destination, the job MUST return to review showing the new destination and require fresh approval of the destination and fields. Upload initiation MUST be durably marked before the external request. Once initiation starts, the destination MUST remain fixed through upload, retries and verification, including when a resumable session expires, is cleared or is replaced.
-- **FR-024**: Disconnecting or losing access to an approved destination MUST pause unfinished publishing and verification without failing the job or losing its approved fields or completed progress. Reconnecting the same channel MUST resume the next unfinished step without a duplicate upload. Connecting a different channel MUST NOT redirect or resume that job; FR-023 governs any destination change before initiation. A request already in flight MAY finish against the original destination.
+- **FR-023**: Connect and Reconnect MUST be rejected unless the granting Google account ID equals the signed-in user's, so a user's YouTube channel never changes. Upload initiation MUST be durably marked before the external request, and a resumable session expiring, being cleared or being replaced MUST NOT clear that mark.
+- **FR-024**: Disconnecting or losing access to an approved destination MUST pause unfinished publishing and verification without failing the job or losing its approved fields or completed progress. Reconnecting the same channel MUST resume the next unfinished step without a duplicate upload. A request already in flight MAY finish against the original destination.
 - **FR-025**: The owner MUST be able to discard a job paused under FR-024. Discarding MUST stop future app steps but MUST NOT claim to delete a video or cancel a request already accepted by YouTube. Existing video IDs and outcomes MUST remain recorded; external video deletion is outside this spec.
 - **FR-026**: Connect and Reconnect MUST bind the authorization attempt to the initiating user with a ten-minute expiry. The callback MUST reject expired, replayed or mismatched attempts, including when the browser's current session belongs to a different user or has ended. Success MUST NOT replace the sign-in identity; cancellation or failed validation MUST preserve the prior connection.
 - **FR-027**: YouTube MUST be marked connected only after confirming both upload and read scopes, a usable long-lived grant and the selected channel's ID and name through that grant. Partial consent or no channel MUST allow identity sign-in but block approval with an actionable Connections status. A missing new refresh token MUST NOT erase a valid existing matching grant. New credentials MUST be validated before replacing the stored connection.
 - **FR-028**: Grant-related pauses MUST preserve edited fields, approval, destination, upload progress and any returned video ID. Same-channel recovery MUST NOT repeat approval, duplicate an upload or take a second daily upload slot for the same upload. Recovery MUST check the stored session's status before retrying: completed uploads proceed to verification, confirmed incomplete uploads resume, and a lost session where the final bytes were never sent MAY restart on the same destination with the same slot. A lost session after final bytes may have been sent MUST pause with "upload outcome unknown" and link to the channel's uploads in YouTube Studio. The app MUST NOT search for the video or upload again on its own. The owner MAY paste the video's URL; the app MUST check the video is on the pinned channel through the owner's grant before recording its ID for normal read-back verification. Otherwise the job MUST stay paused and the owner MAY discard it (FR-025). An authorization failure MUST be treated as lost access, never as unknown completion.
 - **FR-029**: The signed-in home page MUST list only the user's jobs with title, state and a continuation link. Resume MUST respect the seven-day media lifecycle; missing media MUST produce a clear new-upload requirement while retaining saved metadata.
 - **FR-030**: User-specific caches, channel statistics, connection state, job lists, media URL issuance and all video/Short mutations MUST be isolated by user and, where relevant, channel. A signed URL MUST be issued only after checking job ownership; existing issued URLs retain their bounded expiry and are not revoked by sign-out.
-- **FR-031**: A one-off migration MUST map Nathan's existing jobs, Shorts, artist link and token reference to his user, after confirming his Google account ID and the existing grant's channel. Running it twice MUST NOT duplicate or change records. An unconfirmed mapping MUST stop the migration rather than guess ownership. Legacy email-only cookies MUST be rejected.
 
 ### Key Entities
 
@@ -211,22 +207,19 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 - **SC-004**: A returning user within 30 days stays signed in unless they signed out, their access was revoked, or the credential is invalid. Activity never extends the original expiry; expiry on one browser does not affect another.
 - **SC-005**: Interleaved A → B → A requests in one app process expose zero crossed jobs, header/channel data, Connections, job-list entries or newly issued media URLs, and allow zero cross-user video or Short mutations. Run browser coverage on desktop Chrome and Pixel 7.
 - **SC-006**: Same-channel Reconnect restores eligible work before initiation, during upload and before verification, preserving fields and progress without a duplicate upload or a second upload slot; expired media follows FR-029.
-- **SC-007**: Executable legacy visitor/demo/sample/sandbox/embed behavior and obsolete active setup guidance are removed. Historical artifacts, migration fixtures and requirements describing removal are exempt from keyword matching; retired routes do not remain usable.
-- **SC-008**: Automated tests cover account switching during reconnect, cancelled/expired/replayed callbacks, read-only/upload-only/neither-scope grants, no channel, missing refresh tokens, email changes, invite reactivation, destination locking after session reset, lost completion responses that stay paused with no automatic upload, pasted video URLs accepted only on the pinned channel, and picks for unlinked users that read and write no artist memory.
-- **SC-009**: Running the migration twice gives the same result. Nathan's jobs, Shorts, in-progress uploads and awaiting-verification jobs keep ownership, destination and progress; legacy sessions and unmapped jobs are denied.
+- **SC-007**: Executable legacy visitor/demo/sample/sandbox/embed behavior and obsolete active setup guidance are removed. Historical artifacts and requirements describing removal are exempt from keyword matching; retired routes do not remain usable.
+- **SC-008**: Automated tests cover reconnects from another Google account rejected, cancelled/expired/replayed callbacks, read-only/upload-only/neither-scope grants, no channel, missing refresh tokens, email changes, invite reactivation, the upload-start mark surviving session reset, lost completion responses that stay paused with no automatic upload, pasted video URLs accepted only on the pinned channel, and picks for unlinked users that read and write no artist memory.
 
-## Planning and Cutover Gates
+## Evidence Boundary
 
-- **Brand Account proof:** Before finalizing the combined OAuth design, exercise a personal channel and a Brand Account channel. Verify stable sign-in identity, selected channel ID, both scopes, offline refresh, same-channel reconnect and switching channels. Record pass/fail evidence without tokens. If Google cannot satisfy the identity/channel contract in one flow, stop and obtain a revised product decision rather than substitute identities or channels.
-- **Cutover:** With no one using the app, take a Firestore export, deploy the new revision with no traffic, run the FR-031 migration and check Nathan's job count and ownership, then move traffic to it. If the migration is interrupted, rerun it; traffic stays on the old revision until it passes.
-- **Evidence boundary:** Automated tests mock Google at process boundaries; the Brand Account gate requires real provider evidence. Passing mocked tests does not close that gate.
+- Automated tests mock Google at process boundaries; the deployed manual checks supply real provider evidence.
 
 ## Assumptions
 
 - Google is the only sign-in provider. The Connections page structure allows more platforms later, but none are built here.
 - Signed session cookies stay; a per-user access generation supports revocation without a server-side session store.
 - The "sign-in page" is the home route's signed-out view, not a separate URL.
-- Nathan's existing data moves only through FR-031 and the cutover gates. Legacy visitor/demo jobs remain inaccessible; GCS lifecycle removes their media, while any Firestore metadata cleanup must be explicitly planned rather than assumed to follow the bucket lifecycle.
+- Pre-beta, so nothing is migrated. Nathan signs in with an invite linked to `flr`; the `artists/flr` memory and brand guide carry over because they're keyed by artist, while old jobs and stored grants are left behind.
 - The app's OAuth consent screen stays "In production" and unverified. Google's unverified-app screen and user cap apply until verification, which is outside this spec.
 - The shared pool stays at today's daily upload count. A quota increase needs Google's YouTube API audit, outside this spec.
 - Firestore stays the database; user, invitation, connection and job schemas change under this spec.

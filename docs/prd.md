@@ -124,14 +124,14 @@
 - Upload quota fits 6 uploads a day, one pool shared by all users, first come. The quota belongs to the GCP project, not the user; more needs Google's YouTube API audit.
 - Each upload uses its owner's own YouTube grant, so it lands on the owner's channel.
 - Approval shows and records the exact destination YouTube channel ID and name with the approved fields. Publishing and verification use only the owner's grant verified for that channel.
-- Before resumable upload initiation starts, changing the destination requires fresh approval of the destination and fields. Once initiation starts, the destination stays fixed through upload, retries and verification.
-- Persist the upload-start marker before the external initiation request; expired or cleared resumable sessions never unlock the destination. Recovery checks the stored session for completion or a resumable offset. An expired session restarts on the same channel only if the final bytes were never sent. If they may have been sent, pause with "upload outcome unknown" and a link to the channel's uploads in YouTube Studio. The owner either pastes the video's URL, which the app accepts only after checking the video is on the pinned channel through the owner's grant, or discards. The app never searches for the video, and never uploads again on its own. A 401 means lost access, not an unknown outcome.
-- Disconnecting or losing access pauses unfinished publishing and verification, preserving the job, approved fields and completed progress. Reconnecting the same channel resumes the next unfinished step without a duplicate upload. A different connection never redirects the job; a request already in flight may finish against the original channel.
-- Recovery preserves returned video IDs and quota reservations. The same upload never reserves a second slot; a destination change before initiation releases its unused slot and fresh approval reserves against the current day's pool. An uncertain external outcome must be reconciled before retrying or refunding a potentially spent slot.
+- YouTube connects only the signed-in Google account, which has one channel, so a job's channel never changes.
+- Persist the upload-start marker before the external initiation request; expired or cleared resumable sessions never clear it. Recovery checks the stored session for completion or a resumable offset. An expired session restarts on the same channel only if the final bytes were never sent. If they may have been sent, pause with "upload outcome unknown" and a link to the channel's uploads in YouTube Studio. The owner either pastes the video's URL, which the app accepts only after checking the video is on the pinned channel through the owner's grant, or discards. The app never searches for the video, and never uploads again on its own. A 401 means lost access, not an unknown outcome.
+- Disconnecting or losing access pauses unfinished publishing and verification, preserving the job, approved fields and completed progress. Reconnecting the same channel resumes the next unfinished step without a duplicate upload. a request already in flight may finish against the original channel.
+- Recovery preserves returned video IDs and quota reservations. The same upload never reserves a second slot. An uncertain external outcome must be reconciled before retrying or refunding a potentially spent slot.
 - Discarding a paused job stops future app steps; it does not delete a YouTube video or cancel an accepted external request. Keep any returned video ID and outcome.
 - Search and catalog reads use an API key from a second GCP project, so they never spend upload quota.
 - [ ] `VERIFIED` is set by the read-back.
-- [ ] Switching channels after approval never uploads to the new channel without fresh approval; after upload initiation, the original destination cannot change.
+- [ ] Reconnecting from a different Google account is rejected; a job's channel never changes.
 - [ ] Disconnect and same-channel reconnect preserve publishing progress and resume upload or verification without a duplicate upload.
 
 **R7 · Status**
@@ -158,7 +158,7 @@
 
 **R9 · Connections**
 
-- One row per platform with its status and Connect, Reconnect, Disconnect. YouTube only for now; a connection may use a different account from sign-in. Each user has one YouTube connection; connecting a different channel replaces it, subject to R6's approved-destination rules.
+- One row per platform with its status and Connect, Reconnect, Disconnect. YouTube only for now; YouTube connects only the signed-in Google account; future platforms may use other accounts. Each user has one YouTube connection.
 - Each user's YouTube refresh token is stored per user. A revoked or missing grant blocks approval with "reconnect YouTube" and doesn't fail the job.
 - Connect and Reconnect bind to the initiating user, exact browser session, purpose and ten-minute expiry. Reject expired, replayed, superseded or mismatched callbacks and attempts after sign-out or session replacement; never change the sign-in identity. Failed or cancelled reconnect preserves the existing connection.
 - Connected means both YouTube upload and read scopes, a usable long-lived grant and the selected channel's ID and name confirmed through that grant. Partial consent or no channel permits identity sign-in but blocks approval with an actionable status.
@@ -174,14 +174,6 @@
 - Redirect URI is set to the deployed URL after the first deploy.
 - Firestore security rules deny all client access; only the app's service account reads and writes.
 - [ ] A user's token and jobs are reachable only from that user's session.
-
-**v2 planning and cutover gates**
-
-- Prove combined identity/YouTube consent with real personal and Brand Account channels: stable Google ID, selected channel, required scopes, offline refresh, reconnect and channel switching. Record evidence without tokens. A failed identity/channel contract blocks planning completion pending a revised product decision.
-- Verify Nathan's Google ID and existing grant's channel before migrating his token reference, artist link, jobs and Shorts. Reject legacy email-only sessions and unmapped owners; never infer ownership from channel labels.
-- Rehearse migration on isolated data, including interrupted and repeated runs, active uploads and pending verification. Preserve destinations, approved fields, upload progress, video IDs and quota reservations.
-- Pause new steps and settle active requests and claims before cutover. Keep a protected snapshot and migration progress; interruption keeps access closed until migration and ownership checks complete. Never run mixed owner models or restore old code against partially migrated data.
-- Legacy visitor/demo jobs stay inaccessible. Bucket lifecycle deletes media; Firestore metadata cleanup requires a separate explicit plan.
 
 **R11 · Sentry agent tracing**
 
@@ -288,7 +280,6 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 
 ## Open Questions (Ashley)
 
-- Brand Account identity/channel proof: required by the v2 planning gate above; unresolved until real provider evidence passes.
 - OAuth app verification for `youtube.upload` before open signup.
 - Second GCP project for the read-only YouTube API key.
 - Sentry DSN / org.

@@ -28,7 +28,7 @@ All Firestore. Client access stays denied by rules; only the app's service accou
 | `tokenCiphertext` | string \| null                                                 | KMS-encrypted refresh token, base64. Null unless `connected` |
 | `updatedAt`       | number                                                         | ms                                                           |
 
-- One per user (FR-014). Connecting another channel overwrites it in a single write, only after the new grant validates (FR-027).
+- One per user (FR-014), always on the user's own Google account. Reconnect overwrites it in one write, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
 - `revoked` is set when Google returns `invalid_grant`, and the ciphertext is cleared in the same write. A dead token is never kept.
 - Disconnect: revoke at Google, then delete the doc.
 
@@ -54,17 +54,12 @@ All Firestore. Client access stays denied by rules; only the app's service accou
 | `parentId`                          | **New top-level.** `null` on videos, the parent's ID on Shorts. Today it only exists nested in `short.parentId`, and Firestore's `== null` skips docs without the field                                              |
 | `uploadStartedAt`                   | **New.** ms timestamp or null. Persisted before the first external upload-initiation request; never cleared by session expiry, retry or reconnect                                                                    |
 | `finalChunkAt`                      | **New.** ms timestamp or null. Persisted before sending the chunk that reaches the file size. Top-level, because Retry and session loss reset `job.upload`; nothing clears it                                        |
-| `uploadSlotDay`                     | **New.** The quota day the approval's slot was taken from. A release decrements that day only                                                                                                                        |
+| `uploadSlotDay`                     | **New.** The quota day the approval's slot was taken from. A fresh session on a later day takes today's slot and updates it                                                                                          |
 | `owner`                             | **Removed** (`nathan` / `demo` / `visitor`)                                                                                                                                                                          |
 | `channel`                           | **Removed** (`nathan` / `sandbox`)                                                                                                                                                                                   |
 | `sampleId`, `liveVideoId`, `ipHash` | **Removed**                                                                                                                                                                                                          |
 
 - Shorts copy `ownerUid`, `artistId` and `destination: null` from their parent.
-- Migration of existing `PUBLISHING` and `CLAIMED_COMPLETE` jobs:
-  - `destination` = FLR's channel.
-  - `uploadStartedAt` set when an upload session or video ID exists.
-  - `finalChunkAt` set on any started job without a video ID, so its outcome goes through the uploads check instead of a blind restart.
-  - `parentId` written on every job.
 - New composite index for the home job list (FR-029): `ownerUid ==`, `parentId == null`, `createdAt desc`. The E2E fake Firestore gains `where()` and `orderBy()` so the query is exercised.
 - A step result that lands after the job moved (for example a discard during the final chunk) still saves `videoId` and upload progress. Today `releaseJob` drops the whole patch (`jobs.ts:151-153`).
 
@@ -77,12 +72,11 @@ config:
 ---
 stateDiagram-v2
   accTitle: Publishing with a pinned destination
-  accDescr: How an approved job publishes and verifies against its recorded channel, pausing on lost access and returning to review if the channel changes before upload starts.
+  accDescr: How an approved job publishes and verifies against its recorded channel, pausing on lost access or an unknown upload outcome.
   REVIEW --> PUBLISHING: approve (connected, slot taken, destination recorded)
-  PUBLISHING --> PUBLISHING: wait "reconnect YouTube" (no or revoked grant, or other channel after upload start)
+  PUBLISHING --> PUBLISHING: wait "reconnect YouTube" (no or revoked grant)
   PUBLISHING --> PUBLISHING: wait "upload outcome unknown" (session lost after final bytes may have been sent)
   PUBLISHING --> CLAIMED_COMPLETE: owner pastes a video URL on the pinned channel
-  PUBLISHING --> REVIEW: other channel before upload start (slot released)
   PUBLISHING --> CLAIMED_COMPLETE: insert response
   CLAIMED_COMPLETE --> CLAIMED_COMPLETE: wait "reconnect YouTube"
   CLAIMED_COMPLETE --> VERIFIED: read-back through the pinned channel's grant
@@ -91,7 +85,7 @@ stateDiagram-v2
   CLAIMED_COMPLETE --> DISCARDED: discard (videoId kept)
 ```
 
-- "Upload start" means `uploadStartedAt` is set durably before sending the first upload-initiation request. Only while it is null may a channel mismatch return the job to `REVIEW`, clear `destination` and release the reserved slot. Clearing or replacing `job.upload` never clears this marker or unlocks the destination.
+- "Upload start" means `uploadStartedAt` is set durably before sending the first upload-initiation request. Clearing or replacing `job.upload` never clears it.
 - Session PUTs carry no `Authorization` header; the session URI is the credential (`youtube.ts:248-286`). So each upload step first checks the pinned channel's connection doc is `connected`, and waits "reconnect YouTube" otherwise. Revoking at Google alone does not stop a live session.
 - A status check returning complete keeps the video ID and verifies; returning incomplete resumes from its offset.
 - A 404 with `finalChunkAt` null starts a fresh session on the pinned destination with the same slot. With it set, completion is unknown:
@@ -115,7 +109,7 @@ stateDiagram-v2
 - Payload `{uid, sid, gen, exp}`, HMAC-signed with `SESSION_SECRET` (existing `sign` / `unsign`). `sid` is a random ID per sign-in, so each browser session is distinct.
 - `exp` is the sign-in time plus 30 days, fixed.
 - Valid only when the signature checks out, `exp > now`, `users/{uid}` exists and `gen === accessGeneration`. One Firestore read; revocation works through the generation bump, so no invite read per request.
-- A legacy `{email, exp}` cookie has no `uid`, so it fails the check (FR-031).
+- A payload without `uid` fails the check.
 
 ## OAuth state cookie `sb_oauth`
 
@@ -125,5 +119,4 @@ stateDiagram-v2
 
 ## Removed collections
 
-- `samples` is removed. Its docs and `samples/` GCS objects are deleted by hand after cutover.
-- Legacy `visitor` and `demo` job docs are deleted by the migration script; their media goes with the existing 7-day GCS rule.
+- `samples` is removed. Existing Firestore jobs, samples and `yt-refresh-*` secrets are not carried over; delete them by hand.
