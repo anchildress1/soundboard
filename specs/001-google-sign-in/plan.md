@@ -141,7 +141,7 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 - **Gate placement:** one handle in `hooks.server.ts` covers pages and `+server.ts`. There's no wildcard API exemption (FR-002).
 - **Revocation without a session store:** each user has an `accessGeneration` counter, compared on every request (FR-006). That's the gate's only read.
 - **Browser sessions:** a random `sid` per sign-in, bound into the OAuth state, so stale connect callbacks fail after sign-out and back in (FR-026).
-- **Database:** Neon Postgres via Drizzle and `pg` (R12). Step claims are one `UPDATE … RETURNING`; job documents keep their shape in a `data` jsonb column.
+- **Database:** Neon Postgres via Drizzle and `pg` (R12). Step claims are one `UPDATE … RETURNING` setting a fresh random `claim_token` and three-minute expiry. Result writes and release atomically require that token; superseded requests cannot write or clear the current claim. Job documents keep their shape in a `data` jsonb column.
 - **Refresh tokens:** KMS-encrypted on the `connections` row, so the connection and its token are one atomic upsert (R7). Cleared on `revoked`.
 - **Returning sign-in:** skips consent and keeps the stored grant if it's `connected` and `mine=true` matches (R4). With no usable stored grant and no new refresh token, sign-in goes straight to the consent flow.
 - **Channel lock:** the connect callback rejects a grant whose ID token `sub` isn't the session's `uid`. A personal Google account has one channel, so a job's channel never changes and there's no switch-before-upload path (FR-023).
@@ -152,7 +152,7 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
   - Persist top-level `job.finalChunkAt` before sending the chunk that reaches the file size.
   - Session 404 with `finalChunkAt` null → fresh session, same destination. With it set → wait "upload outcome unknown" with a YouTube Studio link (R6). The owner pastes the video URL through `POST /api/jobs/{id}/confirm-upload`; verify its channel, record the ID and continue normal read-back. Or Discard. The app never searches or re-uploads on its own.
   - YouTube's quota-spent or per-channel `uploadLimitExceeded` → wait "Daily upload limit reached. Try tomorrow."; the app keeps no upload count (FR-017).
-  - A step result landing after a discard still saves `videoId` (FR-025).
+  - A step result landing after a discard still saves `videoId` only with its matching claim token, preserving the discarded state; a superseded request writes nothing (FR-025).
   - A wait never fails the job (FR-022 to FR-024).
 - **Header stats:** `channelStats(channelId)` through the API key, cached per channel ID. This fixes today's cache, which serves Nathan's channel to everyone (FR-030).
 - **Pick identity until spec 002:** picks use FLR data only when the job's and the owner's current `artistId` both equal `flr`. That covers the artist tables' `artist_id = 'flr'` memory, `recentVideos(FLR_CHANNEL_ID)`, `PUBLIC_FACTS`, the `artist` field, and the forced `ARTIST_NAME` tag in the pick and in the approve-time tag check (`smart-pick.ts:143-174`, `actions.ts:46`, `memory.ts:31`). Otherwise none of them apply; feedback stays on the job. `ARTIST_VOICE` stays shared until spec 002.
