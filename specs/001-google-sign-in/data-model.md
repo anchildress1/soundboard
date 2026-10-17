@@ -74,7 +74,7 @@ Fields the app filters or locks on are columns; the rest of today's job document
 - Shorts copy `owner_uid`, `artist_id` and a null destination from their parent.
 - Index for the home job list (FR-029): `(owner_uid, created_at desc) WHERE parent_id IS NULL`.
 - A step claims with `UPDATE jobs SET claim_token = $2, claim_until = now() + interval '3 minutes' WHERE id = $1 AND (claim_until IS NULL OR claim_until < now()) RETURNING *`, supplying a fresh random token; zero rows means another step holds it.
-- Saving step results, child-table writes and releasing the claim require the stored token to match the caller's token, atomically in the same transaction. Normal state changes also require the state the step claimed. A superseded request writes nothing and never clears another request's claim.
+- Saving step results, child-table writes and releasing the claim require the stored token to match the caller's token, atomically in the same transaction. Normal state changes also require the state the step claimed. Release sets `claim_token` and `claim_until` to null together. A superseded request writes nothing and never clears another request's claim.
 - A step result that lands after the job moved (for example a discard during the final chunk) still saves `video_id` and upload progress only while its claim token still matches. It preserves the new state and unrelated data, and clears only its own claim. Today `releaseJob` drops the whole patch (`jobs.ts:151-153`).
 - Today's subcollections become child tables keyed by `job_id` → `jobs.id` on delete cascade: `job_picks (job_id, version)`, `job_chunks (job_id, index)` and `job_feedback`, each holding its document as `data` jsonb.
 
@@ -131,4 +131,4 @@ stateDiagram-v2
 
 ## Removed
 
-- `samples` has no table. The Firestore database, its jobs and samples, and the `yt-refresh-*` secrets are deleted by hand after the switch.
+- `samples` has no table. The Firestore database, its jobs and samples, and the `yt-refresh-*` secrets are deleted by hand after the first deploy (T077).

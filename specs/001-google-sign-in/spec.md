@@ -20,7 +20,7 @@
 - Q: Session lifetime? → A: Fixed 30 days from sign-in, independent per browser.
 - Q: Samples and the reupload diff (old R8, R9)? → A: Removed, along with the sandbox channel.
 - Q: Upload quota split? → A: One shared pool, first come.
-- Q: When is a job's destination channel fixed? → A: Approval records the exact YouTube channel ID. Before an upload starts, a different destination requires fresh approval. Once the upload starts, its destination stays fixed through upload and verification. Same-channel reconnect resumes the job; disconnect pauses unfinished publishing and preserves the job and approved fields.
+- Q: When is a job's destination channel fixed? → A: Approval records the exact YouTube channel ID. Before an upload starts, a different destination requires fresh approval. Once the upload starts, its destination stays fixed through upload and verification. Same-channel reconnect resumes the job; disconnect pauses unfinished publishing and preserves the job and approved fields. (The destination half is superseded by the channel lock, FR-023.)
 
 ## User Scenarios & Testing _(mandatory)_
 

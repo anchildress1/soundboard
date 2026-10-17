@@ -52,11 +52,11 @@ Make the app invite-only behind Google sign-in. One consent screen grants identi
 - No whole-media buffering.
 - Token bytes never reach Sentry or logs.
 
-**Scale/Scope**: 2 invited users now; open signup later, capped at 100 until Google verifies the app (research R9). 6 uploads a day, shared (research R8).
+**Scale/Scope**: 2 invited users now; open signup later, capped at 100 until Google verifies the app (research R9). 100 uploads a day, project-wide and shared (research R8).
 
 ## Constitution Check
 
-Gates from `.specify/memory/constitution.md` v1.0.0.
+Gates from `.specify/memory/constitution.md` v1.0.2.
 
 | Principle                     | Status                                                                                                                                    |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -109,7 +109,7 @@ src/
 │   ├── artist/brand.ts                # recentVideos(FLR_CHANNEL_ID) passed explicitly
 │   ├── ai/smart-pick.ts               # artistId in context; null → no artist tag, name or facts
 │   ├── pipeline/pipeline.ts           # connection-gated upload steps, outcome-unknown wait
-│   ├── platforms/youtube/connection.ts (new)  # evaluate grant (FR-027), get/put/delete, accessTokenFor(uid, channelId)
+│   ├── platforms/youtube/connection.ts (new)  # evaluate grant (FR-027), get/put/delete/revoke, accessTokenFor(uid, channelId)
 │   ├── platforms/youtube/youtube.ts   # channelStats(channelId) per-channel cache; videoChannel(id) for pasted URLs
 │   └── platforms/youtube/tokens.ts (removed)  # replaced by connection.ts
 ├── lib/components/Diff.svelte (removed), SignIn.svelte (new), JobList.svelte (new)
@@ -162,7 +162,6 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 
 - **Resuming a session after reconnect is UNCONFIRMED.** Check its status first; a 404 restarts only if the final bytes were never sent, otherwise it waits for the owner (R6).
 - **Neon latency and wake-up are unmeasured** (R12). Measured once the project exists; only the first step after idle is affected.
-- **The 6-a-day figure may be stale.** Google's page now lists a separate uploads bucket (R8); read the real number in the Console.
 
 ## Config changes
 
