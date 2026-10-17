@@ -8,7 +8,10 @@
   Requests for another user's data MUST return 404 and change nothing.
 - An artist profile (memory, identity, brand guide) MUST be read and written only by the user
   linked to it. Unlinked users get no artist data.
-- Caches, credentials and quota state MUST be keyed so they never cross users or channels.
+- Caches and credentials MUST be keyed so they never cross users or channels. Quota state MUST
+  be per user or channel, with one exception: the project-wide daily upload pool, which every
+  approved user shares by design. When the pool is exhausted, the app returns a plain limit
+  message and queues nothing.
 - Platform credentials MUST be encrypted at rest and MUST NOT reach logs, traces or responses.
 
 Rationale: the app is multi-user and becoming multi-artist; one leak breaks the product's trust.
@@ -93,4 +96,4 @@ addition local instead of spreading through every file.
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 1.0.1 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-17
+**Version**: 1.0.3 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-17
