@@ -66,7 +66,6 @@ Fields the app filters or locks on are columns; the rest of today's job document
 | `destination_channel_id` | text                         | Set at approval (FR-022), with `destination_channel_title`                                                                                                    |
 | `upload_started_at`      | timestamptz                  | Persisted before the first external upload-initiation request; never cleared by session expiry, retry or reconnect                                            |
 | `final_chunk_at`         | timestamptz                  | Persisted before sending the chunk that reaches the file size. A column, because Retry and session loss reset the upload session in `data`; nothing clears it |
-| `upload_slot_day`        | date                         | The quota day the approval's slot was taken from. A fresh session on a later day takes today's slot and updates it                                            |
 | `video_id`               | text                         | Kept on every later state change, including discard                                                                                                           |
 | `data`                   | jsonb, not null              | Everything else on today's job document, minus the removed fields below                                                                                       |
 
@@ -92,38 +91,28 @@ config:
 stateDiagram-v2
   accTitle: Publishing with a pinned destination
   accDescr: How an approved job publishes and verifies against its recorded channel, pausing on lost access or an unknown upload outcome.
-  REVIEW --> PUBLISHING: approve (connected, slot taken, destination recorded)
+  REVIEW --> PUBLISHING: approve (connected, destination recorded)
   PUBLISHING --> PUBLISHING: wait "reconnect YouTube" (no or revoked grant)
   PUBLISHING --> PUBLISHING: wait "upload outcome unknown" (session lost after final bytes may have been sent)
   PUBLISHING --> CLAIMED_COMPLETE: owner pastes a video URL on the pinned channel
   PUBLISHING --> CLAIMED_COMPLETE: insert response
   CLAIMED_COMPLETE --> CLAIMED_COMPLETE: wait "reconnect YouTube"
   CLAIMED_COMPLETE --> VERIFIED: read-back through the pinned channel's grant
-  PUBLISHING --> PAYLOAD: YouTube says quota spent
+  PUBLISHING --> PUBLISHING: wait "Daily upload limit reached" (project or channel limit)
   PUBLISHING --> DISCARDED: discard
   CLAIMED_COMPLETE --> DISCARDED: discard (videoId kept)
 ```
 
 - "Upload start" means `upload_started_at` is set durably before sending the first upload-initiation request. Clearing or replacing the upload session never clears it.
-- Session PUTs carry no `Authorization` header; the session URI is the credential (`youtube.ts:248-286`). So each upload step first checks the pinned channel's connection doc is `connected`, and waits "reconnect YouTube" otherwise. Revoking at Google alone does not stop a live session.
+- Session PUTs carry no `Authorization` header; the session URI is the credential (`youtube.ts:248-286`). So each upload step first checks the pinned channel's connection row is `connected`, and waits "reconnect YouTube" otherwise. Revoking at Google alone does not stop a live session.
 - A status check returning complete keeps the video ID and verifies; returning incomplete resumes from its offset.
-- A 404 with `finalChunkAt` null starts a fresh session on the pinned destination with the same slot. With it set, the step clears `job.upload` and completion is unknown. The job is in this wait exactly when `state == 'PUBLISHING' && finalChunkAt != null && upload == null && videoId == null`; steps and confirm-upload both use that check:
+- A 404 with `finalChunkAt` null starts a fresh session on the pinned destination. With it set, the step clears `job.upload` and completion is unknown. The job is in this wait exactly when `state == 'PUBLISHING' && finalChunkAt != null && upload == null && videoId == null`; steps and confirm-upload both use that check:
   - The step returns wait "upload outcome unknown" with a link to the channel's uploads in YouTube Studio. It makes no YouTube call, so the page's polling costs no quota.
   - The owner pastes the video's URL. The app reads it through the pinned grant and requires the pinned `channelId`; then it records the ID, moves to `CLAIMED_COMPLETE` and runs normal read-back.
   - Without confirmation, the job stays paused and the owner may discard it. Discard does not prove the upload failed or remove any video already created.
 - Waits are step wait reasons, like "waking model". They are not new states, and they never count as failures.
-- `PAYLOAD` is kept only for YouTube's own quota-spent response. The visitor and "not connected" uses of it are removed.
-
-## `quota_days`
-
-| Column    | Type                            | Rule                                   |
-| --------- | ------------------------------- | -------------------------------------- |
-| `day`     | date, primary key               | The quota day (`quotaDay`)             |
-| `uploads` | integer, not null, check `<= 6` | One shared pool, `UPLOADS_PER_DAY = 6` |
-
-- Taking a slot is one statement: `INSERT INTO quota_days (day, uploads) VALUES ($1, 1) ON CONFLICT (day) DO UPDATE SET uploads = quota_days.uploads + 1 WHERE quota_days.uploads < 6 RETURNING uploads`. Zero rows means the pool is spent.
-- Today's `runs`, `ips` and `visitorUploads` are gone.
-- A fresh session on a later day than `uploadSlotDay` reserves a slot on the current day, because YouTube charges the day the insert happens. If that day's pool is spent, the step returns wait "Daily upload limit reached. Try tomorrow." and keeps the job in `PUBLISHING`.
+- YouTube's project quota-spent (`quotaExceeded`) and per-channel `uploadLimitExceeded` responses return wait "Daily upload limit reached. Try tomorrow." and keep the job in `PUBLISHING`; nothing counts uploads app-side.
+- `PAYLOAD` has no remaining entry point (its visitor, "not connected" and quota-spent uses are gone), so the state, the job's `payload` field and `Payload.svelte` are removed.
 
 ## Session cookie `sb_session`
 

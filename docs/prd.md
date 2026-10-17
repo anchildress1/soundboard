@@ -121,13 +121,13 @@
 **R6 · Upload and verify**
 
 - `videos.insert` as private (`madeForKids: false`), streamed from GCS as a resumable upload, then `videos.list(id)`.
-- Upload quota fits 6 uploads a day, one pool shared by all users, first come. The quota belongs to the GCP project, not the user; more needs Google's YouTube API audit.
+- YouTube allows 100 uploads a day per GCP project, shared by all users, first come; a channel may have a lower cap of its own. The app keeps no count. When YouTube says either limit is reached, the job waits "Daily upload limit reached. Try tomorrow." and continues after the reset. More needs Google's YouTube API audit.
 - Each upload uses its owner's own YouTube grant, so it lands on the owner's channel.
 - Approval shows and records the exact destination YouTube channel ID and name with the approved fields. Publishing and verification use only the owner's grant verified for that channel.
 - YouTube connects only the signed-in Google account, which has one channel, so a job's channel never changes.
 - Persist the upload-start marker before the external initiation request; expired or cleared resumable sessions never clear it. Recovery checks the stored session for completion or a resumable offset. An expired session restarts on the same channel only if the final bytes were never sent. If they may have been sent, pause with "upload outcome unknown" and a link to the channel's uploads in YouTube Studio. The owner either pastes the video's URL, which the app accepts only after checking the video is on the pinned channel through the owner's grant, or discards. The app never searches for the video, and never uploads again on its own. A 401 means lost access, not an unknown outcome.
 - Disconnecting or losing access pauses unfinished publishing and verification, preserving the job, approved fields and completed progress. Reconnecting the same channel resumes the next unfinished step without a duplicate upload. a request already in flight may finish against the original channel.
-- Recovery preserves returned video IDs and quota reservations. The same upload never reserves a second slot. An uncertain external outcome must be reconciled before retrying or refunding a potentially spent slot.
+- Recovery preserves returned video IDs. An uncertain external outcome must be reconciled before retrying.
 - Discarding a paused job stops future app steps; it does not delete a YouTube video or cancel an accepted external request. Keep any returned video ID and outcome.
 - Search and catalog reads use an API key from a second GCP project, so they never spend upload quota.
 - [ ] `VERIFIED` is set by the read-back.
@@ -163,7 +163,7 @@
 - Connect and Reconnect bind to the initiating user, exact browser session, purpose and ten-minute expiry. Reject expired, replayed, superseded or mismatched callbacks and attempts after sign-out or session replacement; never change the sign-in identity. Failed or cancelled reconnect preserves the existing connection.
 - Connected means both YouTube upload and read scopes, a usable long-lived grant and the selected channel's ID and name confirmed through that grant. Partial consent or no channel permits identity sign-in but blocks approval with an actionable status.
 - Returning sign-in without a new refresh token preserves a valid existing matching grant. Validate replacement credentials before storing them; never erase a usable connection on an incomplete attempt.
-- [ ] Same-channel Reconnect restores eligible work before upload initiation, during upload and before verification, preserving fields and progress without duplicate uploads or quota reservations.
+- [ ] Same-channel Reconnect restores eligible work before upload initiation, during upload and before verification, preserving fields and progress without duplicate uploads.
 
 **R10 · Access**
 
@@ -198,7 +198,7 @@
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.
 - **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
 - **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
-- Approve uploads through R6 (private, read-back verified) and takes an upload slot. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
+- Approve uploads through R6 (private, read-back verified) and counts against YouTube's daily upload limit. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
 - [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
 - [ ] A 60 s Short renders inside one step on the app container.
 - [ ] A Short is `VERIFIED` only by read-back.
@@ -235,7 +235,7 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 | `users/{googleId}`                        | email, display name, artist profile link, access generation                                                                                                                           |
 | `users/{googleId}/connections/{platform}` | platform account ID and name, grant status, token reference                                                                                                                           |
 | `invites/{email}`                         | normalized invited email, active status, bound Google account ID, artist profile link                                                                                                 |
-| `jobs/{id}`                               | owner user ID, approved destination channel ID/name, state, upload and quota progress, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` on a Short    |
+| `jobs/{id}`                               | owner user ID, approved destination channel ID/name, state, upload progress, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` on a Short              |
 | `jobs/{id}/chunks/{n}`, `jobs/{id}/pick`  | step results                                                                                                                                                                          |
 | `artists/{id}/facts`                      | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy. |
 | `artists/{id}/feedback`                   | EDITED · SKIPPED · ACCEPTED                                                                                                                                                           |

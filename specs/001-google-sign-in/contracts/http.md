@@ -56,14 +56,14 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## Job APIs (changed behavior)
 
-| Route                                      | Change                                                                                                                                                  |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                                             |
-| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                                                      |
-| `POST /api/jobs/{id}/approve`              | 409 `"Reconnect YouTube to approve."` unless connected. 409 `"Daily upload limit reached. Try tomorrow."` when the pool is spent. Records `destination` |
-| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing or revoked grant for the pinned channel                           |
-| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                                            |
-| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                                                     |
+| Route                                      | Change                                                                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                   |
+| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                            |
+| `POST /api/jobs/{id}/approve`              | 409 `"Reconnect YouTube to approve."` unless connected. Records `destination`                                                 |
+| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing or revoked grant for the pinned channel |
+| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                  |
+| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                           |
 
 - Upload start is the durable `uploadStartedAt` marker, not the presence of `job.upload`. Session expiry and retries never unlock the destination.
 - Each upload step checks the pinned channel's connection is `connected` before touching the session, because session PUTs carry no auth header.
@@ -74,7 +74,7 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 ## `POST /api/jobs/{id}/confirm-upload`
 
 - Requires the job owner's session, a job in the outcome-unknown wait (`PUBLISHING`, `finalChunkAt` set, `upload` and `videoId` null, per [data-model](../data-model.md#publishing-and-verification-with-a-pinned-destination)), and `{url}` pasted by the owner. Accepts `watch?v=`, `youtu.be/`, `/shorts/` and Studio `/video/` URLs; anything else returns 400. A foreign job returns 404; a stale or ineligible job returns 409.
-- Read the selected video through the owner's pinned-channel grant and return 422 `"That video isn't on <channel title>."` for a missing video or a channel mismatch, with no job change. Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload or takes an upload slot.
+- Read the selected video through the owner's pinned-channel grant and return 422 `"That video isn't on <channel title>."` for a missing video or a channel mismatch, with no job change. Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload.
 
 ## Removed
 

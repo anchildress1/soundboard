@@ -45,7 +45,7 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 - **UNCONFIRMED:** whether a session survives revoke plus re-consent on the same channel. No code depends on it: the status check below handles a live session and a 404 the same way either way.
 - **Decision:**
   - Gate every upload step on the pinned channel's connection row being `connected`; otherwise wait "reconnect YouTube".
-  - After reconnect, check the stored session. Complete → keep the video ID and verify. Incomplete → resume from its offset, no second slot.
+  - After reconnect, check the stored session. Complete → keep the video ID and verify. Incomplete → resume from its offset.
   - A 404 proves nothing if the final bytes were sent, since the upload may have finished before its response was lost. So persist top-level `job.finalChunkAt` before that chunk. It must not live in `job.upload`, which Retry and session loss reset.
   - 404 with `finalChunkAt` null → known incomplete; a fresh session on the pinned channel is safe.
   - 404 with it set → wait "upload outcome unknown" with a link to the channel's uploads in YouTube Studio. The owner pastes the video URL or discards. A pasted ID is accepted only if `videos.list?id=…` through the pinned grant returns it with the pinned `channelId` (1 unit, [quota costs](https://developers.google.com/youtube/v3/determine_quota_cost)).
@@ -67,10 +67,12 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 ## R8 · Upload quota
 
 - **Facts:**
-  - The `videos.insert` page now lists a separate "Video Uploads" bucket of 100 calls a day.
-  - It also says unverified projects are no longer limited to private uploads ([videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert)).
-  - The 1,600-unit cost behind today's 6-a-day figure may be stale.
-- **Decision:** keep `UPLOADS_PER_DAY = 6` as one shared pool (FR-017) until the project's real quota is read in the Cloud Console. Changing the number is a one-line follow-up. Uploads stay private by product rule.
+  - This project's Cloud Console (read 2026-10-17) lists a separate "Video Uploads" quota of 100 a day and 100 a minute, beside 10,000 queries a day and 100 search queries a day.
+  - YouTube also caps uploads per channel, separately and unpublished; the API answers `uploadLimitExceeded` ([postpeer](https://www.postpeer.dev/errors/youtube)).
+  - Unverified projects are no longer limited to private uploads ([videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert)).
+  - **UNCONFIRMED:** whether `videos.insert` also still spends 1,600 of the 10,000 query units. No code depends on it: either limit surfaces as YouTube's own refusal.
+- **Decision:** drop the app's upload count (`UPLOADS_PER_DAY`, `quota_days`, `uploadSlotDay`). YouTube's `quotaExceeded` and `uploadLimitExceeded` pause the job with "Daily upload limit reached. Try tomorrow." and it continues after the reset. Uploads stay private by product rule.
+- **Alternatives:** keeping a count at 6 or 100 was rejected. At 100 a day for two users it protects nothing, and it forces slot reservation, release and day-rollover rules.
 
 ## R9 · Unverified app cap
 
@@ -88,7 +90,7 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 
 ## R12 · Database: Neon Postgres
 
-- **Decision:** replace Firestore with Neon Postgres in `aws-us-east-2`, accessed through Drizzle ORM over `pg` and Neon's pooled connection string. Pins, each at least two weeks old: `drizzle-orm@0.45.3`, `drizzle-kit@0.31.11`, `pg@8.23.1`, `@types/pg@8.23.1`, `@electric-sql/pglite@0.5.8`. `@google-cloud/firestore` is removed.
+- **Decision:** replace Firestore with Neon Postgres in `aws-us-east-2`, accessed through Drizzle ORM over `pg`: the pooled connection string for app traffic, the direct one for `drizzle-kit` migrations. Neon's pooler runs PgBouncer in transaction mode, and its Drizzle guide says migrations through it can fail ([Drizzle guide](https://neon.com/docs/guides/drizzle.md), [pooling FAQ](https://neon.com/faqs/postgres-tools-high-volumes-short-lived-connections)). Pins, each at least two weeks old: `drizzle-orm@0.45.3`, `drizzle-kit@0.31.11`, `pg@8.23.1`, `@types/pg@8.23.1`, `@electric-sql/pglite@0.5.8`. `@google-cloud/firestore` is removed.
 - **Rationale:**
   - Spec 001 adds users, invites, connections, ownership and a filtered job list. Foreign keys, unique constraints (`bound_sub`), check constraints (`token_ciphertext` only when connected) and ordinary indexes replace Firestore's composite index, the `== null` field-presence workaround and hand-written fakes.
   - Today's Firestore footprint is small (6 files, 8 transactions, 22 collection calls), so the switch costs least now.
