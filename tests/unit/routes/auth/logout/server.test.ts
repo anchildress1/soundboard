@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isRedirect } from '@sveltejs/kit';
 import { describe, expect, it, vi } from 'vitest';
-import { SESSION_COOKIE } from '$lib/server/auth';
+import { SESSION_COOKIE } from '$lib/server/auth/auth';
 import { POST } from '$routes/auth/logout/+server';
 
 type Event = Parameters<typeof POST>[0];

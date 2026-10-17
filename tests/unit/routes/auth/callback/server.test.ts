@@ -1,8 +1,14 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/clients';
-import { OAUTH_COOKIE, readSession, SESSION_COOKIE, sign, type OAuthState } from '$lib/server/auth';
+import { resetClients } from '$lib/server/core/clients';
+import {
+  OAUTH_COOKIE,
+  readSession,
+  SESSION_COOKIE,
+  sign,
+  type OAuthState,
+} from '$lib/server/auth/auth';
 import { GET } from '$routes/auth/callback/+server';
 
 const NATHAN_EMAIL = 'nathan@example.com';

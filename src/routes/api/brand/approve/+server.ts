@@ -1,5 +1,5 @@
-import { approveBrand, requireAllowlisted } from '$lib/server/brand';
-import { readBody, respond } from '$lib/server/http';
+import { approveBrand, requireAllowlisted } from '$lib/server/artist/brand';
+import { readBody, respond } from '$lib/server/core/http';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ locals, request }) => {

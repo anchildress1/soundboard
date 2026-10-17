@@ -1,4 +1,4 @@
-import { channelStats, type ChannelStats } from '$lib/server/youtube';
+import { channelStats, type ChannelStats } from '$lib/server/platforms/youtube';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals }) => {

@@ -1,8 +1,8 @@
 import { redirect } from '@sveltejs/kit';
-import { signedReadUrl } from '$lib/server/gcs';
-import { getJob } from '$lib/server/jobs';
-import { authorizedJob, buildView } from '$lib/server/view';
-import { videosByIds } from '$lib/server/youtube';
+import { signedReadUrl } from '$lib/server/media/gcs';
+import { getJob } from '$lib/server/jobs/jobs';
+import { authorizedJob, buildView } from '$lib/server/jobs/view';
+import { videosByIds } from '$lib/server/platforms/youtube';
 import type { LiveMetadata } from '$lib/types';
 import type { PageServerLoad } from './$types';
 

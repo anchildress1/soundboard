@@ -12,8 +12,8 @@ Audience: AI coding agents. Directives only.
 - Artist name: "Nathan" or "Flies Like Robots". NEVER write his surname in code, fixtures, seeds, prompts, commits, or docs.
 - NEVER filter or redact his surname from runtime data (channel credits, model output).
 - UI text: plain labels. NEVER persona or chatbot copy.
-- Description voice: `ARTIST_VOICE` in `src/lib/server/smart-pick.ts`. Change only on new evidence of how Nathan writes.
-- Audio numbers (LUFS, peak, clipping, silence): ffmpeg only. Strip model-emitted numerics (`src/lib/server/numerics.ts`).
+- Description voice: `ARTIST_VOICE` in `src/lib/server/ai/smart-pick.ts`. Change only on new evidence of how Nathan writes.
+- Audio numbers (LUFS, peak, clipping, silence): ffmpeg only. Strip model-emitted numerics (`src/lib/server/ai/numerics.ts`).
 - Hashtags and tags: only from the job's candidate lists (PRD R4). Reject anything else.
 
 ## Data and access
