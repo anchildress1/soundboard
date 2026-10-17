@@ -28,7 +28,7 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
 - One Cloud Run service and one model endpoint. No added services, queues, functions or
   background workers.
 - The pipeline advances one step per page request, each under about 2 minutes, claimed in a
-  Firestore transaction.
+  database transaction.
 - A cold, busy or unauthorized dependency MUST return a wait reason immediately. A wait never
   fails a job.
 - Nothing runs unattended; the user's open page drives every step.
@@ -53,8 +53,9 @@ addition local instead of spreading through every file.
 
 - Coverage floors: 85% lines, functions and statements; 80% branches. Never lowered.
 - Every new module gets positive, negative, error and edge-case tests.
-- Mock only at process boundaries (Firestore, GCS, Secret Manager, KMS, platform HTTP,
+- Mock only at process boundaries (GCS, Secret Manager, KMS, platform HTTP,
   `llama-server`, ffmpeg). Never mock internal modules.
+- The database is never mocked. Tests run it as PGlite with the real migrations.
 - E2E runs on desktop Chrome and Pixel 7 against the in-repo fakes.
 - Provider behavior that Google does not document MUST be proven by a recorded manual gate
   before dependent code is built. Passing mocked tests does not close that gate.
@@ -92,4 +93,4 @@ addition local instead of spreading through every file.
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-16
+**Version**: 1.0.1 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-17
