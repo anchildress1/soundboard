@@ -9,7 +9,8 @@
 Make the app invite-only behind Google sign-in. One consent screen grants identity plus YouTube.
 
 - **Users:** keyed by the Google `sub` (the account's permanent ID). Sessions stay signed `{uid, sid, gen, exp}` cookies with a fixed 30 days, so concurrency needs no session store.
-- **Tokens:** each user's YouTube refresh token is KMS-encrypted on their Firestore connection doc.
+- **Database:** Neon Postgres through Drizzle replaces Firestore (research R12); tests run on PGlite.
+- **Tokens:** each user's YouTube refresh token is KMS-encrypted on their `connections` row.
 - **Jobs:** each job gets an `ownerUid`, plus a destination channel that's pinned at approval.
 - **Removed:** visitors, demo accounts, samples, the sandbox channel and the dev.to framing.
 - **Nathan:** signs in with an invite linked to `flr`. Nothing is migrated (pre-beta).
@@ -23,17 +24,17 @@ Make the app invite-only behind Google sign-in. One consent screen grants identi
 - Existing:
   - SvelteKit 2.70 / Svelte 5 runes, adapter-node 5
   - `google-auth-library` 11.1.0 (OAuth, ID-token verify)
-  - `@google-cloud/firestore` 9.2.0
   - `@google-cloud/secret-manager` 7.1.0, kept for app secrets only
   - `@sentry/sveltekit` 11.4.0
-- New: `@google-cloud/kms` 6.2.1 (research R7)
+- New: `@google-cloud/kms` 6.2.1 (R7); `drizzle-orm` 0.45.3, `pg` 8.23.1, `@electric-sql/pglite` 0.5.8; dev `drizzle-kit` 0.31.11, `@types/pg` 8.23.1 (R12)
+- Removed: `@google-cloud/firestore`
 
 **Storage**:
 
-- Firestore: new `users`, `users/*/connections`, `invites`; changed `jobs`, `quota`.
+- Neon Postgres, `aws-us-east-2`: tables in [data-model](data-model.md); SQL migrations in `drizzle/`. `DATABASE_URL` (pooled) from Secret Manager.
 - One new KMS key ring and key, `soundboard / refresh-tokens`, in us-central1.
 
-**Testing**: Vitest 5 with `@vitest/coverage-v8` (85/85/85/80 floors), Playwright 1.63 (desktop Chrome, Pixel 7), and E2E fakes aliased by `E2E_FAKES=1`. A new fake KMS goes in `tests/e2e/fakes/kms.ts`.
+**Testing**: Vitest 5 with `@vitest/coverage-v8` (85/85/85/80 floors), Playwright 1.63 (desktop Chrome, Pixel 7), and E2E fakes aliased by `E2E_FAKES=1`. Unit tests and the E2E build run on PGlite with the real migrations (`tests/helpers/db.ts`, `tests/e2e/fakes/db.ts`); a fake KMS goes in `tests/e2e/fakes/kms.ts`.
 
 **Target Platform**: Cloud Run (one service, max 1 instance) in us-central1
 
@@ -41,7 +42,7 @@ Make the app invite-only behind Google sign-in. One consent screen grants identi
 
 **Performance Goals**:
 
-- One Firestore read per authenticated request, `users/{uid}`. The invite is read only at sign-in.
+- One query in the gate per authenticated request (the `users` row); pages with the header add the connection read. The invite is read only at sign-in.
 - Callback processing under 1 s, plus Google's own calls (SC-003).
 
 **Constraints**:
@@ -63,7 +64,7 @@ Gates from `.specify/memory/constitution.md` v1.0.0.
 | II. Truthful Output           | ✅ `VERIFIED` still by read-back through the pinned grant. Artist tag only from the linked profile                                        |
 | III. One Service, Page-Driven | ✅ KMS is a managed API call. Lost grant and unknown outcome are wait reasons                                                             |
 | IV. Domain-Grouped Code       | ✅ New files land in domain folders; YouTube code stays in `platforms/youtube/`. ⚠️ `ARTIST_VOICE` stays shared until spec 002 (`TTD.md`) |
-| V. Tested at the Boundaries   | ✅ KMS, Firestore and Google HTTP mocked as boundaries. Brand Accounts out of scope (R2)                                                  |
+| V. Tested at the Boundaries   | ✅ KMS and Google HTTP mocked; the database runs as PGlite with real migrations. Brand Accounts out of scope (R2)                         |
 | VI. Simplicity                | ✅ No session store, no per-request invite read, no platform interface yet                                                                |
 | Media, Privacy and Secrets    | ✅ Tokens, ciphertext and ID tokens never set on spans                                                                                    |
 
@@ -92,7 +93,9 @@ src/
 ├── app.d.ts                           # locals.user: {uid, email, artistId} | null
 ├── lib/driver.ts                      # 401 is final → navigate to /
 ├── lib/server/                        # layout from refactor/server-domains
-│   ├── core/env.ts                    # drop allowlist/demoEmails; add SIGNUP_MODE, KMS_KEY
+│   ├── core/env.ts                    # drop allowlist/demoEmails; add SIGNUP_MODE, KMS_KEY, DATABASE_URL
+│   ├── core/schema.ts      (new)      # Drizzle tables (data-model)
+│   ├── core/db.ts          (new)      # Drizzle over a pg Pool; replaces Firestore in core/clients.ts
 │   ├── core/kms.ts         (new)      # encrypt/decrypt
 │   ├── auth/auth.ts                   # session {uid,sid,gen,exp}, OAuth state {purpose,uid,sid}, prompts
 │   ├── auth/users.ts       (new)      # getUser, redeemInvite (transaction), upsertUser (never writes gen)
@@ -120,23 +123,26 @@ src/
     ├── auth/{login,callback,logout}/+server.ts
     └── brand/…                        # gate by user.artistId; connect links removed
 scripts/
-├── invite.ts               (new)  # add | revoke | list; standalone Firestore client
+├── invite.ts               (new)  # add | revoke | list; standalone pg client
 └── add-sample.sh           (removed)
 tests/
 ├── unit/…                          # mirrors src/
-├── e2e/fakes/{kms.ts (new), firestore.ts (where/orderBy), fixtures.ts (users, invites, connections)}
+├── helpers/db.ts (new)              # fresh PGlite per file, migrations applied; fake-firestore.ts removed
+├── e2e/fakes/{kms.ts, db.ts (new), fixtures.ts (users, invites, connections)}; firestore.ts removed
 └── e2e/{auth,isolation,connections}.spec.ts
+drizzle/ (generated migrations), drizzle.config.ts (new)
 deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 ```
 
-**Structure Decision**: Single SvelteKit project, so existing directories are reused. The two scripts run directly under Node 24's built-in type stripping. They import only `@google-cloud/*` and `google-auth-library`, never `$lib`, because `$lib` aliases need Vite.
+**Structure Decision**: Single SvelteKit project, so existing directories are reused. The script runs directly under Node 24's built-in type stripping. `scripts/invite.ts` imports only `pg`, never `$lib`, because `$lib` aliases need Vite.
 
 ## Key Decisions
 
 - **Gate placement:** one handle in `hooks.server.ts` covers pages and `+server.ts`. There's no wildcard API exemption (FR-002).
-- **Revocation without a session store:** each user has an `accessGeneration` counter, compared on every request (FR-006). That's the only per-request read.
+- **Revocation without a session store:** each user has an `accessGeneration` counter, compared on every request (FR-006). That's the gate's only read.
 - **Browser sessions:** a random `sid` per sign-in, bound into the OAuth state, so stale connect callbacks fail after sign-out and back in (FR-026).
-- **Refresh tokens:** KMS-encrypted in Firestore, so the connection and its token are one atomic write (R7). Cleared on `revoked`.
+- **Database:** Neon Postgres via Drizzle and `pg` (R12). Step claims are one `UPDATE … RETURNING`; quota slots are one upsert with a `< 6` guard; job documents keep their shape in a `data` jsonb column.
+- **Refresh tokens:** KMS-encrypted on the `connections` row, so the connection and its token are one atomic upsert (R7). Cleared on `revoked`.
 - **Returning sign-in:** skips consent and keeps the stored grant if it's `connected` and `mine=true` matches (R4). With no usable stored grant and no new refresh token, sign-in goes straight to the consent flow.
 - **Channel lock:** the connect callback rejects a grant whose ID token `sub` isn't the session's `uid`. A personal Google account has one channel, so a job's channel never changes and there's no switch-before-upload path (FR-023).
 - **Destination pinning:**
@@ -155,15 +161,18 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 ## Risks
 
 - **Resuming a session after reconnect is UNCONFIRMED.** Check its status first; a 404 restarts only if the final bytes were never sent, otherwise it waits for the owner (R6).
+- **Neon latency and wake-up are unmeasured** (R12). Measured once the project exists; only the first step after idle is affected.
 - **The 6-a-day figure may be stale.** Google's page now lists a separate uploads bucket (R8); read the real number in the Console.
 
 ## Config changes
 
-- **Approved:** `package.json` / `pnpm-lock.yaml` add `@google-cloud/kms@6.2.1`; `vite.config.ts` aliases it to the E2E fake.
+- **Approved:** `package.json` / `pnpm-lock.yaml` add `@google-cloud/kms@6.2.1` and the R12 packages, and drop `@google-cloud/firestore`; `drizzle.config.ts` for `drizzle-kit`; `vite.config.ts` aliases KMS and the database client to the E2E fakes and drops the Firestore alias.
 - **You apply** (I draft the diff):
-  - `deploy.sh`: KMS key ring and key, `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key for the runtime service account, the Firestore index, `SIGNUP_MODE` and `KMS_KEY`; drop `ALLOWLIST_EMAILS`, `DEMO_EMAILS` and the `yt-refresh-*` secret creation
-  - `service.yaml`, `.env.example`, `playwright.config.ts`: the same env changes
+  - `deploy.sh`: KMS key ring and key, `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key for the runtime service account, the `DATABASE_URL` secret, `drizzle-kit migrate` before traffic moves, `SIGNUP_MODE` and `KMS_KEY`; drop the Firestore setup and its IAM role; drop `ALLOWLIST_EMAILS`, `DEMO_EMAILS` and the `yt-refresh-*` secret creation
+  - `service.yaml`, `.env.example`, `playwright.config.ts`: the same env changes, plus `DATABASE_URL`
 
 ## Complexity Tracking
 
-None. No gate violations.
+| Violation                                                                                                              | Why it stays                                                                    | Fix target          |
+| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------- |
+| IV: FLR values (`ARTIST_NAME`, `ARTIST_VOICE`, `FLR_CHANNEL_ID`, `PUBLIC_FACTS`) stay constants in `artist/` and `ai/` | One artist until spec 002; moving them into the profile now is that spec's work | Spec 002 (`TTD.md`) |

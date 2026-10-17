@@ -1,6 +1,6 @@
 # Research: Google Sign-In and Connections
 
-Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google doesn't document; those items are checked in the deployed manual run.
+Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google doesn't document; no code depends on any of them, as each item says, so none needs a manual test before it's built (constitution V).
 
 ## R1 · User identity key
 
@@ -28,7 +28,7 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 - **Decision:**
   - Sign-in uses `prompt=select_account`, so returning users skip consent and keep their stored grant.
   - Connect and Reconnect use `prompt=select_account consent` to force a fresh refresh token.
-  - A sign-in without a new refresh token keeps the stored grant only if the stored doc is `connected` and `mine=true` with the new access token returns the stored channel ID.
+  - A sign-in without a new refresh token keeps the stored grant only if the stored row is `connected` and `mine=true` with the new access token returns the stored channel ID.
 - **Alternatives:** forcing consent on every sign-in was rejected. It's annoying, and each new token counts toward the 100 limit.
 
 ## R5 · Disconnect
@@ -42,9 +42,9 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 - **Facts:**
   - Session URIs expire without a documented lifetime and return 404 when they do ([resumable protocol](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol)).
   - The app's session PUTs send no `Authorization` header (`youtube.ts:248-286`); the session URI is the credential. So a 401 isn't a real path, and revoking at Google doesn't stop a live session.
-- **UNCONFIRMED:** whether a session survives revoke plus re-consent on the same channel.
+- **UNCONFIRMED:** whether a session survives revoke plus re-consent on the same channel. No code depends on it: the status check below handles a live session and a 404 the same way either way.
 - **Decision:**
-  - Gate every upload step on the pinned channel's connection doc being `connected`; otherwise wait "reconnect YouTube".
+  - Gate every upload step on the pinned channel's connection row being `connected`; otherwise wait "reconnect YouTube".
   - After reconnect, check the stored session. Complete → keep the video ID and verify. Incomplete → resume from its offset, no second slot.
   - A 404 proves nothing if the final bytes were sent, since the upload may have finished before its response was lost. So persist top-level `job.finalChunkAt` before that chunk. It must not live in `job.upload`, which Retry and session loss reset.
   - 404 with `finalChunkAt` null → known incomplete; a fresh session on the pinned channel is safe.
@@ -54,15 +54,15 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 
 ## R7 · Where refresh tokens live
 
-- **Decision:** encrypt each user's refresh token with one Cloud KMS key and store the ciphertext on the Firestore connection doc. Add `@google-cloud/kms` pinned to **6.2.1** (released 2026-09-28; 6.3.0 is only 4 days old).
+- **Decision:** encrypt each user's refresh token with one Cloud KMS key and store the ciphertext on the user's `connections` row. Add `@google-cloud/kms` pinned to **6.2.1** (released 2026-09-28; 6.3.0 is only 4 days old).
 - **Rationale:**
   - Google positions Secret Manager for stored secrets and KMS for "encrypting rows in a database" ([Secret Manager overview](https://docs.cloud.google.com/secret-manager/docs/overview), [encrypting application data](https://docs.cloud.google.com/kms/docs/encrypting-application-data)).
   - A token is about 100 bytes, under KMS's 64 KB direct-encrypt limit, so no envelope encryption is needed.
-  - The token and its channel record land in one Firestore write, which makes "validate, then replace" atomic (FR-027).
+  - The token and its channel record land in one upsert, which makes "validate, then replace" atomic (FR-027).
   - The runtime account needs `cloudkms.cryptoKeyEncrypterDecrypter` on one key, not secret-create rights across the project.
 - **Alternatives:**
-  - One Secret Manager secret per user was rejected. It needs project-wide create and delete rights, costs per user per month ([pricing](https://cloud.google.com/secret-manager/pricing)), and can't be written atomically with the connection doc.
-  - Plaintext in Firestore was rejected outright.
+  - One Secret Manager secret per user was rejected. It needs project-wide create and delete rights, costs per user per month ([pricing](https://cloud.google.com/secret-manager/pricing)), and can't be written atomically with the connection row.
+  - Plaintext in the database was rejected outright.
 
 ## R8 · Upload quota
 
@@ -75,7 +75,7 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
 ## R9 · Unverified app cap
 
 - **Facts:** unverified apps using sensitive or restricted scopes get 100 new users in total, over the project's lifetime, and it can't be reset ([unverified apps](https://support.google.com/cloud/answer/7454865), [user cap](https://support.google.com/cloud/answer/13463817)).
-- **UNCONFIRMED:** whether `youtube.upload` is classed as sensitive. Only third parties say so; the Console's Data Access page will show it.
+- **UNCONFIRMED:** whether `youtube.upload` is classed as sensitive. Only third parties say so; the Console's Data Access page will show it. No code depends on it; it only affects the user cap.
 - **Decision:** no action for the invite phase. Open signup needs Google's verification first.
 
 ## R11 · Static assets and the auth gate
@@ -85,3 +85,21 @@ Checked 2026-10-16 against Google's docs. **UNCONFIRMED** marks anything Google 
   - Every other page redirects with 303 to `/`. Every `/api/*` returns 401.
   - Static and `_app/immutable` files are served by adapter-node before the SvelteKit handler and contain no app data.
 - **Alternatives:** a guard in `+layout.server.ts` was rejected because it doesn't cover `+server.ts` APIs.
+
+## R12 · Database: Neon Postgres
+
+- **Decision:** replace Firestore with Neon Postgres in `aws-us-east-2`, accessed through Drizzle ORM over `pg` and Neon's pooled connection string. Pins, each at least two weeks old: `drizzle-orm@0.45.3`, `drizzle-kit@0.31.11`, `pg@8.23.1`, `@types/pg@8.23.1`, `@electric-sql/pglite@0.5.8`. `@google-cloud/firestore` is removed.
+- **Rationale:**
+  - Spec 001 adds users, invites, connections, ownership and a filtered job list. Foreign keys, unique constraints (`bound_sub`), check constraints (`token_ciphertext` only when connected) and ordinary indexes replace Firestore's composite index, the `== null` field-presence workaround and hand-written fakes.
+  - Today's Firestore footprint is small (6 files, 8 transactions, 22 collection calls), so the switch costs least now.
+  - Neon scales to zero by default and wakes on connect ([scale to zero](https://neon.com/faqs/cloud-postgres-services-scale-zero-data)); the free plan gives 100 compute-unit hours per project ([pricing](https://neon.com/pricing)).
+  - `aws-us-east-2` (Ohio) is the AWS region nearest Cloud Run's us-central1. A project's region can't change later ([regions](https://neon.tech/docs/introduction/regions)); new Azure projects are closed to new organizations.
+  - Cloud Run runs a long-lived Node process, so the TCP driver `pg` fits. Neon's serverless driver is for edge runtimes, and its transactions need WebSockets plus `ws` ([Drizzle on Neon](https://orm.drizzle.team/docs/connect-neon)).
+  - Tests run real SQL on PGlite, an in-process WASM Postgres with a Drizzle driver ([Drizzle PGlite](https://orm.drizzle.team/learn/latest-releases/drizzle-orm-v0306)). Unit tests and the E2E build use it in place of the database, which stays the process boundary (constitution V).
+  - Job documents keep their nested shape in one `data` jsonb column; only fields the app filters or locks on become columns. That keeps the pipeline rewrite to its storage calls.
+- **UNCONFIRMED:** wake-up time after scale to zero (third-party reports say about 0.5–2 s, [comparison](https://ecorpit.com/neon-vs-supabase-serverless-postgres-saas-backend-2026/)) and per-query latency from us-central1. No code depends on either: a slow first query only makes the first step after idle slower. Measured once the project exists.
+- **Alternatives:**
+  - Supabase was rejected. Free projects pause after a week idle until restored by hand ([limits](https://automationatlas.io/answers/supabase-free-tier-limits-2026/)), and its auth, storage and realtime overlap what the app already has.
+  - Cloud SQL was rejected for now. It stays in Google Cloud but doesn't scale to zero, so it bills while idle.
+  - Staying on Firestore was rejected; spec 001's relational shape keeps adding indexes, workarounds and fake-query code.
+  - Copying Nathan's Firestore memory and brand guide was rejected (pre-beta); memory restarts from `SEED_FACTS`.

@@ -1,67 +1,86 @@
 # Data Model: Google Sign-In and Connections
 
-All Firestore. Client access stays denied by rules; only the app's service account reads and writes.
+Neon Postgres, through Drizzle (research R12). The schema lives in `src/lib/server/core/schema.ts`; `drizzle-kit` generates the SQL migrations in `drizzle/`. Only the app's connection string reaches the database. Times are `timestamptz`; columns are snake_case in SQL and camelCase in TypeScript.
 
-## `users/{sub}`
+Nothing is carried over from Firestore (pre-beta). The FLR artist memory starts from `SEED_FACTS`, and the brand guide is proposed again.
 
-| Field              | Type           | Rule                                                                                            |
-| ------------------ | -------------- | ----------------------------------------------------------------------------------------------- |
-| `email`            | string         | From the latest verified ID token; display only                                                 |
-| `name`             | string \| null | From the ID token                                                                               |
-| `inviteEmail`      | string \| null | Normalized email of the invite this user redeemed; null in open signup                          |
-| `artistId`         | string \| null | `'flr'` for Nathan until spec 002; copied from the invite at first redemption                   |
-| `accessGeneration` | number         | Starts at 1. Revoking the invite increments it. Sessions carrying an older value are signed out |
-| `createdAt`        | number         | ms                                                                                              |
+## `users`
 
-- Created only after the invite check passes (FR-005). An uninvited sign-in writes nothing.
-- Sign-in looks up `users/{sub}` first and checks the invite named by its `inviteEmail`, so an email change keeps access. Only a first sign-in looks the invite up by the token's email.
-- `accessGeneration` is written only at creation and by revoke. Sign-in upserts never touch it, so re-inviting never revives an old cookie.
+| Column              | Type                                 | Rule                                                                               |
+| ------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `uid`               | text, primary key                    | The Google `sub`                                                                   |
+| `email`             | text, not null                       | From the latest verified ID token; display only                                    |
+| `name`              | text                                 | From the ID token                                                                  |
+| `invite_email`      | text → `invites.email`               | The invite this user redeemed; null in open signup                                 |
+| `artist_id`         | text                                 | `'flr'` for Nathan until spec 002; copied from the invite at first redemption      |
+| `access_generation` | integer, not null, default 1         | Revoking the invite increments it. Sessions carrying an older value are signed out |
+| `created_at`        | timestamptz, not null, default now() |                                                                                    |
 
-## `users/{sub}/connections/youtube`
+- Inserted only after the invite check passes (FR-005). An uninvited sign-in writes nothing.
+- Sign-in looks up `users` by `uid` first and checks the invite named by its `invite_email`, so an email change keeps access. Only a first sign-in looks the invite up by the token's email.
+- `access_generation` is written only at insert and by revoke. Sign-in upserts never touch it, so re-inviting never revives an old cookie.
 
-| Field             | Type                                                           | Rule                                                         |
-| ----------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
-| `status`          | `'connected' \| 'missing_scopes' \| 'no_channel' \| 'revoked'` | `connected` only per FR-027                                  |
-| `channelId`       | string \| null                                                 | From `channels.list?mine=true` through this grant            |
-| `channelTitle`    | string \| null                                                 | Same call                                                    |
-| `scopes`          | string[]                                                       | Granted scopes from the token response                       |
-| `tokenCiphertext` | string \| null                                                 | KMS-encrypted refresh token, base64. Null unless `connected` |
-| `updatedAt`       | number                                                         | ms                                                           |
+## `connections`
 
-- One per user (FR-014), always on the user's own Google account. Reconnect overwrites it in one write, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
-- `revoked` is set when Google returns `invalid_grant`, and the ciphertext is cleared in the same write. A dead token is never kept.
-- Disconnect: revoke at Google, then delete the doc.
+| Column             | Type                                                                   | Rule                                                         |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `uid`              | text → `users.uid` on delete cascade                                   | Primary key with `platform`                                  |
+| `platform`         | text, not null, check `= 'youtube'`                                    | The only platform in this spec                               |
+| `status`           | text, check `in ('connected','missing_scopes','no_channel','revoked')` | `connected` only per FR-027                                  |
+| `channel_id`       | text                                                                   | From `channels.list?mine=true` through this grant            |
+| `channel_title`    | text                                                                   | Same call                                                    |
+| `scopes`           | text[], not null                                                       | Granted scopes from the token response                       |
+| `token_ciphertext` | text, check `status = 'connected' or token_ciphertext is null`         | KMS-encrypted refresh token, base64. Null unless `connected` |
+| `updated_at`       | timestamptz, not null                                                  |                                                              |
 
-## `invites/{normalizedEmail}`
+- One per user and platform (FR-014), always on the user's own Google account. Reconnect upserts the row in one statement, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
+- `revoked` is set when Google returns `invalid_grant`, and the ciphertext is cleared in the same `UPDATE`. A dead token is never kept.
+- Disconnect: revoke at Google, then delete the row.
 
-| Field       | Type           | Rule                                                                                  |
-| ----------- | -------------- | ------------------------------------------------------------------------------------- |
-| `email`     | string         | Lowercased, trimmed                                                                   |
-| `active`    | boolean        | `false` = revoked                                                                     |
-| `artistId`  | string \| null | Copied to the user on first redemption                                                |
-| `boundSub`  | string \| null | Set atomically on first redemption. Only this `sub` may redeem it afterwards (FR-005) |
-| `createdAt` | number         | ms                                                                                    |
+## `invites`
 
-- Revoke and reinvite run through `scripts/invite.ts`. Revoking sets `active: false` and increments the bound user's `accessGeneration` in one transaction (FR-006).
+| Column       | Type                                 | Rule                                                                       |
+| ------------ | ------------------------------------ | -------------------------------------------------------------------------- |
+| `email`      | text, primary key                    | Lowercased, trimmed                                                        |
+| `active`     | boolean, not null, default true      | `false` = revoked                                                          |
+| `artist_id`  | text                                 | Copied to the user on first redemption                                     |
+| `bound_sub`  | text, unique                         | Set on first redemption. Only this `sub` may redeem it afterwards (FR-005) |
+| `created_at` | timestamptz, not null, default now() |                                                                            |
 
-## `jobs/{id}` (changed fields)
+- Revoke and reinvite run through `scripts/invite.ts`. Revoking sets `active = false` and increments the bound user's `access_generation` in one transaction (FR-006).
+- First redemption binds with `UPDATE invites SET bound_sub = $sub WHERE email = $email AND active AND (bound_sub IS NULL OR bound_sub = $sub)`; zero rows means denied.
 
-| Field                               | Change                                                                                                                                                                                                               |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ownerUid`                          | **New.** `sub` of the creator. Every page and API returns 404 to anyone else (FR-012)                                                                                                                                |
-| `artistId`                          | **New.** Owner's artist link at create, nullable. Until spec 002, a pick reads or writes `artists/flr` only when this and the owner's current `artistId` both equal `flr`; otherwise it runs with no memory (FR-018) |
-| `destination`                       | **New.** `{channelId, channelTitle} \| null`, set at approval (FR-022)                                                                                                                                               |
-| `parentId`                          | **New top-level.** `null` on videos, the parent's ID on Shorts. Today it only exists nested in `short.parentId`, and Firestore's `== null` skips docs without the field                                              |
-| `uploadStartedAt`                   | **New.** ms timestamp or null. Persisted before the first external upload-initiation request; never cleared by session expiry, retry or reconnect                                                                    |
-| `finalChunkAt`                      | **New.** ms timestamp or null. Persisted before sending the chunk that reaches the file size. Top-level, because Retry and session loss reset `job.upload`; nothing clears it                                        |
-| `uploadSlotDay`                     | **New.** The quota day the approval's slot was taken from. A fresh session on a later day takes today's slot and updates it                                                                                          |
-| `owner`                             | **Removed** (`nathan` / `demo` / `visitor`)                                                                                                                                                                          |
-| `channel`                           | **Removed** (`nathan` / `sandbox`)                                                                                                                                                                                   |
-| `sampleId`, `liveVideoId`, `ipHash` | **Removed**                                                                                                                                                                                                          |
+## `jobs`
 
-- Shorts copy `ownerUid`, `artistId` and `destination: null` from their parent.
-- New composite index for the home job list (FR-029): `ownerUid ==`, `parentId == null`, `createdAt desc`. The E2E fake Firestore gains `where()` and `orderBy()` so the query is exercised.
-- A step result that lands after the job moved (for example a discard during the final chunk) still saves `videoId` and upload progress. Today `releaseJob` drops the whole patch (`jobs.ts:151-153`).
+Fields the app filters or locks on are columns; the rest of today's job document (analysis, recommendation, approved fields, upload session, Short settings) stays one `data` jsonb column, so the pipeline code keeps its shapes.
+
+| Column                   | Type                         | Rule                                                                                                                                                          |
+| ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                     | text, primary key            | Today's job ID format                                                                                                                                         |
+| `owner_uid`              | text → `users.uid`, not null | Every page and API returns 404 to anyone else (FR-012)                                                                                                        |
+| `artist_id`              | text                         | Owner's artist link at create. Until spec 002, a pick reads or writes FLR memory only when this and the owner's current `artist_id` both equal `flr` (FR-018) |
+| `parent_id`              | text → `jobs.id`             | Null on videos, the parent's ID on Shorts                                                                                                                     |
+| `state`                  | text, not null               | Today's states                                                                                                                                                |
+| `created_at`             | timestamptz, not null        |                                                                                                                                                               |
+| `claim_until`            | timestamptz                  | Step claim, 3 minutes out                                                                                                                                     |
+| `destination_channel_id` | text                         | Set at approval (FR-022), with `destination_channel_title`                                                                                                    |
+| `upload_started_at`      | timestamptz                  | Persisted before the first external upload-initiation request; never cleared by session expiry, retry or reconnect                                            |
+| `final_chunk_at`         | timestamptz                  | Persisted before sending the chunk that reaches the file size. A column, because Retry and session loss reset the upload session in `data`; nothing clears it |
+| `upload_slot_day`        | date                         | The quota day the approval's slot was taken from. A fresh session on a later day takes today's slot and updates it                                            |
+| `video_id`               | text                         | Kept on every later state change, including discard                                                                                                           |
+| `data`                   | jsonb, not null              | Everything else on today's job document, minus the removed fields below                                                                                       |
+
+- Removed: `owner` (`nathan` / `demo` / `visitor`), `channel` (`nathan` / `sandbox`), `sampleId`, `liveVideoId`, `ipHash`.
+- Shorts copy `owner_uid`, `artist_id` and a null destination from their parent.
+- Index for the home job list (FR-029): `(owner_uid, created_at desc) WHERE parent_id IS NULL`.
+- A step claims with `UPDATE jobs SET claim_until = now() + interval '3 minutes' WHERE id = $1 AND (claim_until IS NULL OR claim_until < now()) RETURNING *`; zero rows means another step holds it.
+- A step result that lands after the job moved (for example a discard during the final chunk) still saves `video_id` and upload progress. Today `releaseJob` drops the whole patch (`jobs.ts:151-153`).
+- Today's subcollections become child tables keyed by `job_id` → `jobs.id` on delete cascade: `job_picks (job_id, version)`, `job_chunks (job_id, index)` and `job_feedback`, each holding its document as `data` jsonb.
+
+## Artist tables
+
+- `artist_facts (artist_id, key)`, `artist_feedback`, `artist_publishes (artist_id, video_id)` and `artist_brand (artist_id, slot)` with `slot in ('proposal','approved')` replace `artists/flr/*`, each holding today's document as `data` jsonb plus the keys shown.
+- `artist_feedback` is indexed on `(artist_id, at desc)` for `recentFeedback`.
 
 ### Publishing and verification with a pinned destination
 
@@ -85,30 +104,32 @@ stateDiagram-v2
   CLAIMED_COMPLETE --> DISCARDED: discard (videoId kept)
 ```
 
-- "Upload start" means `uploadStartedAt` is set durably before sending the first upload-initiation request. Clearing or replacing `job.upload` never clears it.
+- "Upload start" means `upload_started_at` is set durably before sending the first upload-initiation request. Clearing or replacing the upload session never clears it.
 - Session PUTs carry no `Authorization` header; the session URI is the credential (`youtube.ts:248-286`). So each upload step first checks the pinned channel's connection doc is `connected`, and waits "reconnect YouTube" otherwise. Revoking at Google alone does not stop a live session.
 - A status check returning complete keeps the video ID and verifies; returning incomplete resumes from its offset.
-- A 404 with `finalChunkAt` null starts a fresh session on the pinned destination with the same slot. With it set, completion is unknown:
+- A 404 with `finalChunkAt` null starts a fresh session on the pinned destination with the same slot. With it set, the step clears `job.upload` and completion is unknown. The job is in this wait exactly when `state == 'PUBLISHING' && finalChunkAt != null && upload == null && videoId == null`; steps and confirm-upload both use that check:
   - The step returns wait "upload outcome unknown" with a link to the channel's uploads in YouTube Studio. It makes no YouTube call, so the page's polling costs no quota.
   - The owner pastes the video's URL. The app reads it through the pinned grant and requires the pinned `channelId`; then it records the ID, moves to `CLAIMED_COMPLETE` and runs normal read-back.
   - Without confirmation, the job stays paused and the owner may discard it. Discard does not prove the upload failed or remove any video already created.
 - Waits are step wait reasons, like "waking model". They are not new states, and they never count as failures.
 - `PAYLOAD` is kept only for YouTube's own quota-spent response. The visitor and "not connected" uses of it are removed.
 
-## `quota/{day}` (changed)
+## `quota_days`
 
-| Field                           | Change                                       |
-| ------------------------------- | -------------------------------------------- |
-| `uploads`                       | Kept: one shared pool, `UPLOADS_PER_DAY = 6` |
-| `runs`, `ips`, `visitorUploads` | **Removed**                                  |
+| Column    | Type                            | Rule                                   |
+| --------- | ------------------------------- | -------------------------------------- |
+| `day`     | date, primary key               | The quota day (`quotaDay`)             |
+| `uploads` | integer, not null, check `<= 6` | One shared pool, `UPLOADS_PER_DAY = 6` |
 
-- A fresh session on a later day than `uploadSlotDay` reserves a slot on the current day, because YouTube charges the day the insert happens.
+- Taking a slot is one statement: `INSERT INTO quota_days (day, uploads) VALUES ($1, 1) ON CONFLICT (day) DO UPDATE SET uploads = quota_days.uploads + 1 WHERE quota_days.uploads < 6 RETURNING uploads`. Zero rows means the pool is spent.
+- Today's `runs`, `ips` and `visitorUploads` are gone.
+- A fresh session on a later day than `uploadSlotDay` reserves a slot on the current day, because YouTube charges the day the insert happens. If that day's pool is spent, the step returns wait "Daily upload limit reached. Try tomorrow." and keeps the job in `PUBLISHING`.
 
 ## Session cookie `sb_session`
 
 - Payload `{uid, sid, gen, exp}`, HMAC-signed with `SESSION_SECRET` (existing `sign` / `unsign`). `sid` is a random ID per sign-in, so each browser session is distinct.
 - `exp` is the sign-in time plus 30 days, fixed.
-- Valid only when the signature checks out, `exp > now`, `users/{uid}` exists and `gen === accessGeneration`. One Firestore read; revocation works through the generation bump, so no invite read per request.
+- Valid only when the signature checks out, `exp > now`, the `users` row exists and `gen === access_generation`. One query; revocation works through the generation bump, so no invite read per request.
 - A payload without `uid` fails the check.
 
 ## OAuth state cookie `sb_oauth`
@@ -117,6 +138,6 @@ stateDiagram-v2
 - On `connect`, the callback requires the current session's `uid` and `sid` to both match the state (FR-026). Signing out and back in gets a new `sid`, so a stale callback fails.
 - The cookie is deleted on first read, so a replay fails. Logout deletes it too.
 
-## Removed collections
+## Removed
 
-- `samples` is removed. Existing Firestore jobs, samples and `yt-refresh-*` secrets are not carried over; delete them by hand.
+- `samples` has no table. The Firestore database, its jobs and samples, and the `yt-refresh-*` secrets are deleted by hand after the switch.

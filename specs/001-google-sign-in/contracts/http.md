@@ -38,10 +38,10 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 **Evaluating YouTube (FR-027):**
 
-1. Either required YouTube scope is missing from `tokens.scope` → `missing_scopes`. An existing `connected` doc stays untouched. Read-only, upload-only and neither-scope grants all fail this check.
+1. Either required YouTube scope is missing from `tokens.scope` → `missing_scopes`. An existing `connected` row stays untouched. Read-only, upload-only and neither-scope grants all fail this check.
 2. `channels.list?mine=true` returns nothing → `no_channel`, same rule.
 3. A refresh token came back → encrypt it and write `connected` with the channel, in one write.
-4. No refresh token came back, the stored doc is `connected`, and its channel ID matches → keep the stored grant.
+4. No refresh token came back, the stored row is `connected`, and its channel ID matches → keep the stored grant.
 5. No refresh token came back and there's no usable stored grant → on sign-in, 303 straight to `/auth/login?connect=youtube`, which forces consent. This covers anyone who granted this client before v2, such as Ashley.
 6. Otherwise → `missing_scopes`, with "Reconnect to finish". A sign-in never erases a stored grant.
 
@@ -52,7 +52,7 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## `POST /api/connections/youtube/disconnect`
 
-- Requires a session. Revokes the refresh token at Google (a failure there is logged and the delete goes ahead), then deletes the doc → 204.
+- Requires a session. Revokes the refresh token at Google (a failure there is logged and the delete goes ahead), then deletes the row → 204.
 
 ## Job APIs (changed behavior)
 
@@ -73,7 +73,7 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## `POST /api/jobs/{id}/confirm-upload`
 
-- Requires the job owner's session, a publishing job paused with unknown completion, and `{url}` pasted by the owner. Accepts `watch?v=`, `youtu.be/`, `/shorts/` and Studio `/video/` URLs; anything else returns 400. A foreign job returns 404; a stale or ineligible job returns 409.
+- Requires the job owner's session, a job in the outcome-unknown wait (`PUBLISHING`, `finalChunkAt` set, `upload` and `videoId` null, per [data-model](../data-model.md#publishing-and-verification-with-a-pinned-destination)), and `{url}` pasted by the owner. Accepts `watch?v=`, `youtu.be/`, `/shorts/` and Studio `/video/` URLs; anything else returns 400. A foreign job returns 404; a stale or ineligible job returns 409.
 - Read the selected video through the owner's pinned-channel grant and return 422 `"That video isn't on <channel title>."` for a missing video or a channel mismatch, with no job change. Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload or takes an upload slot.
 
 ## Removed
