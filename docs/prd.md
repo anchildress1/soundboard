@@ -125,6 +125,7 @@
 - Each upload uses its owner's own YouTube grant, so it lands on the owner's channel.
 - Approval shows and records the exact destination YouTube channel ID and name with the approved fields. Publishing and verification use only the owner's grant verified for that channel.
 - Before resumable upload initiation starts, changing the destination requires fresh approval of the destination and fields. Once initiation starts, the destination stays fixed through upload, retries and verification.
+- Persist the upload-start marker before the external initiation request; expired or cleared resumable sessions never unlock the destination. Recovery checks the stored session for completion or a resumable offset. An expired session restarts on the same channel only if the final bytes were never sent. If they may have been sent, pause with "upload outcome unknown" and a link to the channel's uploads in YouTube Studio. The owner either pastes the video's URL, which the app accepts only after checking the video is on the pinned channel through the owner's grant, or discards. The app never searches for the video, and never uploads again on its own. A 401 means lost access, not an unknown outcome.
 - Disconnecting or losing access pauses unfinished publishing and verification, preserving the job, approved fields and completed progress. Reconnecting the same channel resumes the next unfinished step without a duplicate upload. A different connection never redirects the job; a request already in flight may finish against the original channel.
 - Recovery preserves returned video IDs and quota reservations. The same upload never reserves a second slot; a destination change before initiation releases its unused slot and fresh approval reserves against the current day's pool. An uncertain external outcome must be reconciled before retrying or refunding a potentially spent slot.
 - Discarding a paused job stops future app steps; it does not delete a YouTube video or cancel an accepted external request. Keep any returned video ID and outcome.
@@ -168,7 +169,7 @@
 
 - Every job belongs to the user who made it; anyone else gets not-found.
 - User-specific caches and credentials are isolated by user and, where needed, channel. Check ownership before issuing a signed media URL; already-issued URLs retain their bounded expiry after sign-out.
-- Until spec 002, there's one artist profile (FLR). Only the user linked to it writes its memory or opens the brand guide. Other users' picks read it, and their feedback stays on the job.
+- Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
 - Firestore security rules deny all client access; only the app's service account reads and writes.
