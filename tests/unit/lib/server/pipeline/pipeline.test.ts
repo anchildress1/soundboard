@@ -752,16 +752,28 @@ describe('runStep: PUBLISHING', () => {
     expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Nothing to upload.' });
   });
 
-  it.each([
-    ['revoked', { status: 'revoked' as const, tokenCiphertext: null }],
-    ['on another channel', { channelId: 'UCother' }],
-  ])('waits to reconnect when the grant is %s, without calling YouTube', async (_label, change) => {
-    await db().update(connections).set(change).where(eq(connections.uid, A_JOB.ownerUid));
+  it('waits to reconnect when the grant is revoked, without calling YouTube', async () => {
+    await revokeA();
     expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
     expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
       consecutiveFailures: 0,
       error: null,
+      uploadStartedAt: null,
+    });
+    expect(called(/upload\/youtube/)).toHaveLength(0);
+  });
+
+  it('records a failure when the grant is on another channel, without calling YouTube', async () => {
+    await db()
+      .update(connections)
+      .set({ channelId: 'UCother' })
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(await runStep(await publishing())).toEqual({});
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 1,
+      error: "Connected channel doesn't match this job's channel.",
       uploadStartedAt: null,
     });
     expect(called(/upload\/youtube/)).toHaveLength(0);

@@ -181,10 +181,13 @@ describe('accessTokenFor', () => {
     expect(oauth.setCredentials).toHaveBeenCalledWith({ refresh_token: '1//refresh' });
   });
 
-  it('returns null for a different channel without decrypting', async () => {
+  it('throws for a different channel without decrypting', async () => {
     await putConnection(UID, connected());
-    expect(await accessTokenFor(UID, 'UC-other')).toBeNull();
+    await expect(accessTokenFor(UID, 'UC-other')).rejects.toThrow(
+      "Connected channel doesn't match this job's channel.",
+    );
     expect(kms.decrypt).not.toHaveBeenCalled();
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected', channelId: CHANNEL });
   });
 
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(

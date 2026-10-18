@@ -68,13 +68,16 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
 }
 
 /**
- * A fresh access token for the user's grant on `channelId`, or null unless the connection is
- * `connected` to that channel. Google rejecting the refresh token marks the connection revoked;
- * any other failure throws.
+ * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
+ * Google rejecting the refresh token marks the connection revoked and returns null. Throws when the
+ * connected channel isn't `channelId`, and on any other failure.
  */
 export async function accessTokenFor(uid: string, channelId: string): Promise<string | null> {
   const connection = await getConnection(uid);
-  if (connection?.status !== 'connected' || connection.channelId !== channelId) return null;
+  if (connection?.status !== 'connected') return null;
+  // The channel lock means a reconnect can't bring the job's channel back, so this never waits.
+  if (connection.channelId !== channelId)
+    throw new Error("Connected channel doesn't match this job's channel.");
   const cipher = connection.tokenCiphertext;
   const refreshToken = await decrypt(cipher).catch((cause: unknown) => {
     throw new Error("Couldn't unlock the YouTube grant.", { cause });
