@@ -286,6 +286,13 @@ describe('gate', () => {
     },
   );
 
+  it('lets a signed-in client navigation through without the signed-out bounce', async () => {
+    const { resolve, seen } = renderer();
+    const cookie = sessionCookie(USER_B.uid, 1);
+    await run(event(cookie, {}, '/jobs/x', true), resolve);
+    expect(seen.resolved).toBe(1);
+  });
+
   it.each(PATHS)('lets a signed-in request reach %s', async (path) => {
     const { resolve, seen } = renderer();
     const cookie = sessionCookie(USER_B.uid, 1);

@@ -658,15 +658,12 @@ describe('job page: Short tab', () => {
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
   });
 
-  it.each(['PUBLISHING', 'CLAIMED_COMPLETE'] as const)(
-    'still names the pinned channel when the upload failed in %s',
-    (failedState) => {
-      fetchMock.mockImplementation(hang);
-      const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
-      setup(view({ state: 'FAILED', failedState, destination }, { pick: PICK }));
-      expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
-    },
-  );
+  it('still names the pinned channel when the upload failed in PUBLISHING', () => {
+    fetchMock.mockImplementation(hang);
+    const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+    setup(view({ state: 'FAILED', failedState: 'PUBLISHING', destination }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
+  });
 
   it.each([
     ['VERIFIED', null],

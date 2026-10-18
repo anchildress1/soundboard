@@ -236,7 +236,9 @@ describe('accessTokenFor', () => {
         for each row execute function refuse_write()
     `);
     try {
-      await expect(accessTokenFor(UID, CHANNEL)).rejects.toThrow();
+      await expect(accessTokenFor(UID, CHANNEL)).rejects.toMatchObject({
+        cause: { message: 'write refused' },
+      });
     } finally {
       await db().execute(sql`drop trigger refuse_write on connections`);
       await db().execute(sql`drop function refuse_write`);
