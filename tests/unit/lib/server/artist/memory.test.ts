@@ -98,7 +98,7 @@ describe('artistJob', () => {
 
 describe('listFacts', () => {
   it('seeds the facts on first use', async () => {
-    expect(await listFacts({ seed: true })).toEqual(SEED_FACTS);
+    expect(await listFacts()).toEqual(SEED_FACTS);
     const rows = await facts();
     expect(rows.map((r) => [r.artistId, r.key]).sort()).toEqual(
       SEED_FACTS.map((f) => ['flr', f.key]).sort(),
@@ -110,32 +110,28 @@ describe('listFacts', () => {
   });
 
   it('reads stored facts instead of reseeding', async () => {
-    await listFacts({ seed: true });
+    await listFacts();
     await db().update(artistFacts).set({ data: RICHMOND }).where(fact('home'));
     await db().delete(artistFacts).where(fact('mr-kill'));
-    const read = await listFacts({ seed: true });
+    const read = await listFacts();
     expect(read).toHaveLength(SEED_FACTS.length - 1);
     expect(read.find((f) => f.key === 'home')?.value).toBe('Richmond');
     expect((await facts()).some((r) => r.key === 'mr-kill')).toBe(false);
   });
 
-  it('returns the seeds without writing them when seeding is off', async () => {
-    expect(await listFacts({ seed: false })).toEqual(SEED_FACTS);
-    expect(await facts()).toEqual([]);
-  });
-
-  it('reads stored facts without seeding when seeding is off', async () => {
+  it('reads stored facts without reseeding a partial table', async () => {
     await seed({ artistFacts: [{ artistId: 'flr', key: 'home', data: RICHMOND }] });
-    expect(await listFacts({ seed: false })).toEqual([RICHMOND]);
+    expect(await listFacts()).toEqual([RICHMOND]);
+    expect(await facts()).toHaveLength(1);
   });
 
   it("ignores another artist's facts", async () => {
     await seed({ artistFacts: [{ artistId: 'other', key: 'home', data: RICHMOND }] });
-    expect(await listFacts({ seed: false })).toEqual(SEED_FACTS);
+    expect(await listFacts()).toEqual(SEED_FACTS);
   });
 
   it('survives two first uses racing to seed', async () => {
-    const [a, b] = await Promise.all([listFacts({ seed: true }), listFacts({ seed: true })]);
+    const [a, b] = await Promise.all([listFacts(), listFacts()]);
     expect(a).toEqual(SEED_FACTS);
     expect(b).toEqual(SEED_FACTS);
     expect(await facts()).toHaveLength(SEED_FACTS.length);

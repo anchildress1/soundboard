@@ -126,7 +126,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 
   async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
     const [facts, feedback, brand] = artist
-      ? await Promise.all([listFacts({ seed: true }), recentFeedback(), approvedBrand()])
+      ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
       : [[], [], null];
     const result = await runPick(
       {

@@ -51,22 +51,17 @@ export async function artistJob(
   return owner?.artistId === ARTIST_ID;
 }
 
-/**
- * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty table is seeded on first
- * use; without it, the seeds are returned in memory and nothing is written.
- */
-export async function listFacts({ seed }: { seed: boolean }): Promise<Fact[]> {
+/** Reads Nathan's facts, seeding an empty table on first use. Call only on artist jobs. */
+export async function listFacts(): Promise<Fact[]> {
   const rows = await db()
     .select({ data: artistFacts.data })
     .from(artistFacts)
     .where(eq(artistFacts.artistId, ARTIST_ID));
   if (rows.length > 0) return rows.map((r) => r.data as Fact);
-  if (seed) {
-    await db()
-      .insert(artistFacts)
-      .values(SEED_FACTS.map((fact) => ({ artistId: ARTIST_ID, key: fact.key, data: fact })))
-      .onConflictDoNothing();
-  }
+  await db()
+    .insert(artistFacts)
+    .values(SEED_FACTS.map((fact) => ({ artistId: ARTIST_ID, key: fact.key, data: fact })))
+    .onConflictDoNothing();
   return SEED_FACTS;
 }
 
