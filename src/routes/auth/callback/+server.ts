@@ -9,7 +9,7 @@ import {
   sessionCookie,
   type OAuthState,
 } from '$lib/server/auth/auth';
-import { redeemInvite, upsertUser } from '$lib/server/auth/users';
+import { redeemInvite, updateProfile } from '$lib/server/auth/users';
 import { connectGrant, type ConnectOutcome } from '$lib/server/platforms/youtube';
 import type { RequestHandler } from './$types';
 
@@ -28,7 +28,8 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
     captureMessage('Sign-in denied', { level: 'info' });
     redirect(303, '/?signin=denied');
   }
-  const user = (await upsertUser(grant.sub, { email: grant.email, name: grant.name })) ?? redeemed;
+  const user =
+    (await updateProfile(grant.sub, { email: grant.email, name: grant.name })) ?? redeemed;
   cookies.set(SESSION_COOKIE, sessionCookie(user.uid, user.accessGeneration), {
     path: '/',
     httpOnly: true,

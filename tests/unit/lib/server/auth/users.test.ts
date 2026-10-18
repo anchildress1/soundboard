@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getUser, redeemInvite, upsertUser } from '$lib/server/auth/users';
+import { getUser, redeemInvite, updateProfile } from '$lib/server/auth/users';
 import { db } from '$lib/server/core/db';
 import { invites, users } from '$lib/server/core/schema';
 import { seed } from '../../../../helpers/db';
@@ -205,23 +205,23 @@ describe('getUser', () => {
   });
 });
 
-describe('upsertUser', () => {
+describe('updateProfile', () => {
   it('updates email and name and leaves accessGeneration untouched', async () => {
     await seed({ users: [{ uid: NATHAN, email: 'old@example.com', accessGeneration: 3 }] });
-    const user = await upsertUser(NATHAN, { email: 'new@example.com', name: 'Nathan' });
+    const user = await updateProfile(NATHAN, { email: 'new@example.com', name: 'Nathan' });
     expect(user).toMatchObject({ email: 'new@example.com', name: 'Nathan', accessGeneration: 3 });
     expect(await getUser(NATHAN)).toMatchObject({ accessGeneration: 3 });
   });
 
   it('clears a name the token no longer carries', async () => {
     await seed({ users: [{ uid: NATHAN, email: 'n@example.com', name: 'Nathan' }] });
-    expect(await upsertUser(NATHAN, { email: 'n@example.com', name: null })).toMatchObject({
+    expect(await updateProfile(NATHAN, { email: 'n@example.com', name: null })).toMatchObject({
       name: null,
     });
   });
 
   it('never creates a user', async () => {
-    expect(await upsertUser('nobody', { email: 'x@example.com', name: null })).toBeNull();
+    expect(await updateProfile('nobody', { email: 'x@example.com', name: null })).toBeNull();
     expect(await allUsers()).toEqual([]);
   });
 });

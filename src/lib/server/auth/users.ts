@@ -15,7 +15,7 @@ export async function getUser(uid: string): Promise<User | null> {
  * `redeemInvite` creates users) and never writes `accessGeneration`, so a sign-in can't revive a
  * revoked session. Returns null when the user doesn't exist.
  */
-export async function upsertUser(
+export async function updateProfile(
   uid: string,
   profile: { email: string; name: string | null },
 ): Promise<User | null> {
