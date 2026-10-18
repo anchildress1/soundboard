@@ -71,8 +71,8 @@ export function jobRow(doc: JobDoc): typeof jobs.$inferInsert {
   };
 }
 
-// Identity, lineage, the destination and `uploadStartedAt` each have their own guarded statement;
-// `finalChunkAt` has none yet, so nothing writes it.
+// Identity and lineage are fixed at insert; the destination and `uploadStartedAt` change only
+// through their own guarded statements, and nothing updates `finalChunkAt`.
 const GUARDED = [
   'id',
   'ownerUid',
