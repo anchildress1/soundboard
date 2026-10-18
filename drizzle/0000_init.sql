@@ -39,7 +39,8 @@ CREATE TABLE "connections" (
 	CONSTRAINT "connections_uid_platform_pk" PRIMARY KEY("uid","platform"),
 	CONSTRAINT "connections_platform_check" CHECK ("connections"."platform" = 'youtube'),
 	CONSTRAINT "connections_status_check" CHECK ("connections"."status" in ('connected', 'missing_scopes', 'no_channel', 'revoked')),
-	CONSTRAINT "connections_token_check" CHECK ("connections"."status" = 'connected' or "connections"."token_ciphertext" is null)
+	CONSTRAINT "connections_token_check" CHECK ("connections"."status" = 'connected' or "connections"."token_ciphertext" is null),
+	CONSTRAINT "connections_connected_check" CHECK ("connections"."status" <> 'connected' or ("connections"."token_ciphertext" is not null and "connections"."channel_id" is not null))
 );
 --> statement-breakpoint
 CREATE TABLE "invites" (
@@ -85,7 +86,8 @@ CREATE TABLE "jobs" (
 	"upload_started_at" timestamp with time zone,
 	"final_chunk_at" timestamp with time zone,
 	"video_id" text,
-	"data" jsonb NOT NULL
+	"data" jsonb NOT NULL,
+	CONSTRAINT "jobs_state_check" CHECK ("jobs"."state" in ('AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'HOOK', 'RENDER', 'REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'FAILED', 'DISCARDED'))
 );
 --> statement-breakpoint
 CREATE TABLE "users" (

@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1792289048738,
+      "when": 1792342844131,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1792318411062,
-      "tag": "0001_state_and_connection_checks",
       "breakpoints": true
     }
   ]

@@ -1,2 +1,0 @@
-ALTER TABLE "connections" ADD CONSTRAINT "connections_connected_check" CHECK ("connections"."status" <> 'connected' or ("connections"."token_ciphertext" is not null and "connections"."channel_id" is not null));--> statement-breakpoint
-ALTER TABLE "jobs" ADD CONSTRAINT "jobs_state_check" CHECK ("jobs"."state" in ('AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'HOOK', 'RENDER', 'REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'FAILED', 'DISCARDED'));

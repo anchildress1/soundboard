@@ -1,5 +1,5 @@
 {
-  "id": "9b7ffe33-6c35-4f72-aa47-c81eca501d83",
+  "id": "4327ddd2-7c6c-44f5-9314-6ec806aca93e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -272,6 +272,10 @@
         "connections_token_check": {
           "name": "connections_token_check",
           "value": "\"connections\".\"status\" = 'connected' or \"connections\".\"token_ciphertext\" is null"
+        },
+        "connections_connected_check": {
+          "name": "connections_connected_check",
+          "value": "\"connections\".\"status\" <> 'connected' or (\"connections\".\"token_ciphertext\" is not null and \"connections\".\"channel_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -623,7 +627,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "jobs_state_check": {
+          "name": "jobs_state_check",
+          "value": "\"jobs\".\"state\" in ('AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'HOOK', 'RENDER', 'REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'FAILED', 'DISCARDED')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.users": {
