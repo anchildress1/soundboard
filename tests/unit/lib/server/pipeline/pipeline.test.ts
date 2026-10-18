@@ -1128,6 +1128,46 @@ describe('runStep: PUBLISHING recovery', () => {
     });
   });
 
+  it('cancels the open source read and sends nothing when the marker cannot be written', async () => {
+    let cancelled = false;
+    on(
+      /storage\.googleapis\.com/,
+      () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 206 },
+        ),
+    );
+    on(/upload\.example\/s1/, () => new Response('', { status: 308 }));
+    await db().execute(sql`
+      create function refuse_marker() returns trigger language plpgsql
+        as $$ begin raise exception 'marker refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_marker before update on jobs for each row
+        when (new.final_chunk_at is distinct from old.final_chunk_at)
+        execute function refuse_marker()
+    `);
+    try {
+      await runStep(await publishing({ upload: UPLOAD }));
+    } finally {
+      await db().execute(sql`drop trigger refuse_marker on jobs`);
+      await db().execute(sql`drop function refuse_marker`);
+    }
+    expect(cancelled).toBe(true);
+    expect(called(/upload\.example\/s1/)).toHaveLength(1);
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      finalChunkAt: null,
+      upload: UPLOAD,
+      consecutiveFailures: 1,
+    });
+  });
+
   it('leaves the marker unset while chunks before the last go out', async () => {
     h.objects.set('uploads/j1', { size: String(300 * 1024 * 1024), contentType: 'video/mp4' });
     const total = 300 * 1024 * 1024;

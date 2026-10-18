@@ -266,7 +266,13 @@ async function sendChunk(
       // Marked once GCS answered and just before the PUT: a source that never opened sent nothing,
       // and a lost reply to this PUT must never lead to a second upload.
       if (finalChunk(result.next, total)) {
-        await markFinalChunk(job.id);
+        try {
+          await markFinalChunk(job.id);
+        } catch (error) {
+          // The open GCS read would otherwise hold its socket until the timeout.
+          await source.body?.cancel();
+          throw error;
+        }
         finalSent = true;
       }
       result = await uploadChunk(sessionUri, source, result.next, total);
