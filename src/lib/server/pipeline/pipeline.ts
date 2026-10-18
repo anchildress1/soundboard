@@ -269,8 +269,13 @@ async function sendChunk(
         try {
           await markFinalChunk(job.id);
         } catch (error) {
-          // The open GCS read would otherwise hold its socket until the timeout.
-          await source.body?.cancel();
+          // The open GCS read would otherwise hold its socket until the timeout. A failed cancel is
+          // reported on its own so the marker's error stays the one the step records.
+          await source.body?.cancel().catch((cancelError: unknown) =>
+            captureException(cancelError, {
+              tags: { 'job.id': job.id, component: 'gcs-cancel' },
+            }),
+          );
           throw error;
         }
         finalSent = true;

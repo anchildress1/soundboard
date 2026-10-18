@@ -1172,6 +1172,51 @@ describe('runStep: PUBLISHING recovery', () => {
     });
   });
 
+  it('reports a failed cancel and still records the marker error', async () => {
+    const cancelError = new Error('cancel broke');
+    on(
+      /storage\.googleapis\.com/,
+      () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              throw cancelError;
+            },
+          }),
+          { status: 206 },
+        ),
+    );
+    on(/upload\.example\/s1/, () => new Response('', { status: 308 }));
+    await db().execute(sql`
+      create function refuse_marker() returns trigger language plpgsql
+        as $$ begin raise exception 'marker refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_marker before update on jobs for each row
+        when (new.final_chunk_at is distinct from old.final_chunk_at)
+        execute function refuse_marker()
+    `);
+    try {
+      await runStep(await publishing({ upload: UPLOAD }));
+    } finally {
+      await db().execute(sql`drop trigger refuse_marker on jobs`);
+      await db().execute(sql`drop function refuse_marker`);
+    }
+    expect(captureException).toHaveBeenCalledWith(cancelError, {
+      tags: { 'job.id': 'j1', component: 'gcs-cancel' },
+    });
+    const [stepError] = captureException.mock.calls.find(([, context]) =>
+      Boolean((context as { tags?: { step?: string } }).tags?.step),
+    )!;
+    expect(stepError).not.toBe(cancelError);
+    expect(called(/upload\.example\/s1/)).toHaveLength(1);
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      finalChunkAt: null,
+      consecutiveFailures: 1,
+    });
+  });
+
   it('leaves the marker unset while chunks before the last go out', async () => {
     h.objects.set('uploads/j1', { size: String(300 * 1024 * 1024), contentType: 'video/mp4' });
     const total = 300 * 1024 * 1024;
