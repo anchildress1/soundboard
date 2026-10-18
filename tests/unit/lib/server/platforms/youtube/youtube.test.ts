@@ -631,8 +631,8 @@ describe('uploadFailure', () => {
     ['a 403 without quota', new YouTubeError(403, 'forbidden')],
     ['a 400 naming another reason', new YouTubeError(400, 'invalidTitle')],
     ['a 499 at the edge of the range', new YouTubeError(499, 'closed')],
-  ])('reads %s as refused', (_label, error) => {
-    expect(uploadFailure(error)).toBe('refused');
+  ])('reads %s as denied', (_label, error) => {
+    expect(uploadFailure(error)).toBe('denied');
   });
 
   it.each([

@@ -21,7 +21,7 @@ export class YouTubeError extends Error {
   }
 }
 
-export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'refused' | 'other';
+export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'denied' | 'other';
 
 /**
  * Classifies an upload error: an expired resumable session, a spent daily limit (the project's
@@ -36,7 +36,7 @@ export function uploadFailure(error: unknown): UploadFailure {
   if ([400, 403].includes(error.status) && /uploadLimitExceeded/.test(error.message))
     return 'quota-spent';
   if (error.status === 403 && /quota/i.test(error.message)) return 'quota-spent';
-  return error.status >= 400 && error.status < 500 ? 'refused' : 'other';
+  return error.status >= 400 && error.status < 500 ? 'denied' : 'other';
 }
 
 const PACIFIC = new Intl.DateTimeFormat('en-US', {
