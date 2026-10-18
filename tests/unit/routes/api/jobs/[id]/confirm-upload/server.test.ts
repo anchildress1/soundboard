@@ -276,7 +276,7 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
 
   it('skips the publish-time check when the upload start was never recorded', async () => {
     await seedJob({ ...PAUSED, uploadStartedAt: null });
-    videoOn(CHANNEL_A, '2020-01-01T00:00:00Z');
+    videoOn(CHANNEL_A, '1969-12-31T23:59:59Z');
     expect((await confirm({ url: `https://youtu.be/${ID}` })).status).toBe(200);
     expect(await getJob('j1')).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: ID });
   });
