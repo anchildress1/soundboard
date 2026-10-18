@@ -14,6 +14,7 @@ export {
 export {
   channelsMine,
   channelStats,
+  finalChunk,
   readBack,
   recentVideos,
   searchMusicVideos,
@@ -25,6 +26,7 @@ export {
   videosByIds,
   YOUTUBE_SCOPES,
   type CatalogVideo,
+  type ChunkResult,
   type ChannelStats,
   type VideoDuration,
 } from './youtube';

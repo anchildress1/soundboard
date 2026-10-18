@@ -1,6 +1,13 @@
 import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
 import { scrubUrl } from '$lib/scrub';
-import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
+import {
+  DRIVEN_STATES,
+  type Chunk,
+  type JobState,
+  type Pick,
+  type PickFields,
+  type Wait,
+} from '$lib/types';
 import { approvedBrand } from '$lib/server/artist/brand';
 import { analyzeChunk } from '$lib/server/ai/chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '$lib/server/media/ffmpeg';
@@ -12,6 +19,7 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  markFinalChunk,
   markUploadStarted,
   ok,
   releaseJob,
@@ -27,6 +35,7 @@ import type { JobPatch } from '$lib/server/jobs/rows';
 import { invokeAgent } from '$lib/server/core/tracing';
 import {
   accessTokenFor,
+  finalChunk,
   readBack,
   recentVideos,
   startResumableUpload,
@@ -34,6 +43,7 @@ import {
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  type ChunkResult,
 } from '$lib/server/platforms/youtube';
 
 export const VERIFY_ATTEMPTS = 10;
@@ -166,49 +176,80 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   }
 }
 
+const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
+const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
+
+/**
+ * Whether the upload session was lost after its final bytes may have gone out, so only the owner
+ * can say whether YouTube kept the video. Steps and confirm-upload both use this one check.
+ */
+export const outcomeUnknown = (job: JobDoc): boolean =>
+  job.state === 'PUBLISHING' &&
+  job.finalChunkAt !== null &&
+  job.upload === null &&
+  job.videoId === null;
+
 /**
  * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
  * alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload here.
+ * A spent daily limit and a refused grant are waits, never failures.
  */
 async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
+  // No YouTube call at all: the page polls this wait, and polling must spend no quota.
+  if (outcomeUnknown(job)) return { wait: OUTCOME_UNKNOWN };
   const token = await accessTokenFor(job.ownerUid, job.destination.channelId);
   if (!token) return { wait: 'reconnect YouTube' };
-  if (!job.upload) {
-    const info = await objectInfo(job.object);
-    if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
-    // Durable before the request: a crash after YouTube opened the session still shows it began.
-    await markUploadStarted(job.id);
-    try {
-      const sessionUri = await startResumableUpload(
-        token,
-        job.finalFields,
-        info.size,
-        job.contentType,
-      );
-      return ok({
-        upload: { sessionUri, total: info.size },
-        uploadProgress: { sent: 0, total: info.size },
-      });
-    } catch (error) {
-      if (uploadFailure(error) === 'quota-spent') {
-        return fail('PUBLISHING', 'Daily upload limit reached. Try tomorrow.');
-      }
-      throw error;
-    }
-  }
-  const { sessionUri, total } = job.upload;
-  let status: Awaited<ReturnType<typeof uploadOffset>>;
   try {
-    status = await uploadOffset(sessionUri, total);
+    return job.upload
+      ? await sendChunk(job, job.upload)
+      : await initiate(job, token, job.finalFields);
   } catch (error) {
-    // An expired or invalidated session can't resume; the next step opens a fresh one.
-    if (uploadFailure(error) === 'session-lost') return ok({ upload: null, uploadProgress: null });
+    const failure = uploadFailure(error);
+    if (failure === 'quota-spent') return { wait: DAILY_LIMIT };
+    if (failure === 'access-lost') return { wait: 'reconnect YouTube' };
     throw error;
   }
-  const result = status.done
-    ? status
-    : await uploadChunk(sessionUri, await signedReadUrl(job.object), status.next, total);
+}
+
+async function initiate(job: JobDoc, token: string, fields: PickFields): Promise<StepOutput> {
+  const info = await objectInfo(job.object);
+  if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
+  // Durable before the request: a crash after YouTube opened the session still shows it began.
+  await markUploadStarted(job.id);
+  const sessionUri = await startResumableUpload(token, fields, info.size, job.contentType);
+  return ok({
+    upload: { sessionUri, total: info.size },
+    uploadProgress: { sent: 0, total: info.size },
+  });
+}
+
+/**
+ * Resumes from the offset YouTube holds. A lost session restarts on the same destination only if
+ * the final chunk never went out; after it may have, the outcome is the owner's call.
+ */
+async function sendChunk(
+  job: JobDoc,
+  { sessionUri, total }: { sessionUri: string; total: number },
+): Promise<StepOutput> {
+  let finalSent = job.finalChunkAt !== null;
+  let result: ChunkResult;
+  try {
+    result = await uploadOffset(sessionUri, total);
+    if (!result.done) {
+      const source = await signedReadUrl(job.object);
+      if (finalChunk(result.next, total)) {
+        // Durable before the bytes: a lost reply to this PUT must never lead to a second upload.
+        await markFinalChunk(job.id);
+        finalSent = true;
+      }
+      result = await uploadChunk(sessionUri, source, result.next, total);
+    }
+  } catch (error) {
+    if (uploadFailure(error) !== 'session-lost') throw error;
+    if (finalSent) return { upload: null, wait: OUTCOME_UNKNOWN };
+    return ok({ upload: null, uploadProgress: null });
+  }
   if (result.done) {
     // The insert response only claims success; the read-back step decides VERIFIED.
     return ok({

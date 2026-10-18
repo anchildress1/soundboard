@@ -4,6 +4,7 @@ import {
   channelsMine,
   channelStats,
   clearStatsCache,
+  finalChunk,
   readBack,
   recentVideos,
   searchMusicVideos,
@@ -442,13 +443,17 @@ describe('uploadChunk', () => {
     });
   });
 
-  it('throws YouTubeError on a bad GCS status without touching the session', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('denied', { status: 403 }));
-    const error = await uploadChunk('s', 'g', 0, 10).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(YouTubeError);
-    expect((error as YouTubeError).message).toBe('GCS range read 403');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
+  it.each([403, 404])(
+    'throws a plain error on a GCS %i without touching the session',
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(new Response('denied', { status }));
+      const error = await uploadChunk('s', 'g', 0, 10).catch((e: unknown) => e);
+      expect(error).not.toBeInstanceOf(YouTubeError);
+      expect(uploadFailure(error)).toBe('other');
+      expect((error as Error).message).toBe(`GCS range read ${status}`);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('throws when YouTube rejects the chunk', async () => {
     fetchMock
@@ -542,14 +547,44 @@ describe('uploadFailure', () => {
     expect(uploadFailure(new YouTubeError(403, 'QUOTA'))).toBe('quota-spent');
   });
 
+  it.each([400, 403])(
+    "reads the channel's uploadLimitExceeded on a %i as a spent limit",
+    (status) => {
+      const error = new YouTubeError(
+        status,
+        `upload init ${status}: {"reason":"uploadLimitExceeded"}`,
+      );
+      expect(uploadFailure(error)).toBe('quota-spent');
+    },
+  );
+
+  it('reads a 401 as lost access, never a lost session', () => {
+    expect(uploadFailure(new YouTubeError(401, 'upload init 401: invalid credentials'))).toBe(
+      'access-lost',
+    );
+  });
+
   it.each([
     ['a 403 without quota', new YouTubeError(403, 'forbidden')],
+    ['a 400 naming another reason', new YouTubeError(400, 'invalidTitle')],
+    ['the upload limit on a 500', new YouTubeError(500, 'uploadLimitExceeded')],
     ['a quota message on another status', new YouTubeError(500, 'quota backend')],
     ['a plain Error with a session status', Object.assign(new Error('x'), { status: 404 })],
     ['a non-error value', 'quota'],
     ['undefined', undefined],
   ])('reads %s as other', (_label, error) => {
     expect(uploadFailure(error)).toBe('other');
+  });
+});
+
+describe('finalChunk', () => {
+  it.each([
+    [0, 10, true],
+    [0, UPLOAD_CHUNK_BYTES, true],
+    [0, UPLOAD_CHUNK_BYTES + 1, false],
+    [UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES + 1, true],
+  ])('from %i of %i is final: %s', (offset, total, final) => {
+    expect(finalChunk(offset, total)).toBe(final);
   });
 });
 

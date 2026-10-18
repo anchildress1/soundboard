@@ -21,12 +21,19 @@ export class YouTubeError extends Error {
   }
 }
 
-export type UploadFailure = 'session-lost' | 'quota-spent' | 'other';
+export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'other';
 
-/** Classifies an upload error: an expired resumable session, a spent daily quota, or anything else. */
+/**
+ * Classifies an upload error: an expired resumable session, a spent daily limit (the project's
+ * `quotaExceeded` or the channel's `uploadLimitExceeded`), a refused grant, or anything else.
+ */
 export function uploadFailure(error: unknown): UploadFailure {
   if (!(error instanceof YouTubeError)) return 'other';
   if (error.status === 404 || error.status === 410) return 'session-lost';
+  if (error.status === 401) return 'access-lost';
+  // Google's docs don't pin the channel limit's status, so its reason counts on either 4xx.
+  if ([400, 403].includes(error.status) && /uploadLimitExceeded/.test(error.message))
+    return 'quota-spent';
   if (error.status === 403 && /quota/i.test(error.message)) return 'quota-spent';
   return 'other';
 }
@@ -245,6 +252,10 @@ export async function startResumableUpload(
   return location;
 }
 
+/** Whether the chunk starting at `offset` reaches the end of a `total`-byte file. */
+export const finalChunk = (offset: number, total: number): boolean =>
+  offset + UPLOAD_CHUNK_BYTES >= total;
+
 export type ChunkResult = { done: true; videoId: string } | { done: false; next: number };
 
 const nextFromRange = (range: string | null) => {
@@ -286,7 +297,8 @@ export async function uploadChunk(
     signal: AbortSignal.timeout(110_000),
   });
   if (source.status !== 206 && source.status !== 200) {
-    throw new YouTubeError(source.status, `GCS range read ${source.status}`);
+    // A plain error: a GCS 404 must not read as a lost upload session.
+    throw new Error(`GCS range read ${source.status}`);
   }
   return finish(
     await fetch(sessionUri, {

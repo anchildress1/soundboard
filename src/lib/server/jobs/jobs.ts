@@ -199,6 +199,17 @@ export async function markUploadStarted(id: string): Promise<void> {
     .where(eq(jobs.id, id));
 }
 
+/**
+ * Records when the chunk reaching the file size first went out; later calls keep the first time.
+ * Unconditional on the claim: the marker must exist whenever final bytes may have been sent.
+ */
+export async function markFinalChunk(id: string): Promise<void> {
+  await db()
+    .update(jobs)
+    .set({ finalChunkAt: sql`coalesce(${jobs.finalChunkAt}, now())` })
+    .where(eq(jobs.id, id));
+}
+
 /** Moves the job to a new state only if it is still in one of `from`; false when it already moved. */
 export async function transitionJob(
   id: string,
