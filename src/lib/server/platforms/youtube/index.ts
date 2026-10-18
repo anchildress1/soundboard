@@ -23,6 +23,8 @@ export {
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  videoChannel,
+  videoIdFromUrl,
   videosByIds,
   YOUTUBE_SCOPES,
   type CatalogVideo,

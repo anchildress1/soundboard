@@ -344,3 +344,42 @@ export async function readBack(accessToken: string, videoId: string): Promise<Re
   const item = body.items?.[0];
   return item ? { ...toCatalog(item), uploadStatus: item.status?.uploadStatus ?? null } : null;
 }
+
+/** The channel that owns the video, read through the owner's grant; null when it isn't visible. */
+export async function videoChannel(accessToken: string, id: string): Promise<string | null> {
+  const query = new URLSearchParams({ part: 'snippet', id });
+  const body = await readJson<ListResponse<{ snippet?: { channelId?: string } }>>(
+    await fetch(`${API}/videos?${query}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    }),
+    'videos.list',
+  );
+  return body.items?.[0]?.snippet?.channelId ?? null;
+}
+
+const VIDEO_ID = /^[\w-]{11}$/;
+
+/**
+ * The video ID in a pasted `watch?v=`, `youtu.be/`, `/shorts/` or YouTube Studio `/video/` URL;
+ * null for anything else.
+ */
+export function videoIdFromUrl(input: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const host = url.hostname.toLowerCase();
+  const [first, second] = url.pathname.split('/').filter(Boolean);
+  let id: string | null | undefined;
+  if (host === 'youtu.be') id = first;
+  else if (host === 'studio.youtube.com') id = first === 'video' ? second : null;
+  else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    if (url.pathname === '/watch') id = url.searchParams.get('v');
+    else if (first === 'shorts') id = second;
+  }
+  return id && VIDEO_ID.test(id) ? id : null;
+}

@@ -14,6 +14,8 @@ import {
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  videoChannel,
+  videoIdFromUrl,
   videosByIds,
   isoSeconds,
   YouTubeError,
@@ -594,5 +596,67 @@ describe('YOUTUBE_SCOPES', () => {
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
     ]);
+  });
+});
+
+describe('videoChannel', () => {
+  it("reads the video's channel through the caller's grant", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ items: [{ id: 'dQw4w9WgXcQ', snippet: { channelId: 'UCflr' } }] }),
+    );
+    expect(await videoChannel('tok', 'dQw4w9WgXcQ')).toBe('UCflr');
+    expect(urlOf(0).pathname).toBe('/youtube/v3/videos');
+    expect(urlOf(0).searchParams.get('part')).toBe('snippet');
+    expect(urlOf(0).searchParams.get('id')).toBe('dQw4w9WgXcQ');
+    expect(urlOf(0).searchParams.get('key')).toBeNull();
+    expect(headersOf(0)).toEqual({ authorization: 'Bearer tok' });
+  });
+
+  it.each([
+    ['no items', {}],
+    ['an empty list', { items: [] }],
+    ['no snippet', { items: [{ id: 'x' }] }],
+  ])('returns null for %s', async (_label, body) => {
+    fetchMock.mockResolvedValueOnce(json(body));
+    expect(await videoChannel('tok', 'x')).toBeNull();
+  });
+
+  it('throws YouTubeError on an error status', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('nope', { status: 401 }));
+    await expect(videoChannel('tok', 'x')).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('videoIdFromUrl', () => {
+  const ID = 'dQw4w9WgXcQ';
+  it.each([
+    `https://www.youtube.com/watch?v=${ID}`,
+    `https://youtube.com/watch?v=${ID}&t=10s`,
+    `https://m.youtube.com/watch?v=${ID}`,
+    `https://youtu.be/${ID}`,
+    `https://youtu.be/${ID}?si=abc`,
+    `https://www.youtube.com/shorts/${ID}`,
+    `https://studio.youtube.com/video/${ID}/edit`,
+    `  https://youtu.be/${ID}  `,
+  ])('reads the ID from %s', (url) => {
+    expect(videoIdFromUrl(url)).toBe(ID);
+  });
+
+  it.each([
+    '',
+    ID,
+    'not a url',
+    `ftp://youtu.be/${ID}`,
+    `https://example.com/watch?v=${ID}`,
+    `https://notyoutube.com/watch?v=${ID}`,
+    `https://youtube.com.evil.example/watch?v=${ID}`,
+    'https://www.youtube.com/watch',
+    'https://www.youtube.com/watch?v=short',
+    `https://www.youtube.com/channel/${ID}`,
+    `https://studio.youtube.com/channel/${ID}`,
+    'https://youtu.be/',
+    `https://www.youtube.com/shorts/${ID}x`,
+  ])('rejects %j', (url) => {
+    expect(videoIdFromUrl(url)).toBeNull();
   });
 });
