@@ -350,11 +350,12 @@ async function verified(job: JobDoc, videoId: string, video: ReadBack | null): P
   }
   const attempts = job.verifyAttempts + 1;
   if (attempts < VERIFY_ATTEMPTS) return { verifyAttempts: attempts };
+  if (!video) return fail('CLAIMED_COMPLETE', 'YouTube never returned the uploaded video.');
   return fail(
     'CLAIMED_COMPLETE',
-    video
-      ? `YouTube kept the upload at "${video.uploadStatus ?? 'no status'}".`
-      : 'YouTube never returned the uploaded video.',
+    video.uploadStatus
+      ? `YouTube kept the upload at "${video.uploadStatus}".`
+      : 'YouTube never gave the upload a status.',
   );
 }
 

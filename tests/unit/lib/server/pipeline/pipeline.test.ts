@@ -1481,9 +1481,9 @@ describe('runStep: CLAIMED_COMPLETE', () => {
 
   it.each([
     [{ uploadStatus: 'quarantined' }, 'YouTube kept the upload at "quarantined".'],
-    [{}, 'YouTube kept the upload at "no status".'],
+    [{}, 'YouTube never gave the upload a status.'],
   ])(
-    `fails naming the status YouTube kept after ${VERIFY_ATTEMPTS} read-backs of %o`,
+    `fails on the status YouTube kept, or its absence, after ${VERIFY_ATTEMPTS} read-backs of %o`,
     async (status, error) => {
       on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status }] }));
       await runStep(await claimed({ verifyAttempts: VERIFY_ATTEMPTS - 1 }));
