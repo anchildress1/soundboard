@@ -126,7 +126,7 @@ flowchart LR
 ```bash
 git clone git@github.com:anchildress1/soundboard.git
 cd soundboard
-cp .env.example .env   # fill in DATABASE_URL and DATABASE_URL_UNPOOLED from Neon
+cp .env.example .env   # fill in the values listed under Configuration
 make install
 pnpm drizzle-kit migrate
 make dev
@@ -149,7 +149,6 @@ make dev
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
 - **Brand guide:** accounts linked to Nathan's artist profile get a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
 - **Model deploys:** run `make model-image` first, then `make deploy`. The first deploy uploads that image to Vertex and deploys it to the endpoint; expect 20+ minutes. Vertex can fail a deploy with a generic system error when no L4 is free in us-central1. `make deploy` refuses to queue a second deploy while one is still running, and uses the image tagged for the current `model/` tree. A model left idle for 30 days is undeployed automatically; `make deploy` puts it back.
-- **After the first Postgres deploy:** delete the Firestore database, the `yt-refresh-nathan` and `yt-refresh-sandbox` secrets, and the runtime account's `roles/datastore.user` binding by hand. `deploy.sh` no longer creates or uses them.
 
 ---
 
@@ -178,9 +177,9 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 ## Security
 
 - Video and audio are stored only in Cloud Storage and processed only by the model running on a Vertex AI endpoint in the same project. Sentry receives text, with audio and images replaced by size-only placeholders.
-- Every page and API needs a signed-in, invited Google account. Each user sees and uploads only their own jobs, to their own channel; only accounts linked to Nathan's artist profile read or change his stored preferences.
+- Every page except home and the sign-in pages, and every API, needs a signed-in Google account (an invited one while `SIGNUP_MODE=invite`). Each user sees and uploads only their own jobs, to their own channel; only accounts linked to Nathan's artist profile read or change his stored preferences.
 - Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server, encrypted with a Cloud KMS key only the app's service account can use.
-- Only the app connects to the database.
+- No client access to the database: only the app, migrations, and the invite script connect, using connection strings from Secret Manager or a local `.env`.
 - Upload URLs are size-capped, and uploaded files are deleted after 7 days.
 
 ---

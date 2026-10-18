@@ -21,7 +21,7 @@ Audience: AI coding agents. Directives only.
 - `VERIFIED` only after `videos.list` returns the upload. Insert response → `CLAIMED_COMPLETE`.
 - A user is their Google `sub` (`users.uid`). Email is display and invite lookup only.
 - Sign-in needs an active invite while `SIGNUP_MODE=invite`. First redemption binds the invite to the `sub`; NEVER rebind it.
-- Every job query filters by `ownerUid`. Another user's job → 404, never 403.
+- Route handlers load jobs only through `authorizedJob` (owner check). Another user's job → 404, never 403.
 - Only a user with `artistId` reads or writes `artist_*` rows or opens `/brand`. Unlinked users' picks run with no artist memory or identity; their feedback stays in `job_feedback`.
 - One YouTube connection per user, bound to their own Google account. Refresh tokens: KMS ciphertext in `connections.token_ciphertext` only. NEVER log, trace, or return a token or ciphertext.
 - Upload and verify use only the job's approved destination channel and its owner's grant.

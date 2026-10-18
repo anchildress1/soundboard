@@ -172,7 +172,7 @@
 - Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
-- The database has no client access: only the app reaches Neon, over its connection string from Secret Manager. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
+- The database has no client access: only the app (pooled URL from Secret Manager), migrations, and the invite script (direct or pooled URL on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
 - [ ] A user's token and jobs are reachable only from that user's session.
 
 **R11 · Sentry agent tracing**
@@ -218,7 +218,7 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 - **Why Vertex:** Cloud Run's L4 quota for the project is 0 and two increase requests were denied. Vertex's L4 serving quota in us-central1 is 2 without a request. Audio still never leaves the project.
 - **Cost:** about $0.81/hr while a model replica is up (`g2-standard-4` online inference, L4 included), billed for at least 5 minutes per wake. The app bills only while serving. $0 when nobody visits.
 - **Storage:** one GCS bucket, `uploads/`.
-- **State:** Neon Postgres (`aws-us-east-2`) through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
+- **State:** Neon Postgres through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
 - **Region:** us-central1 for everything on Google Cloud. The database is the one exception: Neon runs in `aws-us-east-2`.
 - **Pipeline:** runs in the app container while Nathan watches. The status page calls `POST /api/jobs/{id}/step`; each call does one step and returns the job.
   - **prep:** probe and measure the whole file.
@@ -237,7 +237,7 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 | `connections`             | one row per user and platform: grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                  |
 | `jobs`                    | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON |
 | `job_chunks`, `job_picks` | step results                                                                                                                                                                           |
-| `job_feedback`            | feedback from users without an artist link; it stays on the job                                                                                                                        |
+| `job_feedback`            | feedback on jobs not tied to an artist profile; it stays on the job                                                                                                                    |
 | `artist_facts`            | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy.  |
 | `artist_feedback`         | EDITED · SKIPPED · ACCEPTED                                                                                                                                                            |
 | `artist_publishes`        | video ID, URL, final metadata, status                                                                                                                                                  |

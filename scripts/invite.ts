@@ -1,8 +1,8 @@
 // Manages invites against DATABASE_URL (the unpooled URL works too):
-//   node scripts/invite.ts add <email> [--artist flr]
-//   node scripts/invite.ts revoke <email>
-//   node scripts/invite.ts reactivate <email>
-//   node scripts/invite.ts list
+//   node --env-file=.env scripts/invite.ts add <email> [--artist flr]
+//   node --env-file=.env scripts/invite.ts revoke <email>
+//   node --env-file=.env scripts/invite.ts reactivate <email>
+//   node --env-file=.env scripts/invite.ts list
 // Standalone on purpose: no $lib imports, only syntax Node's type stripping can run.
 import pg from 'pg';
 
