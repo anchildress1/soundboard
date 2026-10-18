@@ -61,7 +61,7 @@ async function call(opts: { cookie?: string; query?: string; origin?: string }) 
 }
 
 const google = (sub: string, email: string, verified = true) => {
-  h.getToken.mockResolvedValue({ tokens: { id_token: 'idt' } });
+  h.getToken.mockResolvedValue({ tokens: { id_token: 'idt', access_token: 'at' } });
   h.verifyIdToken.mockResolvedValue({
     getPayload: () => ({ sub, email, email_verified: verified, name: 'New' }),
   });
@@ -165,7 +165,7 @@ describe('GET /auth/callback: sign-in', () => {
     await seed({ invites: [{ email: EMAIL }] });
     google(SUB, EMAIL, false);
     const { thrown, cookies } = await call({ cookie: sign(state()) });
-    expect((thrown as Error).message).toBe('Google account email is not verified');
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.set).not.toHaveBeenCalled();
     expect(await allUsers()).toEqual([]);
   });

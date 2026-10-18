@@ -3,17 +3,16 @@ import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   authUrl,
-  CHANNEL_SCOPES,
   exchangeCode,
   newOAuthState,
   OAUTH_TTL_SEC,
   oauthClient,
   readOAuthState,
   readSession,
+  SCOPES,
   SESSION_TTL_SEC,
   sessionCookie,
   sign,
-  SIGN_IN_SCOPES,
   unsign,
 } from '$lib/server/auth/auth';
 
@@ -202,32 +201,36 @@ describe('oauthClient / authUrl', () => {
     ]);
   });
 
-  it('asks sign-in for identity only, online', () => {
+  it('asks sign-in for identity and YouTube offline in one consent, with the chooser', () => {
     const state = newOAuthState('sign-in', null);
     const url = authUrl(ORIGIN, state);
     expect(url).toContain('accounts.google.com');
     expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
-      scope: SIGN_IN_SCOPES,
-      state: state.nonce,
-      access_type: 'online',
-      prompt: 'select_account',
-      include_granted_scopes: false,
-    });
-    expect(SIGN_IN_SCOPES).not.toContain('https://www.googleapis.com/auth/youtube.upload');
-  });
-
-  it('asks connect for upload scope offline with the chooser and forced consent', () => {
-    const state = newOAuthState('connect', { uid: UID, sid: 'sid-1' });
-    authUrl(ORIGIN, state);
-    expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
-      scope: CHANNEL_SCOPES,
+      scope: SCOPES,
       state: state.nonce,
       access_type: 'offline',
-      prompt: 'select_account consent',
-      include_granted_scopes: false,
+      include_granted_scopes: true,
+      prompt: 'select_account',
     });
-    expect(CHANNEL_SCOPES).toContain('https://www.googleapis.com/auth/youtube.upload');
-    expect(CHANNEL_SCOPES).toEqual(expect.arrayContaining(SIGN_IN_SCOPES));
+    expect(SCOPES).toEqual([
+      'openid',
+      'email',
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube.readonly',
+    ]);
+  });
+
+  it('forces consent on connect and hints at the user account', () => {
+    const state = newOAuthState('connect', { uid: UID, sid: 'sid-1' });
+    authUrl(ORIGIN, state, NATHAN_EMAIL);
+    expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
+      scope: SCOPES,
+      state: state.nonce,
+      access_type: 'offline',
+      include_granted_scopes: true,
+      prompt: 'select_account consent',
+      login_hint: NATHAN_EMAIL,
+    });
   });
 
   it('requires the client secret', () => {
@@ -240,9 +243,17 @@ describe('oauthClient / authUrl', () => {
 
 describe('exchangeCode', () => {
   const ticket = (payload: unknown) => ({ getPayload: () => payload });
+  const VERIFIED = { sub: UID, email: 'a@b.c', email_verified: true };
 
-  it('returns the sub, lowercased verified email, name and refresh token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', refresh_token: 'rt' } });
+  it('returns the verified identity, granted scopes and both tokens', async () => {
+    oauth.getToken.mockResolvedValueOnce({
+      tokens: {
+        id_token: 'idt',
+        access_token: 'at',
+        refresh_token: 'rt',
+        scope: 'openid email  https://www.googleapis.com/auth/youtube.upload',
+      },
+    });
     oauth.verifyIdToken.mockResolvedValueOnce(
       ticket({ sub: UID, email: 'Nathan@Example.COM', email_verified: true, name: 'Nathan' }),
     );
@@ -250,41 +261,51 @@ describe('exchangeCode', () => {
       sub: UID,
       email: NATHAN_EMAIL,
       name: 'Nathan',
+      scopes: ['openid', 'email', 'https://www.googleapis.com/auth/youtube.upload'],
       refreshToken: 'rt',
+      accessToken: 'at',
     });
     expect(oauth.getToken).toHaveBeenCalledWith('code-1');
     expect(oauth.verifyIdToken).toHaveBeenCalledWith({ idToken: 'idt', audience: 'cid' });
   });
 
-  it('returns a null refresh token and name when Google sends neither', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(
-      ticket({ sub: UID, email: 'a@b.c', email_verified: true }),
-    );
-    expect(await exchangeCode(ORIGIN, 'c')).toMatchObject({ refreshToken: null, name: null });
+  it('returns no refresh token, name or scopes when Google sends none', async () => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
+    oauth.verifyIdToken.mockResolvedValueOnce(ticket(VERIFIED));
+    expect(await exchangeCode(ORIGIN, 'c')).toMatchObject({
+      refreshToken: null,
+      name: null,
+      scopes: [],
+    });
   });
 
-  it('throws when Google returns no ID token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { refresh_token: 'rt' } });
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Google returned no ID token');
+  it.each([
+    ['no ID token', { access_token: 'at' }],
+    ['no access token', { id_token: 'idt' }],
+  ])('throws when Google returns %s', async (_label, tokens) => {
+    oauth.getToken.mockResolvedValueOnce({ tokens });
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Google returned no tokens');
     expect(oauth.verifyIdToken).not.toHaveBeenCalled();
   });
 
-  it('throws when the email is not verified', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(ticket({ email: 'a@b.c', email_verified: false }));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('not verified');
+  it('propagates a failed code exchange', async () => {
+    oauth.getToken.mockRejectedValueOnce(new Error('invalid_grant'));
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('invalid_grant');
   });
 
-  it('throws when the payload has no email', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(ticket(undefined));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('not verified');
+  it.each([
+    ['an unverified email', ticket({ ...VERIFIED, email_verified: false })],
+    ['no email', ticket({ sub: UID, email_verified: true })],
+    ['no payload', ticket(undefined)],
+  ])('returns null for %s', async (_label, result) => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
+    oauth.verifyIdToken.mockResolvedValueOnce(result);
+    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
   });
 
-  it('propagates an invalid ID token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
+  it('returns null for an ID token that fails verification', async () => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
     oauth.verifyIdToken.mockRejectedValueOnce(new Error('Wrong recipient'));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Wrong recipient');
+    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
   });
 });

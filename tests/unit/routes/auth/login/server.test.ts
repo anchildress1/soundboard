@@ -39,7 +39,9 @@ describe('GET /auth/login', () => {
     const { thrown, cookies } = call('');
     const url = location(thrown);
     expect(url.origin).toBe('https://accounts.google.com');
-    expect(url.searchParams.get('scope')).toBe('openid email');
+    expect(url.searchParams.get('scope')).toBe(
+      'openid email https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+    );
     expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:5173/auth/callback');
 
     expect(cookies.set).toHaveBeenCalledTimes(1);

@@ -300,6 +300,21 @@ export async function uploadChunk(
   );
 }
 
+/** The channel the access token's account owns, or null when the account has none. */
+export async function channelsMine(
+  accessToken: string,
+): Promise<{ id: string; title: string } | null> {
+  const body = await readJson<ListResponse<{ id: string; snippet?: { title?: string } }>>(
+    await fetch(`${API}/channels?part=snippet&mine=true`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    }),
+    'channels.list',
+  );
+  const item = body.items?.[0];
+  return item ? { id: item.id, title: item.snippet?.title ?? '' } : null;
+}
+
 /** Reads the video back from the target channel; only this result can mark a publish verified. */
 export type ReadBack = LiveMetadata & { uploadStatus: string | null };
 

@@ -126,7 +126,7 @@ description: 'Task list for Google sign-in and connections'
 
 - [ ] T035 [US2] Rewrite src/routes/auth/login/+server.ts per the contract's login table; remove `nathan`/`sandbox` connect values (FR-020)
 - [ ] T036 [US2] Rewrite src/routes/auth/callback/+server.ts: verify state (delete `sb_oauth` on first read), exchange code, verify the ID token and email; sign-in → `redeemInvite` → `upsertUser` → set `sb_session` with a new `sid` → evaluate YouTube; evaluation per contract steps 1–6, splitting `tokens.scope` on spaces, `channels.list?mine=true` through the new access token, encrypt and write in one `putConnection`
-- [ ] T037 [US2] Return `{email, sub, idToken claims, scopes, refreshToken, accessToken}` from `exchangeCode` in src/lib/server/auth/auth.ts and add `channelsMine(accessToken)` in src/lib/server/platforms/youtube/youtube.ts returning `{id, title} | null`; tests alongside
+- [x] T037 [US2] Return `{email, sub, idToken claims, scopes, refreshToken, accessToken}` from `exchangeCode` in src/lib/server/auth/auth.ts and add `channelsMine(accessToken)` in src/lib/server/platforms/youtube/youtube.ts returning `{id, title} | null`; tests alongside
 - [ ] T038 [US2] Delete `sb_oauth` as well as `sb_session` in src/routes/auth/logout/+server.ts
 - [ ] T039 [US2] Show the signed-in user's own channel in the header: `channelStats(channelId)` with a cache keyed by channel ID in src/lib/server/platforms/youtube/youtube.ts (FR-030 fix for today's single cache), read from `getConnection(locals.user.uid)` in src/routes/+layout.server.ts; header links Connections and, only when `artistId === 'flr'`, Brand guide in src/routes/+layout.svelte. Update tests/unit/routes/layout.server.test.ts and layout.test.ts
 

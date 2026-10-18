@@ -8,8 +8,8 @@ export const OAUTH_COOKIE = 'sb_oauth';
 export const SESSION_TTL_SEC = 30 * 24 * 60 * 60;
 export const OAUTH_TTL_SEC = 10 * 60;
 
-export const SIGN_IN_SCOPES = ['openid', 'email'];
-export const CHANNEL_SCOPES = [...SIGN_IN_SCOPES, ...YOUTUBE_SCOPES];
+/** One consent covers identity and the YouTube channel, so sign-in also connects it. */
+export const SCOPES = ['openid', 'email', ...YOUTUBE_SCOPES];
 
 /** `sid` is random per sign-in, so each browser session is distinct; `exp` never slides. */
 export type Session = { uid: string; sid: string; gen: number; exp: number };
@@ -96,44 +96,53 @@ export function oauthClient(origin: string): OAuth2Client {
 }
 
 /**
- * Sign-in asks for identity only. Connecting a channel asks for upload and read scopes offline,
- * with forced consent so Google returns a refresh token. Both always show the account chooser:
- * connecting binds whichever account is picked, and a browser's default account is rarely the channel.
+ * Every flow asks for all scopes offline, folding in earlier grants. Sign-in shows the account
+ * chooser; connect also forces consent so Google returns a refresh token, hinting at the user's own
+ * account because the grant must belong to them.
  */
-export function authUrl(origin: string, state: OAuthState): string {
+export function authUrl(origin: string, state: OAuthState, loginHint?: string): string {
   const connect = state.purpose === 'connect';
   return oauthClient(origin).generateAuthUrl({
-    scope: connect ? CHANNEL_SCOPES : SIGN_IN_SCOPES,
+    scope: SCOPES,
     state: state.nonce,
-    access_type: connect ? 'offline' : 'online',
+    access_type: 'offline',
+    include_granted_scopes: true,
     prompt: connect ? 'select_account consent' : 'select_account',
-    include_granted_scopes: false,
+    ...(loginHint ? { login_hint: loginHint } : {}),
   });
 }
 
-export type CallbackResult = {
+/** What one code exchange proves and grants. Tokens never leave the callback. */
+export type Grant = {
   sub: string;
   email: string;
   name: string | null;
+  scopes: string[];
   refreshToken: string | null;
+  accessToken: string;
 };
 
-/** Exchanges the code and verifies the ID token's audience and verified email. */
-export async function exchangeCode(origin: string, code: string): Promise<CallbackResult> {
+/**
+ * Exchanges the code and verifies the ID token's audience and verified email. Returns null when the
+ * ID token or its email fails verification; a failed exchange throws.
+ */
+export async function exchangeCode(origin: string, code: string): Promise<Grant | null> {
   const client = oauthClient(origin);
   const { tokens } = await client.getToken(code);
-  if (!tokens.id_token) throw new Error('Google returned no ID token');
-  const ticket = await client.verifyIdToken({
-    idToken: tokens.id_token,
-    audience: required('GOOGLE_OAUTH_CLIENT_ID'),
-  });
-  const payload = ticket.getPayload();
-  if (!payload?.email || !payload.email_verified)
-    throw new Error('Google account email is not verified');
+  if (!tokens.id_token || !tokens.access_token) throw new Error('Google returned no tokens');
+  const payload = await client
+    .verifyIdToken({ idToken: tokens.id_token, audience: required('GOOGLE_OAUTH_CLIENT_ID') })
+    .then(
+      (ticket) => ticket.getPayload(),
+      () => undefined,
+    );
+  if (!payload?.email || !payload.email_verified) return null;
   return {
     sub: payload.sub,
     email: payload.email.toLowerCase(),
     name: payload.name ?? null,
+    scopes: tokens.scope?.split(' ').filter(Boolean) ?? [],
     refreshToken: tokens.refresh_token ?? null,
+    accessToken: tokens.access_token,
   };
 }

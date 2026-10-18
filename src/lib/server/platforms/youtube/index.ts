@@ -9,6 +9,7 @@ export {
   type ConnectionStatus,
 } from './connection';
 export {
+  channelsMine,
   channelStats,
   readBack,
   recentVideos,

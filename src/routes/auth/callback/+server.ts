@@ -17,7 +17,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
   if (state?.purpose !== 'sign-in' || !code || url.searchParams.get('state') !== state.nonce)
     redirect(303, '/?signin=expired');
 
-  const { sub, email, name } = await exchangeCode(url.origin, code);
+  const grant = await exchangeCode(url.origin, code);
+  if (!grant) redirect(303, '/?signin=expired');
+  const { sub, email, name } = grant;
   const redeemed = await redeemInvite(sub, email);
   if (redeemed === 'denied') redirect(303, '/?signin=denied');
   const user = (await upsertUser(sub, { email, name })) ?? redeemed;

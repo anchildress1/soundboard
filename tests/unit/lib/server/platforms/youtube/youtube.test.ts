@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  channelsMine,
   channelStats,
   clearStatsCache,
   readBack,
@@ -439,6 +440,35 @@ describe('uploadChunk', () => {
       .mockResolvedValueOnce(new Response('x', { status: 206 }))
       .mockResolvedValueOnce(new Response('bad', { status: 500 }));
     await expect(uploadChunk('s', 'g', 0, 10)).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('channelsMine', () => {
+  it("returns the token account's channel, read with the bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [{ id: 'UCa', snippet: { title: 'A' } }] }));
+    expect(await channelsMine('tok')).toEqual({ id: 'UCa', title: 'A' });
+    expect(urlOf(0).searchParams.get('mine')).toBe('true');
+    expect(urlOf(0).searchParams.get('part')).toBe('snippet');
+    expect(urlOf(0).searchParams.get('key')).toBeNull();
+    expect(headersOf(0)).toEqual({ authorization: 'Bearer tok' });
+  });
+
+  it('returns an empty title when the channel has none', async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [{ id: 'UCa' }] }));
+    expect(await channelsMine('tok')).toEqual({ id: 'UCa', title: '' });
+  });
+
+  it.each([{ items: [] }, {}])(
+    'returns null for an account without a channel (%j)',
+    async (body) => {
+      fetchMock.mockResolvedValueOnce(json(body));
+      expect(await channelsMine('tok')).toBeNull();
+    },
+  );
+
+  it('throws on a non-ok read', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+    await expect(channelsMine('tok')).rejects.toMatchObject({ status: 403 });
   });
 });
 
