@@ -172,7 +172,7 @@
 - Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
-- Firestore security rules deny all client access; only the app's service account reads and writes.
+- The database has no client access: only the app reaches Neon, over its connection string from Secret Manager. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
 - [ ] A user's token and jobs are reachable only from that user's session.
 
 **R11 · Sentry agent tracing**
@@ -218,28 +218,30 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 - **Why Vertex:** Cloud Run's L4 quota for the project is 0 and two increase requests were denied. Vertex's L4 serving quota in us-central1 is 2 without a request. Audio still never leaves the project.
 - **Cost:** about $0.81/hr while a model replica is up (`g2-standard-4` online inference, L4 included), billed for at least 5 minutes per wake. The app bills only while serving. $0 when nobody visits.
 - **Storage:** one GCS bucket, `uploads/`.
-- **State:** Firestore. **Secrets:** Secret Manager.
-- **Region:** us-central1 for everything. Firestore is created there; its location is permanent.
+- **State:** Neon Postgres (`aws-us-east-2`) through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
+- **Region:** us-central1 for everything on Google Cloud. The database is the one exception: Neon runs in `aws-us-east-2`.
 - **Pipeline:** runs in the app container while Nathan watches. The status page calls `POST /api/jobs/{id}/step`; each call does one step and returns the job.
   - **prep:** probe and measure the whole file.
   - **analyze:** cut and analyze one 29.5s window per call.
   - **pick:** hashtag search, then smart pick → job to `REVIEW`.
   - **hook** (Short jobs): pick the hook window, place the cut from loudness.
   - **render** (Short jobs): cut and reframe to 9:16 into GCS → job to `REVIEW`.
-- Each step claims the job in a Firestore transaction with a 3-minute expiry, so a second tab waits instead of double-running.
+- Each step claims the job with one conditional update that sets a random claim token and a 3-minute expiry, so a second tab waits instead of double-running. A step's result is saved only while its token still holds the claim.
 
-### Firestore
+### Postgres
 
-| Path                                      | Holds                                                                                                                                                                                 |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users/{googleId}`                        | email, display name, artist profile link, access generation                                                                                                                           |
-| `users/{googleId}/connections/{platform}` | platform account ID and name, grant status, token reference                                                                                                                           |
-| `invites/{email}`                         | normalized invited email, active status, bound Google account ID, artist profile link                                                                                                 |
-| `jobs/{id}`                               | owner user ID, approved destination channel ID/name, state, upload progress, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` on a Short              |
-| `jobs/{id}/chunks/{n}`, `jobs/{id}/pick`  | step results                                                                                                                                                                          |
-| `artists/{id}/facts`                      | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy. |
-| `artists/{id}/feedback`                   | EDITED · SKIPPED · ACCEPTED                                                                                                                                                           |
-| `artists/{id}/publishes`                  | video ID, URL, final metadata, status                                                                                                                                                 |
+| Table                     | Holds                                                                                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                   | Google account ID (`uid`), email, display name, invite, artist profile link, access generation                                                                                         |
+| `invites`                 | normalized invited email, active status, bound Google account ID, artist profile link                                                                                                  |
+| `connections`             | one row per user and platform: grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                  |
+| `jobs`                    | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON |
+| `job_chunks`, `job_picks` | step results                                                                                                                                                                           |
+| `job_feedback`            | feedback from users without an artist link; it stays on the job                                                                                                                        |
+| `artist_facts`            | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy.  |
+| `artist_feedback`         | EDITED · SKIPPED · ACCEPTED                                                                                                                                                            |
+| `artist_publishes`        | video ID, URL, final metadata, status                                                                                                                                                  |
+| `artist_brand`            | the brand guide's proposal and approved version                                                                                                                                        |
 
 ## UX
 
