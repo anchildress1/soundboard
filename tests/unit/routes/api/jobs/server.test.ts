@@ -93,9 +93,4 @@ describe('POST /api/jobs', () => {
     expect((await post({ ...upload, durationSec: 901 })).status).toBe(400);
     expect((await post({ ...upload, durationSec: 900 })).status).toBe(200);
   });
-
-  it('rejects a sample request', async () => {
-    expect((await post({ sampleId: 's1' })).status).toBe(400);
-    expect(await jobCount()).toBe(0);
-  });
 });

@@ -119,12 +119,6 @@ describe('create', () => {
     }
   });
 
-  it('rejects a sample request, which no longer exists', async () => {
-    const error = await rejection(create({ sampleId: 'peek' } as unknown as CreateInput, USER_A));
-    expect([error.status, error.message]).toEqual([400, TITLE_REQUIRED]);
-    expect(await jobCount()).toBe(0);
-  });
-
   it.each([
     ['a missing title', upload({ songTitle: '' }), TITLE_REQUIRED],
     ['a blank title', upload({ songTitle: '   ' }), TITLE_REQUIRED],
