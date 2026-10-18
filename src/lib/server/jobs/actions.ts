@@ -204,17 +204,17 @@ const NOT_PAUSED = "This job isn't waiting on a pasted video.";
 const RECONNECT_TO_CONFIRM = 'Reconnect YouTube to confirm.';
 
 /** The pasted video as the pinned grant sees it; YouTube's refusals become the action's errors. */
-async function pastedVideo(uid: string, channelId: string, videoId: string) {
+async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
   let access: Access | null = null;
   try {
-    access = await accessTokenFor(uid, channelId);
+    access = await accessTokenFor(job.ownerUid, channelId);
     if (!access) throw new ActionError(409, RECONNECT_TO_CONFIRM);
     return await videoChannel(access.token, videoId);
   } catch (error) {
     if (error instanceof ActionError) throw error;
     const failure = uploadFailure(error);
     if (failure === 'access-lost') {
-      await access?.refused();
+      await access?.refused({ jobId: job.id });
       throw new ActionError(409, RECONNECT_TO_CONFIRM);
     }
     if (failure === 'quota-spent') {
@@ -239,7 +239,7 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   const videoId = videoIdFromUrl(url);
   if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
   const { channelId, channelTitle } = job.destination;
-  const video = await pastedVideo(job.ownerUid, channelId, videoId);
+  const video = await pastedVideo(job, channelId, videoId);
   if (!video) throw new ActionError(422, "Couldn't find that video.");
   if (video.channelId !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);

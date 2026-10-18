@@ -196,12 +196,17 @@ const unlimited = (job: JobDoc, output: StepOutput): StepOutput =>
   job.limitUntil ? { ...output, limitUntil: null } : output;
 
 /** A spent daily limit or a refused grant becomes its wait; any other error is rethrown. */
-async function youtubeWait(error: unknown, access: Access, now: number): Promise<StepOutput> {
+async function youtubeWait(
+  job: JobDoc,
+  error: unknown,
+  access: Access,
+  now: number,
+): Promise<StepOutput> {
   const failure = uploadFailure(error);
   if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
   if (failure !== 'access-lost') throw error;
   // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
-  await access.refused();
+  await access.refused({ jobId: job.id });
   return pause(RECONNECT);
 }
 
@@ -227,7 +232,7 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
         : await initiate(job, access.token, job.finalFields),
     );
   } catch (error) {
-    return youtubeWait(error, access, now);
+    return youtubeWait(job, error, access, now);
   }
 }
 
@@ -317,7 +322,7 @@ async function verify(job: JobDoc): Promise<StepOutput> {
   try {
     video = await readBack(access.token, job.videoId);
   } catch (error) {
-    return youtubeWait(error, access, now);
+    return youtubeWait(job, error, access, now);
   }
   return unlimited(job, await verified(job, job.videoId, video));
 }

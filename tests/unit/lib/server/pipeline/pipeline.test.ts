@@ -983,8 +983,9 @@ describe('runStep: PUBLISHING', () => {
       .from(connections)
       .where(eq(connections.uid, A_JOB.ownerUid));
     expect(connection).toMatchObject({ status: 'revoked', tokenCiphertext: null });
-    expect(captureMessage).toHaveBeenCalledWith('YouTube refused the upload grant', {
+    expect(captureMessage).toHaveBeenCalledWith('YouTube refused the grant', {
       level: 'warning',
+      tags: { 'job.id': 'j1' },
     });
   });
 

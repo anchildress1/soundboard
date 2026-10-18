@@ -187,10 +187,11 @@ describe('accessTokenFor', () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
     const access = (await accessTokenFor(UID, CHANNEL))!;
-    await access.refused();
+    await access.refused({ jobId: 'j1' });
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
-    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the upload grant', {
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the grant', {
       level: 'warning',
+      tags: { 'job.id': 'j1' },
     });
     expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('ya29');
   });
@@ -200,11 +201,37 @@ describe('accessTokenFor', () => {
     oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
     const access = (await accessTokenFor(UID, CHANNEL))!;
     await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
-    await access.refused();
+    await access.refused({ jobId: 'j1' });
     expect(await getConnection(UID)).toMatchObject({
       status: 'connected',
       tokenCiphertext: 'bmV3',
     });
+  });
+
+  it('reports a refused grant it could not mark revoked, and still returns', async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    const access = (await accessTokenFor(UID, CHANNEL))!;
+    await db().execute(sql`
+      create function refuse_write() returns trigger language plpgsql
+        as $$ begin raise exception 'write refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_write before update on connections
+        for each row execute function refuse_write()
+    `);
+    try {
+      await expect(access.refused({ jobId: 'j1' })).resolves.toBeUndefined();
+    } finally {
+      await db().execute(sql`drop trigger refuse_write on connections`);
+      await db().execute(sql`drop function refuse_write`);
+    }
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ cause: expect.objectContaining({ message: 'write refused' }) }),
+      { tags: { 'job.id': 'j1', component: 'youtube-revoke-mark' } },
+    );
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+    expect(JSON.stringify(vi.mocked(captureException).mock.calls)).not.toContain('ya29');
   });
 
   it('throws for a different channel without decrypting', async () => {
