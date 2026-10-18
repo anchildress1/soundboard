@@ -658,6 +658,22 @@ describe('job page: Short tab', () => {
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
   });
 
+  it.each(['PUBLISHING', 'CLAIMED_COMPLETE'] as const)(
+    'still names the pinned channel when the upload failed in %s',
+    (failedState) => {
+      fetchMock.mockImplementation(hang);
+      const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+      setup(view({ state: 'FAILED', failedState, destination }, { pick: PICK }));
+      expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
+    },
+  );
+
+  it('names no channel on a job that failed before approval', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'FAILED', failedState: 'PICK', error: 'boom' }, { pick: PICK }));
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
+  });
+
   it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
     'offers Make a Short in %s',
     async (state) => {

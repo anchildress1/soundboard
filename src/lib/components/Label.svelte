@@ -34,8 +34,8 @@
     done?: boolean;
     serverErrors?: FieldErrors;
     /**
-     * The channel Approve uploads to: the one approval pinned, else the owner's connected channel.
-     * Null when the owner has none, which blocks approval.
+     * The channel this label uploads to: the one approval pinned, else in review the owner's
+     * connected channel. Shown whenever set; null in review blocks approval.
      */
     destination: Destination | null;
     /** Keeps field ids unique when two labels share a page. */
@@ -95,15 +95,15 @@
     </div>
   </div>
 
+  {#if destination}
+    <p class="channel">
+      Uploads to <strong>{destination.channelTitle ?? 'your channel'}</strong>
+      <span>{destination.channelId}</span>
+    </p>
+  {:else if editable}
+    <p class="channel">Reconnect YouTube to approve.</p>
+  {/if}
   {#if editable || done}
-    {#if destination}
-      <p class="channel">
-        Uploads to <strong>{destination.channelTitle ?? 'your channel'}</strong>
-        <span>{destination.channelId}</span>
-      </p>
-    {:else if editable}
-      <p class="channel">Reconnect YouTube to approve.</p>
-    {/if}
     <div class="actions">
       <button class="btn ghost" type="button" onclick={ondiscard} disabled={busy || done}
         >Discard</button

@@ -317,6 +317,25 @@ describe('Short: where Approve uploads', () => {
     });
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
   });
+
+  it('still names the pinned channel when the upload failed', () => {
+    setup({
+      view: view(
+        'FAILED',
+        {},
+        {
+          failedState: 'PUBLISHING',
+          destination: { channelId: 'UCold', channelTitle: 'Old' },
+        },
+      ),
+    });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
+  });
+
+  it('names no channel on a Short that failed before approval', () => {
+    setup({ view: view('FAILED', {}, { failedState: 'PICK' }) });
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
+  });
 });
 
 describe('Short: expired media', () => {

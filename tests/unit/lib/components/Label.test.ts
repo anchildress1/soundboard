@@ -223,6 +223,12 @@ describe('Label: where Approve uploads', () => {
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
   });
 
+  it('names the pinned channel on a failed upload, without actions', () => {
+    setup({ editable: false, done: false });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
   it('shows no channel line on a read-only draft', () => {
     setup({ editable: false, destination: null });
     expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();

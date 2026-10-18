@@ -181,7 +181,7 @@
         {busy}
         {done}
         {serverErrors}
-        destination={job.destination ?? approveTo}
+        destination={job.destination ?? (editable ? approveTo : null)}
         idPrefix="short-"
         heading="YouTube Short"
         rerunLabel="Re-pick hook"

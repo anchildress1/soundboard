@@ -280,7 +280,7 @@
               {busy}
               {done}
               {serverErrors}
-              destination={job.destination ?? data.approveTo}
+              destination={job.destination ?? (editable ? data.approveTo : null)}
               onapprove={(f) =>
                 act('approve', {
                   ...f,
