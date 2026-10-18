@@ -143,7 +143,7 @@ description: 'Task list for Google sign-in and connections'
 ### Tests
 
 - [x] T040 [P] [US3] Callback denial tests in tests/unit/routes/auth/callback/server.test.ts: uninvited → 303 `/?signin=denied`, no cookie, no `users` row, no connection; invite bound to another `sub` denied; changed email on a bound user keeps jobs and `artistId`
-- [ ] T041 [P] [US3] Generation tests in tests/unit/hooks.server.test.ts: revoke bumps `accessGeneration` → next request signed out; reactivation does not revive the old cookie
+- [x] T041 [P] [US3] Generation tests in tests/unit/hooks.server.test.ts: revoke bumps `accessGeneration` → next request signed out; reactivation does not revive the old cookie
 - [x] T042 [P] [US3] Script tests in tests/unit/scripts/invite.test.ts for add, revoke (one transaction: `active: false` + increment bound user's `accessGeneration`), reactivate and list
 
 ### Implementation

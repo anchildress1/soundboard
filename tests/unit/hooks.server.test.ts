@@ -8,7 +8,8 @@ import { handle, replaceTraceMeta } from '$lib/../hooks.server';
 import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
 import { db } from '$lib/server/core/db';
 import { users } from '$lib/server/core/schema';
-import { seed, truncate } from '../helpers/db';
+import { reactivate, revoke } from '../../scripts/invite';
+import { client, seed, truncate } from '../helpers/db';
 import { USER_A, USER_B, USERS } from '../helpers/pipeline';
 
 const PAGE =
@@ -278,5 +279,37 @@ describe('gate', () => {
     const { resolve } = renderer();
     const response = await run(event(sessionCookie(USER_A.uid, 1), {}, '/api/jobs'), resolve);
     expect(response.status).toBe(401);
+  });
+});
+
+describe('access generation', () => {
+  const signedInAs = async (cookie: string) => {
+    const { resolve, seen } = renderer();
+    await run(event(cookie, {}, '/'), resolve);
+    return seen.locals?.user ?? null;
+  };
+
+  it('signs a user out on the next request once their invite is revoked', async () => {
+    const cookie = sessionCookie(USER_A.uid, 1);
+    expect(await signedInAs(cookie)).toEqual(USER_A);
+    await revoke(client(), USER_A.email);
+    expect(await signedInAs(cookie)).toBeNull();
+  });
+
+  it('keeps other users signed in when one invite is revoked', async () => {
+    await revoke(client(), USER_A.email);
+    expect(await signedInAs(sessionCookie(USER_B.uid, 1))).toEqual(USER_B);
+  });
+
+  it('never revives an old cookie when the invite is reactivated', async () => {
+    const cookie = sessionCookie(USER_A.uid, 1);
+    await revoke(client(), USER_A.email);
+    await reactivate(client(), USER_A.email);
+    expect(await signedInAs(cookie)).toBeNull();
+    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toEqual(USER_A);
+  });
+
+  it('rejects a cookie from a future generation', async () => {
+    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toBeNull();
   });
 });
