@@ -21,11 +21,15 @@
     revoked: 'Access was removed. Reconnect to keep uploading.',
   };
 
+  const UNCONFIRMED =
+    "Removed here. Google didn't confirm. Remove Soundboard at myaccount.google.com/permissions.";
+
   const disconnect = async () => {
     busy = true;
     message = '';
     try {
-      await disconnectYouTube();
+      const { revokedAtGoogle } = await disconnectYouTube();
+      if (!revokedAtGoogle) message = UNCONFIRMED;
       await invalidateAll();
     } catch (error) {
       message = error instanceof Error ? error.message : 'Disconnect failed';

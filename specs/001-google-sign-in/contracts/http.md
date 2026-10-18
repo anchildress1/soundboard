@@ -59,7 +59,8 @@ A connect redirects to `/connections` when the outcome is `connected`, else to `
 
 ## `POST /api/connections/youtube/disconnect`
 
-- Requires a session. Revokes the refresh token at Google (a failure there is logged and the delete goes ahead), then deletes the row → 204.
+- Requires a session. Revokes the refresh token at Google (a failure there is logged and the delete goes ahead), then deletes the row → 200 `{revokedAtGoogle}`, false when Google didn't confirm the revoke (true when there was no token to revoke).
+- On `revokedAtGoogle: false`, `/connections` says: "Removed here. Google didn't confirm. Remove Soundboard at myaccount.google.com/permissions."
 
 ## Job APIs (changed behavior)
 

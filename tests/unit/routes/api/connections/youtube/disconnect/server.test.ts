@@ -32,10 +32,10 @@ afterEach(() => {
 });
 
 describe('POST /api/connections/youtube/disconnect', () => {
-  it("revokes the caller's grant at Google, deletes the row and answers 204", async () => {
+  it("revokes the caller's grant at Google, deletes the row and says Google confirmed", async () => {
     const response = await disconnect(USER_A);
-    expect(response.status).toBe(204);
-    expect(await response.text()).toBe('');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revokedAtGoogle: true });
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://oauth2.googleapis.com/revoke');
     expect(String(init!.body)).toBe(`token=${REFRESH_A}`);
@@ -44,13 +44,15 @@ describe('POST /api/connections/youtube/disconnect', () => {
 
   it('deletes the row even when Google refuses the revoke', async () => {
     fetchMock.mockResolvedValue(new Response('nope', { status: 503 }));
-    expect((await disconnect(USER_A)).status).toBe(204);
+    const response = await disconnect(USER_A);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revokedAtGoogle: false });
     expect(captureMessage).toHaveBeenCalledWith('YouTube revoke refused', expect.anything());
     expect(await getConnection(USER_A.uid)).toBeNull();
   });
 
   it("leaves other users' connections alone", async () => {
-    expect((await disconnect(USER_B)).status).toBe(204);
+    expect((await disconnect(USER_B)).status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await getConnection(USER_A.uid)).not.toBeNull();
   });

@@ -88,8 +88,11 @@ export function discardBrandProposal() {
   return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
 }
 
+/** Always forgets the grant here; `revokedAtGoogle` is false when Google didn't confirm. */
 export function disconnectYouTube() {
-  return call<unknown>('/api/connections/youtube/disconnect', { method: 'POST' });
+  return call<{ revokedAtGoogle: boolean }>('/api/connections/youtube/disconnect', {
+    method: 'POST',
+  });
 }
 
 /** Signed PUT straight to GCS, with progress. The headers must match what the URL was signed with. */

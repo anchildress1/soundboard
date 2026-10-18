@@ -81,7 +81,7 @@ describe('connections page', () => {
   });
 
   it('disconnects, then reloads the page data', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    fetchMock.mockResolvedValue(Response.json({ revokedAtGoogle: true }));
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await waitFor(() => expect(nav.invalidateAll).toHaveBeenCalledOnce());
@@ -89,6 +89,19 @@ describe('connections page', () => {
       '/api/connections/youtube/disconnect',
       expect.objectContaining({ method: 'POST' }),
     );
+    expect(screen.queryByText(/Google didn't confirm/)).toBeNull();
+  });
+
+  it('says where to finish when Google did not confirm the revoke', async () => {
+    fetchMock.mockResolvedValue(Response.json({ revokedAtGoogle: false }));
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    expect(
+      await screen.findByText(
+        "Removed here. Google didn't confirm. Remove Soundboard at myaccount.google.com/permissions.",
+      ),
+    ).toBeInTheDocument();
+    expect(nav.invalidateAll).toHaveBeenCalledOnce();
   });
 
   it('says why a disconnect failed and keeps the row', async () => {

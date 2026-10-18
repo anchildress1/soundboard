@@ -306,7 +306,7 @@ describe('revokeGrant', () => {
   it('revokes the decrypted refresh token at Google, then deletes the row', async () => {
     await putConnection(UID, connected());
     await putConnection('sub-b', connected({ channelId: 'UC-b' }));
-    await revokeGrant(UID);
+    expect(await revokeGrant(UID)).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://oauth2.googleapis.com/revoke');
@@ -322,7 +322,7 @@ describe('revokeGrant', () => {
   it('reports a refused revoke without the token and deletes the row anyway', async () => {
     await putConnection(UID, connected());
     fetchMock.mockResolvedValue(new Response('{"error":"invalid_token"}', { status: 400 }));
-    await revokeGrant(UID);
+    expect(await revokeGrant(UID)).toBe(false);
     expect(captureMessage).toHaveBeenCalledWith('YouTube revoke refused', {
       level: 'warning',
       tags: { status: 400 },
@@ -334,7 +334,7 @@ describe('revokeGrant', () => {
   it('reports a network failure and deletes the row anyway', async () => {
     await putConnection(UID, connected());
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
-    await revokeGrant(UID);
+    expect(await revokeGrant(UID)).toBe(false);
     expect(captureException).toHaveBeenCalledWith(expect.any(TypeError), {
       tags: { component: 'youtube-revoke' },
     });
@@ -344,7 +344,7 @@ describe('revokeGrant', () => {
   it('deletes the row without calling Google when KMS cannot unlock the token', async () => {
     await putConnection(UID, connected());
     kms.decrypt.mockRejectedValue(new Error('kms down'));
-    await revokeGrant(UID);
+    expect(await revokeGrant(UID)).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(captureException).toHaveBeenCalledOnce();
     expect(await getConnection(UID)).toBeNull();
@@ -360,14 +360,14 @@ describe('revokeGrant', () => {
         scopes: [],
         tokenCiphertext: null,
       });
-      await revokeGrant(UID);
+      expect(await revokeGrant(UID)).toBe(true);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(await getConnection(UID)).toBeNull();
     },
   );
 
   it('is a no-op without a connection', async () => {
-    await revokeGrant(UID);
+    expect(await revokeGrant(UID)).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

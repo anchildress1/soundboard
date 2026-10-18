@@ -58,31 +58,38 @@ export async function deleteConnection(uid: string): Promise<void> {
 
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
+/** Revokes a stored grant at Google; false, and reported, when Google didn't confirm it. */
+async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
+  try {
+    const response = await fetch(REVOKE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: await decrypt(tokenCiphertext) }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.ok) return true;
+    captureMessage('YouTube revoke refused', {
+      level: 'warning',
+      tags: { status: response.status },
+    });
+  } catch (error) {
+    captureException(error, { tags: { component: 'youtube-revoke' } });
+  }
+  return false;
+}
+
 /**
  * Disconnects YouTube: revokes the stored grant at Google, then deletes the row. A failed revoke is
- * reported and the row is deleted anyway, so the app holds no token either way.
+ * reported and the row is deleted anyway, so the app holds no token either way. Returns whether
+ * Google confirmed the revoke; true when there was no token to revoke.
  */
-export async function revokeGrant(uid: string): Promise<void> {
+export async function revokeGrant(uid: string): Promise<boolean> {
   const connection = await getConnection(uid);
-  if (connection?.tokenCiphertext) {
-    try {
-      const response = await fetch(REVOKE_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ token: await decrypt(connection.tokenCiphertext) }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) {
-        captureMessage('YouTube revoke refused', {
-          level: 'warning',
-          tags: { status: response.status },
-        });
-      }
-    } catch (error) {
-      captureException(error, { tags: { component: 'youtube-revoke' } });
-    }
-  }
+  const revoked = connection?.tokenCiphertext
+    ? await revokeAtGoogle(connection.tokenCiphertext)
+    : true;
   await deleteConnection(uid);
+  return revoked;
 }
 
 /**
