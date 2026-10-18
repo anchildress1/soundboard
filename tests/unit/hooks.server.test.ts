@@ -5,7 +5,7 @@ import { with_request_store } from '@sveltejs/kit/internal/server';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handle, replaceTraceMeta } from '$lib/../hooks.server';
-import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
+import { readSession, SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
 import { db } from '$lib/server/core/db';
 import { users } from '$lib/server/core/schema';
 import { reactivate, revoke } from '../../scripts/invite';
@@ -18,8 +18,11 @@ const PAGE =
 
 type Locals = RequestEvent['locals'];
 
-/** The locals a session for `user` resolves to; its sid is random per sign-in. */
-const signedIn = (user: typeof USER_A | typeof USER_B) => ({ ...user, sid: expect.any(String) });
+/** The locals `cookie` resolves to for `user`, carrying that cookie's own sid. */
+const signedIn = (user: typeof USER_A | typeof USER_B, cookie: string) => ({
+  ...user,
+  sid: readSession(cookie)!.sid,
+});
 
 function event(
   cookie?: string,
@@ -142,14 +145,16 @@ describe('handle', () => {
 
   it('resolves the user from a signed session at their access generation', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie(USER_A.uid, 1)), resolve);
-    expect(seen.locals?.user).toEqual(signedIn(USER_A));
+    const cookie = sessionCookie(USER_A.uid, 1);
+    await run(event(cookie), resolve);
+    expect(seen.locals?.user).toEqual(signedIn(USER_A, cookie));
   });
 
   it('resolves an unlinked user with a null artist', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie(USER_B.uid, 1)), resolve);
-    expect(seen.locals?.user).toEqual(signedIn(USER_B));
+    const cookie = sessionCookie(USER_B.uid, 1);
+    await run(event(cookie), resolve);
+    expect(seen.locals?.user).toEqual(signedIn(USER_B, cookie));
   });
 
   it('signs out a session from before the access generation was bumped', async () => {
@@ -277,9 +282,10 @@ describe('gate', () => {
 
   it.each(PATHS)('lets a signed-in request reach %s', async (path) => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie(USER_B.uid, 1), {}, path), resolve);
+    const cookie = sessionCookie(USER_B.uid, 1);
+    await run(event(cookie, {}, path), resolve);
     expect(seen.resolved).toBe(1);
-    expect(seen.locals?.user).toEqual(signedIn(USER_B));
+    expect(seen.locals?.user).toEqual(signedIn(USER_B, cookie));
   });
 
   it('gates a revoked session like no session', async () => {
@@ -299,14 +305,15 @@ describe('access generation', () => {
 
   it('signs a user out on the next request once their invite is revoked', async () => {
     const cookie = sessionCookie(USER_A.uid, 1);
-    expect(await signedInAs(cookie)).toEqual(signedIn(USER_A));
+    expect(await signedInAs(cookie)).toEqual(signedIn(USER_A, cookie));
     await revoke(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
   });
 
   it('keeps other users signed in when one invite is revoked', async () => {
     await revoke(client(), USER_A.email);
-    expect(await signedInAs(sessionCookie(USER_B.uid, 1))).toEqual(signedIn(USER_B));
+    const cookie = sessionCookie(USER_B.uid, 1);
+    expect(await signedInAs(cookie)).toEqual(signedIn(USER_B, cookie));
   });
 
   it('never revives an old cookie when the invite is reactivated', async () => {
@@ -314,7 +321,8 @@ describe('access generation', () => {
     await revoke(client(), USER_A.email);
     await reactivate(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
-    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toEqual(signedIn(USER_A));
+    const fresh = sessionCookie(USER_A.uid, 2);
+    expect(await signedInAs(fresh)).toEqual(signedIn(USER_A, fresh));
   });
 
   it('rejects a cookie from a future generation', async () => {
