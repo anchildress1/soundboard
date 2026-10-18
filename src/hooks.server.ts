@@ -2,6 +2,7 @@ import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
+import { getUser } from '$lib/server/auth/users';
 
 const escapeAttr = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
@@ -27,8 +28,14 @@ const jobTraceMeta: Handle = ({ event, resolve }) =>
     },
   });
 
-const session: Handle = ({ event, resolve }) => {
-  event.locals.session = readSession(event.cookies.get(SESSION_COOKIE));
+/** A session counts only while its user exists at the same access generation; revoking bumps it. */
+const session: Handle = async ({ event, resolve }) => {
+  const signed = readSession(event.cookies.get(SESSION_COOKIE));
+  const user = signed ? await getUser(signed.uid) : null;
+  event.locals.user =
+    user && signed?.gen === user.accessGeneration
+      ? { uid: user.uid, email: user.email, artistId: user.artistId }
+      : null;
   return resolve(event);
 };
 

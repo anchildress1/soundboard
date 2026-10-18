@@ -2,9 +2,14 @@
 import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handle, replaceTraceMeta } from '$lib/../hooks.server';
 import { SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
+import { db } from '$lib/server/core/db';
+import { users } from '$lib/server/core/schema';
+import { seed, truncate } from '../helpers/db';
+import { USER_A, USER_B, USERS } from '../helpers/pipeline';
 
 const PAGE =
   '<html><head><meta name="sentry-trace" content="req-trace"/>\n' +
@@ -18,7 +23,7 @@ function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
     request: new Request(url),
     route: { id: '/jobs/[id]' },
     params: { id: 'j1' },
-    locals: { session: null, ...locals } as Locals,
+    locals: { user: null, ...locals } as Locals,
     cookies: {
       get: (name: string) => (name === SESSION_COOKIE ? cookie : undefined),
       getAll: () => [],
@@ -61,9 +66,10 @@ function run(ev: RequestEvent, resolve: ReturnType<typeof renderer>['resolve']) 
   return with_request_store(store(ev), () => handle({ event: ev, resolve }));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('SESSION_SECRET', 'test-secret');
-  vi.stubEnv('ALLOWLIST_EMAILS', 'nathan@example.com');
+  await truncate();
+  await seed(USERS);
 });
 
 describe('replaceTraceMeta', () => {
@@ -117,40 +123,45 @@ describe('handle', () => {
     expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
   });
 
-  it('leaves a signed-out request without a session or cookies', async () => {
+  it('leaves a signed-out request without a user or cookies', async () => {
     const { resolve, seen } = renderer();
     const ev = event();
     const response = await run(ev, resolve);
-    expect(seen.locals?.session).toBeNull();
+    expect(seen.locals?.user).toBeNull();
     expect(ev.cookies.set).not.toHaveBeenCalled();
     expect(response.headers.get('set-cookie')).toBeNull();
   });
 
-  it('reads an allowlisted session from its signed cookie', async () => {
+  it('resolves the user from a signed session at their access generation', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie('Nathan@example.com')), resolve);
-    expect(seen.locals?.session).toEqual({
-      email: 'Nathan@example.com',
-      allowlisted: true,
-      demo: false,
-    });
+    await run(event(sessionCookie(USER_A.uid, 1)), resolve);
+    expect(seen.locals?.user).toEqual(USER_A);
   });
 
-  it('marks a signed-in stranger as not allowlisted', async () => {
+  it('resolves an unlinked user with a null artist', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie('someone@example.com')), resolve);
-    expect(seen.locals?.session).toEqual({
-      email: 'someone@example.com',
-      allowlisted: false,
-      demo: false,
-    });
+    await run(event(sessionCookie(USER_B.uid, 1)), resolve);
+    expect(seen.locals?.user).toEqual(USER_B);
+  });
+
+  it('signs out a session from before the access generation was bumped', async () => {
+    await db().update(users).set({ accessGeneration: 2 }).where(eq(users.uid, USER_A.uid));
+    const { resolve, seen } = renderer();
+    await run(event(sessionCookie(USER_A.uid, 1)), resolve);
+    expect(seen.locals?.user).toBeNull();
+  });
+
+  it('signs out a session whose user no longer exists', async () => {
+    const { resolve, seen } = renderer();
+    await run(event(sessionCookie('uid-gone', 1)), resolve);
+    expect(seen.locals?.user).toBeNull();
   });
 
   it('drops a tampered cookie', async () => {
     const { resolve, seen } = renderer();
-    const forged = sessionCookie('nathan@example.com').replace(/\.[^.]+$/, '.forged');
+    const forged = sessionCookie(USER_A.uid, 1).replace(/\.[^.]+$/, '.forged');
     await run(event(forged), resolve);
-    expect(seen.locals?.session).toBeNull();
+    expect(seen.locals?.user).toBeNull();
   });
 
   it("renders the job's trace into the page when the job page set one", async () => {

@@ -2,16 +2,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 import { load } from '$routes/+layout.server';
+import { USER_A, USER_B } from '../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];
-type Data = { channel: unknown; session: unknown };
+type Data = { channel: unknown; user: unknown };
 
-const run = async (session: Event['locals']['session']) =>
-  (await load({ locals: { session } } as unknown as Event)) as Data;
+const run = async (user: Event['locals']['user']) =>
+  (await load({ locals: { user } } as unknown as Event)) as Data;
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+
+const STATS = {
+  items: [
+    {
+      snippet: { customUrl: '@flieslikerobots' },
+      statistics: { videoCount: '12', subscriberCount: '340' },
+      contentDetails: { relatedPlaylists: { uploads: 'UUflr' } },
+    },
+  ],
+};
 
 beforeEach(() => {
   vi.stubEnv('YOUTUBE_API_KEY', 'key');
@@ -27,21 +38,13 @@ afterEach(() => {
 });
 
 describe('layout load', () => {
-  it('returns FLR channel stats and no session when signed out', async () => {
+  it("returns FLR channel stats to the artist's user", async () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).includes('/channels?')
-        ? json({
-            items: [
-              {
-                snippet: { customUrl: '@flieslikerobots' },
-                statistics: { videoCount: '12', subscriberCount: '340' },
-                contentDetails: { relatedPlaylists: { uploads: 'UUflr' } },
-              },
-            ],
-          })
+        ? json(STATS)
         : json({ items: [{ contentDetails: { videoPublishedAt: '2026-09-20T00:00:00Z' } }] }),
     );
-    const data = await run(null);
+    const data = await run(USER_A);
     expect(data.channel).toEqual({
       handle: '@flieslikerobots',
       videoCount: 12,
@@ -49,28 +52,31 @@ describe('layout load', () => {
       uploadsPlaylist: 'UUflr',
       lastUploadAt: '2026-09-20T00:00:00Z',
     });
-    expect(data.session).toBeNull();
+    expect(data.user).toEqual({ email: USER_A.email, artistId: 'flr' });
+  });
+
+  it.each([
+    ['signed out', null],
+    ['an unlinked user', USER_B],
+  ])('reads no channel stats when %s', async (_label, user) => {
+    const data = await run(user);
+    expect(data.channel).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('renders without stats when the read key is missing', async () => {
     vi.stubEnv('YOUTUBE_API_KEY', '');
-    const data = await run(null);
-    expect(data.channel).toBeNull();
+    expect((await run(USER_A)).channel).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('renders without stats when YouTube errors', async () => {
     fetchMock.mockResolvedValue(new Response('nope', { status: 500 }));
-    expect((await run(null)).channel).toBeNull();
+    expect((await run(USER_A)).channel).toBeNull();
   });
 
-  it('passes only the email, allowlist, and demo flags of the session', async () => {
-    fetchMock.mockRejectedValue(new Error('offline'));
-    const session = { email: 'nathan@example.com', allowlisted: true, demo: false, extra: 'x' };
-    expect((await run(session as Event['locals']['session'])).session).toEqual({
-      email: 'nathan@example.com',
-      allowlisted: true,
-      demo: false,
-    });
+  it('passes only the email and artist link of the user', async () => {
+    expect((await run(USER_B)).user).toEqual({ email: USER_B.email, artistId: null });
+    expect((await run(null)).user).toBeNull();
   });
 });

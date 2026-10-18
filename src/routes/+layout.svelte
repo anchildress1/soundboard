@@ -16,15 +16,11 @@
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-  const CHANNELS: Record<string, string> = { nathan: "Nathan's", sandbox: 'The sandbox' };
-  const notice = $derived.by(() => {
-    const query = page.url.searchParams;
-    if (query.get('signin') === 'denied') {
-      return "That Google account isn't on the allowlist, so you're still signed out. Demo runs work without signing in.";
-    }
-    const connected = CHANNELS[query.get('connected') ?? ''];
-    return connected ? `${connected} channel is connected.` : null;
-  });
+  const notice = $derived(
+    page.url.searchParams.get('signin') === 'denied'
+      ? "That Google account isn't invited, so you're still signed out."
+      : null,
+  );
 </script>
 
 <svelte:head>
@@ -47,7 +43,7 @@
     </h1>
     <div class="bar">
       <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
-      {#if data.channel && (data.session?.allowlisted || data.session?.demo)}
+      {#if data.channel}
         <p class="chip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
             ><path
@@ -58,26 +54,18 @@
           <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
         </p>
       {/if}
-      {#if data.session?.allowlisted}
+      {#if data.user?.artistId === 'flr'}
         <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>
       {/if}
-      {#if data.session}
+      {#if data.user}
         <form method="POST" action="/auth/logout">
-          <button class="btn ghost small" type="submit" title={data.session.email}>Sign out</button>
+          <button class="btn ghost small" type="submit" title={data.user.email}>Sign out</button>
         </form>
       {:else}
         <a class="btn ghost small" href={resolve('/auth/login')} data-sveltekit-reload>Sign in</a>
       {/if}
     </div>
   </header>
-
-  {#if data.session?.demo}
-    <!-- Every page, not just the form: a demo run must never be mistaken for one on Nathan's channel. -->
-    <aside class="demo" aria-label="Demo account">
-      <strong>Demo account</strong>
-      <span>Uploads go private to the sandbox channel. Nothing is saved to Nathan's memory.</span>
-    </aside>
-  {/if}
 
   {#if notice}
     <p class="notice" role="status">{notice}</p>
@@ -214,26 +202,6 @@
   .chip b {
     color: var(--ink);
     font-weight: 500;
-  }
-
-  .demo {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 14px;
-    padding: 12px 16px;
-    border: 2px solid var(--info);
-    background: color-mix(in srgb, var(--info) 14%, var(--panel));
-    font-size: 14px;
-  }
-
-  .demo strong {
-    padding: 4px 10px;
-    background: var(--info);
-    color: var(--ground);
-    font: 900 12px/1 var(--display);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
   }
 
   .notice {

@@ -1,25 +1,27 @@
 // @vitest-environment node
-import { isHttpError, isRedirect } from '@sveltejs/kit';
+import { isRedirect } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { connections, invites, users } from '$lib/server/core/schema';
 import {
+  newOAuthState,
   OAUTH_COOKIE,
   readSession,
   SESSION_COOKIE,
+  SESSION_TTL_SEC,
   sign,
   type OAuthState,
 } from '$lib/server/auth/auth';
 import { GET } from '$routes/auth/callback/+server';
+import { seed, truncate } from '../../../../helpers/db';
+import { USER_A } from '../../../../helpers/pipeline';
 
-const NATHAN_EMAIL = 'nathan@example.com';
-const DEMO_EMAIL = 'demo@example.com';
+const SUB = 'sub-new';
+const EMAIL = 'new@example.com';
 
-const h = vi.hoisted(() => ({
-  getToken: vi.fn(),
-  verifyIdToken: vi.fn(),
-  addSecretVersion: vi.fn(),
-  createSecret: vi.fn(),
-}));
+const h = vi.hoisted(() => ({ getToken: vi.fn(), verifyIdToken: vi.fn() }));
 
 vi.mock('google-auth-library', () => ({
   OAuth2Client: class {
@@ -28,42 +30,26 @@ vi.mock('google-auth-library', () => ({
   },
 }));
 
-vi.mock('@google-cloud/secret-manager', () => ({
-  SecretManagerServiceClient: class {
-    addSecretVersion = h.addSecretVersion;
-    createSecret = h.createSecret;
-  },
-}));
-
 type Event = Parameters<typeof GET>[0];
 
 const state = (patch: Partial<OAuthState> = {}): OAuthState => ({
+  ...newOAuthState('sign-in', null),
   nonce: 'nonce-1',
-  purpose: 'sign-in',
-  channel: null,
   ...patch,
 });
 
-async function call(opts: {
-  cookie?: string;
-  query?: string;
-  allowlisted?: boolean | null;
-  origin?: string;
-}) {
+async function call(opts: { cookie?: string; query?: string; origin?: string }) {
   const cookies = {
     get: vi.fn((name: string) => (name === OAUTH_COOKIE ? opts.cookie : undefined)),
     set: vi.fn(),
     delete: vi.fn(),
   };
-  const allowlisted = opts.allowlisted ?? null;
   const event = {
     cookies,
     url: new URL(
       `${opts.origin ?? 'http://localhost'}/auth/callback${opts.query ?? '?code=c1&state=nonce-1'}`,
     ),
-    locals: {
-      session: allowlisted === null ? null : { allowlisted, email: NATHAN_EMAIL, demo: false },
-    },
+    locals: { user: null },
   } as unknown as Event;
   let thrown: unknown;
   try {
@@ -74,73 +60,68 @@ async function call(opts: {
   return { thrown, cookies };
 }
 
-const google = (email: string, refreshToken: string | null = null, verified = true) => {
-  h.getToken.mockResolvedValue({ tokens: { id_token: 'idt', refresh_token: refreshToken } });
-  h.verifyIdToken.mockResolvedValue({ getPayload: () => ({ email, email_verified: verified }) });
+const google = (sub: string, email: string, verified = true) => {
+  h.getToken.mockResolvedValue({ tokens: { id_token: 'idt' } });
+  h.verifyIdToken.mockResolvedValue({
+    getPayload: () => ({ sub, email, email_verified: verified, name: 'New' }),
+  });
 };
 
 const redirectTo = (thrown: unknown) =>
   isRedirect(thrown) ? [thrown.status, thrown.location] : thrown;
-const statusOf = (thrown: unknown) => (isHttpError(thrown) ? thrown.status : thrown);
+const allUsers = () => db().select().from(users);
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('SESSION_SECRET', 'secret');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'client-1');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'shh');
-  vi.stubEnv('GCP_PROJECT_ID', 'proj');
-  vi.stubEnv('ALLOWLIST_EMAILS', 'nathan@example.com, ashley@example.com');
+  vi.stubEnv('SIGNUP_MODE', 'invite');
   resetClients();
+  await truncate();
   for (const fn of Object.values(h)) fn.mockReset();
 });
 
 describe('GET /auth/callback: state checks', () => {
-  it('400s when the state does not match the cookie', async () => {
+  it('sends a mismatched state back to sign in again, without calling Google', async () => {
     const { thrown, cookies } = await call({
       cookie: sign(state()),
       query: '?code=c1&state=other',
     });
-    expect(statusOf(thrown)).toBe(400);
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.delete).toHaveBeenCalledWith(OAUTH_COOKIE, { path: '/auth' });
     expect(h.getToken).not.toHaveBeenCalled();
   });
 
-  it('400s without a state cookie', async () => {
-    expect(statusOf((await call({})).thrown)).toBe(400);
+  it.each([
+    ['no state cookie', () => undefined],
+    ['a forged state cookie', () => sign(state()).replace(/\.[^.]+$/, '.bad')],
+    ['an expired state', () => sign(state({ exp: Date.now() - 1 }))],
+    ['a connect state', () => sign(state({ purpose: 'connect', uid: USER_A.uid, sid: 's' }))],
+  ])('sends %s back to sign in again', async (_label, cookie) => {
+    const { thrown, cookies } = await call({ cookie: cookie() });
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(h.getToken).not.toHaveBeenCalled();
   });
 
-  it('400s a forged state cookie', async () => {
-    const forged = sign(state()).replace(/\.[^.]+$/, '.bad');
-    expect(statusOf((await call({ cookie: forged })).thrown)).toBe(400);
-  });
-
-  it('400s without a code', async () => {
+  it('sends a callback without a code back to sign in again', async () => {
     const { thrown } = await call({ cookie: sign(state()), query: '?state=nonce-1' });
-    expect(statusOf(thrown)).toBe(400);
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
   });
 });
 
 describe('GET /auth/callback: sign-in', () => {
-  it('sends a non-allowlisted account back with no session cookie', async () => {
-    google('stranger@example.com');
+  it('turns an uninvited account away, writing nothing', async () => {
+    google(SUB, 'stranger@example.com');
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=denied']);
     expect(cookies.set).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual([]);
   });
 
-  it('signs in a demo account', async () => {
-    vi.stubEnv('DEMO_EMAILS', DEMO_EMAIL);
-    google(DEMO_EMAIL);
-    const { thrown, cookies } = await call({ cookie: sign(state()) });
-    expect(redirectTo(thrown)).toEqual([303, '/']);
-    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toEqual({
-      email: DEMO_EMAIL,
-      allowlisted: false,
-      demo: true,
-    });
-  });
-
-  it('sets a signed session cookie for an allowlisted account', async () => {
-    google('Nathan@Example.com');
+  it("redeems the invite and sets a session at the new user's generation", async () => {
+    await seed({ invites: [{ email: EMAIL, artistId: null }] });
+    google(SUB, EMAIL);
     const { thrown, cookies } = await call({
       cookie: sign(state()),
       origin: 'https://soundboard.run.app',
@@ -149,54 +130,43 @@ describe('GET /auth/callback: sign-in', () => {
     expect(cookies.set).toHaveBeenCalledTimes(1);
     const [name, value, options] = cookies.set.mock.calls[0]!;
     expect(name).toBe(SESSION_COOKIE);
-    expect(options).toMatchObject({ path: '/', httpOnly: true, secure: true, sameSite: 'lax' });
-    expect(readSession(value as string)).toEqual({
-      email: NATHAN_EMAIL,
-      allowlisted: true,
-      demo: false,
+    expect(options).toEqual({
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: SESSION_TTL_SEC,
     });
-    expect(h.getToken).toHaveBeenCalledWith('c1');
+    expect(readSession(value as string)).toMatchObject({ uid: SUB, gen: 1 });
+    expect(await allUsers()).toEqual([
+      expect.objectContaining({ uid: SUB, email: EMAIL, name: 'New', inviteEmail: EMAIL }),
+    ]);
+    const [invite] = await db().select().from(invites);
+    expect(invite!.boundSub).toBe(SUB);
+    expect(await db().select().from(connections)).toEqual([]);
+  });
+
+  it("refreshes a returning user's profile and keeps their generation", async () => {
+    await seed({
+      invites: [{ email: EMAIL, artistId: 'flr', boundSub: SUB }],
+      users: [{ uid: SUB, email: EMAIL, inviteEmail: EMAIL, artistId: 'flr', accessGeneration: 4 }],
+    });
+    google(SUB, 'changed@example.com');
+    const { cookies } = await call({ cookie: sign(state()) });
+    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
+      uid: SUB,
+      gen: 4,
+    });
+    const [user] = await db().select().from(users).where(eq(users.uid, SUB));
+    expect(user).toMatchObject({ email: 'changed@example.com', name: 'New', accessGeneration: 4 });
   });
 
   it('refuses an unverified Google email', async () => {
-    google(NATHAN_EMAIL, null, false);
+    await seed({ invites: [{ email: EMAIL }] });
+    google(SUB, EMAIL, false);
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect((thrown as Error).message).toBe('Google account email is not verified');
     expect(cookies.set).not.toHaveBeenCalled();
-  });
-});
-
-describe('GET /auth/callback: connect', () => {
-  const connectState = () => sign(state({ purpose: 'connect', channel: 'nathan' }));
-
-  it("stores the channel's refresh token for an allowlisted session", async () => {
-    google(NATHAN_EMAIL, 'refresh-1');
-    const { thrown, cookies } = await call({ cookie: connectState(), allowlisted: true });
-    expect(redirectTo(thrown)).toEqual([303, '/?connected=nathan']);
-    expect(h.addSecretVersion).toHaveBeenCalledWith({
-      parent: 'projects/proj/secrets/yt-refresh-nathan',
-      payload: { data: Buffer.from('refresh-1', 'utf8') },
-    });
-    expect(cookies.set).not.toHaveBeenCalled();
-  });
-
-  it('400s when Google returns no refresh token', async () => {
-    google(NATHAN_EMAIL, null);
-    const { thrown } = await call({ cookie: connectState(), allowlisted: true });
-    expect(statusOf(thrown)).toBe(400);
-    expect(h.addSecretVersion).not.toHaveBeenCalled();
-  });
-
-  it('403s a connect from a non-allowlisted session', async () => {
-    google(NATHAN_EMAIL, 'refresh-1');
-    expect(statusOf((await call({ cookie: connectState(), allowlisted: false })).thrown)).toBe(403);
-    expect(statusOf((await call({ cookie: connectState() })).thrown)).toBe(403);
-    expect(h.addSecretVersion).not.toHaveBeenCalled();
-  });
-
-  it('403s a connect state with no channel', async () => {
-    google(NATHAN_EMAIL, 'refresh-1');
-    const noChannel = sign(state({ purpose: 'connect', channel: null }));
-    expect(statusOf((await call({ cookie: noChannel, allowlisted: true })).thrown)).toBe(403);
+    expect(await allUsers()).toEqual([]);
   });
 });

@@ -1,16 +1,18 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
-import { allowlist, demoEmails, required } from '$lib/server/core/env';
+import { required } from '$lib/server/core/env';
 import { YOUTUBE_SCOPES } from '$lib/server/platforms/youtube';
 
 export const SESSION_COOKIE = 'sb_session';
 export const OAUTH_COOKIE = 'sb_oauth';
 export const SESSION_TTL_SEC = 30 * 24 * 60 * 60;
+export const OAUTH_TTL_SEC = 10 * 60;
 
 export const SIGN_IN_SCOPES = ['openid', 'email'];
 export const CHANNEL_SCOPES = [...SIGN_IN_SCOPES, ...YOUTUBE_SCOPES];
 
-export type Session = { email: string; allowlisted: boolean; demo: boolean };
+/** `sid` is random per sign-in, so each browser session is distinct; `exp` never slides. */
+export type Session = { uid: string; sid: string; gen: number; exp: number };
 
 const mac = (value: string) =>
   createHmac('sha256', required('SESSION_SECRET')).update(value).digest('base64url');
@@ -35,37 +37,54 @@ export function unsign<T>(token: string | undefined): T | null {
   }
 }
 
-export function isAllowlisted(email: string): boolean {
-  return allowlist().has(email.trim().toLowerCase());
+const randomId = () => randomBytes(16).toString('base64url');
+
+/** A new session for `uid` at access generation `gen`, signed for the cookie. */
+export function sessionCookie(uid: string, gen: number, now = Date.now()): string {
+  const session: Session = { uid, sid: randomId(), gen, exp: now + SESSION_TTL_SEC * 1000 };
+  return sign(session);
 }
 
-/** A demo account that isn't also allowlisted; allowlisting wins. */
-export function isDemo(email: string): boolean {
-  return !isAllowlisted(email) && demoEmails().has(email.trim().toLowerCase());
-}
-
-/** Allowlist membership is re-checked on every request, so removing an email revokes access at once. */
+/**
+ * The signed session, or null for a bad signature, an expired one, or a payload without a `uid`.
+ * Whether the user still exists at that generation is the caller's check.
+ */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
-  const data = unsign<{ email: string; exp: number }>(cookie);
-  if (!data || typeof data.email !== 'string' || data.exp < now) return null;
-  return { email: data.email, allowlisted: isAllowlisted(data.email), demo: isDemo(data.email) };
+  const data = unsign<Partial<Session>>(cookie);
+  if (!data || typeof data.uid !== 'string' || !data.uid) return null;
+  if (typeof data.exp !== 'number' || data.exp <= now) return null;
+  if (typeof data.sid !== 'string' || typeof data.gen !== 'number') return null;
+  return { uid: data.uid, sid: data.sid, gen: data.gen, exp: data.exp };
 }
 
-export function sessionCookie(email: string, now = Date.now()): string {
-  return sign({ email, exp: now + SESSION_TTL_SEC * 1000 });
-}
-
+/** On `connect`, `uid` and `sid` name the session that started it, so a stale callback fails. */
 export type OAuthState = {
   nonce: string;
   purpose: 'sign-in' | 'connect';
-  channel: 'nathan' | 'sandbox' | null;
+  uid: string | null;
+  sid: string | null;
+  exp: number;
 };
 
 export function newOAuthState(
   purpose: OAuthState['purpose'],
-  channel: OAuthState['channel'],
+  session: Pick<Session, 'uid' | 'sid'> | null,
+  now = Date.now(),
 ): OAuthState {
-  return { nonce: randomBytes(16).toString('base64url'), purpose, channel };
+  return {
+    nonce: randomId(),
+    purpose,
+    uid: session?.uid ?? null,
+    sid: session?.sid ?? null,
+    exp: now + OAUTH_TTL_SEC * 1000,
+  };
+}
+
+/** The signed OAuth state, or null when it is missing, tampered with, or past its 10 minutes. */
+export function readOAuthState(cookie: string | undefined, now = Date.now()): OAuthState | null {
+  const state = unsign<OAuthState>(cookie);
+  if (!state || typeof state.nonce !== 'string' || typeof state.exp !== 'number') return null;
+  return state.exp > now ? state : null;
 }
 
 export function oauthClient(origin: string): OAuth2Client {
@@ -92,7 +111,12 @@ export function authUrl(origin: string, state: OAuthState): string {
   });
 }
 
-export type CallbackResult = { email: string; refreshToken: string | null };
+export type CallbackResult = {
+  sub: string;
+  email: string;
+  name: string | null;
+  refreshToken: string | null;
+};
 
 /** Exchanges the code and verifies the ID token's audience and verified email. */
 export async function exchangeCode(origin: string, code: string): Promise<CallbackResult> {
@@ -106,5 +130,10 @@ export async function exchangeCode(origin: string, code: string): Promise<Callba
   const payload = ticket.getPayload();
   if (!payload?.email || !payload.email_verified)
     throw new Error('Google account email is not verified');
-  return { email: payload.email.toLowerCase(), refreshToken: tokens.refresh_token ?? null };
+  return {
+    sub: payload.sub,
+    email: payload.email.toLowerCase(),
+    name: payload.name ?? null,
+    refreshToken: tokens.refresh_token ?? null,
+  };
 }

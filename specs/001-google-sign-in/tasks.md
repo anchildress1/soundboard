@@ -44,7 +44,7 @@ description: 'Task list for Google sign-in and connections'
 - [ ] T008 Create tests/helpers/db.ts (after T006: a fresh PGlite per test file with drizzle/ migrations applied via the PGlite migrator, plus `seed()`), and tests/e2e/fakes/db.ts exporting the same `db()` over an in-memory PGlite seeded from tests/e2e/fakes/fixtures.ts; delete tests/helpers/fake-firestore.ts and tests/e2e/fakes/firestore.ts
 - [x] T009 Replace job ownership fields in src/lib/types.ts: add `ownerUid: string`, `artistId: string | null`, `destination: {channelId, channelTitle} | null`, top-level `parentId: string | null` ("`null` on videos, the parent's ID on Shorts"), `uploadStartedAt: number | null`, `finalChunkAt: number | null`; remove `owner`, `channel`, `sampleId`, `liveVideoId`, `ipHash`, `JobOwner` and `Channel`; keep them out of `JobView`
 - [x] T010 [P] Set `locals.user: {uid, email, artistId} | null` in src/app.d.ts
-- [ ] T011 [P] Remove `allowlist()` and `demoEmails()` and add `signupMode(): 'invite' | 'open'` (default `invite`) and `kmsKey()` in src/lib/server/core/env.ts, with tests in tests/unit/lib/server/core/env.test.ts
+- [x] T011 [P] Remove `allowlist()` and `demoEmails()` and add `signupMode(): 'invite' | 'open'` (default `invite`) and `kmsKey()` in src/lib/server/core/env.ts, with tests in tests/unit/lib/server/core/env.test.ts
 - [x] T012 [P] Create src/lib/server/core/kms.ts with `encrypt(plain): Promise<string>` (base64 ciphertext) and `decrypt(cipher): Promise<string>` against `KMS_KEY`, never logging or setting either value on a span; tests in tests/unit/lib/server/core/kms.test.ts mocking the KMS client
 - [x] T013 [P] Create tests/e2e/fakes/kms.ts: a reversible in-memory encrypt/decrypt with the `KeyManagementServiceClient` surface kms.ts uses
 - [x] T014 Create src/lib/server/auth/users.ts:
@@ -53,7 +53,7 @@ description: 'Task list for Google sign-in and connections'
   - `redeemInvite(sub, email)` in one database transaction: look up the `users` row by `uid` first and check the invite named by its `invite_email`; only a first sign-in looks the invite up by the token's normalized email ("Lowercased, trimmed"). Bind with the data model's `UPDATE invites SET bound_sub = $sub WHERE … (bound_sub IS NULL OR bound_sub = $sub)` ("Only this `sub` may redeem it afterwards"); zero rows = denied, copy `artistId`, create the user with `accessGeneration: 1`. Return `denied` for a missing, inactive or foreign-bound invite and write nothing
   - `signupMode() === 'open'` skips the invite and creates the user with `inviteEmail: null`, `artistId: null`
   - Tests in tests/unit/lib/server/auth/users.test.ts: first redemption, returning user with changed email, foreign `sub` on a bound invite, inactive invite, open mode, upsert leaving `accessGeneration` untouched
-- [ ] T015 Rewrite sessions in src/lib/server/auth/auth.ts:
+- [x] T015 Rewrite sessions in src/lib/server/auth/auth.ts:
   - Session payload `{uid, sid, gen, exp}`; `sid` random per sign-in; `exp` = sign-in + `SESSION_TTL_SEC`, fixed
   - OAuth state `{nonce, purpose: 'sign-in' | 'connect', uid: string | null, sid: string | null, exp}` with `exp` 10 minutes out, cookie path `/auth`
   - Remove `isAllowlisted`, `isDemo`, `Session.allowlisted/demo` and the `channel: 'nathan' | 'sandbox'` state field

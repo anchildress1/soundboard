@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { allowlist, kmsKey, modelUrl, optional, required, signupMode } from '$lib/server/core/env';
+import { kmsKey, modelUrl, optional, required, signupMode } from '$lib/server/core/env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -46,25 +46,6 @@ describe('modelUrl', () => {
   it('honours MODEL_URL', () => {
     vi.stubEnv('MODEL_URL', 'http://model.test:9000');
     expect(modelUrl()).toBe('http://model.test:9000');
-  });
-});
-
-describe('allowlist', () => {
-  it('parses a comma list, trimming and lowercasing', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', ' Nathan@Example.com , ops@example.com,');
-    expect(allowlist()).toEqual(new Set(['nathan@example.com', 'ops@example.com']));
-  });
-
-  it('is empty when unset or blank', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', undefined);
-    expect(allowlist().size).toBe(0);
-    vi.stubEnv('ALLOWLIST_EMAILS', ' , ,');
-    expect(allowlist().size).toBe(0);
-  });
-
-  it('collapses duplicates that differ only by case', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', 'a@x.com,A@X.COM');
-    expect([...allowlist()]).toEqual(['a@x.com']);
   });
 });
 
