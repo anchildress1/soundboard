@@ -1,11 +1,11 @@
 // Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
-// job; user B is invited and unlinked. Each test owns its job IDs, so parallel tests and both
+// job but `e2e-b-review`; user B is invited and unlinked. Each test owns its job IDs, so parallel tests and both
 // Playwright projects never share mutable state.
 import type { JobDoc } from '$lib/server/jobs/jobs';
 import { jobRow } from '$lib/server/jobs/rows';
 import type { Chunk, Pick, Short } from '$lib/types';
 import type { Seed } from '../../helpers/db';
-import { A_JOB, jobDoc, USERS } from '../../helpers/pipeline';
+import { A_JOB, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
 
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE = '#retrowave';
@@ -101,6 +101,11 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     }),
     pick: PICK,
     chunks: [],
+  },
+  {
+    job: job('e2e-b-review', { ownerUid: USER_B.uid, artistId: null, songTitle: 'Vaporgram' }),
+    pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
+    chunks: [0, 1, 2, 3, 4].map(chunk),
   },
   {
     job: job('e2e-analyzing', { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { signIn, USER_B } from './session';
+import { signIn, USER_A, USER_B } from './session';
 
 test.describe('home page', () => {
   test.beforeEach(async ({ page }) => {
@@ -49,4 +49,28 @@ test('health endpoint reports ok', async ({ request }) => {
   const response = await request.get('/health');
   expect(response.ok()).toBe(true);
   expect(await response.json()).toEqual({ ok: true });
+});
+
+test.describe('job list', () => {
+  test("lists only the signed-in user's runs and continues one", async ({ page }) => {
+    await signIn(page, USER_B);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('listitem')).toHaveCount(1);
+    await expect(runs.getByRole('listitem')).toContainText('Vaporgram');
+    await expect(runs.getByRole('listitem')).toContainText('Needs review');
+    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await expect(page).toHaveURL('/jobs/e2e-b-review');
+    await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
+  });
+
+  test("leaves another user's runs and every Short off the list", async ({ page }) => {
+    await signIn(page, USER_A);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('link', { name: 'Continue PeekaBoo' }).first()).toBeVisible();
+    await expect(runs).not.toContainText('Vaporgram');
+    await expect(runs.locator('a[href="/jobs/e2e-cut-short"]')).toHaveCount(0);
+    await expect(runs.locator('a[href="/jobs/e2e-cut"]')).toHaveCount(1);
+  });
 });

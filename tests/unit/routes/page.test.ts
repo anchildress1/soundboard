@@ -21,8 +21,10 @@ const json = (body: unknown, status = 200) =>
 
 const USER = { email: 'b@example.com', artistId: null };
 
-function setup(user: typeof USER | null = USER) {
-  return render(Page, { props: { data: { user, channel: null } } as never });
+type ListedJob = { id: string; songTitle: string; state: string; createdAt: number };
+
+function setup(user: typeof USER | null = USER, jobs: ListedJob[] = []) {
+  return render(Page, { props: { data: { user, channel: null, jobs } } as never });
 }
 
 const analyze = () => screen.getByRole('button', { name: /Analyze|Starting/ });
@@ -49,6 +51,24 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('home page: job list', () => {
+  it('lists the runs under the upload form with a continue link', () => {
+    setup(USER, [{ id: 'j1', songTitle: 'PeekaBoo', state: 'REVIEW', createdAt: 1 }]);
+    const form = screen.getByRole('form', { name: 'Start a run' });
+    const list = screen.getByRole('region', { name: 'Your runs' });
+    expect(form.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Continue PeekaBoo' })).toHaveAttribute(
+      'href',
+      '/jobs/j1',
+    );
+  });
+
+  it('shows no list without runs', () => {
+    setup();
+    expect(screen.queryByRole('region', { name: 'Your runs' })).toBeNull();
+  });
 });
 
 describe('home page: signed out', () => {
