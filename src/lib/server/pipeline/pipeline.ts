@@ -251,7 +251,13 @@ async function sendChunk(
     }
   } catch (error) {
     if (uploadFailure(error) !== 'session-lost') throw error;
-    if (finalSent) return pause(OUTCOME_UNKNOWN, { upload: null });
+    // Tagged with the job only: the session URI alone authorizes uploads.
+    const tags = { 'job.id': job.id };
+    if (finalSent) {
+      captureMessage('Upload session lost after final chunk', { level: 'warning', tags });
+      return pause(OUTCOME_UNKNOWN, { upload: null });
+    }
+    captureMessage('Upload session lost; restarting', { level: 'info', tags });
     return ok({ upload: null, uploadProgress: null });
   }
   if (result.done) {

@@ -1135,6 +1135,11 @@ describe('runStep: PUBLISHING recovery', () => {
     sessionGone();
     await runStep(await publishing({ upload: UPLOAD, uploadStartedAt: 7 }));
     expect(await saved()).toMatchObject({ upload: null, finalChunkAt: null });
+    expect(captureMessage).toHaveBeenCalledWith('Upload session lost; restarting', {
+      level: 'info',
+      tags: { 'job.id': 'j1' },
+    });
+    expect(JSON.stringify(captureMessage.mock.calls)).not.toContain(SESSION_URI);
     handlers.shift();
     await runStep(await saved());
     expect(await saved()).toMatchObject({
@@ -1159,6 +1164,11 @@ describe('runStep: PUBLISHING recovery', () => {
     });
     expect(job.consecutiveFailures).toBe(0);
     expect(outcomeUnknown(job)).toBe(true);
+    expect(captureMessage).toHaveBeenCalledWith('Upload session lost after final chunk', {
+      level: 'warning',
+      tags: { 'job.id': 'j1' },
+    });
+    expect(JSON.stringify(captureMessage.mock.calls)).not.toContain(SESSION_URI);
   });
 
   it('pauses when the final chunk PUT itself finds the session gone', async () => {
