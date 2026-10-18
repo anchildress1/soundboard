@@ -12,6 +12,7 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  markUploadStarted,
   ok,
   releaseJob,
   transitionJob,
@@ -164,17 +165,19 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   }
 }
 
-/** A fresh access token for the owner's grant on the channel the approval pinned. */
-const destinationToken = (job: JobDoc) =>
-  job.destination ? accessTokenFor(job.ownerUid, job.destination.channelId) : null;
-
-async function publishing(job: JobDoc): Promise<Patch> {
+/**
+ * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
+ * alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload here.
+ */
+async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
-  const token = await destinationToken(job);
-  if (!token) return fail('PUBLISHING', 'Reconnect YouTube to upload.');
+  const token = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!token) return { wait: 'reconnect YouTube' };
   if (!job.upload) {
     const info = await objectInfo(job.object);
     if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
+    // Durable before the request: a crash after YouTube opened the session still shows it began.
+    await markUploadStarted(job.id);
     try {
       const sessionUri = await startResumableUpload(
         token,
@@ -233,9 +236,12 @@ async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
   });
 }
 
-async function verify(job: JobDoc): Promise<Patch> {
-  const token = await destinationToken(job);
-  if (!token || !job.videoId) return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
+async function verify(job: JobDoc): Promise<StepOutput> {
+  if (!job.destination || !job.videoId) {
+    return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
+  }
+  const token = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!token) return { wait: 'reconnect YouTube' };
   const video = await readBack(token, job.videoId);
   const uploadStatus = video?.uploadStatus ?? '';
   if (REJECTED_UPLOADS.has(uploadStatus)) {

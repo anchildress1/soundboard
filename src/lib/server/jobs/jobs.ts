@@ -170,6 +170,14 @@ export async function releaseJob(
   });
 }
 
+/** Records when the first upload initiation went out; later calls keep the first time. */
+export async function markUploadStarted(id: string): Promise<void> {
+  await db()
+    .update(jobs)
+    .set({ uploadStartedAt: sql`coalesce(${jobs.uploadStartedAt}, now())` })
+    .where(eq(jobs.id, id));
+}
+
 /** Moves the job to a new state only if it is still in one of `from`; false when it already moved. */
 export async function transitionJob(
   id: string,

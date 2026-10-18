@@ -116,7 +116,11 @@ export type Short = {
 };
 
 export type Wait =
-  'waking model' | 'waiting on another run' | 'step running in another tab' | 'waiting on YouTube';
+  | 'waking model'
+  | 'waiting on another run'
+  | 'step running in another tab'
+  | 'waiting on YouTube'
+  | 'reconnect YouTube';
 
 /** The job as the browser sees it: no owner, upload session URIs, or claim tokens. */
 export type PublicJob = {

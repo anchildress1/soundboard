@@ -9,6 +9,7 @@ import {
   ARTIST,
   CHANNEL_A,
   child,
+  REFRESH_A,
   completion,
   defaultHandlers,
   headers,
@@ -41,6 +42,7 @@ import {
   jobs,
   users,
 } from '$lib/server/core/schema';
+import { retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet } from '$lib/server/jobs/rows';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
@@ -50,6 +52,8 @@ const WAKING = 'waking model';
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';
 const WAITING_ON_YOUTUBE = 'waiting on YouTube';
+const RECONNECT = 'reconnect YouTube';
+const A_TOKEN = `Bearer access:${REFRESH_A}`;
 const SOURCE_OBJECT = 'uploads/p1';
 
 const h = vi.hoisted(() => ({
@@ -77,11 +81,15 @@ vi.mock('@google-cloud/storage', () => ({
   },
 }));
 
+// Each grant mints its own token, so a request's Authorization header names the grant behind it.
 vi.mock('google-auth-library', () => ({
   OAuth2Client: class {
-    setCredentials() {}
+    refresh = '';
+    setCredentials(credentials: { refresh_token: string }) {
+      this.refresh = credentials.refresh_token;
+    }
     async getAccessToken() {
-      return { token: 'access-1' };
+      return { token: `access:${this.refresh}` };
     }
   },
 }));
@@ -122,6 +130,11 @@ const pickAt = async (version: number) =>
       .where(and(eq(jobPicks.jobId, 'j1'), eq(jobPicks.version, version)))
   )[0]?.data as Record<string, unknown> | undefined;
 const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
+const revokeA = () =>
+  db()
+    .update(connections)
+    .set({ status: 'revoked', tokenCiphertext: null })
+    .where(eq(connections.uid, USER_A.uid));
 const artistRowCount = async () =>
   (
     await Promise.all(
@@ -742,21 +755,75 @@ describe('runStep: PUBLISHING', () => {
   it.each([
     ['revoked', { status: 'revoked' as const, tokenCiphertext: null }],
     ['on another channel', { channelId: 'UCother' }],
-  ])('stops when the grant is %s, without calling YouTube', async (_label, change) => {
+  ])('waits to reconnect when the grant is %s, without calling YouTube', async (_label, change) => {
     await db().update(connections).set(change).where(eq(connections.uid, A_JOB.ownerUid));
-    await runStep(await publishing());
+    expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
     expect(await saved()).toMatchObject({
-      state: 'FAILED',
-      failedState: 'PUBLISHING',
-      error: 'Reconnect YouTube to upload.',
+      state: 'PUBLISHING',
+      consecutiveFailures: 0,
+      error: null,
+      uploadStartedAt: null,
     });
     expect(called(/upload\/youtube/)).toHaveLength(0);
   });
 
+  it('waits to reconnect when the connection row is gone', async () => {
+    await db().delete(connections).where(eq(connections.uid, A_JOB.ownerUid));
+    expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
+  });
+
   it("never uploads with another user's grant", async () => {
-    await runStep(await publishing({ ownerUid: 'uid-b', artistId: null }));
-    expect((await saved()).error).toBe('Reconnect YouTube to upload.');
+    expect(await runStep(await publishing({ ownerUid: 'uid-b', artistId: null }))).toEqual({
+      wait: RECONNECT,
+    });
     expect(called(/upload\/youtube/)).toHaveLength(0);
+  });
+
+  it('stops a live session mid-upload once the grant is revoked, keeping its progress', async () => {
+    await revokeA();
+    const upload = { sessionUri: SESSION_URI, total: 1000 };
+    const progress = { sent: 400, total: 1000 };
+    await runStep(await publishing({ upload, uploadProgress: progress, uploadStartedAt: 7 }));
+    // The session URI alone would authorize the PUT; the grant check is what stops it.
+    expect(called(/upload\.example/)).toHaveLength(0);
+    expect(await saved()).toMatchObject({ upload, uploadProgress: progress, uploadStartedAt: 7 });
+  });
+
+  it('marks the upload started before the initiation request goes out', async () => {
+    let markedAtRequest: number | null = null;
+    on(/upload\/youtube\/v3\/videos/, async () => {
+      markedAtRequest = (await saved()).uploadStartedAt;
+      return new Response('forbidden', { status: 403 });
+    });
+    await runStep(await publishing());
+    expect(markedAtRequest).toEqual(expect.any(Number));
+    // A failed initiation may still have opened a session; the marker stays.
+    expect((await saved()).uploadStartedAt).toBe(markedAtRequest);
+  });
+
+  it('keeps the first upload start through a session reset, a retry and a reconnect', async () => {
+    await runStep(await publishing({ uploadStartedAt: 7 }));
+    expect((await saved()).uploadStartedAt).toBe(7);
+
+    on(/upload\.example\/s1/, () => new Response('gone', { status: 404 }));
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ upload: null, uploadStartedAt: 7 });
+
+    await patchJob({ state: 'FAILED', failedState: 'PUBLISHING' });
+    await retry(await saved());
+    expect(await saved()).toMatchObject({ state: 'PUBLISHING', uploadStartedAt: 7 });
+
+    await revokeA();
+    expect(await runStep(await saved())).toEqual({ wait: RECONNECT });
+    await db()
+      .update(connections)
+      .set({ status: 'connected', tokenCiphertext: USERS.connections[0]!.tokenCiphertext })
+      .where(eq(connections.uid, USER_A.uid));
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({
+      upload: { sessionUri: SESSION_URI },
+      uploadStartedAt: 7,
+    });
   });
 
   it('opens a private resumable upload sized from storage', async () => {
@@ -768,7 +835,7 @@ describe('runStep: PUBLISHING', () => {
     });
     const init = called(/upload\/youtube\/v3\/videos/)[0]!.init;
     expect(headers(init)['x-upload-content-length']).toBe('1000');
-    expect(headers(init).authorization).toBe('Bearer access-1');
+    expect(headers(init).authorization).toBe(A_TOKEN);
     expect(JSON.parse(String(init.body)).status).toEqual({
       privacyStatus: 'private',
       selfDeclaredMadeForKids: false,
@@ -881,9 +948,7 @@ describe('runStep: CLAIMED_COMPLETE', () => {
       fields: FIELDS,
       status: 'VERIFIED',
     });
-    expect(headers(called(/com\/youtube\/v3\/videos\?/)[0]!.init).authorization).toBe(
-      'Bearer access-1',
-    );
+    expect(headers(called(/com\/youtube\/v3\/videos\?/)[0]!.init).authorization).toBe(A_TOKEN);
   });
 
   it("verifies a job outside Nathan's artist without touching the artist tables", async () => {
@@ -934,13 +999,21 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'CLAIMED_COMPLETE' });
   });
 
-  it('fails when the grant was revoked', async () => {
-    await db()
-      .update(connections)
-      .set({ status: 'revoked', tokenCiphertext: null })
-      .where(eq(connections.uid, A_JOB.ownerUid));
-    await runStep(await claimed());
+  it('fails when there is no video to read back', async () => {
+    await runStep(await claimed({ videoId: null }));
     expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Cannot read the upload back.' });
+  });
+
+  it('waits to reconnect when the grant was revoked, keeping the video ID', async () => {
+    await revokeA();
+    expect(await runStep(await claimed())).toEqual({ wait: RECONNECT });
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      verifyAttempts: 0,
+      consecutiveFailures: 0,
+    });
+    expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
   });
 
   it('counts a read-back error as a failure and asks the page to wait', async () => {
