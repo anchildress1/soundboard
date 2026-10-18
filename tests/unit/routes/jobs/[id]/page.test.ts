@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPending } from '$lib/pending';
 import { POLL_BACKOFF } from '$lib/retry';
-import type { Chunk, JobState, JobView, LiveMetadata, Pick, PublicJob, Short } from '$lib/types';
+import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '$lib/types';
 import Page from '$routes/jobs/[id]/+page.svelte';
 
 const BRAND_CHECK = 'Keeps the naming pattern.';
@@ -26,12 +26,11 @@ const TRACE = { sentryTrace: 'trace-1', baggage: 'bag-1' };
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   id: 'j1',
   state: 'REVIEW',
-  owner: 'visitor',
-  channel: null,
+  parentId: null,
+  destination: null,
   songTitle: 'PeekaBoo',
   notes: '',
   filename: 'peekaboo.mp4',
-  sampleId: null,
   probe: { durationSec: 140, width: 1920, height: 1080, hasAudio: true },
   measurements: null,
   chunkCount: 5,
@@ -40,7 +39,7 @@ const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   error: null,
   uploadProgress: null,
   videoId: null,
-  payload: null,
+  finalFields: null,
   hashtagCandidates: ['#synthwave', '#retrowave'],
   shortId: null,
   short: null,
@@ -100,20 +99,16 @@ const json = (body: unknown, status = 200) =>
 const hang = () => new Promise<Response>(() => {});
 const paths = () => fetchMock.mock.calls.map(([p]) => String(p));
 
-function setup(
-  v: JobView,
-  extra: { live?: LiveMetadata | null; playbackUrl?: string | null; short?: JobView | null } = {},
-) {
+function setup(v: JobView, extra: { playbackUrl?: string | null; short?: JobView | null } = {}) {
   return render(Page, {
     props: {
       data: {
         view: v,
         playbackUrl: extra.playbackUrl ?? PLAYBACK_URL,
-        live: extra.live ?? null,
         short: extra.short ?? null,
         trace: TRACE,
         channel: null,
-        session: null,
+        user: null,
       },
     } as never,
   });
@@ -254,23 +249,11 @@ describe('job page: status chip', () => {
     expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('Done');
   });
 
-  it('shows the would-be payload for PAYLOAD', () => {
-    const payload = { title: 'PeekaBoo', description: 'd', hashtags: [], tags: ['synthwave'] };
-    setup(view({ state: 'PAYLOAD', payload }, { pick: PICK }));
-    expect(chip()).toHaveTextContent('Payload ready');
-    const block = screen.getByRole('region', { name: 'Would-be upload payload' });
-    const body = JSON.parse(block.querySelector('pre')!.textContent!) as Record<string, unknown>;
-    expect(body).toEqual({
-      snippet: { title: 'PeekaBoo', description: 'd', tags: ['synthwave'], categoryId: '10' },
-      status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-    });
+  it('shows the approved fields over the recommendation once approved', () => {
+    const finalFields = { title: 'Edited', description: 'd', hashtags: [], tags: ['synthwave'] };
+    setup(view({ state: 'VERIFIED', videoId: 'vid1', finalFields }, { pick: PICK }));
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Edited');
     expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
-  });
-
-  it('renders the live-video diff for a sample', () => {
-    const live = { videoId: 'live1', title: 'Neon', description: '', tags: [] };
-    setup(view({ state: 'REVIEW' }, { pick: PICK }), { live });
-    expect(screen.getByRole('region', { name: 'Current versus proposed' })).toBeInTheDocument();
   });
 
   it('streams playback from the signed URL', () => {
@@ -315,17 +298,19 @@ describe('job page: driving', () => {
 });
 
 describe('job page: actions', () => {
-  it('approves and shows the resulting payload', async () => {
-    const payload = {
+  it('approves and shows the upload starting', async () => {
+    const finalFields = {
       title: PICK.title,
       description: PICK.description,
       hashtags: PICK.hashtags,
       tags: PICK.tags,
     };
-    fetchMock.mockResolvedValueOnce(json(view({ state: 'PAYLOAD', payload }, { pick: PICK })));
+    fetchMock
+      .mockResolvedValueOnce(json(view({ state: 'PUBLISHING', finalFields }, { pick: PICK })))
+      .mockImplementation(hang);
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
     await fireEvent.click(screen.getByRole('button', { name: APPROVE }));
-    await waitFor(() => expect(chip()).toHaveTextContent('Payload ready'));
+    await waitFor(() => expect(chip()).toHaveTextContent('Uploading to YouTube'));
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/api/jobs/j1/approve');
     expect(init!.headers).toMatchObject({ 'sentry-trace': 'trace-1' });
@@ -561,7 +546,6 @@ describe('job page: upload hand-off', () => {
 });
 
 const SPEC: Short = {
-  parentId: 'j1',
   sourceDurationSec: 140,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands.' },
@@ -579,6 +563,7 @@ const shortView = (
   job: job({
     id: 's1',
     state,
+    parentId: 'j1',
     filename: 'peekaboo (Short).mp4',
     probe: { durationSec: 30, width: 720, height: 1280, hasAudio: true },
     short: { ...SPEC, ...spec },
@@ -617,7 +602,7 @@ describe('job page: Short tab', () => {
     expect(shortPanel()).toHaveAttribute('aria-labelledby', 'tab-short');
   });
 
-  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'PAYLOAD'] as JobState[])(
+  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
     'offers Make a Short in %s',
     async (state) => {
       fetchMock.mockImplementation(hang);

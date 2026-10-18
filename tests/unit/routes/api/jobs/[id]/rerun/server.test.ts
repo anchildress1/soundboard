@@ -1,77 +1,60 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../../helpers/fake-firestore';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { artistFeedback, jobFeedback } from '$lib/server/core/schema';
+import { listPicks } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/rerun/+server';
 import type { JobView } from '$lib/types';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
+import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
 
-const rerun = async (id: string, allowlisted = false) =>
-  POST({
-    params: { id },
-    locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null },
-  } as unknown as Event);
+const rerun = async (id: string, user: typeof USER_A | typeof USER_B = USER_B) =>
+  POST({ params: { id }, locals: { user } } as unknown as Event);
 
-function seed(id: string, patch: Record<string, unknown> = {}, withPick = true) {
-  store.set(`jobs/${id}`, {
-    id,
-    owner: 'visitor',
-    state: 'REVIEW',
-    songTitle: 'PeekaBoo',
-    consecutiveFailures: 1,
-    error: 'old',
-    ...patch,
-  });
-  if (withPick) store.set(`jobs/${id}/pick/0001`, { version: 1, title: 'First', skipped: false });
+async function put(patch: Parameters<typeof seedJob>[0] = {}, withPick = true) {
+  await seedJob({ state: 'REVIEW', consecutiveFailures: 1, error: 'old', ...patch });
+  if (withPick) {
+    await seed({
+      jobPicks: [{ jobId: 'j1', version: 1, data: { version: 1, title: 'First', skipped: false } }],
+    });
+  }
 }
 
-const keys = (prefix: string) => [...store.keys()].filter((k) => k.startsWith(prefix));
+const jobRows = () => db().select().from(jobFeedback);
+const artistRows = () => db().select().from(artistFeedback);
 
-/** The bucket's lifecycle rule can delete a job mid-request; the route falls back to what it loaded. */
-function vanishAfter(path: string, reads: number) {
-  const real = store.get.bind(store);
-  let n = 0;
-  vi.spyOn(store, 'get').mockImplementation((key: string) => {
-    if (key === path) n += 1;
-    return key === path && n > reads ? undefined : real(key);
-  });
-}
-
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+beforeEach(async () => {
   resetClients();
-  vi.restoreAllMocks();
+  await truncate();
+  await seed(USERS);
 });
 
 describe('POST /api/jobs/[id]/rerun', () => {
   it('skips the current pick and queues a new smart pick', async () => {
-    seed('j');
-    const response = await rerun('j');
+    await put();
+    const response = await rerun('j1');
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;
     expect(view.job).toMatchObject({ state: 'PICK', error: null });
-    expect(store.get('jobs/j/pick/0001')).toMatchObject({ skipped: true });
-    expect(keys('jobs/j/feedback/')).toHaveLength(1);
-    expect(keys('artists/')).toHaveLength(0);
+    expect((await listPicks('j1'))[0]).toMatchObject({ skipped: true });
+    expect(await jobRows()).toHaveLength(1);
+    expect(await artistRows()).toHaveLength(0);
   });
 
   it('queues a pick even with no stored recommendation', async () => {
-    seed('j', {}, false);
-    const view = (await (await rerun('j')).json()) as JobView;
+    await put({}, false);
+    const view = (await (await rerun('j1')).json()) as JobView;
     expect(view.job.state).toBe('PICK');
-    expect(keys('jobs/j/feedback/')).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
   });
 
   it('409s outside review', async () => {
-    seed('j', { state: 'PUBLISHING' });
-    const response = await rerun('j');
+    await put({ state: 'PUBLISHING' });
+    const response = await rerun('j1');
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
       error: 'Not allowed while the job is PUBLISHING.',
@@ -79,22 +62,24 @@ describe('POST /api/jobs/[id]/rerun', () => {
     });
   });
 
-  it("404s Nathan's job from a non-allowlisted session", async () => {
-    seed('n', { owner: 'nathan' });
-    const error = await rerun('n').catch((e: unknown) => e);
+  it("404s another user's job and skips nothing", async () => {
+    await put();
+    const error = await rerun('j1', USER_A).catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
-    expect(store.get('jobs/n/pick/0001')).toMatchObject({ skipped: false });
+    expect((await listPicks('j1'))[0]).toMatchObject({ skipped: false });
   });
 
-  it("stores Nathan's skip on the artist", async () => {
-    seed('n', { owner: 'nathan' });
-    await rerun('n', true);
-    expect(keys('artists/flr/feedback/')).toHaveLength(1);
+  it("stores the skip on Nathan's job in his artist memory", async () => {
+    await put(A_JOB);
+    await rerun('j1', USER_A);
+    expect(await artistRows()).toHaveLength(1);
+    expect(await jobRows()).toHaveLength(0);
   });
+
   it('answers with the loaded job if it disappears mid-request', async () => {
-    seed('j');
-    vanishAfter('jobs/j', 2);
-    const response = await rerun('j');
+    await put({}, false);
+    await vanishOnUpdate();
+    const response = await rerun('j1');
     expect(response.status).toBe(200);
     expect(((await response.json()) as JobView).job.state).toBe('REVIEW');
   });

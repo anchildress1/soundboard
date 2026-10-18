@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
+import { getJob } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/+server';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../../../helpers/db';
+import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -23,17 +23,15 @@ vi.mock('@google-cloud/storage', () => ({
 }));
 
 type Event = Parameters<typeof POST>[0];
+type User = typeof USER_A | typeof USER_B | null;
 
-const post = (body: unknown, allowlisted = false, ip = '203.0.113.7') =>
+const post = (body: unknown, user: User = USER_B) =>
   POST({
     request: new Request('http://localhost/api/jobs', {
       method: 'POST',
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
-    locals: {
-      session: allowlisted ? { email: 'nathan@example.com', allowlisted: true, demo: false } : null,
-    },
-    getClientAddress: () => ip,
+    locals: { user },
   } as unknown as Event);
 
 const upload = {
@@ -45,48 +43,34 @@ const upload = {
   durationSec: 200,
 };
 
-const jobKeys = () => [...store.keys()].filter((k) => /^jobs\/[^/]+$/.test(k));
-const onlyJob = () => store.get(jobKeys()[0]!) as Record<string, unknown>;
+const jobCount = async () => (await db().select().from(jobs)).length;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
-  vi.stubEnv('SESSION_SECRET', 'salt');
-  resetStore();
   resetClients();
-  store.set('samples/s1', {
-    songTitle: 'Neon',
-    videoId: 'live1',
-    object: 'samples/neon.mp4',
-    durationSec: 30,
-  });
+  await truncate();
+  await seed(USERS);
 });
 
 describe('POST /api/jobs', () => {
-  it('starts a signed-out sample run on the sandbox channel', async () => {
-    const response = await post({ sampleId: 's1' });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { id: string; uploadUrl: string | null };
-    expect(body.uploadUrl).toBeNull();
-    expect(body.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(onlyJob()).toMatchObject({
-      owner: 'visitor',
-      channel: 'sandbox',
-      state: 'PREP',
-      sampleId: 's1',
-      liveVideoId: 'live1',
-    });
-    expect(onlyJob().ipHash).toMatch(/^[0-9a-f]{32}$/);
-    expect(JSON.stringify(onlyJob())).not.toContain('203.0.113.7');
-  });
-
-  it('hands an allowlisted upload a signed PUT URL and no run caps', async () => {
-    const response = await post(upload, true);
+  it("creates the signed-in user's job with a signed PUT URL", async () => {
+    const response = await post(upload, USER_A);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { id: string; uploadUrl: string };
     expect(body.uploadUrl).toBe(`https://storage.googleapis.com/bkt/uploads/${body.id}?sig=write`);
-    expect(onlyJob()).toMatchObject({ owner: 'nathan', channel: 'nathan', ipHash: null });
-    expect([...store.keys()].some((k) => k.startsWith('quota/'))).toBe(false);
+    expect(await getJob(body.id)).toMatchObject({
+      ownerUid: USER_A.uid,
+      artistId: 'flr',
+      state: 'AWAITING_UPLOAD',
+    });
+  });
+
+  it('401s a signed-out request and stores nothing', async () => {
+    const response = await post(upload, null);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'Sign in first.', fields: null });
+    expect(await jobCount()).toBe(0);
   });
 
   it('rejects a body that is not a JSON object', async () => {
@@ -96,7 +80,7 @@ describe('POST /api/jobs', () => {
       error: 'Expected a JSON object.',
       fields: null,
     });
-    expect(jobKeys()).toHaveLength(0);
+    expect(await jobCount()).toBe(0);
   });
 
   it('requires a song title', async () => {
@@ -105,20 +89,13 @@ describe('POST /api/jobs', () => {
     expect(((await response.json()) as { error: string }).error).toBe('Song title is required.');
   });
 
-  it('caps visitor uploads at 5 minutes', async () => {
-    const response = await post({ ...upload, durationSec: 301 });
-    expect(response.status).toBe(400);
+  it('caps uploads at 15 minutes', async () => {
+    expect((await post({ ...upload, durationSec: 901 })).status).toBe(400);
+    expect((await post({ ...upload, durationSec: 900 })).status).toBe(200);
   });
 
-  it('404s a missing sample', async () => {
-    expect((await post({ sampleId: 'gone' })).status).toBe(404);
-  });
-
-  it('stops a visitor after five runs a day', async () => {
-    for (let i = 0; i < 5; i++) expect((await post({ sampleId: 's1' })).status).toBe(200);
-    const response = await post({ sampleId: 's1' });
-    expect(response.status).toBe(429);
-    expect(((await response.json()) as { error: string }).error).toMatch(/5 runs per visitor/);
-    expect((await post({ sampleId: 's1' }, false, '198.51.100.1')).status).toBe(200);
+  it('rejects a sample request', async () => {
+    expect((await post({ sampleId: 's1' })).status).toBe(400);
+    expect(await jobCount()).toBe(0);
   });
 });

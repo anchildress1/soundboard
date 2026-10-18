@@ -220,9 +220,9 @@ describe('recentVideos', () => {
       return json({ items: videos });
     });
 
-  it('keeps playlist order, drops the excluded id, and limits to count', async () => {
-    route([video('c'), video('a'), video('d'), video('b')], ['a', 'b', 'x', 'c', 'd']);
-    const videos = await recentVideos(3, 'x');
+  it('keeps playlist order and limits to count', async () => {
+    route([video('c'), video('a'), video('d'), video('b')], ['a', 'b', 'c', 'd']);
+    const videos = await recentVideos(3);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b', 'c']);
     const listCall = fetchMock.mock.calls.findIndex(([u]) => String(u).includes('/videos?'));
     expect(urlOf(listCall).searchParams.get('id')).toBe('a,b,c,d');
@@ -232,15 +232,15 @@ describe('recentVideos', () => {
     expect(pageCall).toBeGreaterThan(-1);
   });
 
-  it('keeps every id when nothing is excluded and skips items without a video id', async () => {
+  it('skips playlist items without a video id', async () => {
     route([video('b'), video('a')], ['a', undefined, 'b']);
-    const videos = await recentVideos(5, null);
+    const videos = await recentVideos(5);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b']);
   });
 
   it('returns nothing when the playlist is empty', async () => {
     route([], []);
-    expect(await recentVideos(5, null)).toEqual([]);
+    expect(await recentVideos(5)).toEqual([]);
   });
 });
 

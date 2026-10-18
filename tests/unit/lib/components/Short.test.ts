@@ -7,7 +7,6 @@ import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$li
 const INVALID = 'aria-invalid';
 
 const SPEC: ShortSpec = {
-  parentId: 'p1',
   sourceDurationSec: 180,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
@@ -38,12 +37,11 @@ const view = (
   job: {
     id: 's1',
     state,
-    owner: 'visitor',
-    channel: 'sandbox',
+    parentId: 'p1',
+    destination: null,
     songTitle: 'PeekaBoo',
     notes: '',
     filename: 'peekaboo (Short).mp4',
-    sampleId: null,
     probe: { durationSec: 30, width: 720, height: 1280, hasAudio: true },
     measurements: null,
     chunkCount: 0,
@@ -52,7 +50,7 @@ const view = (
     error: null,
     uploadProgress: null,
     videoId: null,
-    payload: null,
+    finalFields: null,
     hashtagCandidates: ['#synthwave'],
     shortId: null,
     short: { ...SPEC, ...spec },
@@ -230,10 +228,9 @@ describe('Short: review', () => {
 });
 
 describe('Short: after approval', () => {
-  it('shows the would-be payload when there is no channel to upload to', () => {
-    const payload = { title: 'Edited', description: 'd', hashtags: [], tags: [] };
-    setup({ view: view('PAYLOAD', {}, { payload }) });
-    expect(screen.getByRole('region', { name: 'Would-be upload payload' })).toBeInTheDocument();
+  it('shows the approved fields, not the recommendation, once approved', () => {
+    const finalFields = { title: 'Edited', description: 'd', hashtags: [], tags: [] };
+    setup({ view: view('PUBLISHING', {}, { finalFields }) });
     expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Edited');
     expect(start()).toBeDisabled();
   });

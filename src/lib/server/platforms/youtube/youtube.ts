@@ -161,16 +161,13 @@ export function clearStatsCache(): void {
   statsCache = null;
 }
 
-/** FLR's most recent public uploads, newest first, optionally leaving one video out. */
-export async function recentVideos(
-  count: number,
-  excludeId: string | null,
-): Promise<CatalogVideo[]> {
+/** FLR's most recent public uploads, newest first. */
+export async function recentVideos(count: number): Promise<CatalogVideo[]> {
   const { uploadsPlaylist } = await channelStats();
   const items = await uploadsPage(uploadsPlaylist, count + 5);
   const ids = items
     .map((item) => item.contentDetails?.videoId)
-    .filter((id): id is string => typeof id === 'string' && id !== '' && id !== excludeId);
+    .filter((id): id is string => typeof id === 'string' && id !== '');
   const videos = await videosByIds(ids);
   const order = new Map(ids.map((id, i) => [id, i]));
   return videos.toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);

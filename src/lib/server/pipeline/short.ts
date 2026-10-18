@@ -211,7 +211,7 @@ export function placeCut(
 /** HOOK step: the model picks the window and length, then ffmpeg's loudness places the start. */
 export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
   const short = requireShort(job);
-  const chunks = await listChunks(short.parentId);
+  const chunks = job.parentId ? await listChunks(job.parentId) : [];
   if (chunks.length === 0) throw new Error("The source video's analysis is gone.");
   const ctx: HookContext = {
     songTitle: job.songTitle,

@@ -34,19 +34,17 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type Trace = { sentryTrace: string; baggage: string } | null;
 
-export type CreateBody =
-  | { sampleId: string }
-  | {
-      songTitle: string;
-      notes: string;
-      filename: string;
-      contentType: string;
-      size: number;
-      durationSec: number;
-    };
+export type CreateBody = {
+  songTitle: string;
+  notes: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  durationSec: number;
+};
 
 export function createJob(body: CreateBody) {
-  return call<{ id: string; uploadUrl: string | null }>('/api/jobs', {
+  return call<{ id: string; uploadUrl: string }>('/api/jobs', {
     method: 'POST',
     body: JSON.stringify(body),
   });

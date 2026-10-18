@@ -5,11 +5,9 @@
   import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
   import Bandcamp from '$lib/components/Bandcamp.svelte';
   import Destinations from '$lib/components/Destinations.svelte';
-  import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
-  import Payload from '$lib/components/Payload.svelte';
   import Short from '$lib/components/Short.svelte';
   import Track from '$lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
@@ -55,7 +53,7 @@
   const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
-    job.payload ??
+    job.finalFields ??
       (view.pick
         ? {
             title: view.pick.title,
@@ -233,9 +231,6 @@
     />
     <Track {status} {model} />
     <Heard tags={heardTags(view)} measurements={job.measurements} />
-    {#if data.live && view.pick}
-      <Diff live={data.live} pick={view.pick} />
-    {/if}
   </section>
 
   <div class="right">
@@ -280,9 +275,6 @@
               ondiscard={() => act('discard')}
             />
           {/key}
-          {#if job.state === 'PAYLOAD' && job.payload}
-            <Payload fields={job.payload} />
-          {/if}
         {/snippet}
         {#snippet short()}
           {#if shortView}

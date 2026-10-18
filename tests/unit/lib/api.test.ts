@@ -27,17 +27,19 @@ afterEach(() => {
 const lastInit = () =>
   fetchMock.mock.calls.at(-1)![1] as RequestInit & { headers: Record<string, string> };
 
+const BODY = {
+  songTitle: 'PeekaBoo',
+  notes: '',
+  filename: 'a.mp4',
+  contentType: 'video/mp4',
+  size: 10,
+  durationSec: 60,
+};
+
 describe('createJob', () => {
   it('POSTs JSON and returns the body', async () => {
     fetchMock.mockResolvedValue(json(200, { id: 'j1', uploadUrl: 'https://u' }));
-    const body = {
-      songTitle: 'PeekaBoo',
-      notes: '',
-      filename: 'a.mp4',
-      contentType: 'video/mp4',
-      size: 10,
-      durationSec: 60,
-    };
+    const body = BODY;
     expect(await createJob(body)).toEqual({ id: 'j1', uploadUrl: 'https://u' });
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs');
     expect(lastInit().method).toBe('POST');
@@ -49,7 +51,7 @@ describe('createJob', () => {
     fetchMock.mockResolvedValue(
       json(422, { error: 'Invalid fields', fields: { title: 'Title is required.' } }),
     );
-    const err = await createJob({ sampleId: 's1' }).catch((e: unknown) => e);
+    const err = await createJob(BODY).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err).toMatchObject({
       status: 422,
@@ -59,13 +61,13 @@ describe('createJob', () => {
   });
 
   it('falls back to message, then a generic text, when the body has no error', async () => {
-    fetchMock.mockResolvedValueOnce(json(400, { message: 'Bad sample' }));
-    await expect(createJob({ sampleId: 's' })).rejects.toMatchObject({
-      message: 'Bad sample',
+    fetchMock.mockResolvedValueOnce(json(400, { message: 'Bad request' }));
+    await expect(createJob(BODY)).rejects.toMatchObject({
+      message: 'Bad request',
       fields: null,
     });
     fetchMock.mockResolvedValueOnce(new Response('<html>oops</html>', { status: 502 }));
-    await expect(createJob({ sampleId: 's' })).rejects.toMatchObject({
+    await expect(createJob(BODY)).rejects.toMatchObject({
       status: 502,
       message: 'Request failed (502)',
     });
@@ -73,12 +75,12 @@ describe('createJob', () => {
 
   it('returns an empty object for an OK response without JSON', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
-    expect(await createJob({ sampleId: 's' })).toEqual({});
+    expect(await createJob(BODY)).toEqual({});
   });
 
   it('propagates network failures', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-    await expect(createJob({ sampleId: 's' })).rejects.toThrow('Failed to fetch');
+    await expect(createJob(BODY)).rejects.toThrow('Failed to fetch');
   });
 });
 

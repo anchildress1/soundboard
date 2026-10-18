@@ -6,7 +6,6 @@
   import type { JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
-  import Payload from './Payload.svelte';
   import Track from './Track.svelte';
 
   type Cut = { startSec: number; lengthSec: number; reframe: Reframe };
@@ -45,7 +44,7 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const fields = $derived<PickFields | null>(
-    job.payload ??
+    job.finalFields ??
       (view.pick
         ? {
             title: view.pick.title,
@@ -178,9 +177,6 @@
         {ondiscard}
       />
     {/key}
-  {/if}
-  {#if job.state === 'PAYLOAD' && job.payload}
-    <Payload fields={job.payload} />
   {/if}
   {#if job.state === 'FAILED'}
     <div class="actions">

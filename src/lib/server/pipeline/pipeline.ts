@@ -17,13 +17,19 @@ import {
   transitionJob,
   type JobDoc,
 } from '$lib/server/jobs/jobs';
-import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from '$lib/server/artist/memory';
+import {
+  ARTIST_ID,
+  listFacts,
+  PUBLIC_FACTS,
+  recentFeedback,
+  recordPublish,
+} from '$lib/server/artist/memory';
 import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { hookStep, renderStep } from './short';
 import { runPick } from '$lib/server/ai/smart-pick';
 import { invokeAgent } from '$lib/server/core/tracing';
 import {
-  accessToken,
+  accessTokenFor,
   readBack,
   recentVideos,
   startResumableUpload,
@@ -59,11 +65,10 @@ async function prep(job: JobDoc): Promise<Patch> {
   if (!Number.isFinite(probed.durationSec) || probed.durationSec <= 0) {
     return fail('PREP', "Couldn't read this video's duration. Re-export it and try again.");
   }
-  const limit = MAX_MINUTES[job.owner];
-  if (probed.durationSec > limit * 60) {
+  if (probed.durationSec > MAX_MINUTES * 60) {
     return fail(
       'PREP',
-      `Videos are capped at ${limit} minutes here; this one runs ${(probed.durationSec / 60).toFixed(1)}.`,
+      `Videos are capped at ${MAX_MINUTES} minutes; this one runs ${(probed.durationSec / 60).toFixed(1)}.`,
     );
   }
   const measurements = await measureFile(url, probed.durationSec);
@@ -99,12 +104,11 @@ async function analyze(job: JobDoc): Promise<StepOutput> {
 async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
-  // Demo jobs read Nathan's memory so they run like his; they never write it.
-  const nathan = job.owner !== 'visitor';
+  const nathan = job.artistId === ARTIST_ID;
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),
-    recentVideos(RECENT_COUNT, job.liveVideoId),
+    recentVideos(RECENT_COUNT),
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
@@ -114,8 +118,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   );
   return invokeAgent('smart-pick', async (span) => {
     const audience =
-      job.audience ??
-      (await audienceEvidence(chunks, job.probe?.durationSec ?? null, job.liveVideoId));
+      job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
     try {
       return await pickWith(audience, span);
     } catch (error) {
@@ -126,11 +129,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 
   async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
     const [facts, feedback, brand] = nathan
-      ? await Promise.all([
-          listFacts({ seed: job.owner === 'nathan' }),
-          recentFeedback(),
-          approvedBrand(),
-        ])
+      ? await Promise.all([listFacts({ seed: true }), recentFeedback(), approvedBrand()])
       : [PUBLIC_FACTS, [], null];
     const result = await runPick(
       {
@@ -169,16 +168,14 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   }
 }
 
+/** A fresh access token for the owner's grant on the channel the approval pinned. */
+const destinationToken = (job: JobDoc) =>
+  job.destination ? accessTokenFor(job.ownerUid, job.destination.channelId) : null;
+
 async function publishing(job: JobDoc): Promise<Patch> {
-  if (!job.channel || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
-  const token = await accessToken(job.channel);
-  if (!token) {
-    return {
-      state: 'PAYLOAD',
-      payload: job.finalFields,
-      error: 'The upload channel is not connected.',
-    };
-  }
+  if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
+  const token = await destinationToken(job);
+  if (!token) return fail('PUBLISHING', 'Reconnect YouTube to upload.');
   if (!job.upload) {
     const info = await objectInfo(job.object);
     if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
@@ -195,11 +192,7 @@ async function publishing(job: JobDoc): Promise<Patch> {
       });
     } catch (error) {
       if (uploadFailure(error) === 'quota-spent') {
-        return {
-          state: 'PAYLOAD',
-          payload: job.finalFields,
-          error: 'YouTube upload quota is spent for today.',
-        };
+        return fail('PUBLISHING', 'Daily upload limit reached. Try tomorrow.');
       }
       throw error;
     }
@@ -231,9 +224,9 @@ async function publishing(job: JobDoc): Promise<Patch> {
 const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
 const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
 
-/** Nathan's verified uploads join his memory; demo and visitor uploads never do. */
+/** Verified uploads on Nathan's jobs join his memory; no one else's do. */
 async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
-  if (job.owner !== 'nathan' || !job.finalFields) return;
+  if (job.artistId !== ARTIST_ID || !job.finalFields) return;
   await recordPublish({
     videoId,
     url: `https://youtu.be/${videoId}`,
@@ -245,7 +238,7 @@ async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
 }
 
 async function verify(job: JobDoc): Promise<Patch> {
-  const token = job.channel ? await accessToken(job.channel) : null;
+  const token = await destinationToken(job);
   if (!token || !job.videoId) return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   const video = await readBack(token, job.videoId);
   const uploadStatus = video?.uploadStatus ?? '';

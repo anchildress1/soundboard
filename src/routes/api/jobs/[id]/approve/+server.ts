@@ -7,7 +7,7 @@ import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ params, request, locals }) =>
   respond(async () => {
-    const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
+    const job = await authorizedJob(params.id, locals.user?.uid);
     const body = await readBody(request);
     const tags = Array.isArray(body.tags)
       ? body.tags.map((tag) => text(tag).trim()).filter(Boolean)

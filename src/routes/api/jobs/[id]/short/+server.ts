@@ -7,7 +7,7 @@ import type { RequestHandler } from './$types';
 /** Starts the video's Short, or returns the one it already has; the page then drives its steps. */
 export const POST: RequestHandler = ({ params, locals }) =>
   respond(async () => {
-    const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
+    const job = await authorizedJob(params.id, locals.user?.uid);
     const id = await makeShort(job);
     const short = await getJob(id);
     if (!short) throw new Error(`Short ${id} vanished after it was created.`);

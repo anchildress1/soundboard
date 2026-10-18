@@ -11,20 +11,12 @@ const h = vi.hoisted(() => ({ goto: vi.fn() }));
 
 vi.mock('$app/navigation', () => ({ goto: h.goto }));
 
-type Sample = { id: string; songTitle: string; videoId: string; durationSec: number };
-type Data = {
-  samples: Sample[];
-  session: { email: string; allowlisted: boolean; demo: boolean } | null;
-};
-
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function setup(data: Partial<Data> = {}) {
-  return render(Page, {
-    props: { data: { samples: [], session: null, channel: null, ...data } } as never,
-  });
+function setup() {
+  return render(Page, { props: { data: { user: null, channel: null } } as never });
 }
 
 const analyze = () => screen.getByRole('button', { name: /Analyze|Starting/ });
@@ -87,41 +79,15 @@ describe('home page: form', () => {
     expect(container.querySelector('video')).toBeNull();
   });
 
-  it('caps signed-out videos at 5 minutes', async () => {
+  it('caps videos at 15 minutes', async () => {
     const { container } = setup();
-    expect(screen.getByText('up to 5 min')).toBeInTheDocument();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container, video, 301);
-    expect(screen.getByText('This video runs over 5 minutes.')).toBeInTheDocument();
-    expect(analyze()).toBeDisabled();
-  });
-
-  it('says signed out only when there is no session', () => {
-    setup();
-    expect(screen.getByText(/^Signed out: your own video ends/)).toBeInTheDocument();
-  });
-
-  it('gives the demo account 15 minutes and leaves the demo notice to the layout', () => {
-    setup({ session: { email: 'demo@example.com', allowlisted: false, demo: true } });
     expect(screen.getByText('up to 15 min')).toBeInTheDocument();
-    expect(screen.queryByText(/Signed out/)).toBeNull();
-    expect(screen.queryByText(/sandbox channel/)).toBeNull();
-  });
-
-  it('allows Nathan 15 minutes and drops the signed-out note', async () => {
-    const { container } = setup({
-      session: { email: 'nathan@example.com', allowlisted: true, demo: false },
-    });
-    expect(screen.getByText('up to 15 min')).toBeInTheDocument();
-    expect(screen.queryByText(/Signed out/)).toBeNull();
     await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container, video, 12 * 60);
+    await pickFile(container, video, 15 * 60);
     expect(analyze()).toBeEnabled();
-  });
-
-  it('tells a visitor that their own video ends at the payload', () => {
-    setup();
-    expect(screen.getByText(/ends at the would-be upload payload/)).toBeInTheDocument();
+    await pickFile(container, video, 15 * 60 + 1);
+    expect(screen.getByText('This video runs over 15 minutes.')).toBeInTheDocument();
+    expect(analyze()).toBeDisabled();
   });
 
   it('creates the job, hands the file to the job page, and navigates', async () => {
@@ -152,17 +118,6 @@ describe('home page: form', () => {
     });
   });
 
-  it('defaults an untyped file to video/mp4 and skips the hand-off without an upload URL', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job3', uploadUrl: null }));
-    const { container } = setup();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container, new File(['x'], 'clip', { type: '' }));
-    await fireEvent.click(analyze());
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job3'));
-    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)).contentType).toBe('video/mp4');
-    expect(takePending('job3')).toBeUndefined();
-  });
-
   it('hands the job page the signed type for an untyped file', async () => {
     fetchMock.mockResolvedValue(json({ id: 'job4', uploadUrl: SIGNED_PUT }));
     const { container } = setup();
@@ -174,12 +129,12 @@ describe('home page: form', () => {
   });
 
   it('shows the API error and re-enables the form', async () => {
-    fetchMock.mockResolvedValue(json({ error: 'Today’s 40 public runs are used up.' }, 429));
+    fetchMock.mockResolvedValue(json({ error: 'Videos must be under 2 GB.' }, 400));
     const { container } = setup();
     await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
     await pickFile(container);
     await fireEvent.click(analyze());
-    expect(await screen.findByText('Today’s 40 public runs are used up.')).toBeInTheDocument();
+    expect(await screen.findByText('Videos must be under 2 GB.')).toBeInTheDocument();
     expect(analyze()).toBeEnabled();
     expect(h.goto).not.toHaveBeenCalled();
   });
@@ -197,49 +152,6 @@ describe('home page: form', () => {
     setup();
     await fireEvent.submit(screen.getByRole('form', { name: 'Start a run' }));
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('home page: samples', () => {
-  const samples: Sample[] = [
-    { id: 's1', songTitle: 'Neon', videoId: 'v1', durationSec: 30 },
-    { id: 's2', songTitle: 'PeekaBoo', videoId: 'v2', durationSec: 30 },
-  ];
-
-  it('hides the samples block when there are none', () => {
-    setup();
-    expect(screen.queryByText('Samples')).toBeNull();
-  });
-
-  it('runs a sample in one tap', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job2', uploadUrl: null }));
-    setup({ samples });
-    await fireEvent.click(screen.getByRole('button', { name: 'Neon' }));
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job2'));
-    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({ sampleId: 's1' });
-  });
-
-  it('disables the samples while one starts', async () => {
-    fetchMock.mockReturnValue(new Promise(() => {}));
-    setup({ samples });
-    await fireEvent.click(screen.getByRole('button', { name: 'Neon' }));
-    expect(screen.getByRole('button', { name: 'PeekaBoo' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Starting' })).toBeDisabled();
-  });
-
-  it('shows why a sample could not start', async () => {
-    fetchMock.mockResolvedValue(json({ error: 'That sample is gone.' }, 404));
-    setup({ samples });
-    await fireEvent.click(screen.getByRole('button', { name: 'PeekaBoo' }));
-    expect(await screen.findByText('That sample is gone.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'PeekaBoo' })).toBeEnabled();
-  });
-
-  it('falls back to a generic sample message on a network failure', async () => {
-    fetchMock.mockRejectedValue(new TypeError('offline'));
-    setup({ samples });
-    await fireEvent.click(screen.getByRole('button', { name: 'Neon' }));
-    expect(await screen.findByText('Could not start the sample.')).toBeInTheDocument();
   });
 });
 

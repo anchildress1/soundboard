@@ -147,8 +147,6 @@ export function similarLength(videos: CatalogVideo[], seconds: number): CatalogV
 export async function audienceEvidence(
   chunks: Chunk[],
   durationSec: number | null,
-  /** A sample's own live video, kept out so the pick can't copy what it's compared against (R4). */
-  excludeId: string | null = null,
 ): Promise<AudienceEvidence> {
   const query = searchQuery(chunks);
   return toolSpan('smart-pick', 'hashtag_search', { query }, async (span) => {
@@ -157,7 +155,7 @@ export async function audienceEvidence(
       SEARCH_RESULTS,
       durationSec === null ? undefined : durationBucket(durationSec),
     );
-    const results = await videosByIds(ids.filter((id) => id !== excludeId));
+    const results = await videosByIds(ids);
     const found = durationSec === null ? results : similarLength(results, durationSec);
     const evidence: AudienceEvidence = {
       query,

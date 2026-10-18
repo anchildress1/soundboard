@@ -4,7 +4,8 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
+import { seed, truncate } from '../../../../helpers/db';
+import { jobDoc, seedJob, USERS } from '../../../../helpers/pipeline';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { span, startSpan } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
@@ -31,10 +32,6 @@ const h = vi.hoisted(() => ({
   spawn: vi.fn(),
   upload: vi.fn(),
 }));
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -135,7 +132,6 @@ const ctx = (patch: Partial<HookContext> = {}): HookContext => ({
 });
 
 const SHORT: Short = {
-  parentId: 'p1',
   sourceDurationSec: 180,
   reframe: 'blur',
   hook: null,
@@ -145,57 +141,34 @@ const SHORT: Short = {
 };
 
 function shortJob(patch: Partial<JobDoc> = {}, short: Partial<Short> = {}): JobDoc {
-  return {
+  return jobDoc({
     id: 's1',
     state: 'HOOK',
-    owner: 'visitor',
-    channel: 'sandbox',
-    songTitle: 'PeekaBoo',
+    parentId: 'p1',
     notes: NOTES,
     filename: 'peekaboo (Short).mp4',
-    contentType: 'video/mp4',
-    sampleId: null,
-    liveVideoId: null,
     object: 'uploads/s1',
-    ipHash: null,
-    probe: null,
-    measurements: null,
-    chunkCount: 0,
-    chunkIndex: 0,
-    failedState: null,
-    error: null,
-    uploadProgress: null,
-    videoId: null,
-    payload: null,
     consecutiveFailures: 1,
-    claim: null,
-    trace: null,
     hashtagCandidates: ['#synthwave'],
-    audience: null,
-    upload: null,
-    finalFields: null,
     pickVersion: 1,
-    verifyAttempts: 0,
-    shortId: null,
     short: { ...SHORT, ...short },
     sourceObject: 'uploads/p1',
-    createdAt: 1,
-    updatedAt: 1,
     ...patch,
-  };
+  });
 }
 
-const seedChunks = (count: number) => {
-  for (let i = 0; i < count; i++) {
-    store.set(`jobs/p1/chunks/${String(i).padStart(4, '0')}`, chunk(i));
-  }
-};
+const seedChunks = (count: number) =>
+  seed({
+    jobChunks: Array.from({ length: count }, (_, i) => ({ jobId: 'p1', index: i, data: chunk(i) })),
+  });
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
-  resetStore();
   resetClients();
+  await truncate();
+  await seed(USERS);
+  await seedJob({ id: 'p1', state: 'REVIEW' });
   h.objects.clear();
   h.upload.mockReset();
   h.upload.mockImplementation(async (_path: string, { destination }: { destination: string }) => {
@@ -493,7 +466,7 @@ describe('placeCut', () => {
 
 describe('hookStep', () => {
   it('asks the model for the hook, places the start from loudness, and moves to RENDER', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     h.objects.add('uploads/p1');
     fetchMock.mockResolvedValueOnce(
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: CHORUS })),
@@ -504,7 +477,6 @@ describe('hookStep', () => {
       consecutiveFailures: 0,
       error: null,
       short: {
-        parentId: 'p1',
         reframe: 'blur',
         renders: 0,
         skipped: [],
@@ -526,7 +498,7 @@ describe('hookStep', () => {
   });
 
   it('adds each re-pick to the model time already spent on the Short', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     let calls = 0;
     fetchMock.mockImplementation(async () => {
       calls++;
@@ -541,7 +513,7 @@ describe('hookStep', () => {
   });
 
   it('scans from zero and stops at the end for the first and only window', async () => {
-    store.set('jobs/p1/chunks/0000', chunk(0));
+    await seedChunks(1);
     runs.loudness = { stderr: step(0, 30, 8) };
     fetchMock.mockResolvedValueOnce(
       completion(JSON.stringify({ window: 0, lengthSec: 20, reason: 'Riff.' })),
@@ -558,15 +530,22 @@ describe('hookStep', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('throws for a Short with no parent video', async () => {
+    await seedChunks(6);
+    await expect(hookStep(shortJob({ parentId: null }))).rejects.toThrow(
+      "The source video's analysis is gone.",
+    );
+  });
+
   it('throws when the model reply never parses', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     fetchMock.mockImplementation(async () => completion('{"window": "two"}'));
     await expect(hookStep(shortJob())).rejects.toThrow('The model reply did not parse as a hook.');
     expect(h.spawn).not.toHaveBeenCalled();
   });
 
   it('fails at HOOK for good when the retry repeats a skipped hook too', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     fetchMock.mockImplementation(async () =>
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
     );
@@ -584,7 +563,7 @@ describe('hookStep', () => {
   });
 
   it('starts a long cut from a late window inside that window', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     runs.loudness = { stderr: step(144.5, 180, 165) };
     fetchMock.mockResolvedValueOnce(
       completion(JSON.stringify({ window: 5, lengthSec: 60, reason: 'Outro.' })),
@@ -596,7 +575,7 @@ describe('hookStep', () => {
   });
 
   it('leaves the loudness pass its whole time limit: no model retry that would eat into it', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     let clock = 1_000_000;
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
     onTestFinished(() => now.mockRestore());
@@ -611,7 +590,7 @@ describe('hookStep', () => {
   });
 
   it('propagates a failed loudness pass', async () => {
-    seedChunks(6);
+    await seedChunks(6);
     runs.loudness = { stderr: 'Server returned 403 Forbidden', code: 1 };
     fetchMock.mockResolvedValueOnce(
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
@@ -621,7 +600,7 @@ describe('hookStep', () => {
 
   it('refuses a job that is not a Short, or has no source', async () => {
     await expect(hookStep(shortJob({ short: null }))).rejects.toThrow('Not a Short job.');
-    seedChunks(6);
+    await seedChunks(6);
     fetchMock.mockResolvedValueOnce(
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
     );

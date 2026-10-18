@@ -1,79 +1,61 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../../helpers/fake-firestore';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { artistFeedback, jobFeedback } from '$lib/server/core/schema';
+import { getJob } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/discard/+server';
-import type { JobView } from '$lib/types';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import type { JobState, JobView } from '$lib/types';
+import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
+import { seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
 
-const discard = async (id: string, allowlisted = false) =>
-  POST({
-    params: { id },
-    locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null },
-  } as unknown as Event);
+const discard = async (id: string, user: typeof USER_A | typeof USER_B = USER_B) =>
+  POST({ params: { id }, locals: { user } } as unknown as Event);
 
-const seed = (id: string, patch: Record<string, unknown> = {}) =>
-  store.set(`jobs/${id}`, { id, owner: 'visitor', state: 'REVIEW', ...patch });
+const state = async (id: string) => (await getJob(id))!.state;
 
-/** The bucket's lifecycle rule can delete a job mid-request; the route falls back to what it loaded. */
-function vanishAfter(path: string, reads: number) {
-  const real = store.get.bind(store);
-  let n = 0;
-  vi.spyOn(store, 'get').mockImplementation((key: string) => {
-    if (key === path) n += 1;
-    return key === path && n > reads ? undefined : real(key);
-  });
-}
-
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+beforeEach(async () => {
   resetClients();
-  vi.restoreAllMocks();
+  await truncate();
+  await seed(USERS);
 });
 
 describe('POST /api/jobs/[id]/discard', () => {
-  it.each(['REVIEW', 'ANALYZE', 'FAILED', 'PAYLOAD'])('ends a %s job', async (state) => {
-    seed('j', { state });
-    const response = await discard('j');
+  it.each<JobState>(['REVIEW', 'ANALYZE', 'FAILED'])('ends a %s job', async (from) => {
+    await seedJob({ state: from });
+    const response = await discard('j1');
     expect(response.status).toBe(200);
     expect(((await response.json()) as JobView).job.state).toBe('DISCARDED');
   });
 
   it('learns nothing from a discard', async () => {
-    seed('j');
-    await discard('j');
-    expect([...store.keys()].some((k) => k.includes('feedback'))).toBe(false);
+    await seedJob({ state: 'REVIEW' });
+    await discard('j1');
+    expect(await db().select().from(jobFeedback)).toEqual([]);
+    expect(await db().select().from(artistFeedback)).toEqual([]);
   });
 
   it('409s once the upload has started', async () => {
-    seed('j', { state: 'VERIFIED' });
-    const response = await discard('j');
+    await seedJob({ state: 'VERIFIED' });
+    const response = await discard('j1');
     expect(response.status).toBe(409);
-    expect((store.get('jobs/j') as { state: string }).state).toBe('VERIFIED');
+    expect(await state('j1')).toBe('VERIFIED');
   });
 
-  it("404s Nathan's job from a non-allowlisted session", async () => {
-    seed('n', { owner: 'nathan' });
-    const error = await discard('n').catch((e: unknown) => e);
+  it("404s another user's job and changes nothing", async () => {
+    await seedJob({ state: 'REVIEW' });
+    const error = await discard('j1', USER_A).catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
-    expect((store.get('jobs/n') as { state: string }).state).toBe('REVIEW');
+    expect(await state('j1')).toBe('REVIEW');
   });
 
-  it("discards Nathan's job for an allowlisted session", async () => {
-    seed('n', { owner: 'nathan' });
-    expect(((await (await discard('n', true)).json()) as JobView).job.state).toBe('DISCARDED');
-  });
   it('answers with the loaded job if it disappears mid-request', async () => {
-    seed('j');
-    vanishAfter('jobs/j', 2);
-    const response = await discard('j');
+    await seedJob({ state: 'REVIEW' });
+    await vanishOnUpdate();
+    const response = await discard('j1');
     expect(response.status).toBe(200);
     expect(((await response.json()) as JobView).job.state).toBe('REVIEW');
   });

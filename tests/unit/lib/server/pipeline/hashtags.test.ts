@@ -322,15 +322,13 @@ describe('audienceEvidence', () => {
     expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
   });
 
-  it("leaves a sample's own live video out of the evidence", async () => {
+  it('reads every search result back for the evidence', async () => {
     fetchMock
-      .mockResolvedValueOnce(
-        json({ items: [{ id: { videoId: 'live' } }, { id: { videoId: 'v1' } }] }),
-      )
+      .mockResolvedValueOnce(json({ items: [{ id: { videoId: 'a' } }, { id: { videoId: 'b' } }] }))
       .mockResolvedValueOnce(json({ items: [] }));
-    await audienceEvidence([chunk(['synthwave'])], null, 'live');
+    await audienceEvidence([chunk(['synthwave'])], null);
     const videosUrl = new URL(fetchMock.mock.calls[1]![0] as string);
-    expect(videosUrl.searchParams.get('id')).toBe('v1');
+    expect(videosUrl.searchParams.get('id')).toBe('a,b');
   });
 
   it('searches every length when the window crosses a bucket edge', async () => {

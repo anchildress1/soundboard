@@ -79,9 +79,9 @@ description: 'Task list for Google sign-in and connections'
 
 ### Remove legacy paths (FR-020)
 
-- [ ] T022 Delete src/lib/server/jobs/samples.ts, tests/unit/lib/server/jobs/samples.test.ts, src/lib/components/Diff.svelte, tests/unit/lib/components/Diff.test.ts and scripts/add-sample.sh
+- [x] T022 Delete src/lib/server/jobs/samples.ts, tests/unit/lib/server/jobs/samples.test.ts, src/lib/components/Diff.svelte, tests/unit/lib/components/Diff.test.ts and scripts/add-sample.sh
 - [x] T023 Make create take an owner in src/lib/server/jobs/create.ts: `create(input, user)` sets `ownerUid: user.uid`, `artistId: user.artistId`, `destination: null`, `parentId: null`, null upload markers; remove `{sampleId}`, `ownerFor`, `Who`, `UPLOAD_CHANNEL`, the per-owner minute caps (15 minutes for everyone) and visitor-run charging. Update tests/unit/lib/server/jobs/create.test.ts
-- [ ] T024 Remove `owner`/`channel`/sandbox handling from src/lib/server/pipeline/pipeline.ts, src/lib/server/pipeline/short.ts, src/lib/api.ts, src/lib/status.ts and their tests; remove the unreachable `PAYLOAD` state, the job's `payload` field and src/lib/components/Payload.svelte with its test, including its branches in src/routes/jobs/[id]/+page.svelte and src/lib/components/Short.svelte
+- [x] T024 Remove `owner`/`channel`/sandbox handling from src/lib/server/pipeline/pipeline.ts, src/lib/server/pipeline/short.ts, src/lib/api.ts, src/lib/status.ts and their tests; remove the unreachable `PAYLOAD` state, the job's `payload` field and src/lib/components/Payload.svelte with its test, including its branches in src/routes/jobs/[id]/+page.svelte and src/lib/components/Short.svelte
 - [ ] T025 Replace allowlisted/demo/visitor fixtures with seeded `users`, `invites` and `connections` for two users (A linked to `flr`, B unlinked) in tests/e2e/fakes/fixtures.ts and tests/helpers/pipeline.ts, inserted through `seed()`
 
 **Checkpoint**: `make ai-checks` passes with the new shapes and no visitor/demo/sample code.
@@ -327,4 +327,4 @@ T062–T068
 - [x] T083 Move per-job feedback from `jobs/{id}/feedback` to the `job_feedback` child table in src/lib/server/artist/memory.ts, so unlinked users' feedback stays on the job, with tests per FR-018 (partial)
 - [ ] T084 Port tests/e2e/header.spec.ts, tests/e2e/brand.spec.ts and tests/e2e/short.spec.ts from allowlisted/demo cookies to the seeded users and `{uid, sid, gen, exp}` sessions per FR-020 (partial)
 - [ ] T085 Add an E2E in tests/e2e/auth.spec.ts: a session that stops validating mid-run makes the job page navigate to `/` per quickstart E2E and Edge Cases (missing)
-- [ ] T086 Remove the sample-only `excludeId` parameter from src/lib/server/pipeline/hashtags.ts and its callers and tests per FR-020 (partial)
+- [x] T086 Remove the sample-only `excludeId` parameter from src/lib/server/pipeline/hashtags.ts and its callers and tests per FR-020 (partial)

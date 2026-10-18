@@ -1,10 +1,13 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
+import { and, eq, sql } from 'drizzle-orm';
+import { seed, truncate } from '../../../../helpers/db';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import {
+  A_JOB,
   ANALYSIS,
   ARTIST,
+  CHANNEL_A,
   child,
   completion,
   defaultHandlers,
@@ -17,19 +20,31 @@ import {
   RAW_PICK,
   RETROWAVE,
   SESSION_URI,
+  seedJob,
   SYNTHWAVE,
+  USERS,
   type Handler,
   type Run,
 } from '../../../../helpers/pipeline';
 import { captureException } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
-import { MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
+import { db } from '$lib/server/core/db';
+import {
+  artistBrand,
+  artistFacts,
+  artistFeedback,
+  artistPublishes,
+  connections,
+  jobChunks,
+  jobPicks,
+  jobs,
+} from '$lib/server/core/schema';
+import { getJob, MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
+import { jobSet } from '$lib/server/jobs/rows';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
 import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 
 const WAKING = 'waking model';
-const FIRST_CHUNK = 'jobs/j1/chunks/0000';
-const FIRST_PICK = 'jobs/j1/pick/0001';
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';
 const WAITING_ON_YOUTUBE = 'waiting on YouTube';
@@ -37,14 +52,11 @@ const SOURCE_OBJECT = 'uploads/p1';
 
 const h = vi.hoisted(() => ({
   objects: new Map<string, { size?: string; contentType?: string }>(),
-  secrets: new Map<string, string>(),
   spawn: vi.fn(),
   upload: vi.fn(),
 }));
 
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -59,16 +71,6 @@ vi.mock('@google-cloud/storage', () => ({
           getMetadata: async () => [h.objects.get(object)],
         }),
       };
-    }
-  },
-}));
-
-vi.mock('@google-cloud/secret-manager', () => ({
-  SecretManagerServiceClient: class {
-    async accessSecretVersion({ name }: { name: string }) {
-      const value = h.secrets.get(name.split('/')[3]!);
-      if (value === undefined) throw Object.assign(new Error('NOT_FOUND'), { code: 5 });
-      return [{ payload: { data: Buffer.from(value) } }];
     }
   },
 }));
@@ -97,13 +99,32 @@ const chatBodies = () =>
     (c) => JSON.parse(String(c.init.body)) as Record<string, unknown>,
   );
 
-function seed(patch: Partial<JobDoc> = {}): JobDoc {
-  const doc = jobDoc(patch);
-  store.set(`jobs/${doc.id}`, structuredClone(doc));
-  return doc;
-}
-
-const saved = () => store.get('jobs/j1') as JobDoc;
+const put = (patch: Partial<JobDoc> = {}) => seedJob(patch);
+const saved = async () => (await getJob('j1'))!;
+const patchJob = (fields: Partial<JobDoc>) =>
+  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
+const claimToken = async () =>
+  (await db().select({ token: jobs.claimToken }).from(jobs).where(eq(jobs.id, 'j1')))[0]!.token;
+const chunkAt = async (index: number) =>
+  (
+    await db()
+      .select({ data: jobChunks.data })
+      .from(jobChunks)
+      .where(and(eq(jobChunks.jobId, 'j1'), eq(jobChunks.index, index)))
+  )[0]?.data as Record<string, unknown> | undefined;
+const pickAt = async (version: number) =>
+  (
+    await db()
+      .select({ data: jobPicks.data })
+      .from(jobPicks)
+      .where(and(eq(jobPicks.jobId, 'j1'), eq(jobPicks.version, version)))
+  )[0]?.data as Record<string, unknown> | undefined;
+const artistRowCount = async () =>
+  (
+    await Promise.all(
+      [artistFacts, artistFeedback, artistPublishes, artistBrand].map((t) => db().select().from(t)),
+    )
+  ).flat().length;
 const FIELDS = {
   title: 'PeekaBoo',
   description: 'd #synthwave',
@@ -119,19 +140,20 @@ const MEASURED = {
   silences: [],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
   vi.stubEnv('YOUTUBE_API_KEY', 'key');
   vi.stubEnv('FLR_CHANNEL_ID', 'UCflr');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'cid');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'secret');
-  resetStore();
+  vi.stubEnv('KMS_KEY', 'projects/p/locations/l/keyRings/r/cryptoKeys/k');
   resetClients();
+  await truncate();
+  await seed(USERS);
   clearStatsCache();
   h.objects.clear();
   h.objects.set('uploads/j1', { size: '1000', contentType: 'video/quicktime' });
-  h.secrets.clear();
   tools = {
     probe: { stdout: probeJson(95) },
     measure: { stderr: MEASURE_STDERR },
@@ -163,24 +185,24 @@ afterEach(() => {
 
 describe('runStep: AWAITING_UPLOAD', () => {
   it('moves to PREP once the browser upload lands', async () => {
-    expect(await runStep(seed({ state: 'AWAITING_UPLOAD' }))).toEqual({});
-    expect(saved().state).toBe('PREP');
+    expect(await runStep(await put({ state: 'AWAITING_UPLOAD' }))).toEqual({});
+    expect((await saved()).state).toBe('PREP');
   });
 
   it('keeps waiting while the object is missing', async () => {
     h.objects.clear();
-    expect(await runStep(seed({ state: 'AWAITING_UPLOAD' }))).toEqual({});
-    expect(saved().state).toBe('AWAITING_UPLOAD');
+    expect(await runStep(await put({ state: 'AWAITING_UPLOAD' }))).toEqual({});
+    expect((await saved()).state).toBe('AWAITING_UPLOAD');
   });
 });
 
 describe('runStep: states the page does not drive', () => {
-  it.each(['REVIEW', 'VERIFIED', 'PAYLOAD', 'FAILED', 'DISCARDED'] as const)(
+  it.each(['REVIEW', 'VERIFIED', 'FAILED', 'DISCARDED'] as const)(
     'leaves %s untouched',
     async (state) => {
-      expect(await runStep(seed({ state }))).toEqual({});
-      expect(saved().state).toBe(state);
-      expect(saved().claim).toBeNull();
+      expect(await runStep(await put({ state }))).toEqual({});
+      expect((await saved()).state).toBe(state);
+      expect(await claimToken()).toBeNull();
       expect(calls).toHaveLength(0);
       expect(h.spawn).not.toHaveBeenCalled();
     },
@@ -190,55 +212,66 @@ describe('runStep: states the page does not drive', () => {
 describe('runStep: model readiness', () => {
   it('returns "waking model" while /health answers 503, without claiming the job', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
-    const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
     expect(result).toEqual({ wait: WAKING });
-    expect(saved().claim).toBeNull();
-    expect(saved().consecutiveFailures).toBe(0);
+    expect(await claimToken()).toBeNull();
+    expect((await saved()).consecutiveFailures).toBe(0);
     expect(h.spawn).not.toHaveBeenCalled();
   });
 
   it('treats a refused connection as loading', async () => {
     on(/\/health$/, () => Promise.reject(new TypeError('ECONNREFUSED')));
-    expect(await runStep(seed({ state: 'PICK' }))).toEqual({ wait: WAKING });
+    expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
   });
 
   it('returns "waiting on another run" when every slot is processing', async () => {
     on(/\/slots$/, () => json([{ is_processing: true }]));
-    const result = await runStep(seed({ state: 'PICK' }));
+    const result = await runStep(await pickJob());
     expect(result).toEqual({ wait: 'waiting on another run' });
-    expect(saved().claim).toBeNull();
-    expect(saved().state).toBe('PICK');
+    expect(await claimToken()).toBeNull();
+    expect((await saved()).state).toBe('PICK');
   });
 
   it('skips the model check for steps that only run ffmpeg', async () => {
     on(/\/health$/, () => new Response('', { status: 503 }));
-    await runStep(seed({ state: 'PREP' }));
+    await runStep(await put({ state: 'PREP' }));
     expect(called(/\/health$/)).toHaveLength(0);
-    expect(saved().state).toBe('ANALYZE');
+    expect((await saved()).state).toBe('ANALYZE');
   });
 });
 
 describe('runStep: claims', () => {
   it('waits when another tab holds an unexpired claim', async () => {
-    const claim = { token: 'other', until: Date.now() + 60_000 };
-    const result = await runStep(seed({ state: 'PREP', claim }));
+    const job = await put({ state: 'PREP' });
+    await db()
+      .update(jobs)
+      .set({ claimToken: 'other', claimUntil: sql`now() + interval '1 minute'` })
+      .where(eq(jobs.id, 'j1'));
+    const result = await runStep(job);
     expect(result).toEqual({ wait: 'step running in another tab' });
-    expect(saved().state).toBe('PREP');
-    expect(saved().claim).toEqual(claim);
+    expect((await saved()).state).toBe('PREP');
+    expect(await claimToken()).toBe('other');
     expect(h.spawn).not.toHaveBeenCalled();
   });
 
   it('takes over a lapsed claim', async () => {
-    await runStep(seed({ state: 'PREP', claim: { token: 'old', until: Date.now() - 1 } }));
-    expect(saved().state).toBe('ANALYZE');
-    expect(saved().claim).toBeNull();
+    const job = await put({ state: 'PREP' });
+    await db()
+      .update(jobs)
+      .set({ claimToken: 'old', claimUntil: sql`now() - interval '1 second'` })
+      .where(eq(jobs.id, 'j1'));
+    await runStep(job);
+    expect((await saved()).state).toBe('ANALYZE');
+    expect(await claimToken()).toBeNull();
   });
 });
 
 describe('runStep: PREP', () => {
   it('probes and measures the whole file through a signed URL, then starts ANALYZE', async () => {
-    expect(await runStep(seed({ state: 'PREP', consecutiveFailures: 1, error: 'x' }))).toEqual({});
-    const job = saved();
+    expect(await runStep(await put({ state: 'PREP', consecutiveFailures: 1, error: 'x' }))).toEqual(
+      {},
+    );
+    const job = await saved();
     expect(job.state).toBe('ANALYZE');
     expect(job.probe).toEqual({ durationSec: 95, width: 1920, height: 1080, hasAudio: true });
     expect(job.measurements).toEqual({
@@ -250,7 +283,7 @@ describe('runStep: PREP', () => {
     expect(job.contentType).toBe('video/quicktime');
     expect(job.consecutiveFailures).toBe(0);
     expect(job.error).toBeNull();
-    expect(job.claim).toBeNull();
+    expect(await claimToken()).toBeNull();
     const signed = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
     for (const [, args] of h.spawn.mock.calls as [string, string[]][]) {
       expect(args).toContain(signed);
@@ -260,82 +293,73 @@ describe('runStep: PREP', () => {
 
   it('fails when the upload never reached storage', async () => {
     h.objects.clear();
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
-    expect(saved().error).toMatch(/never reached storage/);
+    await runStep(await put({ state: 'PREP' }));
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
+    expect((await saved()).error).toMatch(/never reached storage/);
   });
 
   it.each([Number.NaN, 0])('fails a video whose duration reads as %s', async (duration) => {
     tools.probe = { stdout: probeJson(duration) };
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
-    expect(saved().error).toMatch(/duration/);
+    await runStep(await put({ state: 'PREP' }));
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
+    expect((await saved()).error).toMatch(/duration/);
   });
 
   it('fails a video with no audio track', async () => {
     tools.probe = { stdout: probeJson(60, false) };
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved()).toMatchObject({
+    await runStep(await put({ state: 'PREP' }));
+    expect(await saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'PREP',
       error: 'This video has no audio track.',
     });
   });
 
-  it(`caps visitor videos at ${MAX_MINUTES.visitor} minutes`, async () => {
-    tools.probe = { stdout: probeJson(5 * 60 + 1) };
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
-    expect(saved().error).toBe('Videos are capped at 5 minutes here; this one runs 5.0.');
+  it(`lets anyone run up to ${MAX_MINUTES} minutes`, async () => {
+    tools.probe = { stdout: probeJson(MAX_MINUTES * 60) };
+    await runStep(await put({ state: 'PREP' }));
+    expect((await saved()).state).toBe('ANALYZE');
+    expect((await saved()).chunkCount).toBe(Math.ceil((900 - 1) / 29.5));
   });
 
-  it('accepts exactly 5 minutes from a visitor', async () => {
-    tools.probe = { stdout: probeJson(300) };
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved().state).toBe('ANALYZE');
-  });
-
-  it(`lets Nathan run up to ${MAX_MINUTES.nathan} minutes`, async () => {
-    tools.probe = { stdout: probeJson(12 * 60) };
-    await runStep(seed({ state: 'PREP', owner: 'nathan', channel: 'nathan' }));
-    expect(saved().state).toBe('ANALYZE');
-    expect(saved().chunkCount).toBe(Math.ceil((720 - 1) / 29.5));
-  });
-
-  it('refuses Nathan past 15 minutes', async () => {
+  it(`refuses a video past ${MAX_MINUTES} minutes`, async () => {
     tools.probe = { stdout: probeJson(16 * 60) };
-    await runStep(seed({ state: 'PREP', owner: 'nathan', channel: 'nathan' }));
-    expect(saved().state).toBe('FAILED');
-    expect(saved().error).toBe('Videos are capped at 15 minutes here; this one runs 16.0.');
+    await runStep(await put({ state: 'PREP', ...A_JOB }));
+    expect((await saved()).state).toBe('FAILED');
+    expect((await saved()).error).toBe('Videos are capped at 15 minutes; this one runs 16.0.');
   });
 
   it('counts an ffprobe crash as a failure without leaving PREP', async () => {
     tools.probe = { code: 1, stderr: 'Invalid data found' };
-    await runStep(seed({ state: 'PREP' }));
-    expect(saved()).toMatchObject({ state: 'PREP', consecutiveFailures: 1 });
-    expect(saved().error).toMatch(/ffprobe exited 1/);
+    await runStep(await put({ state: 'PREP' }));
+    expect(await saved()).toMatchObject({ state: 'PREP', consecutiveFailures: 1 });
+    expect((await saved()).error).toMatch(/ffprobe exited 1/);
   });
 });
 
 describe('runStep: ANALYZE', () => {
   it('stores no chunk when the job was discarded mid-analysis', async () => {
-    const job = seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 });
-    on(/v1\/chat\/completions$/, () => {
-      store.set('jobs/j1', { ...(store.get('jobs/j1') as JobDoc), state: 'DISCARDED' });
+    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 });
+    on(/v1\/chat\/completions$/, async () => {
+      await patchJob({ state: 'DISCARDED' });
       return completion(JSON.stringify(ANALYSIS));
     });
     await runStep(job);
-    expect(saved().state).toBe('DISCARDED');
-    expect(store.has(FIRST_CHUNK)).toBe(false);
+    expect((await saved()).state).toBe('DISCARDED');
+    expect(await chunkAt(0)).toBeUndefined();
   });
 
   it('saves the chunk and advances to the next window', async () => {
     const result = await runStep(
-      seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 }),
+      await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 }),
     );
     expect(result).toEqual({});
-    expect(saved()).toMatchObject({ state: 'ANALYZE', chunkIndex: 1, consecutiveFailures: 0 });
-    const chunk = store.get(FIRST_CHUNK) as { index: number; analysis: unknown };
+    expect(await saved()).toMatchObject({
+      state: 'ANALYZE',
+      chunkIndex: 1,
+      consecutiveFailures: 0,
+    });
+    const chunk = (await chunkAt(0))!;
     expect(chunk).toMatchObject({ index: 0, startSec: 0, durationSec: 29.5, raw: null });
     expect(chunk.analysis).toEqual(ANALYSIS);
     const body = chatBodies()[0]!;
@@ -344,9 +368,9 @@ describe('runStep: ANALYZE', () => {
   });
 
   it('moves to PICK after the last chunk, cutting the short tail window', async () => {
-    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 1 }));
-    expect(saved()).toMatchObject({ state: 'PICK', chunkIndex: 2 });
-    expect(store.get('jobs/j1/chunks/0001')).toMatchObject({
+    await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 1 }));
+    expect(await saved()).toMatchObject({ state: 'PICK', chunkIndex: 2 });
+    expect(await chunkAt(1)).toMatchObject({
       index: 1,
       startSec: 29.5,
       durationSec: 10.5,
@@ -356,35 +380,44 @@ describe('runStep: ANALYZE', () => {
     expect(args[args.indexOf('-t') + 1]).toBe('10.500');
   });
 
+  /** Second window of three, with the first already analyzed. */
+  const analyzing = async () => {
+    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 });
+    await seed({ jobChunks: [{ jobId: 'j1', index: 0, data: { index: 0 } }] });
+    return job;
+  };
+
   it("stores an ffmpeg failure without the signed URL's signature", async () => {
-    store.set(FIRST_CHUNK, { index: 0 });
     tools.window = {
       code: 1,
       stderr:
         'https://storage.googleapis.com/bkt/uploads/j1?X-Goog-Signature=abc123: 403 Forbidden',
     };
-    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 }));
-    expect(saved().error).toMatch(/ffmpeg exited 1/);
-    expect(saved().error).toContain('uploads/j1?[redacted]');
-    expect(saved().error).not.toContain('X-Goog-Signature');
+    await runStep(await analyzing());
+    expect((await saved()).error).toMatch(/ffmpeg exited 1/);
+    expect((await saved()).error).toContain('uploads/j1?[redacted]');
+    expect((await saved()).error).not.toContain('X-Goog-Signature');
   });
 
   it('counts one thrown step, keeps the state, and fails on the second in a row', async () => {
-    store.set(FIRST_CHUNK, { index: 0 });
     tools.window = { code: 1, stderr: 'boom\nmoov atom not found' };
-    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 }));
-    expect(saved()).toMatchObject({ state: 'ANALYZE', chunkIndex: 1, consecutiveFailures: 1 });
-    expect(saved().error).toMatch(/ffmpeg exited 1/);
-    expect(saved().claim).toBeNull();
+    await runStep(await analyzing());
+    expect(await saved()).toMatchObject({
+      state: 'ANALYZE',
+      chunkIndex: 1,
+      consecutiveFailures: 1,
+    });
+    expect((await saved()).error).toMatch(/ffmpeg exited 1/);
+    expect(await claimToken()).toBeNull();
 
-    await runStep(saved());
-    expect(saved()).toMatchObject({
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'ANALYZE',
       consecutiveFailures: 2,
       chunkIndex: 1,
     });
-    expect(store.has(FIRST_CHUNK)).toBe(true);
+    expect(await chunkAt(0)).toBeDefined();
   });
 
   it('waits without a failure when the model scales to zero mid-step', async () => {
@@ -392,38 +425,39 @@ describe('runStep: ANALYZE', () => {
       /chat\/completions$/,
       () => new Response('Model is not yet ready for inference.', { status: 429 }),
     );
-    const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
     expect(result).toEqual({ wait: WAKING });
-    expect(saved()).toMatchObject({
+    expect(await saved()).toMatchObject({
       state: 'ANALYZE',
       chunkIndex: 0,
       consecutiveFailures: 0,
       error: null,
-      claim: null,
     });
-    expect(store.has(FIRST_CHUNK)).toBe(false);
+    expect(await chunkAt(0)).toBeUndefined();
     expect(captureException).not.toHaveBeenCalled();
   });
 
   it('counts a quota 429 as a failure and reports it', async () => {
     on(/chat\/completions$/, () => new Response('Quota exceeded', { status: 429 }));
-    const result = await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
     expect(result).toEqual({});
-    expect(saved()).toMatchObject({ state: 'ANALYZE', consecutiveFailures: 1 });
-    expect(saved().error).toBe('llama-server 429: Quota exceeded');
+    expect(await saved()).toMatchObject({ state: 'ANALYZE', consecutiveFailures: 1 });
+    expect((await saved()).error).toBe('llama-server 429: Quota exceeded');
     expect(captureException).toHaveBeenCalledOnce();
   });
 
   it('resets the failure count after a step succeeds', async () => {
-    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, consecutiveFailures: 1 }));
-    expect(saved()).toMatchObject({ consecutiveFailures: 0, error: null, chunkIndex: 1 });
+    await runStep(
+      await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, consecutiveFailures: 1 }),
+    );
+    expect(await saved()).toMatchObject({ consecutiveFailures: 0, error: null, chunkIndex: 1 });
   });
 
   it('keeps the raw reply when the model never returns valid JSON', async () => {
     on(/chat\/completions$/, () => completion('not json'));
-    await runStep(seed({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(store.get(FIRST_CHUNK)).toMatchObject({ analysis: null, raw: 'not json' });
-    expect(saved().chunkIndex).toBe(1);
+    await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    expect(await chunkAt(0)).toMatchObject({ analysis: null, raw: 'not json' });
+    expect((await saved()).chunkIndex).toBe(1);
   });
 });
 
@@ -453,20 +487,33 @@ const context = () => {
   };
 };
 
-function seedPickChunks() {
-  store.set(FIRST_CHUNK, chunkDoc(0));
-  store.set('jobs/j1/chunks/0001', chunkDoc(1));
+/** The PICK step's job, with its two analyzed chunks; the chunks need the job row first. */
+async function pickJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
+  const job = await put({ state: 'PICK', ...patch });
+  await seed({
+    jobChunks: [0, 1].map((index) => ({ jobId: 'j1', index, data: chunkDoc(index) })),
+  });
+  return job;
 }
 
-describe('runStep: PICK', () => {
-  beforeEach(seedPickChunks);
+const NATHAN_FEEDBACK = {
+  kind: 'EDITED',
+  jobId: 'old',
+  songTitle: 'Earlier',
+  pickVersion: 1,
+  field: 'title',
+  before: 'A',
+  after: 'B',
+  at: 5,
+};
 
-  it('stores candidates and pick version 1 for a visitor job, named as the artist with public facts only', async () => {
-    expect(await runStep(seed({ state: 'PICK', measurements: MEASURED }))).toEqual({});
-    const job = saved();
+describe('runStep: PICK', () => {
+  it('stores candidates and pick version 1 for an unlinked job, named as the artist with public facts only', async () => {
+    expect(await runStep(await pickJob({ measurements: MEASURED }))).toEqual({});
+    const job = await saved();
     expect(job.state).toBe('REVIEW');
     expect(job.hashtagCandidates).toEqual([SYNTHWAVE, RETROWAVE, '#newmusic']);
-    const pick = store.get(FIRST_PICK) as Record<string, unknown>;
+    const pick = (await pickAt(1))!;
     expect(pick).toMatchObject({ version: 1, skipped: false });
     expect(typeof pick.modelMs).toBe('number');
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
@@ -476,9 +523,9 @@ describe('runStep: PICK', () => {
     expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
-    expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
+    expect(await artistRowCount()).toBe(0);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    // Visitor runs read like Nathan too, so his uploads supply the credits.
+    // Until spec 002, every run reads FLR's uploads for the credits.
     expect(called(/playlistItems/).length).toBeGreaterThan(0);
     expect(ctx.recentUploads).toHaveLength(3);
     expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
@@ -486,21 +533,21 @@ describe('runStep: PICK', () => {
 
   it('records the pick request and the stored pick on the smart-pick agent span', async () => {
     clearAgentSpan();
-    await runStep(seed({ state: 'PICK', measurements: MEASURED }));
+    await runStep(await pickJob({ measurements: MEASURED }));
     const { input, output } = agentSpanIO();
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).toContain('recentUploads');
-    const stored = store.get(FIRST_PICK) as Record<string, unknown>;
+    const stored = (await pickAt(1))!;
     expect(JSON.parse(output[0]!)).toMatchObject({ title: stored.title });
   });
 
-  it('names the artist for a sample and leaves its live video out of the comparison set', async () => {
-    await runStep(seed({ state: 'PICK', sampleId: 'smp', liveVideoId: 'v2', channel: 'sandbox' }));
+  it('compares against every recent upload', async () => {
+    await runStep(await pickJob());
     expect(context().artist).toBe(ARTIST);
     const catalog = called(/com\/youtube\/v3\/videos\?/).map((c) =>
       new URL(c.url).searchParams.get('id'),
     );
-    expect(catalog[0]).toBe('v1,v3,v4,v5,v6');
+    expect(catalog[0]).toBe('v1,v2,v3,v4,v5,v6');
     // Only the three newest uploads go to the model, each with its thumbnail.
     expect(context().recentUploads).toHaveLength(3);
     expect(called(/i\.ytimg\.com/)).toHaveLength(3);
@@ -508,78 +555,54 @@ describe('runStep: PICK', () => {
 });
 
 describe("runStep: PICK with Nathan's memory", () => {
-  beforeEach(seedPickChunks);
-
-  it("reads Nathan's memory for a demo job without writing any of it", async () => {
-    store.set('artists/flr/feedback/f1', {
-      kind: 'EDITED',
-      jobId: 'old',
-      songTitle: 'Earlier',
-      pickVersion: 1,
-      field: 'title',
-      before: 'A',
-      after: 'B',
-      at: 5,
-    });
-    const before = [...store.keys()]
-      .filter((k) => k.startsWith('artists/'))
-      .sort((a, b) => a.localeCompare(b));
-    await runStep(seed({ state: 'PICK', owner: 'demo', channel: 'sandbox' }));
-    expect(saved().state).toBe('REVIEW');
+  it("keeps Nathan's memory out of an unlinked job and writes none of it", async () => {
+    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    await runStep(await pickJob());
+    expect((await saved()).state).toBe('REVIEW');
     const ctx = context();
-    expect(ctx.feedback).toHaveLength(1);
-    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
-    const after = [...store.keys()]
-      .filter((k) => k.startsWith('artists/'))
-      .sort((a, b) => a.localeCompare(b));
-    expect(after).toEqual(before);
-    expect(store.has('artists/flr/facts/home')).toBe(false);
+    expect(ctx.feedback).toEqual([]);
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
+    expect(await artistRowCount()).toBe(1);
   });
 
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
-    store.set('artists/flr/feedback/f1', {
-      kind: 'EDITED',
-      jobId: 'old',
-      songTitle: 'Earlier',
-      pickVersion: 1,
-      field: 'title',
-      before: 'A',
-      after: 'B',
-      at: 5,
+    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    const job = await pickJob({
+      ...A_JOB,
+      hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+      audience: {
+        query: 'synthwave music video',
+        hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+        tags: [
+          { tag: 'synthwave', usedBy: 9 },
+          { tag: 'outrun', usedBy: 4 },
+        ],
+        top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
+      },
     });
-    store.set(FIRST_PICK, {
-      ...RAW_PICK,
-      title: 'Old Title',
-      description: 'An older description.',
-      version: 1,
-      skipped: true,
-    });
-    store.set('jobs/j1/pick/0002', {
-      ...RAW_PICK,
-      title: 'Second',
-      version: 2,
-      skipped: false,
-      modelMs: 50_000,
-    });
-    await runStep(
-      seed({
-        state: 'PICK',
-        owner: 'nathan',
-        channel: 'nathan',
-        hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-        audience: {
-          query: 'synthwave music video',
-          hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-          tags: [
-            { tag: 'synthwave', usedBy: 9 },
-            { tag: 'outrun', usedBy: 4 },
-          ],
-          top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
+    await seed({
+      jobPicks: [
+        {
+          jobId: 'j1',
+          version: 1,
+          data: {
+            ...RAW_PICK,
+            title: 'Old Title',
+            description: 'An older description.',
+            version: 1,
+            skipped: true,
+          },
         },
-      }),
-    );
-    expect(saved().state).toBe('REVIEW');
-    const third = store.get('jobs/j1/pick/0003') as { version: number; modelMs: number };
+        {
+          jobId: 'j1',
+          version: 2,
+          data: { ...RAW_PICK, title: 'Second', version: 2, skipped: false, modelMs: 50_000 },
+        },
+      ],
+    });
+    await runStep(job);
+    expect((await saved()).state).toBe('REVIEW');
+    const third = (await pickAt(3)) as { version: number; modelMs: number };
     expect(third.version).toBe(3);
     // The stored time carries the earlier runs, so a re-run never drops them from the total.
     expect(third.modelMs).toBeGreaterThanOrEqual(50_000);
@@ -600,43 +623,45 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(ctx.skippedVersions).toEqual([
       { title: 'Old Title', description: 'An older description.' },
     ]);
-    expect(store.has('artists/flr/facts/home')).toBe(true);
+    expect((await db().select().from(artistFacts)).some((r) => r.key === 'home')).toBe(true);
   });
 
   const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
   const approveGuide = () =>
-    store.set('artists/flr/brand/approved', {
-      ...GUIDE,
-      status: 'APPROVED',
-      basedOn: ['v1'],
-      createdAt: 1,
-      approvedAt: 2,
+    seed({
+      artistBrand: [
+        {
+          artistId: 'flr',
+          slot: 'approved',
+          data: { ...GUIDE, status: 'APPROVED', basedOn: ['v1'], createdAt: 1, approvedAt: 2 },
+        },
+      ],
     });
 
   it("follows Nathan's approved brand guide", async () => {
-    approveGuide();
-    await runStep(seed({ state: 'PICK', owner: 'nathan', channel: 'nathan' }));
+    await approveGuide();
+    await runStep(await pickJob(A_JOB));
     expect(context().brandGuide).toEqual(GUIDE);
   });
 
-  it('keeps the brand guide out of visitor jobs', async () => {
-    approveGuide();
-    await runStep(seed({ state: 'PICK', sampleId: 'smp', channel: 'sandbox' }));
+  it('keeps the brand guide out of unlinked jobs', async () => {
+    await approveGuide();
+    await runStep(await pickJob());
     expect(context()).not.toHaveProperty('brandGuide');
   });
 
   it('counts an unparseable recommendation as a failure', async () => {
     on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
-    await runStep(seed({ state: 'PICK' }));
-    expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
-    expect(saved().error).toBe('The model reply did not parse as a recommendation.');
-    expect(store.has(FIRST_PICK)).toBe(false);
+    await runStep(await pickJob());
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect((await saved()).error).toBe('The model reply did not parse as a recommendation.');
+    expect(await pickAt(1)).toBeUndefined();
   });
 
   it('reports the original model error to Sentry, not the evidence-carrying wrapper', async () => {
     captureException.mockClear();
     on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
-    await runStep(seed({ state: 'PICK' }));
+    await runStep(await pickJob());
     expect(captureException).toHaveBeenCalledTimes(1);
     const [reported, context] = captureException.mock.calls[0]!;
     expect(reported).toBeInstanceOf(Error);
@@ -647,13 +672,15 @@ describe("runStep: PICK with Nathan's memory", () => {
 
   it('keeps the genre search when the model fails, so the retry does not search again', async () => {
     on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
-    await runStep(seed({ state: 'PICK' }));
+    await runStep(await pickJob());
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    expect(saved().audience).toMatchObject({ hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'] });
+    expect((await saved()).audience).toMatchObject({
+      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+    });
 
     on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
-    await runStep(saved());
-    expect(saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
   });
 
@@ -662,41 +689,59 @@ describe("runStep: PICK with Nathan's memory", () => {
       /chat\/completions$/,
       () => new Response('Model is not yet ready for inference.', { status: 429 }),
     );
-    expect(await runStep(seed({ state: 'PICK' }))).toEqual({ wait: WAKING });
-    expect(saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
-    expect(saved().audience).toMatchObject({ hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'] });
+    expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
+    expect((await saved()).audience).toMatchObject({
+      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+    });
     expect(captureException).not.toHaveBeenCalled();
   });
 });
 
 describe('runStep: PUBLISHING', () => {
+  const DESTINATION = { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' };
   const publishing = (patch: Partial<JobDoc> = {}) =>
-    seed({ state: 'PUBLISHING', channel: 'sandbox', finalFields: FIELDS, sampleId: 's', ...patch });
-
-  beforeEach(() => {
-    h.secrets.set('yt-refresh-sandbox', 'refresh-1');
-  });
+    put({
+      state: 'PUBLISHING',
+      ...A_JOB,
+      destination: DESTINATION,
+      finalFields: FIELDS,
+      ...patch,
+    });
 
   it('fails when there is nothing to upload', async () => {
-    await runStep(publishing({ finalFields: null }));
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
+    await runStep(await publishing({ finalFields: null }));
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
   });
 
-  it('ends at the payload when the channel has no token', async () => {
-    h.secrets.clear();
-    await runStep(publishing());
-    expect(saved()).toMatchObject({ state: 'PAYLOAD', payload: FIELDS });
+  it('fails when no destination was pinned', async () => {
+    await runStep(await publishing({ destination: null }));
+    expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Nothing to upload.' });
   });
 
-  it('tells the page why it stopped at the payload', async () => {
-    h.secrets.clear();
-    await runStep(publishing());
-    expect(saved().error).toBe('The upload channel is not connected.');
+  it.each([
+    ['revoked', { status: 'revoked' as const, tokenCiphertext: null }],
+    ['on another channel', { channelId: 'UCother' }],
+  ])('stops when the grant is %s, without calling YouTube', async (_label, change) => {
+    await db().update(connections).set(change).where(eq(connections.uid, A_JOB.ownerUid));
+    await runStep(await publishing());
+    expect(await saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'PUBLISHING',
+      error: 'Reconnect YouTube to upload.',
+    });
+    expect(called(/upload\/youtube/)).toHaveLength(0);
+  });
+
+  it("never uploads with another user's grant", async () => {
+    await runStep(await publishing({ ownerUid: 'uid-b', artistId: null }));
+    expect((await saved()).error).toBe('Reconnect YouTube to upload.');
+    expect(called(/upload\/youtube/)).toHaveLength(0);
   });
 
   it('opens a private resumable upload sized from storage', async () => {
-    await runStep(publishing());
-    expect(saved()).toMatchObject({
+    await runStep(await publishing());
+    expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
       upload: { sessionUri: SESSION_URI, total: 1000 },
       uploadProgress: { sent: 0, total: 1000 },
@@ -712,27 +757,31 @@ describe('runStep: PUBLISHING', () => {
 
   it('fails when the source expired from storage', async () => {
     h.objects.clear();
-    await runStep(publishing());
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
+    await runStep(await publishing());
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
   });
 
-  it('ends at the payload when upload quota is spent', async () => {
+  it('stops when the daily upload limit is spent', async () => {
     on(
       /upload\/youtube\/v3\/videos/,
       () => new Response('{"error":{"errors":[{"reason":"quotaExceeded"}]}}', { status: 403 }),
     );
-    await runStep(publishing());
-    expect(saved()).toMatchObject({
-      state: 'PAYLOAD',
-      payload: FIELDS,
-      error: 'YouTube upload quota is spent for today.',
+    await runStep(await publishing());
+    expect(await saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'PUBLISHING',
+      error: 'Daily upload limit reached. Try tomorrow.',
     });
   });
 
   it('counts other upload-init errors as step failures', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('forbidden', { status: 403 }));
-    await runStep(publishing());
-    expect(saved()).toMatchObject({ state: 'PUBLISHING', consecutiveFailures: 1, upload: null });
+    await runStep(await publishing());
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 1,
+      upload: null,
+    });
   });
 
   it('streams the next range from GCS and records progress on a 308', async () => {
@@ -741,8 +790,8 @@ describe('runStep: PUBLISHING', () => {
         ? new Response('', { status: 308, headers: { range: 'bytes=0-399' } })
         : new Response('', { status: 308, headers: { range: 'bytes=0-699' } }),
     );
-    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
-    expect(saved()).toMatchObject({
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
       uploadProgress: { sent: 700, total: 1000 },
     });
@@ -754,8 +803,8 @@ describe('runStep: PUBLISHING', () => {
   });
 
   it('claims completion with the video ID on the final 200', async () => {
-    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
-    expect(saved()).toMatchObject({
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({
       state: 'CLAIMED_COMPLETE',
       videoId: 'vid1',
       uploadProgress: { sent: 1000, total: 1000 },
@@ -764,14 +813,18 @@ describe('runStep: PUBLISHING', () => {
 
   it('drops an expired upload session so the next step opens a fresh one', async () => {
     on(/upload\.example\/s1/, () => new Response('gone', { status: 404 }));
-    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
-    expect(saved()).toMatchObject({ state: 'PUBLISHING', upload: null, uploadProgress: null });
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      upload: null,
+      uploadProgress: null,
+    });
   });
 
   it('keeps the session and counts a failure when the range read errors otherwise', async () => {
     on(/upload\.example\/s1/, () => new Response('oops', { status: 500 }));
-    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
-    expect(saved()).toMatchObject({
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
       consecutiveFailures: 1,
       upload: { sessionUri: SESSION_URI, total: 1000 },
@@ -780,32 +833,28 @@ describe('runStep: PUBLISHING', () => {
 
   it('skips the range read when YouTube already holds every byte', async () => {
     on(/upload\.example\/s1/, () => json({ id: 'vid2' }));
-    await runStep(publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
-    expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: 'vid2' });
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: 'vid2' });
     expect(called(/storage\.googleapis\.com/)).toHaveLength(0);
   });
 });
 
 describe('runStep: CLAIMED_COMPLETE', () => {
   const claimed = (patch: Partial<JobDoc> = {}) =>
-    seed({
+    put({
       state: 'CLAIMED_COMPLETE',
-      owner: 'nathan',
-      channel: 'nathan',
+      ...A_JOB,
+      destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
       videoId: 'vid1',
       finalFields: FIELDS,
       ...patch,
     });
-
-  beforeEach(() => {
-    h.secrets.set('yt-refresh-nathan', 'refresh-n');
-    h.secrets.set('yt-refresh-sandbox', 'refresh-s');
-  });
+  const publishes = () => db().select().from(artistPublishes);
 
   it('marks VERIFIED on read-back and records the publish for Nathan', async () => {
-    expect(await runStep(claimed())).toEqual({});
-    expect(saved().state).toBe('VERIFIED');
-    expect(store.get('artists/flr/publishes/vid1')).toMatchObject({
+    expect(await runStep(await claimed())).toEqual({});
+    expect((await saved()).state).toBe('VERIFIED');
+    expect((await publishes())[0]!.data).toMatchObject({
       videoId: 'vid1',
       url: 'https://youtu.be/vid1',
       jobId: 'j1',
@@ -817,55 +866,60 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     );
   });
 
-  it('verifies a visitor sample without touching artists/*', async () => {
-    await runStep(claimed({ owner: 'visitor', channel: 'sandbox' }));
-    expect(saved().state).toBe('VERIFIED');
-    expect([...store.keys()].some((k) => k.startsWith('artists/'))).toBe(false);
+  it("verifies a job outside Nathan's artist without touching the artist tables", async () => {
+    await runStep(await claimed({ artistId: null }));
+    expect((await saved()).state).toBe('VERIFIED');
+    expect(await artistRowCount()).toBe(0);
   });
 
   it('fails when YouTube rejected the upload', async () => {
     on(/com\/youtube\/v3\/videos\?/, () =>
       json({ items: [{ id: 'vid1', status: { uploadStatus: 'rejected' } }] }),
     );
-    await runStep(claimed());
-    expect(saved()).toMatchObject({ state: 'FAILED', error: 'YouTube rejected the upload.' });
-    expect(store.has('artists/flr/publishes/vid1')).toBe(false);
+    await runStep(await claimed());
+    expect(await saved()).toMatchObject({ state: 'FAILED', error: 'YouTube rejected the upload.' });
+    expect(await publishes()).toEqual([]);
   });
 
   it('keeps waiting while a listed upload has no accepted status yet', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status: {} }] }));
-    expect(await runStep(claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
-    expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
+    expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
   });
 
   it('waits on YouTube while the video is not listed yet', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [] }));
-    expect(await runStep(claimed({ verifyAttempts: 2 }))).toEqual({ wait: WAITING_ON_YOUTUBE });
-    expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 3 });
+    expect(await runStep(await claimed({ verifyAttempts: 2 }))).toEqual({
+      wait: WAITING_ON_YOUTUBE,
+    });
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 3 });
   });
 
   it(`fails after ${VERIFY_ATTEMPTS} empty read-backs`, async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [] }));
-    expect(await runStep(claimed({ verifyAttempts: VERIFY_ATTEMPTS - 1 }))).toEqual({});
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'CLAIMED_COMPLETE' });
-    expect(saved().error).toBe('YouTube never returned the uploaded video.');
+    expect(await runStep(await claimed({ verifyAttempts: VERIFY_ATTEMPTS - 1 }))).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'CLAIMED_COMPLETE' });
+    expect((await saved()).error).toBe('YouTube never returned the uploaded video.');
   });
 
   it('fails when there is no channel to read back from', async () => {
-    await runStep(claimed({ channel: null }));
-    expect(saved()).toMatchObject({ state: 'FAILED', failedState: 'CLAIMED_COMPLETE' });
+    await runStep(await claimed({ destination: null }));
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'CLAIMED_COMPLETE' });
   });
 
-  it('fails when the channel lost its token', async () => {
-    h.secrets.clear();
-    await runStep(claimed());
-    expect(saved()).toMatchObject({ state: 'FAILED', error: 'Cannot read the upload back.' });
+  it('fails when the grant was revoked', async () => {
+    await db()
+      .update(connections)
+      .set({ status: 'revoked', tokenCiphertext: null })
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    await runStep(await claimed());
+    expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Cannot read the upload back.' });
   });
 
   it('counts a read-back error as a failure and asks the page to wait', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => new Response('oops', { status: 500 }));
-    expect(await runStep(claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
-    expect(saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', consecutiveFailures: 1 });
+    expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', consecutiveFailures: 1 });
   });
 });
 
@@ -904,39 +958,38 @@ describe('failurePatch', () => {
 
 describe('runStep: claim safety', () => {
   it('runs the step on the job read inside the claim, not the caller snapshot', async () => {
-    const stale = seed({ state: 'PICK' });
-    store.set('jobs/j1', { ...stale, state: 'REVIEW' });
+    const stale = await pickJob();
+    await patchJob({ state: 'REVIEW' });
     expect(await runStep(stale)).toEqual({});
-    expect(saved().state).toBe('REVIEW');
-    expect(saved().claim).toBeNull();
+    expect((await saved()).state).toBe('REVIEW');
+    expect(await claimToken()).toBeNull();
     expect(chatBodies()).toHaveLength(0);
   });
 
   it('waits on a loading model when the claimed state is ahead of the snapshot', async () => {
-    const stale = seed({ state: 'PREP' });
-    store.set('jobs/j1', { ...stale, state: 'ANALYZE', chunkCount: 2 });
+    const stale = await put({ state: 'PREP' });
+    await patchJob({ state: 'ANALYZE', chunkCount: 2 });
     on(/127\.0\.0\.1:8081\/health$/, () => new Response('loading', { status: 503 }));
     expect(await runStep(stale)).toEqual({ wait: WAKING });
-    expect(saved()).toMatchObject({ state: 'ANALYZE', claim: null });
+    expect(await saved()).toMatchObject({ state: 'ANALYZE' });
     expect(chatBodies()).toHaveLength(0);
   });
 
   it('drops the step result when the job was discarded mid-step', async () => {
-    const job = seed({ state: 'PICK', owner: 'visitor', sampleId: 's1' });
-    on(/v1\/chat\/completions$/, () => {
-      store.set('jobs/j1', { ...(store.get('jobs/j1') as JobDoc), state: 'DISCARDED' });
+    const job = await pickJob();
+    on(/v1\/chat\/completions$/, async () => {
+      await patchJob({ state: 'DISCARDED' });
       return completion(JSON.stringify(RAW_PICK));
     });
     await runStep(job);
-    expect(saved().state).toBe('DISCARDED');
-    expect(saved().claim).toBeNull();
-    expect(store.has(FIRST_PICK)).toBe(false);
+    expect((await saved()).state).toBe('DISCARDED');
+    expect(await claimToken()).toBeNull();
+    expect(await pickAt(1)).toBeUndefined();
   });
 });
 
 describe('runStep: Short', () => {
   const SHORT = {
-    parentId: 'p1',
     sourceDurationSec: 180,
     reframe: 'blur' as const,
     hook: null,
@@ -955,18 +1008,23 @@ describe('runStep: Short', () => {
     return lines.join('\n');
   };
 
-  beforeEach(() => {
-    for (let i = 0; i < 6; i++) {
-      store.set(`jobs/p1/chunks/${String(i).padStart(4, '0')}`, {
+  beforeEach(async () => {
+    await put({ id: 'p1', state: 'REVIEW' });
+    await seed({
+      jobChunks: Array.from({ length: 6 }, (_, i) => ({
+        jobId: 'p1',
         index: i,
-        startSec: i * 29.5,
-        durationSec: 29.5,
-        measurements: MEASURED,
-        analysis: ANALYSIS,
-        raw: null,
-        modelMs: 1,
-      });
-    }
+        data: {
+          index: i,
+          startSec: i * 29.5,
+          durationSec: 29.5,
+          measurements: MEASURED,
+          analysis: ANALYSIS,
+          raw: null,
+          modelMs: 1,
+        },
+      })),
+    });
     h.objects.set(SOURCE_OBJECT, { size: '9000', contentType: 'video/mp4' });
     h.upload.mockReset();
     h.upload.mockResolvedValue([{}]);
@@ -986,11 +1044,17 @@ describe('runStep: Short', () => {
 
   it('runs HOOK then RENDER into REVIEW, one step per call', async () => {
     hookReply({ window: 2, lengthSec: 30, reason: 'The chorus lands.' });
-    const job = seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT, pickVersion: 1 });
+    const job = await put({
+      state: 'HOOK',
+      parentId: 'p1',
+      short: SHORT,
+      sourceObject: SOURCE_OBJECT,
+      pickVersion: 1,
+    });
 
     expect(await runStep(job)).toEqual({});
-    expect(saved().state).toBe('RENDER');
-    expect(saved().short!.hook).toEqual({
+    expect((await saved()).state).toBe('RENDER');
+    expect((await saved()).short!.hook).toEqual({
       window: 2,
       startSec: 70,
       lengthSec: 30,
@@ -1000,43 +1064,47 @@ describe('runStep: Short', () => {
       response_format: { json_schema: { name: 'hook_pick' } },
     });
 
-    expect(await runStep(saved())).toEqual({});
-    expect(saved()).toMatchObject({
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({
       state: 'REVIEW',
       object: 'uploads/j1-1',
       probe: { width: 1080, height: 1920 },
       short: { renders: 1 },
-      claim: null,
     });
   });
 
   it('waits for the model before picking the hook', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     const result = await runStep(
-      seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT }),
+      await put({ state: 'HOOK', parentId: 'p1', short: SHORT, sourceObject: SOURCE_OBJECT }),
     );
     expect(result).toEqual({ wait: WAKING });
-    expect(saved().state).toBe('HOOK');
-    expect(saved().claim).toBeNull();
+    expect((await saved()).state).toBe('HOOK');
+    expect(await claimToken()).toBeNull();
   });
 
   it('renders without waiting on the model, which it does not use', async () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
     await runStep(
-      seed({ state: 'RENDER', short: { ...SHORT, hook }, sourceObject: SOURCE_OBJECT }),
+      await put({
+        state: 'RENDER',
+        parentId: 'p1',
+        short: { ...SHORT, hook },
+        sourceObject: SOURCE_OBJECT,
+      }),
     );
     expect(called(/\/health$/)).toHaveLength(0);
-    expect(saved().state).toBe('REVIEW');
+    expect((await saved()).state).toBe('REVIEW');
   });
 
   it('fails at HOOK after two unparsed replies in a row, ready for a retry', async () => {
     on(/\/v1\/chat\/completions$/, () => completion('nope'));
-    seed({ state: 'HOOK', short: SHORT, sourceObject: SOURCE_OBJECT });
-    await runStep(saved());
-    expect(saved()).toMatchObject({ state: 'HOOK', consecutiveFailures: 1 });
-    await runStep(saved());
-    expect(saved()).toMatchObject({
+    await put({ state: 'HOOK', parentId: 'p1', short: SHORT, sourceObject: SOURCE_OBJECT });
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ state: 'HOOK', consecutiveFailures: 1 });
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'HOOK',
       error: 'The model reply did not parse as a hook.',
@@ -1051,13 +1119,17 @@ describe('runStep: Short', () => {
       completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
     );
     const skipped = [{ window: 2, lengthSec: 30 }];
-    seed({ state: 'HOOK', short: { ...SHORT, skipped }, sourceObject: SOURCE_OBJECT });
-    await runStep(saved());
-    expect(saved()).toMatchObject({
+    await put({
+      state: 'HOOK',
+      parentId: 'p1',
+      short: { ...SHORT, skipped },
+      sourceObject: SOURCE_OBJECT,
+    });
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'HOOK',
       error: 'The model kept picking a skipped hook.',
-      claim: null,
     });
     expect(called(/\/v1\/chat\/completions$/)).toHaveLength(2);
   });
@@ -1065,14 +1137,15 @@ describe('runStep: Short', () => {
   it('fails the render when the upload to storage is refused', async () => {
     h.upload.mockRejectedValue(new Error('403 Forbidden'));
     const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
-    const job = seed({
+    const job = await put({
       state: 'RENDER',
+      parentId: 'p1',
       short: { ...SHORT, hook },
       sourceObject: SOURCE_OBJECT,
       consecutiveFailures: 1,
     });
     await runStep(job);
-    expect(saved()).toMatchObject({
+    expect(await saved()).toMatchObject({
       state: 'FAILED',
       failedState: 'RENDER',
       error: '403 Forbidden',

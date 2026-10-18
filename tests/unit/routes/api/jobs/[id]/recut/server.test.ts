@@ -1,14 +1,12 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../../helpers/fake-firestore';
 import { resetClients } from '$lib/server/core/clients';
+import { getJob } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/recut/+server';
 import type { JobView, Short } from '$lib/types';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
+import { seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -24,15 +22,14 @@ vi.mock('@google-cloud/storage', () => ({
 
 type Event = Parameters<typeof POST>[0];
 
-const recut = async (id: string, body: unknown, allowlisted = false) =>
+const recut = async (id: string, body: unknown, user: typeof USER_A | typeof USER_B = USER_B) =>
   POST({
     params: { id },
     request: new Request('https://x', { method: 'POST', body: JSON.stringify(body) }),
-    locals: { session: allowlisted ? { email: 'nathan@example.com', allowlisted } : null },
+    locals: { user },
   } as unknown as Event);
 
 const SHORT: Short = {
-  parentId: 'p',
   sourceDurationSec: 180,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'Chorus.' },
@@ -41,27 +38,21 @@ const SHORT: Short = {
   modelMs: 1,
 };
 
-function seed(id: string, patch: Record<string, unknown> = {}) {
-  store.set(`jobs/${id}`, {
-    id,
-    owner: 'visitor',
-    state: 'REVIEW',
-    object: `uploads/${id}`,
-    short: SHORT,
-    ...patch,
-  });
-}
+const put = (id: string, short: Short | null = SHORT) =>
+  seedJob({ id, state: 'REVIEW', object: `uploads/${id}`, short });
+const state = async (id: string) => (await getJob(id))!.state;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
-  resetStore();
   resetClients();
+  await truncate();
+  await seed(USERS);
 });
 
 describe('POST /api/jobs/[id]/recut', () => {
   it('queues a re-render with the new cut', async () => {
-    seed('s');
+    await put('s');
     const response = await recut('s', { startSec: 75, lengthSec: 20, reframe: 'crop' });
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;
@@ -73,7 +64,7 @@ describe('POST /api/jobs/[id]/recut', () => {
   });
 
   it('400s a cut that runs past the end', async () => {
-    seed('s');
+    await put('s');
     const response = await recut('s', { startSec: 175, lengthSec: 20, reframe: 'blur' });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
@@ -83,7 +74,7 @@ describe('POST /api/jobs/[id]/recut', () => {
   });
 
   it('400s missing fields', async () => {
-    seed('s');
+    await put('s');
     expect((await recut('s', {})).status).toBe(400);
     expect((await recut('s', { startSec: 70, lengthSec: 30 })).status).toBe(400);
   });
@@ -94,49 +85,43 @@ describe('POST /api/jobs/[id]/recut', () => {
     ['an array length', { startSec: 70, lengthSec: [30] }],
     ['a false length', { startSec: 70, lengthSec: false }],
   ])('400s %s instead of reading it as a number', async (_label, cut) => {
-    seed('s');
+    await put('s');
     expect((await recut('s', { ...cut, reframe: 'blur' })).status).toBe(400);
-    expect((store.get('jobs/s') as { state: string }).state).toBe('REVIEW');
+    expect(await state('s')).toBe('REVIEW');
   });
 
   it('400s a framing that is not a string', async () => {
-    seed('s');
+    await put('s');
     expect((await recut('s', { startSec: 70, lengthSec: 30, reframe: ['crop'] })).status).toBe(400);
-    expect((store.get('jobs/s') as { state: string }).state).toBe('REVIEW');
+    expect(await state('s')).toBe('REVIEW');
   });
 
   it('400s a body that is not a JSON object', async () => {
-    seed('s');
+    await put('s');
     expect((await recut('s', [1, 2])).status).toBe(400);
   });
 
   it('409s a video job', async () => {
-    seed('v', { short: null });
+    await put('v', null);
     expect((await recut('v', { startSec: 0, lengthSec: 30, reframe: 'blur' })).status).toBe(409);
   });
 
-  it("404s Nathan's Short for a non-allowlisted session", async () => {
-    seed('n', { owner: 'nathan' });
-    const error = await recut('n', { startSec: 70, lengthSec: 30, reframe: 'crop' }).catch(
+  it("404s another user's Short and changes nothing", async () => {
+    await put('s');
+    const error = await recut('s', { startSec: 70, lengthSec: 30, reframe: 'crop' }, USER_A).catch(
       (e: unknown) => e,
     );
     expect(isHttpError(error) && error.status).toBe(404);
-    expect((store.get('jobs/n') as { state: string }).state).toBe('REVIEW');
+    expect(await state('s')).toBe('REVIEW');
   });
 
   it('answers with the loaded job if it disappears mid-request', async () => {
-    seed('s');
-    const real = store.get.bind(store);
-    let reads = 0;
-    vi.spyOn(store, 'get').mockImplementation((key: string) => {
-      if (key === 'jobs/s') reads += 1;
-      return key === 'jobs/s' && reads > 2 ? undefined : real(key);
-    });
+    await put('s');
+    await vanishOnUpdate();
     const response = await recut('s', { startSec: 70, lengthSec: 30, reframe: 'crop' });
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;
     expect(view.job.state).toBe('REVIEW');
     expect(view.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s?sig=read');
-    vi.restoreAllMocks();
   });
 });

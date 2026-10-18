@@ -34,7 +34,6 @@ const LABELS: Record<JobState, Label> = {
   },
   CLAIMED_COMPLETE: fixed('info', 'Verifying upload', 100),
   VERIFIED: fixed('ok', 'Verified · private', 100),
-  PAYLOAD: fixed('warn', 'Payload ready', 100),
   FAILED: (view) => ({ tone: 'err', text: 'Failed', progress: runningProgress(view) }),
   DISCARDED: fixed('err', 'Discarded', 0),
 };

@@ -7,11 +7,8 @@
   import Monitor from '$lib/components/Monitor.svelte';
   import { setPending } from '$lib/pending';
   import { TITLE_MAX } from '$lib/metadata';
-  import type { PageData } from './$types';
 
-  let { data }: { data: PageData } = $props();
-
-  const maxMinutes = $derived(data.session?.allowlisted || data.session?.demo ? 15 : 5);
+  const maxMinutes = 15;
 
   let file = $state<File | null>(null);
   let objectUrl = $state<string | null>(null);
@@ -52,23 +49,11 @@
         durationSec: duration,
         contentType,
       });
-      if (uploadUrl) setPending(id, { file, uploadUrl, objectUrl, contentType });
+      setPending(id, { file, uploadUrl, objectUrl, contentType });
       objectUrl = null;
       await goto(resolve('/jobs/[id]', { id }));
     } catch (error) {
       message = error instanceof ApiError ? error.message : 'Could not start the run.';
-      busy = false;
-    }
-  };
-
-  const runSample = async (sampleId: string) => {
-    busy = true;
-    message = '';
-    try {
-      const { id } = await createJob({ sampleId });
-      await goto(resolve('/jobs/[id]', { id }));
-    } catch (error) {
-      message = error instanceof ApiError ? error.message : 'Could not start the sample.';
       busy = false;
     }
   };
@@ -81,25 +66,6 @@
 <main>
   <section class="tape" aria-label="The video">
     <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
-    {#if data.samples.length > 0}
-      <div class="samples">
-        <h2>Samples <span>30 seconds · one tap</span></h2>
-        <ul>
-          {#each data.samples as sample (sample.id)}
-            <li>
-              <button
-                class="btn ghost"
-                type="button"
-                disabled={busy}
-                onclick={() => runSample(sample.id)}
-              >
-                {sample.songTitle}
-              </button>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
     <Heard tags={[]} measurements={null} />
   </section>
 
@@ -124,11 +90,6 @@
       <label for="notes">Notes <span>optional</span></label>
       <textarea id="notes" rows="3" bind:value={notes} maxlength="1000" disabled={busy}></textarea>
     </div>
-    {#if !data.session}
-      <p class="note">
-        Signed out: your own video ends at the would-be upload payload; nothing is posted.
-      </p>
-    {/if}
     <div class="actions">
       <button class="btn primary" type="submit" disabled={!canStart}
         >{busy ? 'Starting' : 'Analyze'}</button
@@ -158,37 +119,6 @@
     flex-direction: column;
     gap: 14px;
     min-width: 0;
-  }
-
-  .samples h2 {
-    margin: 0 0 8px;
-    font: 900 12px/1 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--magenta);
-  }
-
-  .samples h2 span {
-    font: 500 11px/1 var(--mono);
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--muted);
-    margin-left: 6px;
-  }
-
-  .samples ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .note {
-    margin: 0;
-    font-size: 13px;
-    color: var(--muted);
   }
 
   .actions {
