@@ -9,6 +9,7 @@ SEPARATOR="=================================================="
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
 command -v envsubst > /dev/null || { echo "Error: envsubst (gettext) is not installed." >&2; exit 1; }
 command -v curl > /dev/null || { echo "Error: curl is not installed." >&2; exit 1; }
+command -v pnpm > /dev/null || { echo "Error: pnpm is not installed." >&2; exit 1; }
 
 # .env.sentry-build-plugin holds the Sentry source-map upload token; it's optional.
 for file in .env .env.sentry-build-plugin; do
@@ -38,9 +39,8 @@ require_env GCP_PROJECT_ID
 require_env GCS_BUCKET
 require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
-require_env ALLOWLIST_EMAILS
+SIGNUP_MODE="${SIGNUP_MODE:-invite}"
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
-DEMO_EMAILS="${DEMO_EMAILS:-}"
 
 # The model image is named by the git tree hash of model/, as build-model.sh tags it, so a stale
 # value in .env can't deploy an old image.
@@ -50,8 +50,11 @@ if ! gcloud artifacts docker images describe "$MODEL_IMAGE" --project "$GCP_PROJ
   exit 1
 fi
 
-export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID ALLOWLIST_EMAILS \
-  PUBLIC_SENTRY_DSN DEMO_EMAILS
+KMS_KEYRING="soundboard"
+KMS_KEY_NAME="refresh-tokens"
+KMS_KEY="projects/${GCP_PROJECT_ID}/locations/${REGION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY_NAME}"
+export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
+  PUBLIC_SENTRY_DSN
 SERVICE_ACCOUNT="${SERVICE}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 GIT_SHA="$(git rev-parse --short HEAD)"
 APP_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/app:${GIT_SHA}"
@@ -65,7 +68,7 @@ echo "Model:   $MODEL_IMAGE"
 echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
-  iam.googleapis.com iamcredentials.googleapis.com firestore.googleapis.com \
+  iam.googleapis.com iamcredentials.googleapis.com cloudkms.googleapis.com \
   secretmanager.googleapis.com aiplatform.googleapis.com --project "$GCP_PROJECT_ID" --quiet
 
 # Runtime identity: create it once, and let the deploying account attach it to the service
@@ -112,16 +115,21 @@ gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
   --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/iam.serviceAccountTokenCreator \
   --project "$GCP_PROJECT_ID" --quiet > /dev/null
 
-# Firestore in Native mode. Its location is permanent, so it is created once in the service region.
-# Without deployed Firebase rules, client SDK access is denied; only the runtime identity reads it.
-if ! gcloud firestore databases describe --database "(default)" --project "$GCP_PROJECT_ID" \
-  &> /dev/null; then
-  gcloud firestore databases create --location "$REGION" --type firestore-native \
-    --project "$GCP_PROJECT_ID" --quiet
+# YouTube refresh tokens are stored in Postgres as KMS ciphertext. Key rings and keys can't be
+# deleted, so they are created once; the runtime identity may encrypt and decrypt with this key only.
+if ! gcloud kms keyrings describe "$KMS_KEYRING" --location "$REGION" \
+  --project "$GCP_PROJECT_ID" &> /dev/null; then
+  gcloud kms keyrings create "$KMS_KEYRING" --location "$REGION" --project "$GCP_PROJECT_ID" --quiet
 fi
-gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-  --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/datastore.user \
-  --condition None --quiet > /dev/null
+if ! gcloud kms keys describe "$KMS_KEY_NAME" --keyring "$KMS_KEYRING" --location "$REGION" \
+  --project "$GCP_PROJECT_ID" &> /dev/null; then
+  gcloud kms keys create "$KMS_KEY_NAME" --keyring "$KMS_KEYRING" --location "$REGION" \
+    --purpose encryption --project "$GCP_PROJECT_ID" --quiet
+fi
+gcloud kms keys add-iam-policy-binding "$KMS_KEY_NAME" --keyring "$KMS_KEYRING" \
+  --location "$REGION" --project "$GCP_PROJECT_ID" \
+  --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/cloudkms.cryptoKeyEncrypterDecrypter \
+  --quiet > /dev/null
 
 # App secrets come from .env on first deploy (or when the value changes) and live only in Secret
 # Manager after that. The runtime identity reads them; it never sees them on disk.
@@ -143,19 +151,8 @@ sync_secret() {
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
-
-# YouTube refresh tokens: the app adds versions when a channel is connected, so it gets accessor and
-# version-adder on exactly these two secrets.
-for channel in nathan sandbox; do
-  secret="yt-refresh-${channel}"
-  if ! gcloud secrets describe "$secret" --project "$GCP_PROJECT_ID" &> /dev/null; then
-    gcloud secrets create "$secret" --replication-policy automatic --project "$GCP_PROJECT_ID" --quiet
-  fi
-  for role in roles/secretmanager.secretAccessor roles/secretmanager.secretVersionAdder; do
-    gcloud secrets add-iam-policy-binding "$secret" --project "$GCP_PROJECT_ID" \
-      --member "serviceAccount:${SERVICE_ACCOUNT}" --role "$role" --quiet > /dev/null
-  done
-done
+sync_secret DATABASE_URL DATABASE_URL
+sync_secret DATABASE_URL_UNPOOLED DATABASE_URL_UNPOOLED
 
 # Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
 # image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
@@ -302,12 +299,19 @@ else
   gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
 fi
 
+# Migrate before the new revision takes traffic. Neon's pooler can break migrations, so drizzle-kit
+# reads the direct URL from Secret Manager; it is never echoed or written to disk.
+# A separate assignment so set -e stops the deploy when the secret read fails.
+migrate_url="$(gcloud secrets versions access latest --secret DATABASE_URL_UNPOOLED \
+  --project "$GCP_PROJECT_ID")"
+DATABASE_URL_UNPOOLED="$migrate_url" pnpm exec drizzle-kit migrate
+
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
 envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${MODEL_URL} ${GCP_PROJECT_ID} ${GCS_BUCKET}
-  ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${ALLOWLIST_EMAILS} ${DEMO_EMAILS} ${PUBLIC_SENTRY_DSN}' \
+  ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}' \
   < service.yaml > "$rendered"
 
 gcloud run services replace "$rendered" --region "$REGION" --project "$GCP_PROJECT_ID"
