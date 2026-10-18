@@ -24,6 +24,6 @@ test.describe('brand guide', () => {
     await page.getByRole('link', { name: 'Brand guide' }).click();
     await expect(page).toHaveURL('/brand');
     await expect(page.getByRole('heading', { name: /Approved guide/ })).toBeVisible();
-    await expect(page.getByRole('link', { name: /connect/i })).toHaveCount(0);
+    await expect(page.getByRole('main').getByRole('link', { name: /connect/i })).toHaveCount(0);
   });
 });

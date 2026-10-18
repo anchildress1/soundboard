@@ -1,11 +1,12 @@
 // Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
-// job but `e2e-b-review`; user B is invited and unlinked. Each test owns its job IDs, so parallel
-// tests and both Playwright projects never share mutable state.
+// job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
+// backs the Connections page. Each test owns its job IDs, so parallel tests and both Playwright
+// projects never share mutable state.
 import type { JobDoc } from '$lib/server/jobs/jobs';
 import { jobRow } from '$lib/server/jobs/rows';
 import type { Chunk, Pick, Short } from '$lib/types';
 import type { Seed } from '../../helpers/db';
-import { A_JOB, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
+import { A_JOB, CHANNEL_A, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
 
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE = '#retrowave';
@@ -108,6 +109,23 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     chunks: [0, 1, 2, 3, 4].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
+  // Paused with the upload outcome unknown: its steps make no YouTube call.
+  ...['e2e-paused-chromium', 'e2e-paused-mobile'].map((id) => ({
+    job: job(id, {
+      state: 'PUBLISHING',
+      destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
+      finalFields: {
+        title: PICK.title,
+        description: PICK.description,
+        hashtags: PICK.hashtags,
+        tags: PICK.tags,
+      },
+      uploadStartedAt: 1,
+      finalChunkAt: 2,
+    }),
+    pick: PICK,
+    chunks: [0, 1, 2, 3, 4].map(chunk),
+  })),
   ...['e2e-analyzing', 'e2e-signout-chromium', 'e2e-signout-mobile'].map((id) => ({
     job: job(id, { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
@@ -115,9 +133,37 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   })),
 ];
 
+/** One signed-up user per YouTube status that isn't connected, uid `uid-<status>`. */
+export const BROKEN_STATUSES = ['missing_scopes', 'no_channel', 'revoked'] as const;
+const broken = BROKEN_STATUSES.map((status) => ({
+  status,
+  uid: `uid-${status}`,
+  email: `${status}@example.com`,
+}));
+
 /** Every row the E2E database starts with, in `seed()` order. */
 export const SEED: Seed = {
-  ...USERS,
+  invites: [
+    ...USERS.invites,
+    ...broken.map((u) => ({ email: u.email, artistId: null, boundSub: u.uid })),
+  ],
+  users: [
+    ...USERS.users,
+    ...broken.map(({ uid, email }) => ({ uid, email, inviteEmail: email, accessGeneration: 1 })),
+  ],
+  connections: [
+    ...USERS.connections,
+    ...broken.map(({ uid, status }) => ({
+      uid,
+      platform: 'youtube',
+      status,
+      channelId: null,
+      channelTitle: null,
+      scopes: ['openid', 'email'],
+      tokenCiphertext: null,
+      updatedAt: new Date(0),
+    })),
+  ],
   jobs: JOBS.map(({ job }) => jobRow(job)),
   jobPicks: JOBS.flatMap(({ job, pick }) =>
     pick ? [{ jobId: job.id, version: pick.version, data: { ...pick, skipped: false } }] : [],

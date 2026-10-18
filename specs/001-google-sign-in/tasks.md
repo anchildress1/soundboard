@@ -225,7 +225,7 @@ description: 'Task list for Google sign-in and connections'
   - 401 counts as lost access, not unknown outcome
 - [x] T066 [P] [US5] confirm-upload tests in tests/unit/routes/api/jobs/[id]/confirm-upload/server.test.ts: `watch?v=`, `youtu.be/`, `/shorts/`, Studio `/video/` accepted; other input 400; foreign job 404; job not matching the outcome-unknown check (`PUBLISHING`, `finalChunkAt` set, `upload` and `videoId` null) 409; missing or wrong-channel video 422 with no job change; success → `CLAIMED_COMPLETE` with no new upload
 - [x] T067 [P] [US5] Discard tests in tests/unit/lib/server/jobs/actions.test.ts and tests/unit/lib/server/jobs/jobs.test.ts: discard allowed in `PUBLISHING` and `CLAIMED_COMPLETE`; a step result after discard still saves `videoId` only with its matching claim token, without restoring the old state or replacing unrelated data; a superseded token saves nothing and never clears a newer claim (`releaseJob`, `jobs.ts:151-153`)
-- [ ] T068 [P] [US5] E2E in tests/e2e/connections.spec.ts: Connections renders every status; Discard works on a paused job
+- [x] T068 [P] [US5] E2E in tests/e2e/connections.spec.ts: Connections renders every status; Discard works on a paused job
 
 ### Implementation
 
