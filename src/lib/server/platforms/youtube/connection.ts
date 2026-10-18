@@ -93,8 +93,8 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<st
   } catch (error) {
     if (!invalidGrant(error))
       throw new Error("Couldn't refresh the YouTube grant.", { cause: error });
-    await markRevoked(uid, cipher);
     captureMessage('YouTube grant revoked', { level: 'info' });
+    await markRevoked(uid, cipher);
     return null;
   }
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
