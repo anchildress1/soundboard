@@ -1,5 +1,15 @@
 export { accessToken, getRefreshToken, storeRefreshToken } from './tokens';
 export {
+  accessTokenFor,
+  deleteConnection,
+  getConnection,
+  markRevoked,
+  putConnection,
+  type Connection,
+  type ConnectionRow,
+  type ConnectionStatus,
+} from './connection';
+export {
   channelStats,
   readBack,
   recentVideos,
