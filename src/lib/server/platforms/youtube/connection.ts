@@ -33,7 +33,7 @@ export type ConnectionStatus = Connection['status'];
 const PLATFORM = 'youtube';
 const mine = (uid: string) => and(eq(connections.uid, uid), eq(connections.platform, PLATFORM));
 
-/** The user's YouTube connection; pass a transaction to read it where it is used. */
+/** The user's YouTube connection; pass `q` to read it inside the caller's transaction. */
 export async function getConnection(
   uid: string,
   q: Database | Tx = db(),
@@ -57,8 +57,8 @@ export async function deleteConnection(uid: string): Promise<void> {
 }
 
 /**
- * Marks the grant `tokenCiphertext` revoked and drops its token in the same write; a dead token is
- * never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
+ * Revokes the grant stored as `tokenCiphertext`, dropping its token in the same write; a dead token
+ * is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
  */
 export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {
   await db()

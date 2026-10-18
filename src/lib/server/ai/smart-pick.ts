@@ -93,7 +93,7 @@ export type PickContext = {
   facts: Fact[];
   feedback: Feedback[];
   skipped: { title: string; description: string }[];
-  /** Nathan's approved guide (R12); null on non-artist jobs and before one is approved. */
+  /** Nathan's approved guide; null on non-artist jobs and before one is approved. */
   brand: BrandGuide | null;
 };
 

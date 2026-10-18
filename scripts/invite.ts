@@ -81,7 +81,7 @@ export type Command =
   | { name: 'add'; email: string; artistId: string | null }
   | { name: 'revoke' | 'reactivate'; email: string };
 
-/** One command line as a command; a bad command line throws `USAGE`. */
+/** Parses argv into a command; a bad command line throws `USAGE`. */
 export function parse(args: string[]): Command {
   const [name, email, flag, artist, ...rest] = args;
   if (name === 'list' && !email) return { name };
@@ -124,7 +124,7 @@ if (import.meta.main) {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   let connected = false;
   try {
-    // A bad command line never needs the database.
+    // Parse first: a bad command line prints usage even without DATABASE_URL.
     parse(args);
     if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL');
     await client.connect();

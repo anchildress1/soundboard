@@ -47,7 +47,8 @@ export function sessionCookie(uid: string, gen: number, now = Date.now()): strin
 }
 
 /**
- * The signed session, or null for a bad signature, an expired one, or a malformed payload. Whether the user still exists at that generation is the caller's check.
+ * The signed session, or null for a bad signature, an expired one, or a malformed payload. Whether
+ * the user still exists at that generation is the caller's check.
  */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
   const data = unsign<Partial<Session>>(cookie);

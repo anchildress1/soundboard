@@ -10,7 +10,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
     try {
       channel = await channelStats(connection.channelId);
     } catch (error) {
-      // The header renders without stats when the read key or channel is unavailable.
+      // Stats are optional: report the failure, render the header without them.
       captureException(error, { tags: { component: 'header-stats' } });
     }
   }
