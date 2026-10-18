@@ -13,12 +13,13 @@ spec:
         autoscaling.knative.dev/minScale: '0'
         autoscaling.knative.dev/maxScale: '1'
         run.googleapis.com/startup-cpu-boost: 'true'
-    spec:
+    # Cloud Run rejects Kubernetes securityContext; the distroless :nonroot image runs as non-root.
+    spec: # nosemgrep: yaml.kubernetes.security.run-as-non-root.run-as-non-root
       serviceAccountName: ${SERVICE_ACCOUNT}
       containerConcurrency: 80
       timeoutSeconds: 3600
       containers:
-        - name: app
+        - name: app # nosemgrep: yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-securitycontext
           image: ${APP_IMAGE}
           ports:
             - containerPort: 8080
