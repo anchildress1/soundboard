@@ -119,12 +119,12 @@ description: 'Task list for Google sign-in and connections'
 ### Tests
 
 - [ ] T032 [P] [US2] Callback tests in tests/unit/routes/auth/callback/server.test.ts covering every row of the contract's callback table and evaluation steps 1–6: read-only, upload-only and neither-scope grants; no channel; refresh token present; no refresh token with a `connected` matching row kept; no refresh token and no usable grant → 303 `/auth/login?connect=youtube`; a `revoked` doc never revived by sign-in; mismatched/expired/replayed state
-- [ ] T033 [P] [US2] Login tests in tests/unit/routes/auth/login/server.test.ts: no query → 4 scopes, `access_type=offline`, `include_granted_scopes=true`, `prompt=select_account`; `?connect=youtube` with session → `prompt=select_account consent` and `login_hint`; without session → 401; any other `connect` → 400
+- [x] T033 [P] [US2] Login tests in tests/unit/routes/auth/login/server.test.ts: no query → 4 scopes, `access_type=offline`, `include_granted_scopes=true`, `prompt=select_account`; `?connect=youtube` with session → `prompt=select_account consent` and `login_hint`; without session → 401; any other `connect` → 400
 - [ ] T034 [P] [US2] Logout tests in tests/unit/routes/auth/logout/server.test.ts: deletes `sb_session` and `sb_oauth`
 
 ### Implementation
 
-- [ ] T035 [US2] Rewrite src/routes/auth/login/+server.ts per the contract's login table; remove `nathan`/`sandbox` connect values (FR-020)
+- [x] T035 [US2] Rewrite src/routes/auth/login/+server.ts per the contract's login table; remove `nathan`/`sandbox` connect values (FR-020)
 - [ ] T036 [US2] Rewrite src/routes/auth/callback/+server.ts: verify state (delete `sb_oauth` on first read), exchange code, verify the ID token and email; sign-in → `redeemInvite` → `upsertUser` → set `sb_session` with a new `sid` → evaluate YouTube; evaluation per contract steps 1–6, splitting `tokens.scope` on spaces, `channels.list?mine=true` through the new access token, encrypt and write in one `putConnection`
 - [x] T037 [US2] Return `{email, sub, idToken claims, scopes, refreshToken, accessToken}` from `exchangeCode` in src/lib/server/auth/auth.ts and add `channelsMine(accessToken)` in src/lib/server/platforms/youtube/youtube.ts returning `{id, title} | null`; tests alongside
 - [ ] T038 [US2] Delete `sb_oauth` as well as `sb_session` in src/routes/auth/logout/+server.ts
