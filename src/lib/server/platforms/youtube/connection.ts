@@ -96,12 +96,15 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
     .where(and(mine(uid), eq(connections.tokenCiphertext, tokenCiphertext)));
 }
 
+/** A fresh access token, and how to give up its grant once YouTube refuses the token. */
+export type Access = { token: string; refused: () => Promise<void> };
+
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
  * Google rejecting the refresh token marks the connection revoked and returns null. Throws when the
  * connected channel isn't `channelId`, and on any other failure.
  */
-export async function accessTokenFor(uid: string, channelId: string): Promise<string | null> {
+export async function accessTokenFor(uid: string, channelId: string): Promise<Access | null> {
   const connection = await getConnection(uid);
   if (connection?.status !== 'connected') return null;
   // The channel lock means a reconnect can't bring the job's channel back, so this throws rather
@@ -128,7 +131,13 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<st
     return null;
   }
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
-  return token;
+  return {
+    token,
+    refused: async () => {
+      captureMessage('YouTube refused the upload grant', { level: 'warning' });
+      await markRevoked(uid, cipher);
+    },
+  };
 }
 
 /** The parts of a fresh Google grant a connection needs. */

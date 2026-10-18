@@ -5,6 +5,7 @@ export {
   markRevoked,
   putConnection,
   revokeGrant,
+  type Access,
   type Connection,
   type ConnectionRow,
   type ConnectionGrant,

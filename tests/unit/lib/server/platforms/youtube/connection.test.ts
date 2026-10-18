@@ -174,13 +174,37 @@ describe('accessTokenFor', () => {
   it('decrypts the stored token and refreshes it', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
-    expect(await accessTokenFor(UID, CHANNEL)).toBe('ya29.access');
+    expect(await accessTokenFor(UID, CHANNEL)).toMatchObject({ token: 'ya29.access' });
     expect(kms.decrypt).toHaveBeenCalledWith({
       name: 'projects/p/locations/l/keyRings/r/cryptoKeys/k',
       ciphertext: Buffer.from('c2VhbGVk', 'base64'),
     });
     expect(oauth.options).toEqual([{ clientId: 'cid', clientSecret: 'csecret' }]);
     expect(oauth.setCredentials).toHaveBeenCalledWith({ refresh_token: '1//refresh' });
+  });
+
+  it('revokes only its own grant once YouTube refuses the token, reporting no token', async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    const access = (await accessTokenFor(UID, CHANNEL))!;
+    await access.refused();
+    expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the upload grant', {
+      level: 'warning',
+    });
+    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('ya29');
+  });
+
+  it('leaves a newer grant alone when an older token is refused', async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    const access = (await accessTokenFor(UID, CHANNEL))!;
+    await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+    await access.refused();
+    expect(await getConnection(UID)).toMatchObject({
+      status: 'connected',
+      tokenCiphertext: 'bmV3',
+    });
   });
 
   it('throws for a different channel without decrypting', async () => {

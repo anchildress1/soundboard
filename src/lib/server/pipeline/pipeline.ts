@@ -190,17 +190,19 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
   // No YouTube call at all: the page polls this wait, and polling must spend no quota.
   if (outcomeUnknown(job)) return { wait: OUTCOME_UNKNOWN };
-  const token = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!token) return { wait: 'reconnect YouTube' };
+  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!access) return { wait: 'reconnect YouTube' };
   try {
     return job.upload
       ? await sendChunk(job, job.upload)
-      : await initiate(job, token, job.finalFields);
+      : await initiate(job, access.token, job.finalFields);
   } catch (error) {
     const failure = uploadFailure(error);
     if (failure === 'quota-spent') return { wait: DAILY_LIMIT };
-    if (failure === 'access-lost') return { wait: 'reconnect YouTube' };
-    throw error;
+    if (failure !== 'access-lost') throw error;
+    // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
+    await access.refused();
+    return { wait: 'reconnect YouTube' };
   }
 }
 
@@ -275,9 +277,9 @@ async function verify(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.videoId) {
     return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   }
-  const token = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!token) return { wait: 'reconnect YouTube' };
-  const video = await readBack(token, job.videoId);
+  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!access) return { wait: 'reconnect YouTube' };
+  const video = await readBack(access.token, job.videoId);
   const uploadStatus = video?.uploadStatus ?? '';
   if (REJECTED_UPLOADS.has(uploadStatus)) {
     return fail('CLAIMED_COMPLETE', `YouTube ${uploadStatus} the upload.`);

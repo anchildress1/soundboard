@@ -208,9 +208,9 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   const videoId = videoIdFromUrl(url);
   if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
   const { channelId, channelTitle } = job.destination;
-  const token = await accessTokenFor(job.ownerUid, channelId);
-  if (!token) throw new ActionError(409, 'Reconnect YouTube to confirm.');
-  if ((await videoChannel(token, videoId)) !== channelId) {
+  const access = await accessTokenFor(job.ownerUid, channelId);
+  if (!access) throw new ActionError(409, 'Reconnect YouTube to confirm.');
+  if ((await videoChannel(access.token, videoId)) !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);
   }
   const saved = await db().transaction(async (tx) => {

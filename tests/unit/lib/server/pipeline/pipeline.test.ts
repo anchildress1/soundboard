@@ -28,7 +28,7 @@ import {
   type Handler,
   type Run,
 } from '../../../../helpers/pipeline';
-import { captureException } from '../../../../mocks/sentry';
+import { captureException, captureMessage } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import {
@@ -921,10 +921,18 @@ describe('runStep: PUBLISHING', () => {
     expect(await saved()).toMatchObject({ state: 'PUBLISHING', consecutiveFailures: 0, upload });
   });
 
-  it('counts a 401 as lost access, not an unknown outcome', async () => {
+  it('counts a 401 as lost access, not an unknown outcome, revoking the grant', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('unauthorized', { status: 401 }));
     expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
     expect(await saved()).toMatchObject({ state: 'PUBLISHING', consecutiveFailures: 0 });
+    const [connection] = await db()
+      .select()
+      .from(connections)
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(connection).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(captureMessage).toHaveBeenCalledWith('YouTube refused the upload grant', {
+      level: 'warning',
+    });
   });
 
   it('counts a 401 on the final chunk as lost access, keeping the session', async () => {
