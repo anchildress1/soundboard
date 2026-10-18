@@ -163,7 +163,7 @@ description: 'Task list for Google sign-in and connections'
 
 ### Tests
 
-- [ ] T045 [P] [US4] Isolation tests in tests/unit/lib/server/jobs/view.test.ts and every tests/unit/routes/api/jobs/[id]/**/server.test.ts: a foreign `ownerUid` gets 404 on every job page and API (FR-012)
+- [x] T045 [P] [US4] Isolation tests in tests/unit/lib/server/jobs/view.test.ts and every tests/unit/routes/api/jobs/[id]/**/server.test.ts: a foreign `ownerUid` gets 404 on every job page and API (FR-012)
 - [ ] T046 [P] [US4] One-process interleave test A → B → A in tests/unit/routes/isolation.test.ts covering header stats, Connections, job lists, media URLs and Short mutations (SC-005)
 - [x] T047 [P] [US4] Upload-gating tests in tests/unit/lib/server/pipeline/pipeline.test.ts: initiation, chunks and read-back use only `accessTokenFor(job.ownerUid, job.destination.channelId)`; a missing or revoked grant → wait "reconnect YouTube"; `uploadStartedAt` survives session reset, retry and reconnect
 - [x] T048 [P] [US4] Unlinked-pick tests in tests/unit/lib/server/ai/smart-pick.test.ts and tests/unit/lib/server/artist/memory.test.ts: `artistId` null, or owner's current `artistId` ≠ `flr` → no read or write of artist rows with `artist_id = 'flr'`, no `recentVideos`, no `PUBLIC_FACTS`, no `artist` field, no forced `ARTIST_NAME` tag; feedback stays on the job
@@ -171,8 +171,8 @@ description: 'Task list for Google sign-in and connections'
 
 ### Implementation
 
-- [ ] T050 [US4] `authorizedJob(id, uid)` in src/lib/server/jobs/view.ts: 404 unless `job.ownerUid === uid`; issue signed media URLs only after that check (FR-030). Update all callers in src/routes/api/jobs/** and src/routes/jobs/[id]/+page.server.ts to pass `locals.user.uid`
-- [ ] T051 [US4] Pass `locals.user` to `create` in src/routes/api/jobs/+server.ts; reject `{sampleId}`
+- [x] T050 [US4] `authorizedJob(id, uid)` in src/lib/server/jobs/view.ts: 404 unless `job.ownerUid === uid`; issue signed media URLs only after that check (FR-030). Update all callers in src/routes/api/jobs/** and src/routes/jobs/[id]/+page.server.ts to pass `locals.user.uid`
+- [x] T051 [US4] Pass `locals.user` to `create` in src/routes/api/jobs/+server.ts; reject `{sampleId}`
 - [x] T052 [US4] Approve pins destination in src/lib/server/jobs/actions.ts: 409 `"Reconnect YouTube to approve."` unless the owner's connection is `connected`; record `destination` in the same transaction. Show the destination channel ID and name on approval in src/lib/components/Destinations.svelte
 - [x] T053 [US4] Gate FLR identity by artist in src/lib/server/ai/smart-pick.ts (`smart-pick.ts:143-174`), src/lib/server/jobs/actions.ts (approve-time tag check, `actions.ts:46`) and src/lib/server/artist/memory.ts (`memory.ts:31`): FLR data only when the job's and the owner's current `artistId` both equal `flr`; `ARTIST_VOICE` stays shared
 - [x] T054 [US4] Pass `FLR_CHANNEL_ID` explicitly to `recentVideos` in src/lib/server/artist/brand.ts; replace `requireAllowlisted` with a `user.artistId === 'flr'` check (404 otherwise) in src/lib/server/artist/brand.ts, src/routes/brand/+page.server.ts and src/routes/api/brand/{approve,discard,propose}/+server.ts; remove the Brand guide connect links in src/routes/brand/+page.svelte

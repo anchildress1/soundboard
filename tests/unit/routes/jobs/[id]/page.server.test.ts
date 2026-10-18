@@ -8,14 +8,17 @@ import type { JobView } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
+const signed = vi.hoisted(() => ({ objects: [] as string[] }));
+
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
     bucket(name: string) {
       return {
         file: (object: string) => ({
-          getSignedUrl: async ({ action }: { action: string }) => [
-            `https://storage.googleapis.com/${name}/${object}?sig=${action}`,
-          ],
+          getSignedUrl: async ({ action }: { action: string }) => {
+            signed.objects.push(object);
+            return [`https://storage.googleapis.com/${name}/${object}?sig=${action}`];
+          },
         }),
       };
     }
@@ -50,6 +53,7 @@ beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
   resetClients();
+  signed.objects.length = 0;
   await truncate();
   await seed(USERS);
 });
@@ -75,12 +79,13 @@ describe('job page load', () => {
   it.each([
     ['another user', USER_A],
     ['a signed-out request', null],
-  ])('404s the job for %s without touching locals', async (_label, user) => {
+  ])('404s the job for %s without touching locals or signing media', async (_label, user) => {
     await put('b');
     const locals = localsFor(user);
     const error = await fail('b', locals);
     expect(isHttpError(error) && error.status).toBe(404);
     expect(locals.jobTrace).toBeUndefined();
+    expect(signed.objects).toEqual([]);
   });
 });
 
