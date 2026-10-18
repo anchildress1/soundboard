@@ -12,7 +12,6 @@ import {
   readSession,
   SESSION_COOKIE,
   SESSION_TTL_SEC,
-  sessionCookie,
   sign,
   type OAuthState,
 } from '$lib/server/auth/auth';
@@ -55,13 +54,8 @@ const state = (patch: Partial<OAuthState> = {}): OAuthState => ({
   ...patch,
 });
 
-async function call(
-  opts: { cookie?: string; query?: string; origin?: string; user?: User; session?: string } = {},
-) {
-  const jar: Record<string, string | undefined> = {
-    [OAUTH_COOKIE]: opts.cookie,
-    [SESSION_COOKIE]: opts.session,
-  };
+async function call(opts: { cookie?: string; query?: string; origin?: string; user?: User } = {}) {
+  const jar: Record<string, string | undefined> = { [OAUTH_COOKIE]: opts.cookie };
   const cookies = { get: vi.fn((name: string) => jar[name]), set: vi.fn(), delete: vi.fn() };
   const event = {
     cookies,
@@ -462,21 +456,17 @@ describe('GET /auth/callback: denied sign-in', () => {
 });
 
 describe('GET /auth/callback: connect', () => {
-  let session = '';
-  let sid = '';
-  const connectState = (patch: Partial<OAuthState> = {}) =>
-    sign(state({ purpose: 'connect', uid: USER_A.uid, sid, ...patch }));
+  const connectState = (user: { uid: string; sid: string } = USER_A) =>
+    sign(state({ purpose: 'connect', uid: user.uid, sid: user.sid }));
 
   beforeEach(async () => {
-    session = sessionCookie(USER_A.uid, 1);
-    sid = readSession(session)!.sid;
     await seed(USERS);
   });
 
   it('re-grants the channel for the session that started it', async () => {
     channel({ id: 'UCother', title: 'Other' });
     google(USER_A.uid, USER_A.email, { refresh: 'rt-2' });
-    const { thrown, cookies } = await call({ cookie: connectState(), user: USER_A, session });
+    const { thrown, cookies } = await call({ cookie: connectState(), user: USER_A });
     expect(redirectTo(thrown)).toEqual([303, '/connections']);
     expect(cookies.set).not.toHaveBeenCalled();
     expect(await connectionOf(USER_A.uid)).toMatchObject({
@@ -487,15 +477,14 @@ describe('GET /auth/callback: connect', () => {
     });
   });
 
-  it.each<[string, User, () => string | undefined]>([
-    ['signed out', null, () => undefined],
-    ['a session for another user', USER_B, () => sessionCookie(USER_B.uid, 1)],
-    ['a stale callback after sign-out and back in', USER_A, () => sessionCookie(USER_A.uid, 1)],
-    ['a user without a readable session cookie', USER_A, () => 'garbage'],
-  ])('rejects %s as a mismatch, changing nothing', async (_label, user, cookie) => {
+  it.each<[string, User]>([
+    ['signed out', null],
+    ['a session for another user', USER_B],
+    ['a stale callback after sign-out and back in', { ...USER_A, sid: 'sid-later' }],
+  ])('rejects %s as a mismatch, changing nothing', async (_label, user) => {
     const before = await allConnections();
     google(USER_A.uid, USER_A.email);
-    const { thrown } = await call({ cookie: connectState(), user, session: cookie() });
+    const { thrown } = await call({ cookie: connectState(), user });
     expect(redirectTo(thrown)).toEqual([303, MISMATCH]);
     expect(h.getToken).not.toHaveBeenCalled();
     expect(await allConnections()).toEqual(before);
@@ -504,7 +493,7 @@ describe('GET /auth/callback: connect', () => {
   it("rejects a grant from another Google account, keeping the user's connection", async () => {
     const before = await allConnections();
     google(USER_B.uid, USER_B.email);
-    const { thrown } = await call({ cookie: connectState(), user: USER_A, session });
+    const { thrown } = await call({ cookie: connectState(), user: USER_A });
     expect(redirectTo(thrown)).toEqual([303, '/connections?connect=wrong-account']);
     expect(await allConnections()).toEqual(before);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -513,19 +502,14 @@ describe('GET /auth/callback: connect', () => {
   it('keeps the stored connection when the reconnect fails', async () => {
     const before = await connectionOf(USER_A.uid);
     google(USER_A.uid, USER_A.email, { scopes: ['openid', 'email', READ] });
-    const { thrown } = await call({ cookie: connectState(), user: USER_A, session });
+    const { thrown } = await call({ cookie: connectState(), user: USER_A });
     expect(redirectTo(thrown)).toEqual([303, '/connections']);
     expect(await connectionOf(USER_A.uid)).toEqual(before);
   });
 
   it('records missing_scopes rather than looping when a connect brings no refresh token', async () => {
-    const sessionB = sessionCookie(USER_B.uid, 1);
     google(USER_B.uid, USER_B.email, { refresh: null });
-    const { thrown } = await call({
-      cookie: sign(state({ purpose: 'connect', uid: USER_B.uid, sid: readSession(sessionB)!.sid })),
-      user: USER_B,
-      session: sessionB,
-    });
+    const { thrown } = await call({ cookie: connectState(USER_B), user: USER_B });
     expect(redirectTo(thrown)).toEqual([303, '/connections']);
     expect(await connectionOf(USER_B.uid)).toMatchObject({
       status: 'missing_scopes',
@@ -535,7 +519,7 @@ describe('GET /auth/callback: connect', () => {
 
   it('sends an unverified grant back to sign in again', async () => {
     google(USER_A.uid, USER_A.email, { verified: false });
-    const { thrown } = await call({ cookie: connectState(), user: USER_A, session });
+    const { thrown } = await call({ cookie: connectState(), user: USER_A });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
   });
 });

@@ -1,13 +1,7 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  OAUTH_COOKIE,
-  readOAuthState,
-  readSession,
-  SESSION_COOKIE,
-  sessionCookie,
-} from '$lib/server/auth/auth';
+import { OAUTH_COOKIE, readOAuthState } from '$lib/server/auth/auth';
 import { GET } from '$routes/auth/login/+server';
 import { USER_A } from '../../../../helpers/pipeline';
 
@@ -17,9 +11,9 @@ type User = Event['locals']['user'];
 const SCOPES =
   'openid email https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly';
 
-function call(query: string, opts: { origin?: string; user?: User; session?: string } = {}) {
+function call(query: string, opts: { origin?: string; user?: User } = {}) {
   const cookies = {
-    get: vi.fn((name: string) => (name === SESSION_COOKIE ? opts.session : undefined)),
+    get: vi.fn(() => undefined),
     set: vi.fn(),
     delete: vi.fn(),
   };
@@ -84,8 +78,7 @@ describe('GET /auth/login: sign-in', () => {
   });
 
   it('starts a plain sign-in even when already signed in', () => {
-    const session = sessionCookie(USER_A.uid, 1);
-    const { thrown, cookies } = call('', { user: USER_A, session });
+    const { thrown, cookies } = call('', { user: USER_A });
     const url = location(thrown);
     expect(url.searchParams.get('prompt')).toBe('select_account');
     expect(url.searchParams.get('login_hint')).toBeNull();
@@ -98,8 +91,7 @@ describe('GET /auth/login: sign-in', () => {
 
 describe('GET /auth/login: connect', () => {
   it("forces consent, hints at the user's email and binds the state to the session", () => {
-    const session = sessionCookie(USER_A.uid, 1);
-    const { thrown, cookies } = call('?connect=youtube', { user: USER_A, session });
+    const { thrown, cookies } = call('?connect=youtube', { user: USER_A });
     const url = location(thrown);
     expect(url.searchParams.get('scope')).toBe(SCOPES);
     expect(url.searchParams.get('prompt')).toBe('select_account consent');
@@ -108,22 +100,18 @@ describe('GET /auth/login: connect', () => {
     expect(state).toMatchObject({
       purpose: 'connect',
       uid: USER_A.uid,
-      sid: readSession(session)!.sid,
+      sid: USER_A.sid,
     });
   });
 
-  it.each([
-    ['without a session', null, undefined],
-    ['with a user but no readable session cookie', USER_A, 'garbage'],
-  ])('401s %s', (_label, user, session) => {
-    const { thrown, cookies } = call('?connect=youtube', { user, session });
+  it('401s without a session', () => {
+    const { thrown, cookies } = call('?connect=youtube');
     expect(status(thrown)).toBe(401);
     expect(cookies.set).not.toHaveBeenCalled();
   });
 
   it.each(['nathan', 'sandbox', '', 'YouTube'])('400s connect=%s', (value) => {
-    const session = sessionCookie(USER_A.uid, 1);
-    const { thrown, cookies } = call(`?connect=${value}`, { user: USER_A, session });
+    const { thrown, cookies } = call(`?connect=${value}`, { user: USER_A });
     expect(status(thrown)).toBe(400);
     expect(cookies.set).not.toHaveBeenCalled();
   });

@@ -18,6 +18,9 @@ const PAGE =
 
 type Locals = RequestEvent['locals'];
 
+/** The locals a session for `user` resolves to; its sid is random per sign-in. */
+const signedIn = (user: typeof USER_A | typeof USER_B) => ({ ...user, sid: expect.any(String) });
+
 function event(
   cookie?: string,
   locals: Partial<Locals> = {},
@@ -140,13 +143,13 @@ describe('handle', () => {
   it('resolves the user from a signed session at their access generation', async () => {
     const { resolve, seen } = renderer();
     await run(event(sessionCookie(USER_A.uid, 1)), resolve);
-    expect(seen.locals?.user).toEqual(USER_A);
+    expect(seen.locals?.user).toEqual(signedIn(USER_A));
   });
 
   it('resolves an unlinked user with a null artist', async () => {
     const { resolve, seen } = renderer();
     await run(event(sessionCookie(USER_B.uid, 1)), resolve);
-    expect(seen.locals?.user).toEqual(USER_B);
+    expect(seen.locals?.user).toEqual(signedIn(USER_B));
   });
 
   it('signs out a session from before the access generation was bumped', async () => {
@@ -271,7 +274,7 @@ describe('gate', () => {
     const { resolve, seen } = renderer();
     await run(event(sessionCookie(USER_B.uid, 1), {}, path), resolve);
     expect(seen.resolved).toBe(1);
-    expect(seen.locals?.user).toEqual(USER_B);
+    expect(seen.locals?.user).toEqual(signedIn(USER_B));
   });
 
   it('gates a revoked session like no session', async () => {
@@ -291,14 +294,14 @@ describe('access generation', () => {
 
   it('signs a user out on the next request once their invite is revoked', async () => {
     const cookie = sessionCookie(USER_A.uid, 1);
-    expect(await signedInAs(cookie)).toEqual(USER_A);
+    expect(await signedInAs(cookie)).toEqual(signedIn(USER_A));
     await revoke(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
   });
 
   it('keeps other users signed in when one invite is revoked', async () => {
     await revoke(client(), USER_A.email);
-    expect(await signedInAs(sessionCookie(USER_B.uid, 1))).toEqual(USER_B);
+    expect(await signedInAs(sessionCookie(USER_B.uid, 1))).toEqual(signedIn(USER_B));
   });
 
   it('never revives an old cookie when the invite is reactivated', async () => {
@@ -306,7 +309,7 @@ describe('access generation', () => {
     await revoke(client(), USER_A.email);
     await reactivate(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
-    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toEqual(USER_A);
+    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toEqual(signedIn(USER_A));
   });
 
   it('rejects a cookie from a future generation', async () => {

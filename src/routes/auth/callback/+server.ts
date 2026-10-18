@@ -4,7 +4,6 @@ import {
   exchangeCode,
   OAUTH_COOKIE,
   readOAuthState,
-  readSession,
   SESSION_COOKIE,
   SESSION_TTL_SEC,
   sessionCookie,
@@ -52,13 +51,13 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
  * browser session, or sign-out and back in) or another Google account changes nothing.
  */
 async function connect(
-  { url, cookies, code }: Callback,
+  { url, code }: Callback,
   state: OAuthState,
-  uid: string | undefined,
+  user: App.Locals['user'],
 ): Promise<never> {
-  const session = readSession(cookies.get(SESSION_COOKIE));
-  if (!uid || session?.uid !== uid || uid !== state.uid || session.sid !== state.sid)
+  if (!user || user.uid !== state.uid || user.sid !== state.sid)
     redirect(303, '/connections?connect=mismatch');
+  const { uid } = user;
   const grant = await exchangeCode(url.origin, code);
   if (!grant) redirect(303, '/?signin=expired');
   if (grant.sub !== uid) redirect(303, '/connections?connect=wrong-account');
@@ -74,7 +73,5 @@ export const GET: RequestHandler = async ({ url, cookies, locals }) => {
   if (!state || !code || url.searchParams.get('state') !== state.nonce)
     redirect(303, '/?signin=expired');
   const callback = { url, cookies, code };
-  return state.purpose === 'connect'
-    ? connect(callback, state, locals.user?.uid)
-    : signIn(callback);
+  return state.purpose === 'connect' ? connect(callback, state, locals.user) : signIn(callback);
 };

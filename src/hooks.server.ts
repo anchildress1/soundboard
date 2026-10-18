@@ -34,7 +34,7 @@ const session: Handle = async ({ event, resolve }) => {
   const user = signed ? await getUser(signed.uid) : null;
   event.locals.user =
     user && signed?.gen === user.accessGeneration
-      ? { uid: user.uid, email: user.email, artistId: user.artistId }
+      ? { uid: user.uid, sid: signed.sid, email: user.email, artistId: user.artistId }
       : null;
   return resolve(event);
 };
