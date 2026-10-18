@@ -40,6 +40,7 @@ require_env GCS_BUCKET
 require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
 SIGNUP_MODE="${SIGNUP_MODE:-invite}"
+case "$SIGNUP_MODE" in invite | open) ;; *) echo "Error: SIGNUP_MODE must be invite or open." >&2; exit 1 ;; esac
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
 
 # The model image is named by the git tree hash of model/, as build-model.sh tags it, so a stale
