@@ -436,7 +436,7 @@ describe('GET /auth/callback: connect', () => {
     });
   });
 
-  it.each([
+  it.each<[string, User, () => string | undefined]>([
     ['signed out', null, () => undefined],
     ['a session for another user', USER_B, () => sessionCookie(USER_B.uid, 1)],
     ['a stale callback after sign-out and back in', USER_A, () => sessionCookie(USER_A.uid, 1)],
