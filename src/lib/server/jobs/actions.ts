@@ -24,7 +24,6 @@ import {
   uploadFailure,
   videoChannel,
   videoIdFromUrl,
-  YouTubeError,
   type Access,
 } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
@@ -203,7 +202,6 @@ export async function discard(job: JobDoc): Promise<void> {
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";
 
 const RECONNECT_TO_CONFIRM = 'Reconnect YouTube to confirm.';
-const NOT_FOUND = "Couldn't find that video.";
 
 /** The pasted video as the pinned grant sees it; YouTube's refusals become the action's errors. */
 async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
@@ -226,10 +224,6 @@ async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
     if (failure === 'quota-spent') {
       throw new ActionError(429, 'Daily YouTube limit reached. Try tomorrow.');
     }
-    // Any other 403 is YouTube declining to show this video to the grant.
-    if (error instanceof YouTubeError && error.status === 403) {
-      throw new ActionError(422, NOT_FOUND);
-    }
     captureException(error, { tags: { action: 'confirm-upload' } });
     throw new ActionError(502, "YouTube didn't answer. Try again.");
   }
@@ -250,7 +244,7 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
   const { channelId, channelTitle } = job.destination;
   const video = await pastedVideo(job, channelId, videoId);
-  if (!video) throw new ActionError(422, NOT_FOUND);
+  if (!video) throw new ActionError(422, "Couldn't find that video.");
   if (video.channelId !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);
   }

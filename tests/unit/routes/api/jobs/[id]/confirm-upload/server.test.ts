@@ -229,6 +229,14 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
       },
     ],
     [
+      'YouTube refuses the read for a reason other than quota',
+      async () => {
+        fetchMock.mockImplementation(
+          async () => new Response('insufficientPermissions', { status: 403 }),
+        );
+      },
+    ],
+    [
       'the network fails',
       async () => {
         fetchMock.mockImplementation(async () => {
@@ -257,16 +265,6 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await errorOf(response)).toBe("Couldn't use your YouTube connection. Try reconnecting.");
     expect(captureException).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
-  });
-
-  it('422s a video YouTube forbids reading, without reporting it', async () => {
-    await seedJob(PAUSED);
-    fetchMock.mockImplementation(async () => new Response('forbidden', { status: 403 }));
-    const response = await confirm({ url: `https://youtu.be/${ID}` });
-    expect(response.status).toBe(422);
-    expect(await errorOf(response)).toBe("Couldn't find that video.");
-    expect(captureException).not.toHaveBeenCalled();
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
