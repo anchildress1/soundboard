@@ -66,7 +66,7 @@ Fields the app filters or locks on are columns; the rest of today's job document
 | `claim_token`            | text                         | Fresh random token per claim; only its holder may save step results or release the claim                                                                      |
 | `destination_channel_id` | text                         | Set at approval (FR-022), with `destination_channel_title`                                                                                                    |
 | `upload_started_at`      | timestamptz                  | Persisted before the first external upload-initiation request; never cleared by session expiry, retry or reconnect                                            |
-| `final_chunk_at`         | timestamptz                  | Persisted before sending the chunk that reaches the file size. A column, because Retry and session loss reset the upload session in `data`; nothing clears it |
+| `final_chunk_at`         | timestamptz                  | Persisted before sending the chunk that reaches the file size. A column, because session loss resets the upload session in `data`; nothing clears it          |
 | `video_id`               | text                         | Kept on every later state change, including discard                                                                                                           |
 | `data`                   | jsonb, not null              | Everything else on today's job document, minus the removed fields below                                                                                       |
 

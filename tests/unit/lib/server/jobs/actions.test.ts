@@ -520,21 +520,15 @@ describe('retry', () => {
     });
   });
 
-  it('starts a fresh upload session when the upload failed', async () => {
+  it('keeps the upload session, so the next step asks YouTube where it stands', async () => {
+    const upload = { sessionUri: 'https://upload.example/s', total: 10 };
+    const uploadProgress = { sent: 5, total: 10 };
     const job = await makeJob({
       state: 'FAILED',
-      patch: {
-        failedState: 'PUBLISHING',
-        upload: { sessionUri: 'https://upload.example/dead', total: 10 },
-        uploadProgress: { sent: 5, total: 10 },
-      },
+      patch: { failedState: 'PUBLISHING', upload, uploadProgress },
     });
     await retry(job);
-    expect(await getJob('job1')).toMatchObject({
-      state: 'PUBLISHING',
-      upload: null,
-      uploadProgress: null,
-    });
+    expect(await getJob('job1')).toMatchObject({ state: 'PUBLISHING', upload, uploadProgress });
   });
 
   it('falls back to PREP when no failed state was recorded', async () => {

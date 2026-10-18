@@ -228,8 +228,8 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
 }
 
 /**
- * Resumes a failed job at the step that failed, keeping finished chunks. A failed upload starts a
- * fresh resumable session, since the old one may have expired.
+ * Resumes a failed job at the step that failed, keeping finished chunks. A failed upload keeps its
+ * session: the next step asks YouTube for its offset and resumes, completes, or handles a lost one.
  */
 export async function retry(job: JobDoc): Promise<void> {
   requireState(job, ['FAILED']);
@@ -239,7 +239,6 @@ export async function retry(job: JobDoc): Promise<void> {
     consecutiveFailures: 0,
     verifyAttempts: 0,
     error: null,
-    ...(job.failedState === 'PUBLISHING' ? { upload: null, uploadProgress: null } : {}),
   });
   if (!resumed) throw new ActionError(409, 'The job is no longer failed.');
 }

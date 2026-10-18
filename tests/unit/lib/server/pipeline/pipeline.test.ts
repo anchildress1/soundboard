@@ -1141,14 +1141,24 @@ describe('runStep: PUBLISHING recovery', () => {
     expect(await saved()).toMatchObject({ state: 'PUBLISHING', upload: null });
   });
 
-  it('never restarts after a retry that follows a lost final chunk', async () => {
-    await publishing({
-      upload: UPLOAD,
-      finalChunkAt: 5,
-      state: 'FAILED',
-      failedState: 'PUBLISHING',
-    });
+  const failedAfterFinal = () =>
+    publishing({ upload: UPLOAD, finalChunkAt: 5, state: 'FAILED', failedState: 'PUBLISHING' });
+
+  it('asks the live session after a retry that follows the final chunk, completing it', async () => {
+    on(/upload\.example\/s1/, () => json({ id: 'vid3' }));
+    await failedAfterFinal();
     await retry(await saved());
+    expect(await saved()).toMatchObject({ state: 'PUBLISHING', upload: UPLOAD });
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: 'vid3' });
+    expect(initiations()).toHaveLength(0);
+  });
+
+  it('never restarts after a retry when the session is gone after the final chunk', async () => {
+    sessionGone();
+    await failedAfterFinal();
+    await retry(await saved());
+    expect(await runStep(await saved())).toEqual({ wait: OUTCOME_UNKNOWN });
     expect(await runStep(await saved())).toEqual({ wait: OUTCOME_UNKNOWN });
     expect(initiations()).toHaveLength(0);
   });
