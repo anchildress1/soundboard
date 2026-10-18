@@ -160,6 +160,7 @@ describe('job page load: Short', () => {
     const { data } = await run('j');
     expect(data.short?.job.id).toBe('s');
     expect(data.short?.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s-1?sig=read');
+    expect(data.shortExpired).toBe(false);
   });
 
   it('flags a Short whose render storage dropped, signing no playback for it', async () => {
