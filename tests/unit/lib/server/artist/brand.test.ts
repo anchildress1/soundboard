@@ -270,6 +270,14 @@ describe('proposeBrand', () => {
     expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(10);
   });
 
+  it("reads FLR's own channel by FLR_CHANNEL_ID, never a signed-in user's", async () => {
+    await proposeBrand();
+    const [channels] = called(/youtube\/v3\/channels\?/);
+    const params = new URL(channels!.url).searchParams;
+    expect(params.get('id')).toBe('UCflr');
+    expect(params.get('mine')).toBeNull();
+  });
+
   it('records the redacted request and the guide on the agent span', async () => {
     clearAgentSpan();
     await proposeBrand();
