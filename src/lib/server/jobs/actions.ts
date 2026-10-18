@@ -235,6 +235,7 @@ async function pastedVideo(job: Paused, videoId: string) {
     captureException(error, {
       tags: { action: 'confirm-upload', 'job.id': job.id, phase: 'read' },
     });
+    // A read has no upload session, so its 404 or 410 is a denial too.
     throw new ActionError(
       502,
       failure === 'denied' || failure === 'session-lost'
