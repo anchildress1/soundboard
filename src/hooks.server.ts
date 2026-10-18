@@ -39,7 +39,10 @@ const session: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-/** Paths a signed-out request may reach; every other page and every API needs a session. */
+/**
+ * Paths a signed-out page load may reach; every other page, every data request, and every API
+ * needs a session.
+ */
 const OPEN = new Set([
   '/',
   '/auth/login',
