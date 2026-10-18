@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
+import { connections, jobs } from '$lib/server/core/schema';
 import { getJob, type JobDoc } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/confirm-upload/+server';
 import type { JobView } from '$lib/types';
@@ -19,6 +19,7 @@ import {
   USER_B,
   USERS,
 } from '../../../../../../helpers/pipeline';
+import { captureException } from '../../../../../../mocks/sentry';
 
 vi.mock('@google-cloud/kms', () => import('../../../../../../e2e/fakes/kms'));
 
@@ -198,6 +199,59 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(response.status).toBe(409);
     expect(await errorOf(response)).toBe('Reconnect YouTube to confirm.');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('409s and revokes the grant when YouTube refuses its token', async () => {
+    await seedJob(PAUSED);
+    fetchMock.mockImplementation(async () => new Response('unauthorized', { status: 401 }));
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(response.status).toBe(409);
+    expect(await errorOf(response)).toBe('Reconnect YouTube to confirm.');
+    const [row] = await db().select().from(connections).where(eq(connections.uid, USER_A.uid));
+    expect(row).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
+  });
+
+  it('429s when the daily YouTube limit is spent', async () => {
+    await seedJob(PAUSED);
+    fetchMock.mockImplementation(async () => new Response('quotaExceeded', { status: 403 }));
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(response.status).toBe(429);
+    expect(await errorOf(response)).toBe('Daily YouTube limit reached. Try tomorrow.');
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, () => Promise<unknown>]>([
+    [
+      'YouTube errors',
+      async () => {
+        fetchMock.mockImplementation(async () => new Response('oops', { status: 500 }));
+      },
+    ],
+    [
+      'the network fails',
+      async () => {
+        fetchMock.mockImplementation(async () => {
+          throw new TypeError('fetch failed');
+        });
+      },
+    ],
+    [
+      'the grant is on another channel',
+      () =>
+        db()
+          .update(connections)
+          .set({ channelId: 'UCother' })
+          .where(eq(connections.uid, USER_A.uid)),
+    ],
+  ])('502s and reports it when %s, with no job change', async (_label, arrange) => {
+    await seedJob(PAUSED);
+    await arrange();
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(response.status).toBe(502);
+    expect(await errorOf(response)).toBe("YouTube didn't answer. Try again.");
+    expect(captureException).toHaveBeenCalledOnce();
+    expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
   it('409s when the job left the paused state while the video was read', async () => {

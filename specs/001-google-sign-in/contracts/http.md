@@ -81,7 +81,9 @@ A connect redirects to `/connections` when the outcome is `connected`, else to `
 ## `POST /api/jobs/{id}/confirm-upload`
 
 - Requires the job owner's session, a job in the outcome-unknown wait (`PUBLISHING`, `finalChunkAt` set, `upload` and `videoId` null, per [data-model](../data-model.md#publishing-and-verification-with-a-pinned-destination)), and `{url}` pasted by the owner. Accepts `watch?v=`, `youtu.be/`, `/shorts/` and Studio `/video/` URLs; anything else returns 400. A foreign job returns 404; a stale or ineligible job returns 409.
-- Read the selected video through the owner's pinned-channel grant. With no job change, return 422 `"Couldn't find that video."` when it is missing or not visible, `"That video isn't on <channel title>."` on another channel, and `"That video was published before this upload started."` when its `publishedAt` predates `uploadStartedAt` (to the second). Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload.
+- Read the selected video through the owner's pinned-channel grant. With no job change, return 422 `"Couldn't find that video."` when it is missing or not visible, `"That video isn't on <channel title>."` on another channel, and `"That video was published before this upload started."` when its `publishedAt` predates `uploadStartedAt` (to the second).
+- YouTube refusing the grant's token returns 409 `"Reconnect YouTube to confirm."` and marks the connection revoked; a spent daily limit returns 429 `"Daily YouTube limit reached. Try tomorrow."`; any other failure reading the video, including a grant on another channel, is reported and returns 502 `"YouTube didn't answer. Try again."`.
+- Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload.
 
 ## Removed
 

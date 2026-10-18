@@ -1,3 +1,4 @@
+import { captureException } from '@sentry/sveltekit';
 import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields } from '$lib/metadata';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -20,8 +21,10 @@ import { tagPool } from '$lib/server/ai/smart-pick';
 import {
   accessTokenFor,
   getConnection,
+  uploadFailure,
   videoChannel,
   videoIdFromUrl,
+  type Access,
 } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
 
@@ -198,6 +201,30 @@ export async function discard(job: JobDoc): Promise<void> {
 
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";
 
+const RECONNECT_TO_CONFIRM = 'Reconnect YouTube to confirm.';
+
+/** The pasted video as the pinned grant sees it; YouTube's refusals become the action's errors. */
+async function pastedVideo(uid: string, channelId: string, videoId: string) {
+  let access: Access | null = null;
+  try {
+    access = await accessTokenFor(uid, channelId);
+    if (!access) throw new ActionError(409, RECONNECT_TO_CONFIRM);
+    return await videoChannel(access.token, videoId);
+  } catch (error) {
+    if (error instanceof ActionError) throw error;
+    const failure = uploadFailure(error);
+    if (failure === 'access-lost') {
+      await access?.refused();
+      throw new ActionError(409, RECONNECT_TO_CONFIRM);
+    }
+    if (failure === 'quota-spent') {
+      throw new ActionError(429, 'Daily YouTube limit reached. Try tomorrow.');
+    }
+    captureException(error, { tags: { action: 'confirm-upload' } });
+    throw new ActionError(502, "YouTube didn't answer. Try again.");
+  }
+}
+
 // YouTube stamps whole seconds, so a video from this upload can read as up to a second early.
 const startSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
 
@@ -212,9 +239,7 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   const videoId = videoIdFromUrl(url);
   if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
   const { channelId, channelTitle } = job.destination;
-  const access = await accessTokenFor(job.ownerUid, channelId);
-  if (!access) throw new ActionError(409, 'Reconnect YouTube to confirm.');
-  const video = await videoChannel(access.token, videoId);
+  const video = await pastedVideo(job.ownerUid, channelId, videoId);
   if (!video) throw new ActionError(422, "Couldn't find that video.");
   if (video.channelId !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);
