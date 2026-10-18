@@ -300,7 +300,8 @@ describe('approve: where the upload goes', () => {
 
   it('refuses an approval that names no channel', async () => {
     const job = await makeJob();
-    expect((await rejection(approve(job, input({ channelId: '' })))).status).toBe(409);
+    const error = await rejection(approve(job, input({ channelId: '' })));
+    expect([error.status, error.message]).toEqual([400, 'Name the channel being approved to.']);
   });
 
   it('never re-pins a job whose upload already started, rolling back its feedback', async () => {

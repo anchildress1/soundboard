@@ -155,6 +155,17 @@ describe('POST /api/jobs/[id]/approve', () => {
     });
   });
 
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+  ])('400s a %s channel and records nothing', async (_label, channelId) => {
+    await put('j');
+    const response = await approve('j', { ...fields, channelId });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'Name the channel being approved to.' });
+    expect(await job('j')).toMatchObject({ state: 'REVIEW', destination: null });
+  });
+
   it('treats missing fields as empty and reports the title', async () => {
     await put('j');
     const response = await approve('j', { pickVersion: 1, channelId: CHANNEL_A });

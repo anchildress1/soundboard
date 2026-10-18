@@ -77,6 +77,7 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
   if (!Number.isInteger(input.pickVersion)) {
     throw new ActionError(400, 'Name the recommendation version being approved.');
   }
+  if (!input.channelId) throw new ActionError(400, 'Name the channel being approved to.');
 
   const outcome = await db().transaction(async (tx) => {
     const current = await lockJob(tx, job.id);
