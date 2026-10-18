@@ -630,6 +630,13 @@ describe('uploadFailure', () => {
   it.each([
     ['a 403 without quota', new YouTubeError(403, 'forbidden')],
     ['a 400 naming another reason', new YouTubeError(400, 'invalidTitle')],
+    ['a 499 at the edge of the range', new YouTubeError(499, 'closed')],
+  ])('reads %s as refused', (_label, error) => {
+    expect(uploadFailure(error)).toBe('refused');
+  });
+
+  it.each([
+    ['a status below the 4xx range', new YouTubeError(399, 'odd')],
     ['the upload limit on a 500', new YouTubeError(500, 'uploadLimitExceeded')],
     ['a quota message on another status', new YouTubeError(500, 'quota backend')],
     ['a plain Error with a session status', Object.assign(new Error('x'), { status: 404 })],

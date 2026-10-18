@@ -235,7 +235,12 @@ async function pastedVideo(job: Paused, videoId: string) {
     captureException(error, {
       tags: { action: 'confirm-upload', 'job.id': job.id, phase: 'read' },
     });
-    throw new ActionError(502, "YouTube didn't answer. Try again.");
+    throw new ActionError(
+      502,
+      failure === 'refused'
+        ? "YouTube wouldn't read that video. Try again, or reconnect if it keeps failing."
+        : "YouTube didn't answer. Try again.",
+    );
   }
 }
 

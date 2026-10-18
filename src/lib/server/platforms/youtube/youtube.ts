@@ -21,11 +21,12 @@ export class YouTubeError extends Error {
   }
 }
 
-export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'other';
+export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'refused' | 'other';
 
 /**
  * Classifies an upload error: an expired resumable session, a spent daily limit (the project's
- * `quotaExceeded` or the channel's `uploadLimitExceeded`), a refused grant, or anything else.
+ * `quotaExceeded` or the channel's `uploadLimitExceeded`), a refused grant, any other refusal of
+ * the request (a 4xx), or anything else (a 5xx or a request that never got an answer).
  */
 export function uploadFailure(error: unknown): UploadFailure {
   if (!(error instanceof YouTubeError)) return 'other';
@@ -35,7 +36,7 @@ export function uploadFailure(error: unknown): UploadFailure {
   if ([400, 403].includes(error.status) && /uploadLimitExceeded/.test(error.message))
     return 'quota-spent';
   if (error.status === 403 && /quota/i.test(error.message)) return 'quota-spent';
-  return 'other';
+  return error.status >= 400 && error.status < 500 ? 'refused' : 'other';
 }
 
 const PACIFIC = new Intl.DateTimeFormat('en-US', {

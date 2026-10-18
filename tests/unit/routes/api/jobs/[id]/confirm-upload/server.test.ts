@@ -221,12 +221,17 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(captureException).not.toHaveBeenCalled();
   });
 
-  it.each<[string, () => Promise<unknown>]>([
+  const DIDNT_ANSWER = "YouTube didn't answer. Try again.";
+  const WOULDNT_READ =
+    "YouTube wouldn't read that video. Try again, or reconnect if it keeps failing.";
+
+  it.each<[string, () => Promise<unknown>, string]>([
     [
       'YouTube errors',
       async () => {
         fetchMock.mockImplementation(async () => new Response('oops', { status: 500 }));
       },
+      DIDNT_ANSWER,
     ],
     [
       'YouTube refuses the read for a reason other than quota',
@@ -235,6 +240,7 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
           async () => new Response('insufficientPermissions', { status: 403 }),
         );
       },
+      WOULDNT_READ,
     ],
     [
       'the network fails',
@@ -243,13 +249,14 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
           throw new TypeError('fetch failed');
         });
       },
+      DIDNT_ANSWER,
     ],
-  ])('502s and reports it when %s, with no job change', async (_label, arrange) => {
+  ])('502s and reports it when %s, with no job change', async (_label, arrange, message) => {
     await seedJob(PAUSED);
     await arrange();
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(502);
-    expect(await errorOf(response)).toBe("YouTube didn't answer. Try again.");
+    expect(await errorOf(response)).toBe(message);
     expect(captureException).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
       tags: { action: 'confirm-upload', 'job.id': 'j1', phase: 'read' },
     });
