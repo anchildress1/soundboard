@@ -17,7 +17,13 @@
   import { POLL_BACKOFF, Waiting } from '$lib/retry';
   import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
   import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
-  import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
+  import {
+    DRIVEN_STATES,
+    SHORT_SOURCE_STATES,
+    type JobView,
+    type PickFields,
+    type Wait,
+  } from '$lib/types';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -66,10 +72,15 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
-  // A publish that waits on the owner, not on YouTube: lost access or an unknown upload outcome.
+  // A publish that won't move on by itself soon: lost access, an unknown upload outcome, or a
+  // spent daily limit. Each can be discarded.
+  const PAUSES: (Wait | undefined)[] = [
+    'reconnect YouTube',
+    'upload outcome unknown',
+    'Daily upload limit reached. Try tomorrow.',
+  ];
   const paused = $derived(
-    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') &&
-      (view.wait === 'reconnect YouTube' || view.wait === 'upload outcome unknown'),
+    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') && PAUSES.includes(view.wait),
   );
   let pastedUrl = $state('');
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
@@ -369,7 +380,7 @@
           to resume, or discard the job.
         </p>
       </section>
-    {:else if paused && job.destination}
+    {:else if paused && view.wait === 'upload outcome unknown' && job.destination}
       <section class="paused" aria-labelledby="paused-title">
         <h2 id="paused-title">Upload outcome unknown</h2>
         <p>

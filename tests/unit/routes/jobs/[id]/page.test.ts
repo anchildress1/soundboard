@@ -532,16 +532,20 @@ describe('job page: paused publish', () => {
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
   });
 
-  it.each([undefined, 'Daily upload limit reached. Try tomorrow.'] as const)(
-    'shows no paused panel and keeps Discard off while waiting on %s',
-    async (wait) => {
-      serve(publishing(wait));
-      setup(publishing());
-      await waitFor(() => expect(paths()).toContain(STEP_PATH));
-      expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
-      expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
-    },
-  );
+  it('shows no paused panel and keeps Discard off while the upload runs', async () => {
+    serve(publishing());
+    setup(publishing());
+    await waitFor(() => expect(paths()).toContain(STEP_PATH));
+    expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  });
+
+  it('lets a job waiting on the daily limit be discarded, with no paused panel', async () => {
+    serve(publishing('Daily upload limit reached. Try tomorrow.'));
+    setup(publishing());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled());
+    expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
+  });
 });
 
 describe('job page: upload hand-off', () => {
