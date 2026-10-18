@@ -30,16 +30,18 @@ export default defineConfig({
       command: 'pnpm build && pnpm preview',
       url: 'http://localhost:4173',
       reuseExistingServer: false,
-      // Fake Google Cloud clients seeded with fixture jobs (vite.config.ts), and fixed test identities
-      // so header.spec.ts can sign session cookies for each kind of user.
+      // Fake Google Cloud clients and database seeded with fixture jobs (vite.config.ts).
       env: {
         E2E_FAKES: '1',
         MODEL_URL: 'http://127.0.0.1:4174',
         GCP_PROJECT_ID: 'e2e',
         GCS_BUCKET: 'e2e',
         SESSION_SECRET: 'e2e-session-secret',
-        ALLOWLIST_EMAILS: 'nathan@e2e.test',
-        DEMO_EMAILS: 'demo@e2e.test',
+        SIGNUP_MODE: 'invite',
+        KMS_KEY: 'projects/e2e/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens',
+        // The E2E build swaps in PGlite (tests/e2e/fakes/db.ts); these only satisfy the env shape.
+        DATABASE_URL: 'postgres://e2e@localhost/e2e',
+        DATABASE_URL_UNPOOLED: 'postgres://e2e@localhost/e2e',
       },
     },
   ],
