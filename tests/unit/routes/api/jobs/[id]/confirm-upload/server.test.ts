@@ -250,14 +250,16 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(502);
     expect(await errorOf(response)).toBe("YouTube didn't answer. Try again.");
-    expect(captureException).toHaveBeenCalledOnce();
+    expect(captureException).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      tags: { action: 'confirm-upload', 'job.id': 'j1', phase: 'read' },
+    });
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
   it.each<[string, Partial<typeof connections.$inferInsert>]>([
     ['the grant is on another channel', { channelId: 'UCother' }],
     ['the grant will not decrypt', { tokenCiphertext: 'unsealed' }],
-  ])('502s asking to reconnect when %s, without a YouTube call', async (_label, connection) => {
+  ])('502s and reports it when %s, without a YouTube call', async (_label, connection) => {
     await seedJob(PAUSED);
     await db().update(connections).set(connection).where(eq(connections.uid, USER_A.uid));
     const response = await confirm({ url: `https://youtu.be/${ID}` });
@@ -265,7 +267,9 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await errorOf(response)).toBe(
       "Couldn't use your YouTube connection. Try again, or reconnect if it keeps failing.",
     );
-    expect(captureException).toHaveBeenCalledOnce();
+    expect(captureException).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      tags: { action: 'confirm-upload', 'job.id': 'j1', phase: 'grant' },
+    });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });

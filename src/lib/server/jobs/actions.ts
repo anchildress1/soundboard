@@ -212,7 +212,9 @@ async function pastedVideo(job: Paused, videoId: string) {
   try {
     access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   } catch (error) {
-    captureException(error, { tags: { action: 'confirm-upload' } });
+    captureException(error, {
+      tags: { action: 'confirm-upload', 'job.id': job.id, phase: 'grant' },
+    });
     throw new ActionError(
       502,
       "Couldn't use your YouTube connection. Try again, or reconnect if it keeps failing.",
@@ -230,7 +232,9 @@ async function pastedVideo(job: Paused, videoId: string) {
     if (failure === 'quota-spent') {
       throw new ActionError(429, 'Daily YouTube limit reached. Try tomorrow.');
     }
-    captureException(error, { tags: { action: 'confirm-upload' } });
+    captureException(error, {
+      tags: { action: 'confirm-upload', 'job.id': job.id, phase: 'read' },
+    });
     throw new ActionError(502, "YouTube didn't answer. Try again.");
   }
 }
