@@ -40,7 +40,7 @@ description: 'Task list for Google sign-in and connections'
 ### Shapes and storage
 
 - [x] T006 Create src/lib/server/core/schema.ts with every table, column, constraint and index in [data-model.md](data-model.md) (e.g. `token_ciphertext` check "`status = 'connected' or token_ciphertext is null`", `bound_sub` unique, job-list index `(owner_uid, created_at desc) WHERE parent_id IS NULL`); run `pnpm drizzle-kit generate` and commit the SQL in drizzle/
-- [ ] T007 Create src/lib/server/core/db.ts: `db()` returns Drizzle over a `pg` Pool built from `DATABASE_URL`; remove the Firestore client from src/lib/server/core/clients.ts and keep `resetClients()` dropping the pool; tests in tests/unit/lib/server/core/db.test.ts
+- [x] T007 Create src/lib/server/core/db.ts: `db()` returns Drizzle over a `pg` Pool built from `DATABASE_URL`; remove the Firestore client from src/lib/server/core/clients.ts and keep `resetClients()` dropping the pool; tests in tests/unit/lib/server/core/db.test.ts
 - [ ] T008 Create tests/helpers/db.ts (after T006: a fresh PGlite per test file with drizzle/ migrations applied via the PGlite migrator, plus `seed()`), and tests/e2e/fakes/db.ts exporting the same `db()` over an in-memory PGlite seeded from tests/e2e/fakes/fixtures.ts; delete tests/helpers/fake-firestore.ts and tests/e2e/fakes/firestore.ts
 - [x] T009 Replace job ownership fields in src/lib/types.ts: add `ownerUid: string`, `artistId: string | null`, `destination: {channelId, channelTitle} | null`, top-level `parentId: string | null` ("`null` on videos, the parent's ID on Shorts"), `uploadStartedAt: number | null`, `finalChunkAt: number | null`; remove `owner`, `channel`, `sampleId`, `liveVideoId`, `ipHash`, `JobOwner` and `Channel`; keep them out of `JobView`
 - [x] T010 [P] Set `locals.user: {uid, email, artistId} | null` in src/app.d.ts
@@ -59,13 +59,13 @@ description: 'Task list for Google sign-in and connections'
   - Remove `isAllowlisted`, `isDemo`, `Session.allowlisted/demo` and the `channel: 'nathan' | 'sandbox'` state field
   - `readSession` rejects a bad signature, `exp <= now`, or a payload without `uid`
   - Tests in tests/unit/lib/server/auth/auth.test.ts: round trip, tamper, expiry, missing `uid`, state expiry
-- [ ] T016 Create src/lib/server/platforms/youtube/connection.ts replacing tokens.ts:
+- [x] T016 Create src/lib/server/platforms/youtube/connection.ts replacing tokens.ts:
   - `getConnection(uid)`, `putConnection(uid, row)` (one upsert of status, channel and `tokenCiphertext`), `deleteConnection(uid)`
   - `markRevoked(uid)` sets `status: 'revoked'` and clears `tokenCiphertext` in the same write
   - `accessTokenFor(uid, channelId)`: decrypt, refresh, return null unless `status === 'connected'` and `channelId` matches; `invalid_grant` → `markRevoked`
   - Statuses exactly `'connected' | 'missing_scopes' | 'no_channel' | 'revoked'`; "`tokenCiphertext`… Null unless `connected`"
   - Tests in tests/unit/lib/server/platforms/youtube/connection.test.ts; delete src/lib/server/platforms/youtube/tokens.ts and its test
-- [ ] T017 Export the connection functions from src/lib/server/platforms/youtube/index.ts and drop the `tokens` exports; keep `YouTubeError` unexported
+- [x] T017 Export the connection functions from src/lib/server/platforms/youtube/index.ts and drop the `tokens` exports; keep `YouTubeError` unexported
 
 ### Storage rewrite
 
