@@ -139,6 +139,19 @@ describe('newJobId', () => {
 });
 
 describe('createJob / getJob', () => {
+  const rawInsert = (id: string, state: string) =>
+    db().execute(
+      sql`insert into jobs (id, owner_uid, state, created_at, data) values (${id}, ${USER_A.uid}, ${state}, now(), '{}')`,
+    );
+
+  it('stores only known states', async () => {
+    await rawInsert('ok', 'PREP');
+    await expect(rawInsert('bogus', 'BOGUS')).rejects.toMatchObject({
+      cause: { message: expect.stringContaining('jobs_state_check') },
+    });
+    expect(await getJob('bogus')).toBeNull();
+  });
+
   it('waits for the browser upload when no object exists yet', async () => {
     const job = await createJob(input, 'job1');
     expect(job.state).toBe('AWAITING_UPLOAD');
@@ -405,7 +418,14 @@ describe('createShort', () => {
   }
 
   it('creates a HOOK job carrying the pick on screen, candidates, trace, owner and parent', async () => {
-    const job = await parent();
+    await parent();
+    // The parent's pinned channel stays with the parent; the Short pins its own on approval.
+    await db()
+      .update(jobs)
+      .set({ destinationChannelId: 'UCflr', destinationChannelTitle: 'FLR' })
+      .where(eq(jobs.id, 'p'));
+    const job = (await getJob('p'))!;
+    expect(job.destination).toEqual({ channelId: 'UCflr', channelTitle: 'FLR' });
     expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
     const short = (await getJob('s1'))!;
     expect(short).toMatchObject({
