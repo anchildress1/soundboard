@@ -14,6 +14,8 @@ vi.mock('@google-cloud/storage', () => ({
       return {
         file: (object: string) => ({
           getSignedUrl: async () => [`https://storage.googleapis.com/${name}/${object}?sig=read`],
+          exists: async () => [true],
+          getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
         }),
       };
     }

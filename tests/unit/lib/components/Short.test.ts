@@ -318,3 +318,16 @@ describe('Short: where Approve uploads', () => {
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
   });
 });
+
+describe('Short: expired media', () => {
+  it('says the video is gone and keeps the saved details', () => {
+    setup({ expired: true });
+    expect(screen.getByRole('note')).toHaveTextContent(/gone from storage after 7 days/);
+    expect(screen.getByLabelText(/^Title/)).toHaveValue(PICK.title);
+  });
+
+  it('says nothing about storage while the media is there', () => {
+    setup();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+});

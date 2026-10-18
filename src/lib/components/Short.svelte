@@ -18,6 +18,7 @@
     message = '',
     serverErrors = {},
     approveTo,
+    expired = false,
     onrecut,
     onapprove,
     onrerun,
@@ -31,6 +32,8 @@
     serverErrors?: FieldErrors;
     /** The owner's connected channel, shown beside Approve until approval pins one. */
     approveTo: Destination | null;
+    /** Storage dropped the media this Short's remaining work needs. */
+    expired?: boolean;
     onrecut: (cut: Cut) => void;
     onapprove: (fields: Fields) => void;
     onrerun: () => void;
@@ -81,6 +84,12 @@
 </script>
 
 <div class="short">
+  {#if expired}
+    <p class="expired" role="note">
+      This Short's video is gone from storage after 7 days. Its saved details stay here; upload the
+      video again from the home page to finish anything that needs it.
+    </p>
+  {/if}
   {#if job.state === 'VERIFIED' && job.videoId}
     <p class="uploaded">
       <span class="check" aria-hidden="true">✓</span>
@@ -227,6 +236,13 @@
 
   .uploaded a {
     color: var(--green);
+  }
+
+  .expired {
+    margin: 0;
+    padding: 12px 14px;
+    border-left: 3px solid var(--yellow);
+    background: var(--panel);
   }
 
   .cut {

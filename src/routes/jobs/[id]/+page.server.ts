@@ -12,13 +12,13 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   if (job.parentId) redirect(307, `/jobs/${job.parentId}`);
   locals.jobTrace = job.trace;
   const expired = await mediaExpired(job);
-  const [view, playbackUrl, short, approveTo] = await Promise.all([
+  const [view, playbackUrl, { short, shortExpired }, approveTo] = await Promise.all([
     buildView(job),
     job.state === 'AWAITING_UPLOAD' || expired ? Promise.resolve(null) : signedReadUrl(job.object),
     shortView(job.shortId),
     connectedChannel(job.ownerUid),
   ]);
-  return { view, playbackUrl, short, trace: job.trace, expired, approveTo };
+  return { view, playbackUrl, short, shortExpired, trace: job.trace, expired, approveTo };
 };
 
 /** The channel an approval would pin now; approve refuses if it changed before the click. */
@@ -31,5 +31,7 @@ async function connectedChannel(uid: string): Promise<Destination | null> {
 
 async function shortView(id: string | null) {
   const short = id ? await getJob(id) : null;
-  return short && short.state !== 'DISCARDED' ? buildView(short) : null;
+  if (!short || short.state === 'DISCARDED') return { short: null, shortExpired: false };
+  const [view, shortExpired] = await Promise.all([buildView(short), mediaExpired(short)]);
+  return { short: view, shortExpired };
 }

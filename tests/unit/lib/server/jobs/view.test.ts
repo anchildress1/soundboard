@@ -153,11 +153,19 @@ describe('buildView for a Short', () => {
   it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
     'signs playback of the rendered object in %s',
     async (state) => {
+      stored.objects.add('uploads/s-1');
       const job = await createJob(input(), 's');
       const view = await buildView({ ...job, state, object: 'uploads/s-1', short: SHORT });
       expect(view.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s-1?sig=read');
     },
   );
+
+  it('signs no playback once storage dropped the render', async () => {
+    stored.objects.clear();
+    const job = await createJob(input(), 's');
+    const view = await buildView({ ...job, state: 'REVIEW', object: 'uploads/s-1', short: SHORT });
+    expect(view).not.toHaveProperty('playbackUrl');
+  });
 
   it.each(['HOOK', 'RENDER', 'FAILED'] as JobState[])(
     'leaves playback out while the Short is %s',
@@ -180,13 +188,68 @@ describe('buildView for a Short', () => {
 });
 
 describe('mediaExpired', () => {
-  it.each(['PREP', 'ANALYZE', 'PICK', 'REVIEW', 'PUBLISHING', 'FAILED'] as JobState[])(
+  beforeEach(() => stored.objects.clear());
+
+  it.each(['PREP', 'ANALYZE', 'PICK', 'HOOK', 'RENDER', 'REVIEW', 'PUBLISHING'] as JobState[])(
     'is true in %s once the object is gone',
     async (state) => {
-      stored.objects.clear();
       expect(await mediaExpired(jobDoc({ state }))).toBe(true);
     },
   );
+
+  it.each([
+    ['the step it failed at needs media', 'ANALYZE', true],
+    ['it failed uploading', 'PUBLISHING', true],
+    ['no failed state was recorded, so retry starts at PREP', null, true],
+    ['it failed verifying, which needs no media', 'CLAIMED_COMPLETE', false],
+  ] as const)('is %s for a FAILED job when %s', async (_label, failedState, expired) => {
+    expect(await mediaExpired(jobDoc({ state: 'FAILED', failedState }))).toBe(expired);
+  });
+
+  it.each(['HOOK', 'RENDER'] as JobState[])(
+    "checks a Short's source video in %s, not its render",
+    async (state) => {
+      const short = jobDoc({
+        state,
+        short: SHORT,
+        object: 'uploads/s-1',
+        sourceObject: 'uploads/v',
+      });
+      stored.objects.add('uploads/s-1');
+      expect(await mediaExpired(short)).toBe(true);
+      stored.objects.add('uploads/v');
+      stored.objects.delete('uploads/s-1');
+      expect(await mediaExpired(short)).toBe(false);
+    },
+  );
+
+  it.each(['REVIEW', 'PUBLISHING'] as JobState[])(
+    "checks a Short's render in %s, not its source video",
+    async (state) => {
+      const short = jobDoc({
+        state,
+        short: SHORT,
+        object: 'uploads/s-1',
+        sourceObject: 'uploads/v',
+      });
+      stored.objects.add('uploads/v');
+      expect(await mediaExpired(short)).toBe(true);
+      stored.objects.add('uploads/s-1');
+      expect(await mediaExpired(short)).toBe(false);
+    },
+  );
+
+  it('checks a failed Short against the step it failed at', async () => {
+    const short = jobDoc({
+      state: 'FAILED',
+      failedState: 'RENDER',
+      short: SHORT,
+      object: 'uploads/s-1',
+      sourceObject: 'uploads/v',
+    });
+    stored.objects.add('uploads/s-1');
+    expect(await mediaExpired(short)).toBe(true);
+  });
 
   it('is false while the object is still stored', async () => {
     stored.objects.add('uploads/j1');
@@ -196,7 +259,6 @@ describe('mediaExpired', () => {
   it.each(['AWAITING_UPLOAD', 'CLAIMED_COMPLETE', 'VERIFIED', 'DISCARDED'] as JobState[])(
     'is false in %s, whose remaining work needs no media',
     async (state) => {
-      stored.objects.clear();
       expect(await mediaExpired(jobDoc({ state }))).toBe(false);
     },
   );

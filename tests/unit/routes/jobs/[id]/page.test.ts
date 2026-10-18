@@ -107,6 +107,7 @@ function setup(
     playbackUrl?: string | null;
     short?: JobView | null;
     expired?: boolean;
+    shortExpired?: boolean;
     approveTo?: typeof CONNECTED | null;
   } = {},
 ) {
@@ -116,6 +117,7 @@ function setup(
         view: v,
         playbackUrl: extra.playbackUrl ?? PLAYBACK_URL,
         short: extra.short ?? null,
+        shortExpired: extra.shortExpired ?? false,
         expired: extra.expired ?? false,
         approveTo: extra.approveTo === undefined ? CONNECTED : extra.approveTo,
         trace: TRACE,
@@ -851,6 +853,16 @@ describe('job page: Short actions', () => {
       pickVersion: 1,
       channelId: CONNECTED.channelId,
     });
+  });
+
+  it("flags the Short's expired media in the Short tab", async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: shortView('REVIEW', {}, {}),
+      shortExpired: true,
+    });
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('note')).toHaveTextContent(/gone from storage/);
   });
 
   it('shows field errors from a rejected Short approval in the Short tab', async () => {

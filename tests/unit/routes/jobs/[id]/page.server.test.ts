@@ -33,6 +33,7 @@ type Data = {
   approveTo: { channelId: string; channelTitle: string | null } | null;
   view: JobView;
   short: JobView | null;
+  shortExpired: boolean;
   playbackUrl: string | null;
   trace: { sentryTrace: string; baggage: string } | null;
 };
@@ -161,9 +162,32 @@ describe('job page load: Short', () => {
     expect(data.short?.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/s-1?sig=read');
   });
 
+  it('flags a Short whose render storage dropped, signing no playback for it', async () => {
+    await put('j', { state: 'REVIEW', shortId: 's' });
+    await put('s', {
+      state: 'REVIEW',
+      object: 'uploads/s-1',
+      sourceObject: 'uploads/j',
+      parentId: 'j',
+      short: SHORT,
+    });
+    signed.missing.add('uploads/s-1');
+    const { data } = await run('j');
+    expect(data.shortExpired).toBe(true);
+    expect(data.short).not.toHaveProperty('playbackUrl');
+    expect(data.expired).toBe(false);
+  });
+
+  it("flags a Short still cutting once its video's source is gone", async () => {
+    await put('j', { state: 'REVIEW', shortId: 's' });
+    await put('s', { state: 'HOOK', sourceObject: 'uploads/j', parentId: 'j', short: SHORT });
+    signed.missing.add('uploads/j');
+    expect((await run('j')).data.shortExpired).toBe(true);
+  });
+
   it('shows no Short when there is none, or it is gone', async () => {
     await put('j', { state: 'REVIEW' });
-    expect((await run('j')).data.short).toBeNull();
+    expect((await run('j')).data).toMatchObject({ short: null, shortExpired: false });
     await put('k', { state: 'REVIEW', shortId: 'vanished' });
     expect((await run('k')).data.short).toBeNull();
   });

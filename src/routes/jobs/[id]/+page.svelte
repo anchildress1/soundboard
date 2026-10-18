@@ -301,6 +301,7 @@
               message={shortMessage}
               serverErrors={shortErrors}
               approveTo={data.approveTo}
+              expired={data.shortExpired && shortView.job.id === data.short?.job.id}
               onrecut={(cut) => actShort('recut', cut)}
               onapprove={(f) =>
                 actShort('approve', {
