@@ -155,6 +155,45 @@ describe('redeemInvite (open mode)', () => {
   });
 });
 
+describe('redeemInvite: concurrent first sign-ins of one account', () => {
+  // Lands another sign-in's insert of the same account between this one's read and its insert.
+  const raceFirstSignIn = async () => {
+    await db().execute(
+      sql.raw(`create or replace function race_users() returns trigger language plpgsql as $$ begin
+        if pg_trigger_depth() = 1 then
+          insert into users (uid, email, invite_email, artist_id, access_generation)
+          values (new.uid, new.email, new.invite_email, new.artist_id, 1);
+        end if;
+        return new;
+      end $$`),
+    );
+    await db().execute(
+      sql`create trigger race_users before insert on users for each row execute function race_users()`,
+    );
+  };
+
+  afterEach(async () => {
+    await db().execute(sql`drop trigger if exists race_users on users`);
+  });
+
+  it('returns the user the other sign-in created, in open mode', async () => {
+    vi.stubEnv('SIGNUP_MODE', 'open');
+    await raceFirstSignIn();
+    expect(await redeemInvite(OTHER, 'anyone@example.com')).toMatchObject({ uid: OTHER });
+    expect(await allUsers()).toHaveLength(1);
+  });
+
+  it('returns the user the other sign-in created, in invite mode', async () => {
+    await seed({ invites: [{ email: 'nathan@example.com', artistId: 'flr' }] });
+    await raceFirstSignIn();
+    expect(await redeemInvite(NATHAN, 'nathan@example.com')).toMatchObject({
+      uid: NATHAN,
+      artistId: 'flr',
+    });
+    expect(await allUsers()).toHaveLength(1);
+  });
+});
+
 describe('getUser', () => {
   it('returns the user by uid', async () => {
     await seed({ users: [{ uid: NATHAN, email: 'nathan@example.com', name: 'Nathan' }] });
