@@ -319,3 +319,12 @@ T062–T068
 
 - US5 (Connections, recovery, confirm-upload), then polish.
 - Commit after each task or logical group; never push without being asked.
+
+---
+
+## Phase 10: Convergence
+
+- [ ] T083 Move per-job feedback from `jobs/{id}/feedback` to the `job_feedback` child table in src/lib/server/artist/memory.ts, so unlinked users' feedback stays on the job, with tests per FR-018 (partial)
+- [ ] T084 Port tests/e2e/header.spec.ts, tests/e2e/brand.spec.ts and tests/e2e/short.spec.ts from allowlisted/demo cookies to the seeded users and `{uid, sid, gen, exp}` sessions per FR-020 (partial)
+- [ ] T085 Add an E2E in tests/e2e/auth.spec.ts: a session that stops validating mid-run makes the job page navigate to `/` per quickstart E2E and Edge Cases (missing)
+- [ ] T086 Remove the sample-only `excludeId` parameter from src/lib/server/pipeline/hashtags.ts and its callers and tests per FR-020 (partial)
