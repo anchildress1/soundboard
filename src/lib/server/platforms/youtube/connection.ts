@@ -2,8 +2,9 @@ import { and, eq } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
-import { decrypt } from '$lib/server/core/kms';
+import { decrypt, encrypt } from '$lib/server/core/kms';
 import { connections } from '$lib/server/core/schema';
+import { channelsMine, YOUTUBE_SCOPES } from './youtube';
 
 export type ConnectionStatus = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
 export type Connection = typeof connections.$inferSelect;
@@ -76,4 +77,54 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<st
     await markRevoked(uid, cipher);
     return null;
   }
+}
+
+/** The parts of a fresh Google grant a connection needs. */
+export type Grant = { scopes: string[]; refreshToken: string | null; accessToken: string };
+
+/**
+ * Evaluates a fresh grant for the user's YouTube connection and writes it in at most one upsert.
+ * A failed grant never touches a `connected` row, so a sign-in never erases a working connection.
+ * Returns `consent` on a sign-in that brought no refresh token and has no stored grant to fall back
+ * on: only a forced-consent connect can finish it.
+ */
+export async function connectGrant(
+  uid: string,
+  grant: Grant,
+  purpose: 'sign-in' | 'connect',
+): Promise<'done' | 'consent'> {
+  const stored = await getConnection(uid);
+  const kept = stored?.status === 'connected';
+  const fail = async (status: 'missing_scopes' | 'no_channel') => {
+    if (!kept) {
+      await putConnection(uid, {
+        status,
+        channelId: null,
+        channelTitle: null,
+        scopes: grant.scopes,
+        tokenCiphertext: null,
+      });
+    }
+    return 'done' as const;
+  };
+
+  // Read-only, upload-only and identity-only grants all fail here.
+  if (!YOUTUBE_SCOPES.every((scope) => grant.scopes.includes(scope))) return fail('missing_scopes');
+  const channel = await channelsMine(grant.accessToken);
+  if (!channel) return fail('no_channel');
+  if (grant.refreshToken) {
+    await putConnection(uid, {
+      status: 'connected',
+      channelId: channel.id,
+      channelTitle: channel.title,
+      scopes: grant.scopes,
+      tokenCiphertext: await encrypt(grant.refreshToken),
+    });
+    return 'done';
+  }
+  if (kept && stored.channelId === channel.id) return 'done';
+  // Google only returns a refresh token on consent, so an account that granted this client before
+  // (or a revoked one) needs the forced-consent connect.
+  if (!kept && purpose === 'sign-in') return 'consent';
+  return fail('missing_scopes');
 }

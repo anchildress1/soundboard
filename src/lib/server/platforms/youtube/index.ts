@@ -1,5 +1,6 @@
 export {
   accessTokenFor,
+  connectGrant,
   deleteConnection,
   getConnection,
   markRevoked,
@@ -7,6 +8,7 @@ export {
   type Connection,
   type ConnectionRow,
   type ConnectionStatus,
+  type Grant,
 } from './connection';
 export {
   channelsMine,
