@@ -57,6 +57,8 @@ const OUTCOME_UNKNOWN = 'upload outcome unknown';
 const DAILY_LIMIT = 'Daily upload limit reached. Try tomorrow.';
 const A_TOKEN = `Bearer access:${REFRESH_A}`;
 const SOURCE_OBJECT = 'uploads/p1';
+// Far from the Pacific midnight reset, so the step and the assertion see the same reset.
+const NOON_PACIFIC = Date.parse('2026-10-18T19:00:00Z');
 
 const h = vi.hoisted(() => ({
   objects: new Map<string, { size?: string; contentType?: string }>(),
@@ -200,6 +202,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -924,10 +927,10 @@ describe('runStep: PUBLISHING', () => {
 
   it('holds the wait until the Pacific midnight reset, with no grant refresh or YouTube call', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('quotaExceeded', { status: 403 }));
-    const before = Date.now();
+    vi.setSystemTime(NOON_PACIFIC);
     await runStep(await publishing());
     const { limitUntil } = await saved();
-    expect(limitUntil).toBe(quotaResetAt(before));
+    expect(limitUntil).toBe(quotaResetAt(NOON_PACIFIC));
     calls.length = 0;
     h.refreshError = new Error('a refresh would fail the step');
     for (let i = 0; i < 2; i++) {
@@ -947,8 +950,9 @@ describe('runStep: PUBLISHING', () => {
 
   it('sets a fresh reset when the limit is still spent after the last one passed', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('quotaExceeded', { status: 403 }));
+    vi.setSystemTime(NOON_PACIFIC);
     await runStep(await publishing({ limitUntil: 1 }));
-    expect((await saved()).limitUntil).toBeGreaterThan(Date.now());
+    expect((await saved()).limitUntil).toBe(quotaResetAt(NOON_PACIFIC));
   });
 
   it.each([
@@ -1499,23 +1503,19 @@ describe('runStep: CLAIMED_COMPLETE', () => {
   });
 
   it('waits until the Pacific midnight reset when the read-back finds the limit spent', async () => {
-    vi.setSystemTime(Date.parse('2026-10-18T19:00:00Z'));
-    try {
-      on(/com\/youtube\/v3\/videos\?/, () => new Response('quotaExceeded', { status: 403 }));
-      expect(await runStep(await claimed({ consecutiveFailures: 1, error: 'stale' }))).toEqual({
-        wait: DAILY_LIMIT,
-      });
-      expect(await saved()).toMatchObject({
-        state: 'CLAIMED_COMPLETE',
-        verifyAttempts: 0,
-        consecutiveFailures: 0,
-        error: null,
-        limitUntil: quotaResetAt(Date.parse('2026-10-18T19:00:00Z')),
-      });
-      expect(captureException).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    vi.setSystemTime(NOON_PACIFIC);
+    on(/com\/youtube\/v3\/videos\?/, () => new Response('quotaExceeded', { status: 403 }));
+    expect(await runStep(await claimed({ consecutiveFailures: 1, error: 'stale' }))).toEqual({
+      wait: DAILY_LIMIT,
+    });
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      verifyAttempts: 0,
+      consecutiveFailures: 0,
+      error: null,
+      limitUntil: quotaResetAt(NOON_PACIFIC),
+    });
+    expect(captureException).not.toHaveBeenCalled();
   });
 
   it('waits to reconnect and revokes the grant when the read-back is refused', async () => {
