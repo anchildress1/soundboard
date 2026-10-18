@@ -1,10 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
+import { signIn, USER_A } from './session';
 
 const TABS_JOB = '/jobs/e2e-tabs';
 
 const tab = (page: Page, name: 'YouTube' | 'Short' | 'Bandcamp') =>
   page.getByRole('tab', { name: new RegExp(name) });
 const shortPanel = (page: Page) => page.locator('#panel-short');
+
+// Every job here is Nathan's.
+test.beforeEach(async ({ page }) => {
+  await signIn(page, USER_A);
+});
 
 test.describe('destination tabs', () => {
   test('lists YouTube, Short, and Bandcamp, each to do, with YouTube open', async ({ page }) => {
