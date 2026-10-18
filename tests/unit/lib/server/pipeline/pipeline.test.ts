@@ -60,6 +60,7 @@ const h = vi.hoisted(() => ({
   objects: new Map<string, { size?: string; contentType?: string }>(),
   spawn: vi.fn(),
   upload: vi.fn(),
+  refreshError: null as Error | null,
 }));
 
 vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
@@ -89,6 +90,7 @@ vi.mock('google-auth-library', () => ({
       this.refresh = credentials.refresh_token;
     }
     async getAccessToken() {
+      if (h.refreshError) throw h.refreshError;
       return { token: `access:${this.refresh}` };
     }
   },
@@ -169,6 +171,7 @@ beforeEach(async () => {
   await seed(USERS);
   clearStatsCache();
   h.objects.clear();
+  h.refreshError = null;
   h.objects.set('uploads/j1', { size: '1000', contentType: 'video/quicktime' });
   tools = {
     probe: { stdout: probeJson(95) },
@@ -207,6 +210,7 @@ describe('runStep: AWAITING_UPLOAD', () => {
 
   it('keeps waiting while the object is missing', async () => {
     h.objects.clear();
+    h.refreshError = null;
     expect(await runStep(await put({ state: 'AWAITING_UPLOAD' }))).toEqual({});
     expect((await saved()).state).toBe('AWAITING_UPLOAD');
   });
@@ -309,6 +313,7 @@ describe('runStep: PREP', () => {
 
   it('fails when the upload never reached storage', async () => {
     h.objects.clear();
+    h.refreshError = null;
     await runStep(await put({ state: 'PREP' }));
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
     expect((await saved()).error).toMatch(/never reached storage/);
@@ -779,6 +784,23 @@ describe('runStep: PUBLISHING', () => {
     expect(called(/upload\/youtube/)).toHaveLength(0);
   });
 
+  it('records a failure when the grant refresh errors, keeping the connection', async () => {
+    h.refreshError = new Error('ECONNRESET');
+    expect(await runStep(await publishing())).toEqual({});
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 1,
+      error: "Couldn't refresh the YouTube grant.",
+      uploadStartedAt: null,
+    });
+    const [connection] = await db()
+      .select()
+      .from(connections)
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(connection).toMatchObject({ status: 'connected', channelId: CHANNEL_A });
+    expect(called(/upload\/youtube/)).toHaveLength(0);
+  });
+
   it('waits to reconnect when the connection row is gone', async () => {
     await db().delete(connections).where(eq(connections.uid, A_JOB.ownerUid));
     expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
@@ -856,6 +878,7 @@ describe('runStep: PUBLISHING', () => {
 
   it('fails when the source expired from storage', async () => {
     h.objects.clear();
+    h.refreshError = null;
     await runStep(await publishing());
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
   });
@@ -1025,6 +1048,24 @@ describe('runStep: CLAIMED_COMPLETE', () => {
       verifyAttempts: 0,
       consecutiveFailures: 0,
     });
+    expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
+  });
+
+  it('records a failure when the grant refresh errors, keeping the connection', async () => {
+    h.refreshError = new Error('ECONNRESET');
+    expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      verifyAttempts: 0,
+      consecutiveFailures: 1,
+      error: "Couldn't refresh the YouTube grant.",
+    });
+    const [connection] = await db()
+      .select()
+      .from(connections)
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(connection).toMatchObject({ status: 'connected' });
     expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
   });
 
