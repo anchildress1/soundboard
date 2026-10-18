@@ -287,6 +287,13 @@ describe('job page: driving', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('goes home to sign in when a step finds the session gone', async () => {
+    fetchMock.mockResolvedValueOnce(json({ message: 'Sign in first.' }, 401));
+    setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { invalidateAll: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the job error from a step', async () => {
     fetchMock.mockResolvedValueOnce(
       json(view({ state: 'FAILED', failedState: 'ANALYZE', error: FFMPEG_EXITED })),

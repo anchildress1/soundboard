@@ -78,6 +78,8 @@
     return () => clearInterval(tick);
   });
 
+  const signedOut = () => void goto(resolve('/'), { invalidateAll: true });
+
   const run = async () => {
     if (driving) return;
     driving = true;
@@ -90,6 +92,7 @@
           message = next.job.error ?? '';
         },
         onError: (text) => (message = text),
+        signedOut,
       });
     } finally {
       driving = false;
@@ -118,6 +121,7 @@
           shortMessage = next.job.error ?? '';
         },
         onError: (text) => (shortMessage = text),
+        signedOut,
       });
     } finally {
       drivingShort = false;
