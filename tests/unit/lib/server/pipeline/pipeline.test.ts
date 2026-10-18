@@ -22,6 +22,7 @@ import {
   SESSION_URI,
   seedJob,
   SYNTHWAVE,
+  USER_A,
   USERS,
   type Handler,
   type Run,
@@ -38,6 +39,7 @@ import {
   jobChunks,
   jobPicks,
   jobs,
+  users,
 } from '$lib/server/core/schema';
 import { getJob, MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet } from '$lib/server/jobs/rows';
@@ -119,6 +121,7 @@ const pickAt = async (version: number) =>
       .from(jobPicks)
       .where(and(eq(jobPicks.jobId, 'j1'), eq(jobPicks.version, version)))
   )[0]?.data as Record<string, unknown> | undefined;
+const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
 const artistRowCount = async () =>
   (
     await Promise.all(
@@ -508,7 +511,7 @@ const NATHAN_FEEDBACK = {
 };
 
 describe('runStep: PICK', () => {
-  it('stores candidates and pick version 1 for an unlinked job, named as the artist with public facts only', async () => {
+  it('stores candidates and pick version 1 for an unlinked job, with no artist identity', async () => {
     expect(await runStep(await pickJob({ measurements: MEASURED }))).toEqual({});
     const job = await saved();
     expect(job.state).toBe('REVIEW');
@@ -519,15 +522,16 @@ describe('runStep: PICK', () => {
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
 
     const ctx = context();
-    expect(ctx.artist).toBe(ARTIST);
-    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
+    expect(ctx).not.toHaveProperty('artist');
+    expect(ctx.facts).toEqual([]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
+    expect(ctx.candidateTags.map((c) => c.tag)).not.toContain(ARTIST);
+    expect(pick.tags).not.toContain(ARTIST);
     expect(await artistRowCount()).toBe(0);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    // Until spec 002, every run reads FLR's uploads for the credits.
-    expect(called(/playlistItems/).length).toBeGreaterThan(0);
-    expect(ctx.recentUploads).toHaveLength(3);
+    expect(called(/playlistItems/)).toHaveLength(0);
+    expect(ctx.recentUploads).toEqual([]);
     expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
   });
 
@@ -541,8 +545,8 @@ describe('runStep: PICK', () => {
     expect(JSON.parse(output[0]!)).toMatchObject({ title: stored.title });
   });
 
-  it('compares against every recent upload', async () => {
-    await runStep(await pickJob());
+  it("compares Nathan's job against every recent FLR upload", async () => {
+    await runStep(await pickJob(A_JOB));
     expect(context().artist).toBe(ARTIST);
     const catalog = called(/com\/youtube\/v3\/videos\?/).map((c) =>
       new URL(c.url).searchParams.get('id'),
@@ -551,6 +555,7 @@ describe('runStep: PICK', () => {
     // Only the three newest uploads go to the model, each with its thumbnail.
     expect(context().recentUploads).toHaveLength(3);
     expect(called(/i\.ytimg\.com/)).toHaveLength(3);
+    expect(new URL(called(/youtube\/v3\/channels\?/)[0]!.url).searchParams.get('id')).toBe('UCflr');
   });
 });
 
@@ -561,8 +566,23 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect((await saved()).state).toBe('REVIEW');
     const ctx = context();
     expect(ctx.feedback).toEqual([]);
-    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
+    expect(ctx.facts).toEqual([]);
     expect(await artistRowCount()).toBe(1);
+  });
+
+  it("treats Nathan's job as unlinked once its owner's link is removed", async () => {
+    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    await approveGuide();
+    await unlinkA();
+    await runStep(await pickJob(A_JOB));
+    expect((await saved()).state).toBe('REVIEW');
+    const ctx = context();
+    expect(ctx).not.toHaveProperty('artist');
+    expect(ctx).not.toHaveProperty('brandGuide');
+    expect([ctx.facts, ctx.feedback, ctx.recentUploads]).toEqual([[], [], []]);
+    expect(called(/playlistItems/)).toHaveLength(0);
+    // Nothing was read into the prompt and nothing was seeded.
+    expect(await artistRowCount()).toBe(2);
   });
 
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
@@ -868,6 +888,13 @@ describe('runStep: CLAIMED_COMPLETE', () => {
 
   it("verifies a job outside Nathan's artist without touching the artist tables", async () => {
     await runStep(await claimed({ artistId: null }));
+    expect((await saved()).state).toBe('VERIFIED');
+    expect(await artistRowCount()).toBe(0);
+  });
+
+  it("records no publish once Nathan's job owner is unlinked", async () => {
+    await unlinkA();
+    await runStep(await claimed());
     expect((await saved()).state).toBe('VERIFIED');
     expect(await artistRowCount()).toBe(0);
   });

@@ -236,8 +236,10 @@ describe('recentVideos', () => {
 
   it('keeps playlist order and limits to count', async () => {
     route([video('c'), video('a'), video('d'), video('b')], ['a', 'b', 'c', 'd']);
-    const videos = await recentVideos(3);
+    const videos = await recentVideos('UCx', 3);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b', 'c']);
+    const channelCall = fetchMock.mock.calls.findIndex(([u]) => String(u).includes('/channels'));
+    expect(urlOf(channelCall).searchParams.get('id')).toBe('UCx');
     const listCall = fetchMock.mock.calls.findIndex(([u]) => String(u).includes('/videos?'));
     expect(urlOf(listCall).searchParams.get('id')).toBe('a,b,c,d');
     const pageCall = fetchMock.mock.calls.findIndex(
@@ -248,13 +250,13 @@ describe('recentVideos', () => {
 
   it('skips playlist items without a video id', async () => {
     route([video('b'), video('a')], ['a', undefined, 'b']);
-    const videos = await recentVideos(5);
+    const videos = await recentVideos('UCx', 5);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b']);
   });
 
   it('returns nothing when the playlist is empty', async () => {
     route([], []);
-    expect(await recentVideos(5)).toEqual([]);
+    expect(await recentVideos('UCx', 5)).toEqual([]);
   });
 });
 

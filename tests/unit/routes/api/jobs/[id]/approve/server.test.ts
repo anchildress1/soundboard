@@ -146,7 +146,7 @@ describe('POST /api/jobs/[id]/approve', () => {
 
   it('treats missing fields as empty and reports the title', async () => {
     await put('j');
-    const response = await approve('j', {});
+    const response = await approve('j', { pickVersion: 1 });
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ fields: { title: 'Title is required.' } });
   });

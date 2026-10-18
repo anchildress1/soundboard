@@ -5,7 +5,7 @@ import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jo
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistFeedback, connections, jobFeedback, jobs } from '$lib/server/core/schema';
+import { artistFeedback, connections, jobFeedback, jobs, users } from '$lib/server/core/schema';
 import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet } from '$lib/server/jobs/rows';
 import type { Hook, JobState, Pick, Short } from '$lib/types';
@@ -107,6 +107,9 @@ const rejection = async (promise: Promise<unknown>) => {
   return error as ActionError;
 };
 
+const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
+const ARTIST = 'Flies Like Robots';
+
 const setBStatus = (status: 'connected' | 'missing_scopes' | 'no_channel' | 'revoked') =>
   db()
     .update(connections)
@@ -191,10 +194,33 @@ describe('approve', () => {
     });
   });
 
-  it('accepts the artist name and candidate tags in any case', async () => {
-    const job = await makeJob();
+  it("accepts the artist name and candidate tags in any case on Nathan's job", async () => {
+    const job = await makeJob({ owner: USER_A });
     await approve(job, input({ tags: ['flies like robots', 'SYNTHWAVE'] }));
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
+  });
+
+  it('rejects the artist name as a tag on an unlinked job', async () => {
+    const job = await makeJob();
+    const error = await rejection(approve(job, input({ tags: ['synthwave', ARTIST] })));
+    expect(error.fields).toEqual({ tags: `Not in this job's tag list: ${ARTIST}` });
+  });
+
+  it('rejects the artist name even when the genre search returned it, on an unlinked job', async () => {
+    const job = await makeJob({
+      patch: {
+        audience: { query: 'q', hashtags: candidates, tags: [{ tag: ARTIST, usedBy: 4 }], top: [] },
+      },
+    });
+    expect((await rejection(approve(job, input({ tags: [ARTIST] })))).status).toBe(422);
+  });
+
+  it("rejects the artist name once Nathan's job owner is unlinked", async () => {
+    const job = await makeJob({ owner: USER_A });
+    await unlinkA();
+    const error = await rejection(approve(job, input({ tags: [ARTIST] })));
+    expect(error.status).toBe(422);
+    expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
 
   it('reports a YouTube limit before the tag list', async () => {
@@ -307,6 +333,16 @@ describe('approve: where the upload goes', () => {
   });
 });
 
+describe('approve: artist memory follows the current link', () => {
+  it("keeps feedback on the job once Nathan's job owner is unlinked", async () => {
+    const job = await makeJob({ owner: USER_A });
+    await unlinkA();
+    await approve(job, input({ title: EDITED_TITLE }));
+    expect(await artistRows()).toHaveLength(0);
+    expect((await jobRows()).map((r) => r.kind)).toEqual(['EDITED', 'ACCEPTED']);
+  });
+});
+
 describe('rerun', () => {
   it('requires REVIEW', async () => {
     const job = await makeJob({ state: 'PUBLISHING' });
@@ -339,6 +375,14 @@ describe('rerun', () => {
     await rerun(job);
     expect(await artistRows()).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
     expect(await jobRows()).toHaveLength(0);
+  });
+
+  it("keeps the skip on the job once Nathan's job owner is unlinked", async () => {
+    const job = await makeJob({ owner: USER_A });
+    await unlinkA();
+    await rerun(job);
+    expect(await artistRows()).toHaveLength(0);
+    expect(await jobRows()).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {

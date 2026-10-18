@@ -11,6 +11,7 @@ import {
 } from '$lib/brand';
 import type { Wait } from '$lib/types';
 import { ActionError } from '$lib/server/core/errors';
+import { required } from '$lib/server/core/env';
 import { and, eq } from 'drizzle-orm';
 import { db, type Database, type Tx } from '$lib/server/core/db';
 import { artistBrand } from '$lib/server/core/schema';
@@ -172,7 +173,7 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
   if (status === 'loading') return { wait: 'waking model' };
   if (status === 'busy') return { wait: 'waiting on another run' };
 
-  const videos = await recentVideos(BRAND_VIDEOS);
+  const videos = await recentVideos(required('FLR_CHANNEL_ID'), BRAND_VIDEOS);
   if (videos.length === 0)
     throw new ActionError(409, 'The channel has no public uploads to learn from.');
   const withThumbs = await Promise.all(

@@ -61,6 +61,7 @@ const facts: Fact[] = [
 ];
 
 const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
+  artist: true,
   songTitle: 'PeekaBoo',
   chunks: [],
   candidates,
@@ -111,6 +112,7 @@ const feedback = (kind: Feedback['kind'], over: Partial<Feedback> = {}): Feedbac
 });
 
 const ctx = (over: Partial<PickContext> = {}): PickContext => ({
+  artist: true,
   songTitle: 'PeekaBoo',
   notes: '',
   chunks: [chunk(0)],
@@ -272,6 +274,17 @@ describe('buildPickMessages', () => {
     expect(system(messages)).toContain("recentUploads are the artist's own uploads");
     expect(system(messages)).toContain('credit lines');
     expect(system(messages)).not.toContain('name no artist');
+  });
+
+  it('names no artist and asks for no artist tag on an unlinked job', () => {
+    const messages = buildPickMessages(ctx({ artist: false }));
+    const body = context(messages);
+    expect(body).not.toHaveProperty('artist');
+    expect(body.candidateTags).toEqual(tagCandidates);
+    expect(system(messages)).not.toContain(ARTIST);
+    expect(system(messages)).not.toContain('recentUploads are');
+    // The voice stays shared until spec 002.
+    expect(system(messages)).toContain(ARTIST_VOICE);
   });
 
   it('grounds title, description, and tags in the genre search', () => {
@@ -775,6 +788,24 @@ describe('finalizePick: links, tags, and limits', () => {
   it('falls back to the artist name alone when the search found no tags', () => {
     const pick = finalizePick(raw({ tags: ['synthwave'] }), fix({ tagCandidates: [] }));
     expect(pick.tags).toEqual([ARTIST]);
+  });
+
+  it('never adds the artist name on an unlinked job, even when the model or search offers it', () => {
+    const unlinked = fix({ artist: false, tagCandidates: cands('synthwave', ARTIST) });
+    expect(finalizePick(raw({ tags: ['synthwave'] }), unlinked).tags).toEqual(['synthwave']);
+    expect(finalizePick(raw({ tags: [ARTIST, 'synthwave'] }), unlinked).tags).toEqual([
+      'synthwave',
+    ]);
+    expect(finalizePick(raw({ tags: [ARTIST] }), fix({ artist: false })).tags).toEqual([]);
+  });
+
+  it('caps tags at 10 on an unlinked job without reserving a slot', () => {
+    const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
+    const pick = finalizePick(
+      raw({ tags: names }),
+      fix({ artist: false, tagCandidates: cands(...names) }),
+    );
+    expect(pick.tags).toEqual(names.slice(0, 10));
   });
 
   it('keeps tags within 500 characters by YouTube counting', () => {

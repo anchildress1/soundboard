@@ -8,11 +8,12 @@ import {
   artistPublishes,
   jobFeedback,
   jobs,
+  users,
 } from '$lib/server/core/schema';
 import {
   approvalFeedback,
+  artistJob,
   listFacts,
-  PUBLIC_FACTS,
   recentFeedback,
   writeFeedback,
   recordPublish,
@@ -22,15 +23,20 @@ import {
 } from '$lib/server/artist/memory';
 import type { PickFields } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
-import { seedJob, USERS } from '../../../../helpers/pipeline';
+import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const OFFICIAL_TITLE = 'PeekaBoo (Official Video)';
 const RICHMOND: Fact = { key: 'home', value: 'Richmond', kind: 'FACT', public: true };
 
 const recordFeedback = (
   entries: Parameters<typeof writeFeedback>[1],
-  target: Parameters<typeof writeFeedback>[2],
-) => db().transaction(async (tx) => writeFeedback(tx, entries, target));
+  job: Parameters<typeof writeFeedback>[2],
+) => db().transaction(async (tx) => writeFeedback(tx, entries, job));
+
+/** The same stored job, as seen on the artist and unlinked. */
+const NATHANS = { id: 'job1', ...A_JOB };
+const UNLINKED = { id: 'job1', ownerUid: USER_B.uid, artistId: null };
+const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
 
 const entry = (at: number, kind: Feedback['kind'] = 'ACCEPTED'): Feedback => ({
   kind,
@@ -57,11 +63,36 @@ describe('seed facts', () => {
     expect(inference.length).toBeGreaterThan(0);
     expect(inference.every((f) => f.public === false)).toBe(true);
   });
+});
 
-  it('exposes only the artist name outside the artist', () => {
-    expect(PUBLIC_FACTS).toEqual([
-      { key: 'artist-name', value: 'Flies Like Robots', kind: 'FACT', public: true },
-    ]);
+describe('artistJob', () => {
+  it('is true only when the job and its owner are both linked to the artist', async () => {
+    expect(await artistJob(A_JOB)).toBe(true);
+  });
+
+  it('is false for a job created without the link', async () => {
+    expect(await artistJob({ ownerUid: USER_A.uid, artistId: null })).toBe(false);
+  });
+
+  it("is false once the owner's link is removed, for jobs made while linked", async () => {
+    await unlinkA();
+    expect(await artistJob(A_JOB)).toBe(false);
+  });
+
+  it("is false when an unlinked owner's job somehow names the artist", async () => {
+    expect(await artistJob({ ownerUid: USER_B.uid, artistId: 'flr' })).toBe(false);
+  });
+
+  it('is false for an owner that no longer exists', async () => {
+    expect(await artistJob({ ownerUid: 'ghost', artistId: 'flr' })).toBe(false);
+  });
+
+  it("reads the owner's link inside the caller's transaction", async () => {
+    const seen = await db().transaction(async (tx) => {
+      await tx.update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
+      return artistJob(A_JOB, tx);
+    });
+    expect(seen).toBe(false);
   });
 });
 
@@ -113,7 +144,7 @@ describe('listFacts', () => {
 
 describe('writeFeedback', () => {
   it("routes feedback on the artist's jobs to the artist's memory", async () => {
-    await recordFeedback([entry(1), entry(2, 'EDITED')], { toArtist: true, jobId: 'job1' });
+    await recordFeedback([entry(1), entry(2, 'EDITED')], NATHANS);
     const rows = await artistRows();
     expect(rows.map((r) => [r.artistId, r.at.getTime(), (r.data as Feedback).kind])).toEqual([
       ['flr', 1, 'ACCEPTED'],
@@ -122,8 +153,15 @@ describe('writeFeedback', () => {
     expect(await jobRows()).toHaveLength(0);
   });
 
+  it("keeps feedback on its job once the owner's artist link is gone", async () => {
+    await unlinkA();
+    await recordFeedback([entry(1, 'EDITED')], NATHANS);
+    expect(await artistRows()).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(1);
+  });
+
   it('keeps any other feedback on its job', async () => {
-    await recordFeedback([entry(1, 'SKIPPED')], { toArtist: false, jobId: 'job1' });
+    await recordFeedback([entry(1, 'SKIPPED')], UNLINKED);
     const rows = await jobRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ jobId: 'job1', data: { kind: 'SKIPPED' } });
@@ -131,18 +169,18 @@ describe('writeFeedback', () => {
   });
 
   it('writes nothing for an empty list', async () => {
-    await recordFeedback([], { toArtist: true, jobId: 'job1' });
-    await recordFeedback([], { toArtist: false, jobId: 'job1' });
+    await recordFeedback([], NATHANS);
+    await recordFeedback([], UNLINKED);
     expect(await artistRows()).toHaveLength(0);
     expect(await jobRows()).toHaveLength(0);
   });
 
   it('refuses job feedback for a job that does not exist', async () => {
-    await expect(recordFeedback([entry(1)], { toArtist: false, jobId: 'ghost' })).rejects.toThrow();
+    await expect(recordFeedback([entry(1)], { ...UNLINKED, id: 'ghost' })).rejects.toThrow();
   });
 
   it("drops a job's feedback with the job", async () => {
-    await recordFeedback([entry(1)], { toArtist: false, jobId: 'job1' });
+    await recordFeedback([entry(1)], UNLINKED);
     await db().delete(jobs);
     expect(await jobRows()).toHaveLength(0);
   });
@@ -150,13 +188,13 @@ describe('writeFeedback', () => {
 
 describe('recentFeedback', () => {
   it('returns newest first, limited', async () => {
-    await recordFeedback([entry(10), entry(30), entry(20)], { toArtist: true, jobId: 'j' });
+    await recordFeedback([entry(10), entry(30), entry(20)], NATHANS);
     expect((await recentFeedback()).map((f) => f.at)).toEqual([30, 20, 10]);
     expect((await recentFeedback(2)).map((f) => f.at)).toEqual([30, 20]);
   });
 
   it('ignores feedback kept on jobs and other artists', async () => {
-    await recordFeedback([entry(5)], { toArtist: false, jobId: 'job1' });
+    await recordFeedback([entry(5)], UNLINKED);
     await seed({ artistFeedback: [{ artistId: 'other', at: new Date(6), data: entry(6) }] });
     expect(await recentFeedback()).toEqual([]);
   });
@@ -164,7 +202,7 @@ describe('recentFeedback', () => {
   it('defaults to 20 rows', async () => {
     await recordFeedback(
       Array.from({ length: 25 }, (_, i) => entry(i)),
-      { toArtist: true, jobId: 'j' },
+      NATHANS,
     );
     const rows = await recentFeedback();
     expect(rows).toHaveLength(20);

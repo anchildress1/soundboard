@@ -76,6 +76,8 @@ export function isRawPick(value: unknown): value is RawPick {
 }
 
 export type PickContext = {
+  /** Whether this is an artist job: names the artist and requires the artist tag. */
+  artist: boolean;
   songTitle: string;
   notes: string;
   chunks: Chunk[];
@@ -144,26 +146,29 @@ export function weighFeedback(feedback: Feedback[]) {
   }));
 }
 
-/** Tags the pick may use: the genre search's tags plus the artist name. */
-export function tagPool(fix: { tagCandidates: TagCandidate[] }): TagCandidate[] {
+/**
+ * Tags the pick may use: the genre search's tags, with the artist name only on an artist job, even
+ * when the search returned it.
+ */
+export function tagPool(fix: { artist: boolean; tagCandidates: TagCandidate[] }): TagCandidate[] {
   const artist = ARTIST_NAME.toLowerCase();
-  return [
-    ...fix.tagCandidates.filter((c) => c.tag.toLowerCase() !== artist),
-    { tag: ARTIST_NAME, usedBy: 0 },
-  ];
+  const found = fix.tagCandidates.filter((c) => c.tag.toLowerCase() !== artist);
+  return fix.artist ? [...found, { tag: ARTIST_NAME, usedBy: 0 }] : found;
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     "audienceTopVideos are the most-viewed music videos in this genre, ranked by views. They are the evidence for what reaches listeners: model the title format and the description's structure and length on them.",
-    "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags.",
+    ctx.artist
+      ? "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags."
+      : '',
     `title: at most ${TITLE_MAX} characters.`,
     `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. Never open with or repeat the title: YouTube shows it right above. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
     ARTIST_VOICE,
     'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
-    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones. Include "${ARTIST_NAME}". Never the song title. Never invent one.`,
+    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${ctx.artist ? ` Include "${ARTIST_NAME}".` : ''} Never the song title. Never invent one.`,
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
@@ -176,7 +181,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       : '',
   ].filter(Boolean);
   const context = {
-    artist: ARTIST_NAME,
+    artist: ctx.artist ? ARTIST_NAME : undefined,
     songTitle: ctx.songTitle,
     artistNotes: ctx.notes || undefined,
     // Private facts never reach the model, so they can't surface in publishable copy.
@@ -255,6 +260,7 @@ function clip(text: string, max: number): string {
 }
 
 export type PickFixups = {
+  artist: boolean;
   songTitle: string;
   chunks: Chunk[];
   candidates: string[];
@@ -339,18 +345,18 @@ const bandcampText = (text: string, facts: Fact[]) =>
   );
 
 /**
- * The model's picks from the pool, never containing the song title, plus the artist name, at most
- * 10 within YouTube's 500-character total. Nothing is filled from the pool: search membership alone
- * doesn't show the tag was heard.
+ * The model's picks from the pool, never containing the song title, plus the artist name on an
+ * artist job, at most 10 within YouTube's 500-character total. Nothing is filled from the pool:
+ * search membership alone doesn't show the tag was heard.
  */
-function pickTags(raw: string[], pool: string[], songTitle: string): string[] {
+function pickTags(raw: string[], pool: string[], fix: PickFixups): string[] {
   const byLower = new Map(pool.map((t) => [t.toLowerCase(), t]));
-  const artist = ARTIST_NAME.toLowerCase();
-  const allowed = (key: string) => byLower.has(key) && !containsWords(key, songTitle);
+  const artist = fix.artist ? ARTIST_NAME.toLowerCase() : null;
+  const allowed = (key: string) => byLower.has(key) && !containsWords(key, fix.songTitle);
   const keys = [...new Set(raw.map((t) => tidy(t.replace(/^#+/, '')).toLowerCase()))].filter(
     allowed,
   );
-  if (!keys.includes(artist)) keys.push(artist);
+  if (artist && !keys.includes(artist)) keys.push(artist);
   while (keys.length > MAX_TAGS)
     keys.splice(
       keys.findLastIndex((k) => k !== artist),
@@ -373,7 +379,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
   const tags = pickTags(
     draft.tags,
     tagPool(fix).map((c) => c.tag),
-    fix.songTitle,
+    fix,
   );
   const hashtags = pickHashtags(draft, fix.candidates, tags);
 

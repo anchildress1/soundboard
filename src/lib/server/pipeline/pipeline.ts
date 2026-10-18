@@ -17,13 +17,8 @@ import {
   transitionJob,
   type JobDoc,
 } from '$lib/server/jobs/jobs';
-import {
-  ARTIST_ID,
-  listFacts,
-  PUBLIC_FACTS,
-  recentFeedback,
-  recordPublish,
-} from '$lib/server/artist/memory';
+import { artistJob, listFacts, recentFeedback, recordPublish } from '$lib/server/artist/memory';
+import { required } from '$lib/server/core/env';
 import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { hookStep, renderStep } from './short';
 import { runPick } from '$lib/server/ai/smart-pick';
@@ -104,11 +99,11 @@ async function analyze(job: JobDoc): Promise<StepOutput> {
 async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
-  const nathan = job.artistId === ARTIST_ID;
+  const artist = await artistJob(job);
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),
-    recentVideos(RECENT_COUNT),
+    artist ? recentVideos(required('FLR_CHANNEL_ID'), RECENT_COUNT) : [],
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
@@ -128,11 +123,12 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   });
 
   async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
-    const [facts, feedback, brand] = nathan
+    const [facts, feedback, brand] = artist
       ? await Promise.all([listFacts({ seed: true }), recentFeedback(), approvedBrand()])
-      : [PUBLIC_FACTS, [], null];
+      : [[], [], null];
     const result = await runPick(
       {
+        artist,
         songTitle: job.songTitle,
         notes: job.notes,
         measurements: job.measurements,
@@ -224,9 +220,9 @@ async function publishing(job: JobDoc): Promise<Patch> {
 const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
 const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
 
-/** Verified uploads on Nathan's jobs join his memory; no one else's do. */
+/** Verified uploads on artist jobs join the artist's memory; no one else's do. */
 async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
-  if (job.artistId !== ARTIST_ID || !job.finalFields) return;
+  if (!job.finalFields || !(await artistJob(job))) return;
   await recordPublish({
     videoId,
     url: `https://youtu.be/${videoId}`,

@@ -1,7 +1,13 @@
 import { desc, eq } from 'drizzle-orm';
 import type { PickFields } from '$lib/types';
-import { db, type Tx } from '$lib/server/core/db';
-import { artistFacts, artistFeedback, artistPublishes, jobFeedback } from '$lib/server/core/schema';
+import { db, type Database, type Tx } from '$lib/server/core/db';
+import {
+  artistFacts,
+  artistFeedback,
+  artistPublishes,
+  jobFeedback,
+  users,
+} from '$lib/server/core/schema';
 
 export const ARTIST_ID = 'flr';
 export const ARTIST_NAME = 'Flies Like Robots';
@@ -28,8 +34,22 @@ export const SEED_FACTS: Fact[] = [
   { key: 'mr-kill', value: 'Connected to the artist Mr. Kill', kind: 'INFERENCE', public: false },
 ];
 
-/** What a job outside the artist may know about them without reading the artist tables. */
-export const PUBLIC_FACTS: Fact[] = [SEED_FACTS[0]!];
+/**
+ * Whether a job may use the artist's identity and memory: the job was created under the artist and
+ * its owner is still linked now, so unlinking a user cuts off their open jobs too. Pass the
+ * transaction that writes the feedback, so the link is read where it is used.
+ */
+export async function artistJob(
+  job: { ownerUid: string; artistId: string | null },
+  q: Database | Tx = db(),
+): Promise<boolean> {
+  if (job.artistId !== ARTIST_ID) return false;
+  const [owner] = await q
+    .select({ artistId: users.artistId })
+    .from(users)
+    .where(eq(users.uid, job.ownerUid));
+  return owner?.artistId === ARTIST_ID;
+}
 
 /**
  * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty table is seeded on first
@@ -52,20 +72,20 @@ export async function listFacts({ seed }: { seed: boolean }): Promise<Fact[]> {
 
 /**
  * Writes feedback rows in the caller's transaction, so they commit with the state change they
- * describe. Feedback on the artist's jobs goes to the artist; any other job's stays on that job.
+ * describe. Feedback on an artist job (`artistJob`) goes to the artist; any other stays on the job.
  */
 export async function writeFeedback(
   tx: Tx,
   entries: Feedback[],
-  target: { toArtist: boolean; jobId: string },
+  job: { id: string; ownerUid: string; artistId: string | null },
 ): Promise<void> {
   if (entries.length === 0) return;
-  if (target.toArtist) {
+  if (await artistJob(job, tx)) {
     await tx
       .insert(artistFeedback)
       .values(entries.map((data) => ({ artistId: ARTIST_ID, at: new Date(data.at), data })));
   } else {
-    await tx.insert(jobFeedback).values(entries.map((data) => ({ jobId: target.jobId, data })));
+    await tx.insert(jobFeedback).values(entries.map((data) => ({ jobId: job.id, data })));
   }
 }
 

@@ -14,7 +14,8 @@ import {
   type JobDoc,
 } from './jobs';
 import { jobSet } from './rows';
-import { approvalFeedback, ARTIST_ID, ARTIST_NAME, writeFeedback } from '$lib/server/artist/memory';
+import { approvalFeedback, artistJob, writeFeedback } from '$lib/server/artist/memory';
+import { tagPool } from '$lib/server/ai/smart-pick';
 import { getConnection } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
 
@@ -23,49 +24,51 @@ function requireState(job: JobDoc, states: JobState[]): void {
     throw new ActionError(409, `Not allowed while the job is ${job.state}.`);
 }
 
-/** Feedback on Nathan's jobs teaches his memory; anyone else's stays on the job. */
-const toArtist = (job: JobDoc) => job.artistId === ARTIST_ID;
-
-/** Edited tags follow the pick's rules: the job's tag candidates or the artist name, never the title. */
-function tagError(tags: string[], job: JobDoc): string | undefined {
+/**
+ * Edited tags follow the pick's rules: the job's tag candidates, plus the artist name on an artist
+ * job, never the title.
+ */
+function tagError(tags: string[], job: JobDoc, artist: boolean): string | undefined {
   const titled = tags.filter((tag) => containsWords(tag, job.songTitle));
   if (titled.length > 0) return `Tags can't contain the song title: ${titled.join(', ')}`;
   const allowed = new Set(
-    [...(job.audience?.tags ?? []).map((c) => c.tag), ARTIST_NAME].map((t) => t.toLowerCase()),
+    tagPool({ artist, tagCandidates: job.audience?.tags ?? [] }).map((c) => c.tag.toLowerCase()),
   );
   const stray = tags.filter((tag) => !allowed.has(tag.trim().toLowerCase()));
   if (stray.length > 0) return `Not in this job's tag list: ${stray.join(', ')}`;
   return undefined;
 }
 
-/**
- * Approves the edited fields of the recommendation on screen and pins the upload to the owner's
- * connected channel. One transaction re-checks REVIEW and the pick version, moves the job, and
- * records the feedback, so a double submit or a stale tab can't approve twice or approve an older
- * pick.
- */
-export async function approve(
-  job: JobDoc,
-  input: { title: string; description: string; tags: string[]; pickVersion: number },
-): Promise<void> {
-  requireState(job, ['REVIEW']);
+type ApprovalInput = { title: string; description: string; tags: string[]; pickVersion: number };
+
+/** The approved fields, or a 422 naming each field that breaks the job's rules. */
+function finalFields(input: ApprovalInput, job: JobDoc, artist: boolean): PickFields {
   const candidates = job.hashtagCandidates ?? [];
   const errors = validateFields(input, candidates);
-  const tags = errors.tags ?? tagError(input.tags, job);
+  const tags = errors.tags ?? tagError(input.tags, job, artist);
   if (tags) errors.tags = tags;
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
-  if (!Number.isInteger(input.pickVersion)) {
-    throw new ActionError(400, 'Name the recommendation version being approved.');
-  }
-
   const byLower = new Map(candidates.map((c) => [c.toLowerCase(), c]));
-  const final: PickFields = {
+  return {
     title: input.title.trim(),
     description: input.description.trim(),
     hashtags: parseHashtags(input.description).map((t) => byLower.get(t) ?? t),
     tags: input.tags,
   };
+}
+
+/**
+ * Approves the edited fields of the recommendation on screen and pins the upload to the owner's
+ * connected channel. One transaction re-checks REVIEW and the pick version, validates against the
+ * job and the owner's current artist link, moves the job, and records the feedback, so a double
+ * submit or a stale tab can't approve twice or approve an older pick.
+ */
+export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> {
+  requireState(job, ['REVIEW']);
+  if (!Number.isInteger(input.pickVersion)) {
+    throw new ActionError(400, 'Name the recommendation version being approved.');
+  }
   const connection = await getConnection(job.ownerUid);
   if (connection?.status !== 'connected' || !connection.channelId) {
     throw new ActionError(409, 'Reconnect YouTube to approve.');
@@ -78,18 +81,20 @@ export async function approve(
     if (current.pickVersion !== input.pickVersion) return 'stale';
     const proposed = await pickIn(tx, job.id, input.pickVersion);
     if (!proposed) return 'stale';
+    const final = finalFields(input, current, await artistJob(current, tx));
 
     const feedback = approvalFeedback(proposed, final, {
       jobId: job.id,
-      songTitle: job.songTitle,
+      songTitle: current.songTitle,
       pickVersion: proposed.version,
       at: Date.now(),
     });
     // A Short's draft is the video's own metadata: its edits are new signal, its acceptance is not.
-    await writeFeedback(tx, job.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback, {
-      toArtist: toArtist(job),
-      jobId: job.id,
-    });
+    await writeFeedback(
+      tx,
+      current.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback,
+      current,
+    );
     await tx
       .update(jobs)
       .set(
@@ -145,7 +150,7 @@ export async function rerun(job: JobDoc): Promise<void> {
           at: Date.now(),
         },
       ],
-      { toArtist: toArtist(job), jobId: job.id },
+      job,
     );
   });
   if (!skipped) throw new ActionError(409, 'This recommendation was already handled.');

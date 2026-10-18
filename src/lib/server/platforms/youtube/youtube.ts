@@ -163,9 +163,9 @@ export function clearStatsCache(): void {
   statsCache.clear();
 }
 
-/** FLR's most recent public uploads, newest first. */
-export async function recentVideos(count: number): Promise<CatalogVideo[]> {
-  const { uploadsPlaylist } = await channelStats(required('FLR_CHANNEL_ID'));
+/** A channel's most recent public uploads, newest first. */
+export async function recentVideos(channelId: string, count: number): Promise<CatalogVideo[]> {
+  const { uploadsPlaylist } = await channelStats(channelId);
   const items = await uploadsPage(uploadsPlaylist, count + 5);
   const ids = items
     .map((item) => item.contentDetails?.videoId)
