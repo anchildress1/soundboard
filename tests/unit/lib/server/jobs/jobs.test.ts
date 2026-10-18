@@ -16,16 +16,18 @@ import {
   newJobDoc,
   newJobId,
   ok,
+  outcomeUnknown,
   releaseJob,
   skipAndRepick,
   toPublic,
   transitionJob,
+  type JobDoc,
   type NewJob,
 } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
-import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { jobDoc, SESSION_URI, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const SOURCE_OBJECT = 'uploads/source.mp4';
 const REFUSES_MISSING = 'refuses a missing job';
@@ -670,5 +672,25 @@ describe('fail', () => {
       failedState: 'ANALYZE',
       error: 'boom',
     });
+  });
+});
+
+describe('outcomeUnknown', () => {
+  const paused = jobDoc({ state: 'PUBLISHING', finalChunkAt: 5 });
+  it('matches a publishing job whose session was lost after the final chunk', () => {
+    expect(outcomeUnknown(paused)).toBe(true);
+  });
+
+  it('matches a paused job whose data has no upload key at all', () => {
+    expect(outcomeUnknown({ ...paused, upload: undefined } as unknown as JobDoc)).toBe(true);
+  });
+
+  it.each<[string, Partial<JobDoc>]>([
+    ['another state', { state: 'CLAIMED_COMPLETE' }],
+    ['no final chunk', { finalChunkAt: null }],
+    ['a live session', { upload: { sessionUri: SESSION_URI, total: 1 } }],
+    ['a video ID', { videoId: 'v' }],
+  ])('rejects a job with %s', (_label, patch) => {
+    expect(outcomeUnknown({ ...paused, ...patch })).toBe(false);
   });
 });

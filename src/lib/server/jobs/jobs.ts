@@ -35,6 +35,13 @@ export type JobDoc = PublicJob & {
   updatedAt: number;
 };
 
+/**
+ * Whether the upload session was lost after its final bytes may have gone out, so only the owner
+ * can say whether YouTube kept the video. No session means the same here as in the upload step.
+ */
+export const outcomeUnknown = (job: JobDoc): boolean =>
+  job.state === 'PUBLISHING' && job.finalChunkAt !== null && !job.upload && job.videoId === null;
+
 export type NewJob = {
   ownerUid: string;
   artistId: string | null;

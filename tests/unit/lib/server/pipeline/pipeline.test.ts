@@ -43,14 +43,9 @@ import {
   users,
 } from '$lib/server/core/schema';
 import { retry } from '$lib/server/jobs/actions';
-import { getJob, MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
+import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import {
-  failurePatch,
-  outcomeUnknown,
-  runStep,
-  VERIFY_ATTEMPTS,
-} from '$lib/server/pipeline/pipeline';
+import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
 import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 
 const WAKING = 'waking model';
@@ -1127,6 +1122,16 @@ describe('runStep: PUBLISHING recovery', () => {
     expect(outcomeUnknown(await saved())).toBe(true);
   });
 
+  it('makes no YouTube call when the paused job has no upload key at all', async () => {
+    await publishing({ finalChunkAt: 5 });
+    await db()
+      .update(jobs)
+      .set({ data: sql`${jobs.data} - 'upload'` })
+      .where(eq(jobs.id, 'j1'));
+    expect(await runStep(await saved())).toEqual({ wait: OUTCOME_UNKNOWN });
+    expect(calls).toHaveLength(0);
+  });
+
   it('makes no YouTube call while the outcome is unknown, on any later step', async () => {
     await publishing({ finalChunkAt: 5 });
     for (let i = 0; i < 3; i++) {
@@ -1190,22 +1195,6 @@ describe('runStep: PUBLISHING recovery', () => {
     expect(await saved()).toMatchObject({ state: 'VERIFIED', videoId: 'vid1' });
     expect(initiations()).toHaveLength(0);
     expect(called(/upload\.example/)).toHaveLength(0);
-  });
-});
-
-describe('outcomeUnknown', () => {
-  const paused = jobDoc({ state: 'PUBLISHING', finalChunkAt: 5 });
-  it('matches a publishing job whose session was lost after the final chunk', () => {
-    expect(outcomeUnknown(paused)).toBe(true);
-  });
-
-  it.each<[string, Partial<JobDoc>]>([
-    ['another state', { state: 'CLAIMED_COMPLETE' }],
-    ['no final chunk', { finalChunkAt: null }],
-    ['a live session', { upload: { sessionUri: SESSION_URI, total: 1 } }],
-    ['a video ID', { videoId: 'v' }],
-  ])('rejects a job with %s', (_label, patch) => {
-    expect(outcomeUnknown({ ...paused, ...patch })).toBe(false);
   });
 });
 

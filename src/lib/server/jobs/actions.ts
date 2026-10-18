@@ -8,6 +8,7 @@ import {
   createShort,
   latestPick,
   lockJob,
+  outcomeUnknown,
   pickIn,
   skipAndRepick,
   transitionJob,
@@ -22,7 +23,6 @@ import {
   videoChannel,
   videoIdFromUrl,
 } from '$lib/server/platforms/youtube';
-import { outcomeUnknown } from '$lib/server/pipeline/pipeline';
 import { ActionError } from '$lib/server/core/errors';
 
 function requireState(job: JobDoc, states: JobState[]): void {

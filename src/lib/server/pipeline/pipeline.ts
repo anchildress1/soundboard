@@ -22,6 +22,7 @@ import {
   markFinalChunk,
   markUploadStarted,
   ok,
+  outcomeUnknown,
   releaseJob,
   transitionJob,
   type JobDoc,
@@ -179,16 +180,6 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
-
-/**
- * Whether the upload session was lost after its final bytes may have gone out, so only the owner
- * can say whether YouTube kept the video. Steps and confirm-upload both use this one check.
- */
-export const outcomeUnknown = (job: JobDoc): boolean =>
-  job.state === 'PUBLISHING' &&
-  job.finalChunkAt !== null &&
-  job.upload === null &&
-  job.videoId === null;
 
 /**
  * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
