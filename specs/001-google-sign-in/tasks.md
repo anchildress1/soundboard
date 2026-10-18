@@ -47,7 +47,7 @@ description: 'Task list for Google sign-in and connections'
 - [ ] T011 [P] Remove `allowlist()` and `demoEmails()` and add `signupMode(): 'invite' | 'open'` (default `invite`) and `kmsKey()` in src/lib/server/core/env.ts, with tests in tests/unit/lib/server/core/env.test.ts
 - [x] T012 [P] Create src/lib/server/core/kms.ts with `encrypt(plain): Promise<string>` (base64 ciphertext) and `decrypt(cipher): Promise<string>` against `KMS_KEY`, never logging or setting either value on a span; tests in tests/unit/lib/server/core/kms.test.ts mocking the KMS client
 - [x] T013 [P] Create tests/e2e/fakes/kms.ts: a reversible in-memory encrypt/decrypt with the `KeyManagementServiceClient` surface kms.ts uses
-- [ ] T014 Create src/lib/server/auth/users.ts:
+- [x] T014 Create src/lib/server/auth/users.ts:
   - `getUser(uid)`
   - `upsertUser(uid, {email, name})`, which updates email/name only and **never writes `accessGeneration`**
   - `redeemInvite(sub, email)` in one database transaction: look up the `users` row by `uid` first and check the invite named by its `invite_email`; only a first sign-in looks the invite up by the token's normalized email ("Lowercased, trimmed"). Bind with the data model's `UPDATE invites SET bound_sub = $sub WHERE … (bound_sub IS NULL OR bound_sub = $sub)` ("Only this `sub` may redeem it afterwards"); zero rows = denied, copy `artistId`, create the user with `accessGeneration: 1`. Return `denied` for a missing, inactive or foreign-bound invite and write nothing
