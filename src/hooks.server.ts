@@ -1,5 +1,5 @@
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { json, redirect, type Handle } from '@sveltejs/kit';
+import { json, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
 import { getUser } from '$lib/server/auth/users';
@@ -47,8 +47,7 @@ const gate: Handle = async ({ event, resolve }) => {
   if (event.locals.user || OPEN.has(pathname)) return resolve(event);
   if (pathname === '/api' || pathname.startsWith('/api/'))
     return json({ message: 'Sign in first.' }, { status: 401 });
-  // A client-side navigation needs SvelteKit's JSON redirect, which only a thrown redirect produces.
-  if (event.isDataRequest) redirect(303, '/');
+  // SvelteKit rebuilds this as its JSON redirect for a client-side navigation's data request.
   return new Response(null, { status: 303, headers: { location: '/' } });
 };
 
@@ -60,7 +59,8 @@ const securityHeaders: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-// The gate runs inside securityHeaders so its own 303 and 401 responses carry them too.
+// The gate runs inside securityHeaders so its own 303 and 401 responses carry them too, except a
+// data request's 303: SvelteKit replaces it with a fresh JSON redirect after every hook ran.
 export const handle = sequence(jobTraceMeta, sentryHandle(), session, securityHeaders, gate);
 
 export const handleError = handleErrorWithSentry();

@@ -64,6 +64,17 @@ test.describe('job list', () => {
     await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
   });
 
+  test('sends a client navigation home once the session is gone', async ({ page }) => {
+    await signIn(page, USER_B);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('link', { name: 'Continue Vaporgram' })).toBeVisible();
+    await page.context().clearCookies();
+    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await expect(page).toHaveURL('/');
+    await expect(page.getByLabel(/^Title/)).toHaveCount(0);
+  });
+
   test('continues a run whose media expired, keeping its details', async ({ page }) => {
     await signIn(page, USER_A);
     await page.goto('/');

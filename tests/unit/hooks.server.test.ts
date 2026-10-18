@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { isRedirect, type RequestEvent, type ResolveOptions } from '@sveltejs/kit';
+import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { eq } from 'drizzle-orm';
@@ -261,12 +261,10 @@ describe('gate', () => {
     },
   );
 
-  it("sends a signed-out client navigation home through SvelteKit's redirect", async () => {
+  it('sends a signed-out client navigation home with the same 303, for SvelteKit to rebuild', async () => {
     const { resolve, seen } = renderer();
-    const thrown = await run(event(undefined, {}, '/jobs/x', true), resolve).catch(
-      (e: unknown) => e,
-    );
-    expect(isRedirect(thrown) && [thrown.status, thrown.location]).toEqual([303, '/']);
+    const response = await run(event(undefined, {}, '/jobs/x', true), resolve);
+    expect([response.status, response.headers.get('location')]).toEqual([303, '/']);
     expect(seen.resolved).toBe(0);
   });
 
