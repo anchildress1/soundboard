@@ -237,7 +237,7 @@ async function pastedVideo(job: Paused, videoId: string) {
     });
     throw new ActionError(
       502,
-      failure === 'denied'
+      failure === 'denied' || failure === 'session-lost'
         ? "YouTube wouldn't read that video. Try again, or reconnect if it keeps failing."
         : "YouTube didn't answer. Try again.",
     );

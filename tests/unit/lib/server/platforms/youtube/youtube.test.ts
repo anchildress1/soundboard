@@ -636,6 +636,9 @@ describe('uploadFailure', () => {
   });
 
   it.each([
+    ['a 429 rate limit', new YouTubeError(429, 'videos.list 429: rateLimitExceeded')],
+    ['a 403 rate limit', new YouTubeError(403, 'videos.list 403: rateLimitExceeded')],
+    ["a 403 on the user's rate limit", new YouTubeError(403, 'userRateLimitExceeded')],
     ['a status below the 4xx range', new YouTubeError(399, 'odd')],
     ['the upload limit on a 500', new YouTubeError(500, 'uploadLimitExceeded')],
     ['a quota message on another status', new YouTubeError(500, 'quota backend')],

@@ -243,6 +243,25 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
       },
       WOULDNT_READ,
     ],
+    ...[404, 410].map((status): [string, () => Promise<unknown>, string] => [
+      `YouTube answers the read with a ${status}`,
+      async () => {
+        fetchMock.mockImplementation(async () => new Response('notFound', { status }));
+      },
+      WOULDNT_READ,
+    ]),
+    ...(
+      [
+        [429, 'rateLimitExceeded'],
+        [403, 'rateLimitExceeded'],
+      ] as const
+    ).map(([status, reason]): [string, () => Promise<unknown>, string] => [
+      `YouTube rate-limits the read with a ${status} ${reason}`,
+      async () => {
+        fetchMock.mockImplementation(async () => new Response(reason, { status }));
+      },
+      DIDNT_ANSWER,
+    ]),
     [
       'the network fails',
       async () => {
