@@ -11,11 +11,17 @@ import * as schema from '$lib/server/core/schema';
 
 // Resolved from the working directory, not this file: vitest and the Playwright web server both
 // run from the repo root, and the E2E build bundles this module away from its source path.
-const database = drizzle(new PGlite(), { schema });
+const pglite = new PGlite();
+const database = drizzle(pglite, { schema });
 await migrate(database, { migrationsFolder: resolve('drizzle') });
 
 export function db(): Database {
   return database;
+}
+
+/** The raw PGlite under `db()`, for code that speaks pg's `query(text, params)`. */
+export function client(): PGlite {
+  return pglite;
 }
 
 /** The instance lives for the whole test file; there is no pool to drop. */

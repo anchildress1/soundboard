@@ -144,11 +144,11 @@ description: 'Task list for Google sign-in and connections'
 
 - [x] T040 [P] [US3] Callback denial tests in tests/unit/routes/auth/callback/server.test.ts: uninvited → 303 `/?signin=denied`, no cookie, no `users` row, no connection; invite bound to another `sub` denied; changed email on a bound user keeps jobs and `artistId`
 - [ ] T041 [P] [US3] Generation tests in tests/unit/hooks.server.test.ts: revoke bumps `accessGeneration` → next request signed out; reactivation does not revive the old cookie
-- [ ] T042 [P] [US3] Script tests in tests/unit/scripts/invite.test.ts for add, revoke (one transaction: `active: false` + increment bound user's `accessGeneration`), reactivate and list
+- [x] T042 [P] [US3] Script tests in tests/unit/scripts/invite.test.ts for add, revoke (one transaction: `active: false` + increment bound user's `accessGeneration`), reactivate and list
 
 ### Implementation
 
-- [ ] T043 [US3] Create scripts/invite.ts (`add <email> [--artist flr]`, `revoke <email>`, `list`) with a standalone `pg` client on `DATABASE_URL` and no `$lib` imports, runnable as `node scripts/invite.ts` under Node 24 type stripping
+- [x] T043 [US3] Create scripts/invite.ts (`add <email> [--artist flr]`, `revoke <email>`, `list`) with a standalone `pg` client on `DATABASE_URL` and no `$lib` imports, runnable as `node scripts/invite.ts` under Node 24 type stripping
 - [x] T044 [US3] Wire the denied path in src/routes/auth/callback/+server.ts to write nothing before `redeemInvite` succeeds (FR-005)
 
 **Checkpoint**: US1–US3 testable.
