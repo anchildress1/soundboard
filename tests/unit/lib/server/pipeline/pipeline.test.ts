@@ -46,7 +46,7 @@ import { retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
-import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
+import { clearStatsCache, quotaResetAt } from '$lib/server/platforms/youtube/youtube';
 
 const WAKING = 'waking model';
 const ARTIST_NAME_KEY = 'artist-name';
@@ -902,12 +902,33 @@ describe('runStep: PUBLISHING', () => {
     expect(captureException).not.toHaveBeenCalled();
   });
 
-  it('continues on the next step once the daily limit resets', async () => {
+  it('holds the wait until the Pacific midnight reset, with no grant refresh or YouTube call', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('quotaExceeded', { status: 403 }));
+    const before = Date.now();
     await runStep(await publishing());
-    handlers.shift();
-    expect(await runStep(await saved())).toEqual({});
-    expect(await saved()).toMatchObject({ upload: { sessionUri: SESSION_URI } });
+    const { limitUntil } = await saved();
+    expect(limitUntil).toBe(quotaResetAt(before));
+    calls.length = 0;
+    h.refreshError = new Error('a refresh would fail the step');
+    for (let i = 0; i < 2; i++) {
+      expect(await runStep(await saved())).toEqual({ wait: DAILY_LIMIT });
+    }
+    expect(calls).toHaveLength(0);
+    expect(await saved()).toMatchObject({ consecutiveFailures: 0, limitUntil });
+  });
+
+  it('calls YouTube again once the limit has reset, clearing it on success', async () => {
+    expect(await runStep(await publishing({ limitUntil: Date.now() - 1 }))).toEqual({});
+    expect(await saved()).toMatchObject({
+      upload: { sessionUri: SESSION_URI },
+      limitUntil: null,
+    });
+  });
+
+  it('sets a fresh reset when the limit is still spent after the last one passed', async () => {
+    on(/upload\/youtube\/v3\/videos/, () => new Response('quotaExceeded', { status: 403 }));
+    await runStep(await publishing({ limitUntil: 1 }));
+    expect((await saved()).limitUntil).toBeGreaterThan(Date.now());
   });
 
   it('waits without a failure when the upload limit hits mid-upload, keeping the session', async () => {

@@ -436,6 +436,7 @@ describe('newJobDoc', () => {
       sourceObject: null,
       uploadStartedAt: null,
       finalChunkAt: null,
+      limitUntil: null,
       createdAt: 5,
       updatedAt: 5,
     });

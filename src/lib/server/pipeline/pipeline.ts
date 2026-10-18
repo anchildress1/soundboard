@@ -37,6 +37,7 @@ import { invokeAgent } from '$lib/server/core/tracing';
 import {
   accessTokenFor,
   finalChunk,
+  quotaResetAt,
   readBack,
   recentVideos,
   sourceRange,
@@ -190,15 +191,19 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
   // No YouTube call at all: the page polls this wait, and polling must spend no quota.
   if (outcomeUnknown(job)) return { wait: OUTCOME_UNKNOWN };
+  // Nor while the daily limit is spent: the quota is shared, and a refresh would spend nothing useful.
+  const now = Date.now();
+  if (job.limitUntil && now < job.limitUntil) return { wait: DAILY_LIMIT };
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   if (!access) return { wait: 'reconnect YouTube' };
   try {
-    return job.upload
+    const output = job.upload
       ? await sendChunk(job, job.upload)
       : await initiate(job, access.token, job.finalFields);
+    return job.limitUntil ? { ...output, limitUntil: null } : output;
   } catch (error) {
     const failure = uploadFailure(error);
-    if (failure === 'quota-spent') return { wait: DAILY_LIMIT };
+    if (failure === 'quota-spent') return { limitUntil: quotaResetAt(now), wait: DAILY_LIMIT };
     if (failure !== 'access-lost') throw error;
     // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
     await access.refused();

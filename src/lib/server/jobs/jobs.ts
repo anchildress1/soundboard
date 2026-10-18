@@ -32,6 +32,8 @@ export type JobDoc = PublicJob & {
   uploadStartedAt: number | null;
   /** Set before sending the chunk that reaches the file size; nothing clears it. */
   finalChunkAt: number | null;
+  /** When YouTube's spent daily limit resets; publish steps wait without calling it until then. */
+  limitUntil: number | null;
   updatedAt: number;
 };
 
@@ -92,6 +94,7 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
     sourceObject: null,
     uploadStartedAt: null,
     finalChunkAt: null,
+    limitUntil: null,
     createdAt: now,
     updatedAt: now,
   };

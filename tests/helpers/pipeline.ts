@@ -262,6 +262,7 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     sourceObject: null,
     uploadStartedAt: null,
     finalChunkAt: null,
+    limitUntil: null,
     createdAt: 1,
     updatedAt: 1,
     ...patch,
