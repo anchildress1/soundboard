@@ -1040,6 +1040,25 @@ describe('runStep: PUBLISHING recovery', () => {
     expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', finalChunkAt: markedAtPut });
   });
 
+  it.each<[string, () => Response]>([
+    ['errors', () => new Response('oops', { status: 503 })],
+    [
+      'times out',
+      () => {
+        throw new DOMException('The operation timed out.', 'TimeoutError');
+      },
+    ],
+  ])('leaves the marker unset when the final range read %s', async (_label, reply) => {
+    on(/storage\.googleapis\.com/, reply);
+    await runStep(await publishing({ upload: UPLOAD }));
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      finalChunkAt: null,
+      upload: UPLOAD,
+      consecutiveFailures: 1,
+    });
+  });
+
   it('leaves the marker unset while chunks before the last go out', async () => {
     h.objects.set('uploads/j1', { size: String(300 * 1024 * 1024), contentType: 'video/mp4' });
     const total = 300 * 1024 * 1024;

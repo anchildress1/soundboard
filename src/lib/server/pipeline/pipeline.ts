@@ -38,6 +38,7 @@ import {
   finalChunk,
   readBack,
   recentVideos,
+  sourceRange,
   startResumableUpload,
   thumbnailDataUrl,
   uploadChunk,
@@ -237,9 +238,10 @@ async function sendChunk(
   try {
     result = await uploadOffset(sessionUri, total);
     if (!result.done) {
-      const source = await signedReadUrl(job.object);
+      const source = await sourceRange(await signedReadUrl(job.object), result.next, total);
+      // Marked once GCS answered and just before the PUT: a source that never opened sent nothing,
+      // and a lost reply to this PUT must never lead to a second upload.
       if (finalChunk(result.next, total)) {
-        // Durable before the bytes: a lost reply to this PUT must never lead to a second upload.
         await markFinalChunk(job.id);
         finalSent = true;
       }

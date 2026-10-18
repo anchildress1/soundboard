@@ -8,6 +8,7 @@ import {
   readBack,
   recentVideos,
   searchMusicVideos,
+  sourceRange,
   startResumableUpload,
   thumbnailDataUrl,
   UPLOAD_CHUNK_BYTES,
@@ -409,59 +410,72 @@ describe('uploadOffset', () => {
   });
 });
 
-describe('uploadChunk', () => {
-  it('reads a range from GCS and forwards it with Content-Range', async () => {
+describe('sourceRange', () => {
+  it("reads the chunk's range from GCS", async () => {
     const total = UPLOAD_CHUNK_BYTES * 2 + 10;
-    fetchMock.mockResolvedValueOnce(new Response('bytes', { status: 206 })).mockResolvedValueOnce(
+    fetchMock.mockResolvedValueOnce(new Response('bytes', { status: 206 }));
+    const source = await sourceRange('https://gcs/signed', 0, total);
+    expect(source.status).toBe(206);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
+    expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
+  });
+
+  it('stops the last range at the file end', async () => {
+    const offset = UPLOAD_CHUNK_BYTES;
+    fetchMock.mockResolvedValueOnce(new Response('tail', { status: 200 }));
+    await sourceRange('g', offset, offset + 100);
+    expect(headersOf(0)).toEqual({ range: `bytes=${offset}-${offset + 99}` });
+  });
+
+  it.each([403, 404, 503])('throws a plain error on a GCS %i', async (status) => {
+    fetchMock.mockResolvedValueOnce(new Response('denied', { status }));
+    const error = await sourceRange('g', 0, 10).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(YouTubeError);
+    expect(uploadFailure(error)).toBe('other');
+    expect((error as Error).message).toBe(`GCS range read ${status}`);
+  });
+});
+
+describe('uploadChunk', () => {
+  it('streams the open range into the session with Content-Range', async () => {
+    const total = UPLOAD_CHUNK_BYTES * 2 + 10;
+    fetchMock.mockResolvedValueOnce(
       new Response(null, {
         status: 308,
         headers: { range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` },
       }),
     );
-    const result = await uploadChunk(SESSION_URL, 'https://gcs/signed', 0, total);
+    const source = new Response('bytes', { status: 206 });
+    const result = await uploadChunk(SESSION_URL, source, 0, total);
     expect(result).toEqual({ done: false, next: UPLOAD_CHUNK_BYTES });
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
-    expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
-    expect(String(fetchMock.mock.calls[1]![0])).toBe(SESSION_URL);
-    expect(initOf(1).method).toBe('PUT');
-    expect(headersOf(1)).toEqual({
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(SESSION_URL);
+    expect(initOf(0).method).toBe('PUT');
+    expect(headersOf(0)).toEqual({
       'content-length': String(UPLOAD_CHUNK_BYTES),
       'content-range': `bytes 0-${UPLOAD_CHUNK_BYTES - 1}/${total}`,
     });
-    expect(initOf(1).body).toBeInstanceOf(ReadableStream);
+    expect(initOf(0).body).toBeInstanceOf(ReadableStream);
   });
 
   it('sends the last short chunk and returns the video id on 200', async () => {
     const offset = UPLOAD_CHUNK_BYTES;
     const total = offset + 100;
-    fetchMock
-      .mockResolvedValueOnce(new Response('tail', { status: 200 }))
-      .mockResolvedValueOnce(json({ id: 'newVid' }));
-    expect(await uploadChunk('s', 'g', offset, total)).toEqual({ done: true, videoId: 'newVid' });
-    expect(headersOf(0)).toEqual({ range: `bytes=${offset}-${total - 1}` });
-    expect(headersOf(1)).toEqual({
+    fetchMock.mockResolvedValueOnce(json({ id: 'newVid' }));
+    expect(await uploadChunk('s', new Response('tail'), offset, total)).toEqual({
+      done: true,
+      videoId: 'newVid',
+    });
+    expect(headersOf(0)).toEqual({
       'content-length': '100',
       'content-range': `bytes ${offset}-${total - 1}/${total}`,
     });
   });
 
-  it.each([403, 404])(
-    'throws a plain error on a GCS %i without touching the session',
-    async (status) => {
-      fetchMock.mockResolvedValueOnce(new Response('denied', { status }));
-      const error = await uploadChunk('s', 'g', 0, 10).catch((e: unknown) => e);
-      expect(error).not.toBeInstanceOf(YouTubeError);
-      expect(uploadFailure(error)).toBe('other');
-      expect((error as Error).message).toBe(`GCS range read ${status}`);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    },
-  );
-
   it('throws when YouTube rejects the chunk', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response('x', { status: 206 }))
-      .mockResolvedValueOnce(new Response('bad', { status: 500 }));
-    await expect(uploadChunk('s', 'g', 0, 10)).rejects.toMatchObject({ status: 500 });
+    fetchMock.mockResolvedValueOnce(new Response('bad', { status: 500 }));
+    await expect(uploadChunk('s', new Response('x'), 0, 10)).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });
 

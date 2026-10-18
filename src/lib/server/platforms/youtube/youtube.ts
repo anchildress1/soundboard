@@ -281,25 +281,37 @@ export async function uploadOffset(sessionUri: string, total: number): Promise<C
   );
 }
 
-/**
- * Streams one range of the GCS object into the upload session. The body is piped from the signed
- * GCS response straight into the PUT, so the chunk never sits in app memory.
- */
-export async function uploadChunk(
-  sessionUri: string,
+const chunkEnd = (offset: number, total: number) =>
+  Math.min(offset + UPLOAD_CHUNK_BYTES, total) - 1;
+
+/** Opens the GCS range that the chunk starting at `offset` sends. */
+export async function sourceRange(
   sourceUrl: string,
   offset: number,
   total: number,
-): Promise<ChunkResult> {
-  const end = Math.min(offset + UPLOAD_CHUNK_BYTES, total) - 1;
+): Promise<Response> {
   const source = await fetch(sourceUrl, {
-    headers: { range: `bytes=${offset}-${end}` },
+    headers: { range: `bytes=${offset}-${chunkEnd(offset, total)}` },
     signal: AbortSignal.timeout(110_000),
   });
   if (source.status !== 206 && source.status !== 200) {
     // A plain error: a GCS 404 must not read as a lost upload session.
     throw new Error(`GCS range read ${source.status}`);
   }
+  return source;
+}
+
+/**
+ * Sends one chunk from an open `sourceRange`. The body is piped from the signed GCS response
+ * straight into the PUT, so the chunk never sits in app memory.
+ */
+export async function uploadChunk(
+  sessionUri: string,
+  source: Response,
+  offset: number,
+  total: number,
+): Promise<ChunkResult> {
+  const end = chunkEnd(offset, total);
   return finish(
     await fetch(sessionUri, {
       method: 'PUT',

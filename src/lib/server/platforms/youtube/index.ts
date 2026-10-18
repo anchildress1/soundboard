@@ -18,6 +18,7 @@ export {
   readBack,
   recentVideos,
   searchMusicVideos,
+  sourceRange,
   startResumableUpload,
   thumbnailDataUrl,
   uploadChunk,
