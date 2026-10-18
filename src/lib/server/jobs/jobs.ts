@@ -101,6 +101,28 @@ export async function getJob(id: string): Promise<JobDoc | null> {
   return row ? fromRow(row) : null;
 }
 
+export type JobListItem = { id: string; songTitle: string; state: JobState; createdAt: number };
+
+/** The user's newest 20 root jobs; Shorts are reached through their video. */
+export async function listJobs(uid: string): Promise<JobListItem[]> {
+  const rows = await db()
+    .select({
+      id: jobs.id,
+      songTitle: sql<string>`${jobs.data}->>'songTitle'`,
+      state: jobs.state,
+      createdAt: jobs.createdAt,
+    })
+    .from(jobs)
+    .where(and(eq(jobs.ownerUid, uid), isNull(jobs.parentId)))
+    .orderBy(desc(jobs.createdAt))
+    .limit(20);
+  return rows.map((row) => ({
+    ...row,
+    state: row.state as JobState,
+    createdAt: row.createdAt.getTime(),
+  }));
+}
+
 /**
  * Claims the job for one step with a fresh token and returns the job as the claim left it, so the
  * step never runs on a snapshot another request already moved past. Returns null while another

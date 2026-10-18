@@ -11,6 +11,7 @@ import {
   getJob,
   latestPick,
   listChunks,
+  listJobs,
   listPicks,
   newJobDoc,
   newJobId,
@@ -25,7 +26,7 @@ import {
 import { jobSet } from '$lib/server/jobs/rows';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
-import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const SOURCE_OBJECT = 'uploads/source.mp4';
 const REFUSES_MISSING = 'refuses a missing job';
@@ -95,6 +96,39 @@ const exists = async (id: string) => (await getJob(id)) !== null;
 beforeEach(async () => {
   await truncate();
   await seed(USERS);
+});
+
+describe('listJobs', () => {
+  const at = (minute: number) => Date.UTC(2026, 9, 1, 12, minute);
+
+  it("lists the user's own root jobs, newest first, with only the list fields", async () => {
+    await seedJob({ id: 'old', songTitle: 'Old', state: 'VERIFIED', createdAt: at(1) });
+    await seedJob({ id: 'new', songTitle: 'New', state: 'REVIEW', createdAt: at(2) });
+    expect(await listJobs(USER_B.uid)).toEqual([
+      { id: 'new', songTitle: 'New', state: 'REVIEW', createdAt: at(2) },
+      { id: 'old', songTitle: 'Old', state: 'VERIFIED', createdAt: at(1) },
+    ]);
+  });
+
+  it("leaves out other users' jobs and Shorts", async () => {
+    await seedJob({ id: 'mine', createdAt: at(1) });
+    await seedJob({ id: 'short', parentId: 'mine', createdAt: at(2) });
+    await seedJob({ id: 'theirs', ownerUid: USER_A.uid, artistId: 'flr', createdAt: at(3) });
+    expect((await listJobs(USER_B.uid)).map((j) => j.id)).toEqual(['mine']);
+    expect((await listJobs(USER_A.uid)).map((j) => j.id)).toEqual(['theirs']);
+  });
+
+  it('keeps the newest 20', async () => {
+    for (let i = 0; i < 22; i++) await seedJob({ id: `j${i}`, createdAt: at(i) });
+    const listed = await listJobs(USER_B.uid);
+    expect(listed).toHaveLength(20);
+    expect([listed[0]!.id, listed.at(-1)!.id]).toEqual(['j21', 'j2']);
+  });
+
+  it('is empty for a user with no jobs or no account', async () => {
+    expect(await listJobs(USER_B.uid)).toEqual([]);
+    expect(await listJobs('ghost')).toEqual([]);
+  });
 });
 
 describe('newJobId', () => {

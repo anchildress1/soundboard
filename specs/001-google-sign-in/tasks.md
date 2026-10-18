@@ -190,12 +190,12 @@ description: 'Task list for Google sign-in and connections'
 
 ### Tests
 
-- [ ] T056 [P] [US6] `listJobs` tests in tests/unit/lib/server/jobs/jobs.test.ts: own root jobs only, newest 20, Shorts excluded via `parentId == null`
+- [x] T056 [P] [US6] `listJobs` tests in tests/unit/lib/server/jobs/jobs.test.ts: own root jobs only, newest 20, Shorts excluded via `parentId == null`
 - [ ] T057 [P] [US6] E2E in tests/e2e/home.spec.ts: each user's home lists only their jobs; a job link opens the job page
 
 ### Implementation
 
-- [ ] T058 [US6] Add `listJobs(uid)` in src/lib/server/jobs/jobs.ts: `ownerUid ==`, `parentId == null`, `createdAt desc`, limit 20, returning `{id, songTitle, state, createdAt}[]`
+- [x] T058 [US6] Add `listJobs(uid)` in src/lib/server/jobs/jobs.ts: `ownerUid ==`, `parentId == null`, `createdAt desc`, limit 20, returning `{id, songTitle, state, createdAt}[]`
 - [ ] T059 [P] [US6] Create src/lib/components/JobList.svelte (song title, plain state label, continue link); tests in tests/unit/lib/components/JobList.test.ts
 - [ ] T060 [US6] Load `jobs` in src/routes/+page.server.ts and render JobList under the upload form in src/routes/+page.svelte
 - [ ] T061 [US6] On the job page, when source or rendered media is gone (7-day GCS lifecycle), keep saved metadata visible and show that media-dependent work needs a new upload, in src/routes/jobs/[id]/+page.svelte and src/lib/server/jobs/view.ts (FR-029)
