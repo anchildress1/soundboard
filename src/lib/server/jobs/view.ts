@@ -1,12 +1,12 @@
 import { error } from '@sveltejs/kit';
 import type { JobState, JobView, Pick, Wait } from '$lib/types';
 import { signedReadUrl } from '$lib/server/media/gcs';
-import { canAccess, getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
+import { getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
 
-/** Loads a job the caller may see. Nathan's jobs read as missing to anyone not allowlisted. */
-export async function authorizedJob(id: string, allowlisted: boolean): Promise<JobDoc> {
-  const job = await getJob(id);
-  if (!job || !canAccess(job, allowlisted)) error(404, 'Job not found');
+/** Loads the caller's own job; anyone else's, or any job when signed out, reads as missing. */
+export async function authorizedJob(id: string, uid: string | undefined): Promise<JobDoc> {
+  const job = uid ? await getJob(id) : null;
+  if (!job || job.ownerUid !== uid) error(404, 'Job not found');
   return job;
 }
 
@@ -16,7 +16,6 @@ const RENDERED: ReadonlySet<JobState> = new Set([
   'PUBLISHING',
   'CLAIMED_COMPLETE',
   'VERIFIED',
-  'PAYLOAD',
 ]);
 
 export async function buildView(job: JobDoc, wait?: Wait): Promise<JobView> {

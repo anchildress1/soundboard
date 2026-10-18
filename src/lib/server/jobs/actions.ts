@@ -1,25 +1,21 @@
 import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields } from '$lib/metadata';
-import {
-  SHORT_SOURCE_STATES,
-  type JobState,
-  type Pick,
-  type PickFields,
-  type Reframe,
-} from '$lib/types';
-import { db } from '$lib/server/core/clients';
+import { eq } from 'drizzle-orm';
+import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '$lib/types';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import {
   createShort,
-  jobRef,
   latestPick,
-  pickKey,
+  lockJob,
+  pickIn,
   skipAndRepick,
   transitionJob,
   type JobDoc,
 } from './jobs';
-import { approvalFeedback, ARTIST_NAME, writeFeedback } from '$lib/server/artist/memory';
-import { takeUploadSlot, takeVisitorRun } from './quota';
-import { getRefreshToken } from '$lib/server/platforms/youtube';
+import { jobSet } from './rows';
+import { approvalFeedback, ARTIST_ID, ARTIST_NAME, writeFeedback } from '$lib/server/artist/memory';
+import { getConnection } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
 
 function requireState(job: JobDoc, states: JobState[]): void {
@@ -27,7 +23,8 @@ function requireState(job: JobDoc, states: JobState[]): void {
     throw new ActionError(409, `Not allowed while the job is ${job.state}.`);
 }
 
-const allowlistedFor = (job: JobDoc) => job.owner === 'nathan';
+/** Feedback on Nathan's jobs teaches his memory; anyone else's stays on the job. */
+const toArtist = (job: JobDoc) => job.artistId === ARTIST_ID;
 
 /** Edited tags follow the pick's rules: the job's tag candidates or the artist name, never the title. */
 function tagError(tags: string[], job: JobDoc): string | undefined {
@@ -42,10 +39,10 @@ function tagError(tags: string[], job: JobDoc): string | undefined {
 }
 
 /**
- * Approves the edited fields of the recommendation on screen. One transaction re-checks REVIEW and
- * the pick version, takes the day's upload slot, moves the job, and records the feedback, so a
- * double submit or a stale tab can't approve twice or approve an older pick. Without a channel,
- * token, or slot the run ends at the would-be payload.
+ * Approves the edited fields of the recommendation on screen and pins the upload to the owner's
+ * connected channel. One transaction re-checks REVIEW and the pick version, moves the job, and
+ * records the feedback, so a double submit or a stale tab can't approve twice or approve an older
+ * pick.
  */
 export async function approve(
   job: JobDoc,
@@ -69,37 +66,18 @@ export async function approve(
     hashtags: parseHashtags(input.description).map((t) => byLower.get(t) ?? t),
     tags: input.tags,
   };
-  const connected = job.channel ? Boolean(await getRefreshToken(job.channel)) : false;
-  const ref = jobRef(job.id);
+  const connection = await getConnection(job.ownerUid);
+  if (connection?.status !== 'connected' || !connection.channelId) {
+    throw new ActionError(409, 'Reconnect YouTube to approve.');
+  }
+  const destination = { channelId: connection.channelId, channelTitle: connection.channelTitle };
 
-  const outcome = await db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const current = snap.exists ? (snap.data() as JobDoc) : null;
+  const outcome = await db().transaction(async (tx) => {
+    const current = await lockJob(tx, job.id);
     if (current?.state !== 'REVIEW') return 'handled';
     if (current.pickVersion !== input.pickVersion) return 'stale';
-    const pickSnap = await tx.get(ref.collection('pick').doc(pickKey(input.pickVersion)));
-    if (!pickSnap.exists) return 'stale';
-    const proposed = pickSnap.data() as Pick;
-
-    const payload = (error: string | null): Partial<JobDoc> => ({
-      state: 'PAYLOAD',
-      payload: final,
-      finalFields: final,
-      error,
-    });
-    let patch: Partial<JobDoc>;
-    if (!job.channel) patch = payload(null);
-    else if (!connected) patch = payload('The upload channel is not connected.');
-    else if (await takeUploadSlot(tx, job.owner !== 'nathan')) {
-      // payload is the approved fields wherever the job ends, so the page shows what was sent.
-      patch = {
-        state: 'PUBLISHING',
-        payload: final,
-        finalFields: final,
-        consecutiveFailures: 0,
-        error: null,
-      };
-    } else patch = payload("Today's upload quota is used up.");
+    const proposed = await pickIn(tx, job.id, input.pickVersion);
+    if (!proposed) return 'stale';
 
     const feedback = approvalFeedback(proposed, final, {
       jobId: job.id,
@@ -108,11 +86,22 @@ export async function approve(
       at: Date.now(),
     });
     // A Short's draft is the video's own metadata: its edits are new signal, its acceptance is not.
-    writeFeedback(tx, job.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback, {
-      allowlisted: allowlistedFor(job),
+    await writeFeedback(tx, job.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback, {
+      toArtist: toArtist(job),
       jobId: job.id,
     });
-    tx.update(ref, { ...patch, updatedAt: Date.now() });
+    await tx
+      .update(jobs)
+      .set(
+        jobSet({
+          state: 'PUBLISHING',
+          finalFields: final,
+          destination,
+          consecutiveFailures: 0,
+          error: null,
+        }),
+      )
+      .where(eq(jobs.id, job.id));
     return 'approved';
   });
   if (outcome === 'handled') throw new ActionError(409, 'This recommendation was already handled.');
@@ -142,9 +131,9 @@ export async function rerun(job: JobDoc): Promise<void> {
     return;
   }
   const current = await latestPick(job.id);
-  const skipped = await skipAndRepick(job.id, current?.version ?? null, (tx) => {
+  const skipped = await skipAndRepick(job.id, current?.version ?? null, async (tx) => {
     if (!current) return;
-    writeFeedback(
+    await writeFeedback(
       tx,
       [
         {
@@ -156,7 +145,7 @@ export async function rerun(job: JobDoc): Promise<void> {
           at: Date.now(),
         },
       ],
-      { allowlisted: allowlistedFor(job), jobId: job.id },
+      { toArtist: toArtist(job), jobId: job.id },
     );
   });
   if (!skipped) throw new ActionError(409, 'This recommendation was already handled.');
@@ -171,7 +160,6 @@ const DISCARDABLE: JobState[] = [
   'RENDER',
   'REVIEW',
   'FAILED',
-  'PAYLOAD',
 ];
 
 /** Ends the job. Nothing is learned from a discard; a step still running drops its result. */
@@ -201,8 +189,7 @@ export async function retry(job: JobDoc): Promise<void> {
 
 /**
  * Starts a Short from a video whose analysis is done, or returns the live one it already has. Its
- * metadata starts from what the artist approved, else the recommendation on screen. A visitor's new
- * Short counts as one of their runs.
+ * metadata starts from what the artist approved, else the recommendation on screen.
  */
 export async function makeShort(job: JobDoc): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
@@ -213,18 +200,11 @@ export async function makeShort(job: JobDoc): Promise<string> {
   if (!canCutShort(job.probe.durationSec)) {
     throw new ActionError(409, `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`);
   }
-  // A Short costs a model call and a render, so a signed-out visitor pays for it with a run.
-  const ipHash = job.owner === 'visitor' ? job.ipHash : null;
-  const started = await createShort(
-    job,
-    SHORT_SOURCE_STATES,
-    ipHash ? (tx) => takeVisitorRun(tx, ipHash) : null,
-  );
+  const started = await createShort(job, SHORT_SOURCE_STATES);
   if (!started) throw new ActionError(409, 'The video moved on before the Short could start.');
   if ('noPick' in started) {
     throw new ActionError(409, 'This video has no recommendation to start from.');
   }
-  if ('blocked' in started) throw new ActionError(429, started.blocked);
   return started.id;
 }
 

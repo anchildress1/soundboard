@@ -2,6 +2,7 @@
 // (tests/e2e/fakes/db.ts) run real SQL on an in-process PGlite with the real migrations, so the
 // database is never mocked. Each test file gets its own instance through module isolation.
 import { PGlite } from '@electric-sql/pglite';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { resolve } from 'node:path';
@@ -19,6 +20,32 @@ export function db(): Database {
 
 /** The instance lives for the whole test file; there is no pool to drop. */
 export function resetDb(): void {}
+
+/** Empties every table and drops any `afterJobUpdate` hook; tests call this first. */
+export async function truncate(): Promise<void> {
+  await database.execute(sql`drop trigger if exists after_job_update on jobs`);
+  await database.execute(
+    sql`truncate invites, users, connections, jobs, artist_facts, artist_feedback, artist_publishes, artist_brand restart identity cascade`,
+  );
+}
+
+/**
+ * Runs `statement` (PL/pgSQL, with the updated row as `new`) after every job UPDATE: a concurrent
+ * writer landing mid-request, such as the bucket lifecycle deleting a job.
+ */
+export async function afterJobUpdate(statement: string): Promise<void> {
+  await database.execute(
+    sql.raw(
+      `create or replace function after_job_update() returns trigger language plpgsql as $$ begin ${statement}; return null; end $$`,
+    ),
+  );
+  await database.execute(
+    sql`create trigger after_job_update after update on jobs for each row execute function after_job_update()`,
+  );
+}
+
+/** Deletes each job right after it is updated. */
+export const vanishOnUpdate = () => afterJobUpdate('delete from jobs where id = new.id');
 
 type Insert<T extends keyof typeof schema> = (typeof schema)[T] extends {
   $inferInsert: infer Row;

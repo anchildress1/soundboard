@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
+// @vitest-environment node
+import { eq, sql } from 'drizzle-orm';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { db } from '$lib/server/core/db';
+import { jobPicks, jobs } from '$lib/server/core/schema';
 import {
-  canAccess,
   claimJob,
-  CLAIM_TTL_MS,
   createJob,
   createShort,
   fail,
@@ -11,40 +12,33 @@ import {
   latestPick,
   listChunks,
   listPicks,
-  skipAndRepick,
-  transitionJob,
   newJobDoc,
   newJobId,
   ok,
   releaseJob,
-  saveChunk,
-  savePick,
+  skipAndRepick,
   toPublic,
-  updateJob,
+  transitionJob,
+  type JobDoc,
   type NewJob,
 } from '$lib/server/jobs/jobs';
-import { resetClients } from '$lib/server/core/clients';
+import { jobSet } from '$lib/server/jobs/rows';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
+import { seed, truncate } from '../../../../helpers/db';
+import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
-const SAMPLE_OBJECT = 'samples/a.mp4';
+const SOURCE_OBJECT = 'uploads/source.mp4';
 const REFUSES_MISSING = 'refuses a missing job';
 const SYNTHWAVE = '#synthwave';
 
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
-
 const input: NewJob = {
-  owner: 'visitor',
-  channel: null,
+  ownerUid: USER_B.uid,
+  artistId: null,
   songTitle: 'PeekaBoo',
   notes: '',
   filename: 'peekaboo.mp4',
   contentType: 'video/mp4',
   object: null,
-  sampleId: null,
-  liveVideoId: null,
-  ipHash: 'abc',
   trace: { sentryTrace: 't-s-1', baggage: 'b' },
 };
 
@@ -77,10 +71,30 @@ const pick = (version: number): Pick => ({
   modelMs: 1,
 });
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
-  resetClients();
+const patch = (id: string, fields: Partial<JobDoc>) =>
+  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, id));
+const seedPicks = (jobId: string, ...versions: number[]) =>
+  seed({
+    jobPicks: versions.map((v) => ({ jobId, version: v, data: { ...pick(v), skipped: false } })),
+  });
+const claimRow = async (id: string) =>
+  (
+    await db()
+      .select({ token: jobs.claimToken, until: jobs.claimUntil })
+      .from(jobs)
+      .where(eq(jobs.id, id))
+  )[0]!;
+/** Ages the claim past its 3 minutes, as if the step that holds it hung. */
+const expireClaim = (id: string) =>
+  db()
+    .update(jobs)
+    .set({ claimUntil: sql`now() - interval '1 second'` })
+    .where(eq(jobs.id, id));
+const exists = async (id: string) => (await getJob(id)) !== null;
+
+beforeEach(async () => {
+  await truncate();
+  await seed(USERS);
 });
 
 describe('newJobId', () => {
@@ -91,82 +105,146 @@ describe('newJobId', () => {
   });
 });
 
-describe('createJob', () => {
+describe('createJob / getJob', () => {
   it('waits for the browser upload when no object exists yet', async () => {
     const job = await createJob(input, 'job1');
     expect(job.state).toBe('AWAITING_UPLOAD');
     expect(job.object).toBe('uploads/job1');
-    expect(store.has('jobs/job1')).toBe(true);
+    expect(await getJob('job1')).toEqual(job);
   });
 
-  it('starts at PREP for samples that already sit in the bucket', async () => {
-    const job = await createJob({ ...input, object: SAMPLE_OBJECT }, 'job2');
+  it('starts at PREP when the object already sits in the bucket', async () => {
+    const job = await createJob({ ...input, object: SOURCE_OBJECT }, 'job2');
     expect(job.state).toBe('PREP');
-    expect(job.object).toBe(SAMPLE_OBJECT);
+    expect(job.object).toBe(SOURCE_OBJECT);
   });
-});
 
-describe('getJob / updateJob', () => {
+  it('stores the owner, artist, destination and upload markers as columns', async () => {
+    await createJob({ ...input, ownerUid: USER_A.uid, artistId: 'flr' }, 'j');
+    await patch('j', {
+      destination: { channelId: 'UCflr', channelTitle: 'Flies Like Robots' },
+      uploadStartedAt: 5,
+      finalChunkAt: 6,
+      videoId: 'vid1',
+    });
+    const [row] = await db().select().from(jobs).where(eq(jobs.id, 'j'));
+    expect(row).toMatchObject({
+      ownerUid: USER_A.uid,
+      artistId: 'flr',
+      parentId: null,
+      destinationChannelId: 'UCflr',
+      destinationChannelTitle: 'Flies Like Robots',
+      uploadStartedAt: new Date(5),
+      finalChunkAt: new Date(6),
+      videoId: 'vid1',
+    });
+    expect(row!.data).not.toHaveProperty('ownerUid');
+    expect(await getJob('j')).toMatchObject({
+      destination: { channelId: 'UCflr', channelTitle: 'Flies Like Robots' },
+      uploadStartedAt: 5,
+      finalChunkAt: 6,
+    });
+  });
+
+  it('refuses a job whose owner is not a user', async () => {
+    await expect(createJob({ ...input, ownerUid: 'nobody' }, 'j')).rejects.toThrow();
+  });
+
   it('returns null for a missing job', async () => {
     expect(await getJob('nope')).toBeNull();
-  });
-
-  it('merges a patch and bumps updatedAt', async () => {
-    await createJob(input, 'j');
-    await updateJob('j', { state: 'ANALYZE' });
-    expect((await getJob('j'))?.state).toBe('ANALYZE');
   });
 });
 
 describe('claimJob / releaseJob', () => {
-  it('hands out one claim at a time', async () => {
+  it('hands out one claim at a time, with a fresh random token, for 3 minutes', async () => {
     await createJob(input, 'j');
-    const token = await claimJob('j', 1000);
-    expect(token).toBeTruthy();
-    expect(await claimJob('j', 2000)).toBeNull();
+    const claimed = await claimJob('j');
+    expect(claimed?.token).toMatch(/^[0-9a-f]{32}$/);
+    expect(await claimJob('j')).toBeNull();
+    const { until } = await claimRow('j');
+    expect(until!.getTime() - Date.now()).toBeGreaterThan(2.9 * 60 * 1000);
+    expect(until!.getTime() - Date.now()).toBeLessThanOrEqual(3 * 60 * 1000);
   });
 
-  it('frees the job once the claim lapses', async () => {
+  it('frees the job once the claim lapses, with a new token', async () => {
     await createJob(input, 'j');
-    await claimJob('j', 1000);
-    expect(await claimJob('j', 1000 + CLAIM_TTL_MS + 1)).toBeTruthy();
+    const first = await claimJob('j');
+    await expireClaim('j');
+    const second = await claimJob('j');
+    expect(second?.token).toBeTruthy();
+    expect(second?.token).not.toBe(first?.token);
   });
 
   it('returns null for a missing job', async () => {
     expect(await claimJob('ghost')).toBeNull();
   });
 
-  it('returns the job as read inside the claim', async () => {
-    await createJob({ ...input, object: SAMPLE_OBJECT }, 'j');
+  it('returns the job as the claim left it', async () => {
+    await createJob({ ...input, object: SOURCE_OBJECT }, 'j');
     const claimed = await claimJob('j');
     expect(claimed?.job.state).toBe('PREP');
-    expect(claimed?.token).toMatch(/^[0-9a-f]{16}$/);
+    expect(claimed?.job).not.toHaveProperty('claimToken');
   });
 
-  it('applies the patch and clears the claim for the holder', async () => {
+  it('applies the patch and output and clears the claim for the holder', async () => {
     await createJob(input, 'j');
     const { token } = (await claimJob('j'))!;
-    expect(await releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(true);
-    const job = await getJob('j');
-    expect(job?.state).toBe('PICK');
-    expect(job?.claim).toBeNull();
+    const released = await releaseJob(
+      'j',
+      token,
+      'AWAITING_UPLOAD',
+      { state: 'PICK', chunkIndex: 1 },
+      { pick: pick(1), chunk: chunk(0) },
+    );
+    expect(released).toBe(true);
+    expect(await getJob('j')).toMatchObject({ state: 'PICK', chunkIndex: 1 });
+    expect(await claimRow('j')).toEqual({ token: null, until: null });
+    expect(await listPicks('j')).toEqual([{ ...pick(1), skipped: false }]);
+    expect(await listChunks('j')).toEqual([chunk(0)]);
   });
 
   it('drops the patch but frees the job when an action moved it during the step', async () => {
     await createJob(input, 'j');
     const { token } = (await claimJob('j'))!;
-    await updateJob('j', { state: 'DISCARDED' });
-    expect(await releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(false);
-    const job = await getJob('j');
-    expect(job?.state).toBe('DISCARDED');
-    expect(job?.claim).toBeNull();
+    await patch('j', { state: 'DISCARDED' });
+    expect(
+      await releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' }, { pick: pick(1) }),
+    ).toBe(false);
+    expect((await getJob('j'))?.state).toBe('DISCARDED');
+    expect(await claimRow('j')).toEqual({ token: null, until: null });
+    expect(await listPicks('j')).toEqual([]);
   });
 
-  it('refuses a stale token', async () => {
+  it('refuses a stale token and leaves the live claim alone', async () => {
     await createJob(input, 'j');
-    await claimJob('j');
+    const { token } = (await claimJob('j'))!;
     expect(await releaseJob('j', 'stale', 'AWAITING_UPLOAD', { state: 'PICK' })).toBe(false);
     expect((await getJob('j'))?.state).toBe('AWAITING_UPLOAD');
+    expect((await claimRow('j')).token).toBe(token);
+  });
+
+  it('lets a late step neither write nor clear the claim that replaced its own', async () => {
+    await createJob({ ...input, object: SOURCE_OBJECT }, 'j');
+    const a = (await claimJob('j'))!;
+    await expireClaim('j');
+    const b = (await claimJob('j'))!;
+
+    const late = await releaseJob(
+      'j',
+      a.token,
+      'PREP',
+      { state: 'ANALYZE', chunkCount: 9 },
+      { pick: pick(1), chunk: chunk(0) },
+    );
+    expect(late).toBe(false);
+    expect(await getJob('j')).toMatchObject({ state: 'PREP', chunkCount: 0 });
+    expect((await claimRow('j')).token).toBe(b.token);
+    expect(await listPicks('j')).toEqual([]);
+    expect(await listChunks('j')).toEqual([]);
+
+    expect(await releaseJob('j', b.token, 'PREP', { state: 'ANALYZE', chunkCount: 2 })).toBe(true);
+    expect(await getJob('j')).toMatchObject({ state: 'ANALYZE', chunkCount: 2 });
+    expect(await claimRow('j')).toEqual({ token: null, until: null });
   });
 
   it(REFUSES_MISSING, async () => {
@@ -175,11 +253,18 @@ describe('claimJob / releaseJob', () => {
 });
 
 describe('transitionJob', () => {
-  it('moves the job only from an allowed state', async () => {
+  it('moves the job only from an allowed state, keeping data it does not name', async () => {
     await createJob(input, 'j');
     expect(await transitionJob('j', ['REVIEW'], { state: 'DISCARDED' })).toBe(false);
-    expect(await transitionJob('j', ['AWAITING_UPLOAD'], { state: 'PREP' })).toBe(true);
-    expect((await getJob('j'))?.state).toBe('PREP');
+    expect(await transitionJob('j', ['AWAITING_UPLOAD'], { state: 'PREP', error: 'x' })).toBe(true);
+    expect(await getJob('j')).toMatchObject({ state: 'PREP', error: 'x', songTitle: 'PeekaBoo' });
+  });
+
+  it('bumps updatedAt', async () => {
+    const job = await createJob(input, 'j');
+    await new Promise((r) => setTimeout(r, 2));
+    await transitionJob('j', ['AWAITING_UPLOAD'], { state: 'PREP' });
+    expect((await getJob('j'))!.updatedAt).toBeGreaterThan(job.updatedAt);
   });
 
   it(REFUSES_MISSING, async () => {
@@ -190,35 +275,48 @@ describe('transitionJob', () => {
 describe('chunks and picks', () => {
   it('lists chunks in index order', async () => {
     await createJob(input, 'j');
-    await saveChunk('j', chunk(1));
-    await saveChunk('j', chunk(0));
-    expect((await listChunks('j')).map((c) => c.index)).toEqual([0, 1]);
+    await seed({
+      jobChunks: [1, 0, 10].map((i) => ({ jobId: 'j', index: i, data: chunk(i) })),
+    });
+    expect((await listChunks('j')).map((c) => c.index)).toEqual([0, 1, 10]);
   });
 
   it('tracks pick versions and skips', async () => {
     await createJob(input, 'j');
-    await updateJob('j', { state: 'REVIEW' });
+    await patch('j', { state: 'REVIEW' });
     expect(await latestPick('j')).toBeNull();
-    await savePick('j', pick(1));
-    await savePick('j', pick(2));
-    expect(await skipAndRepick('j', 1)).toBe(true);
+    await seedPicks('j', 2, 10, 1);
+    expect(await skipAndRepick('j', 10)).toBe(true);
     expect((await getJob('j'))?.state).toBe('PICK');
     expect(await skipAndRepick('j', 2)).toBe(false);
     const picks = await listPicks('j');
     expect(picks.map((p) => [p.version, p.skipped])).toEqual([
-      [1, true],
+      [1, false],
       [2, false],
+      [10, true],
     ]);
-    expect((await latestPick('j'))?.version).toBe(2);
+    expect((await latestPick('j'))?.version).toBe(10);
   });
 });
 
 describe('skipAndRepick', () => {
   it('queues a pick with nothing to skip', async () => {
     await createJob(input, 'j');
-    await updateJob('j', { state: 'REVIEW' });
+    await patch('j', { state: 'REVIEW', error: 'old' });
     expect(await skipAndRepick('j', null)).toBe(true);
-    expect((await getJob('j'))?.state).toBe('PICK');
+    expect(await getJob('j')).toMatchObject({ state: 'PICK', error: null });
+  });
+
+  it('runs the extra write in the same transaction and rolls back with it', async () => {
+    await createJob(input, 'j');
+    await patch('j', { state: 'REVIEW' });
+    await seedPicks('j', 1);
+    const boom = skipAndRepick('j', 1, async () => {
+      throw new Error('boom');
+    });
+    await expect(boom).rejects.toThrow('boom');
+    expect((await getJob('j'))?.state).toBe('REVIEW');
+    expect((await listPicks('j'))[0]!.skipped).toBe(false);
   });
 
   it(REFUSES_MISSING, async () => {
@@ -227,15 +325,21 @@ describe('skipAndRepick', () => {
 });
 
 describe('newJobDoc', () => {
-  it('builds a video job with no Short attached', () => {
+  it('builds a video job with no parent, Short, destination or upload markers', () => {
     const doc = newJobDoc(input, 'j', 5);
     expect(doc).toMatchObject({
       id: 'j',
       state: 'AWAITING_UPLOAD',
+      ownerUid: USER_B.uid,
+      artistId: null,
+      parentId: null,
+      destination: null,
       object: 'uploads/j',
       shortId: null,
       short: null,
       sourceObject: null,
+      uploadStartedAt: null,
+      finalChunkAt: null,
       createdAt: 5,
       updatedAt: 5,
     });
@@ -243,9 +347,12 @@ describe('newJobDoc', () => {
 });
 
 describe('createShort', () => {
-  async function parent(patch: Record<string, unknown> = {}) {
-    await createJob({ ...input, owner: 'nathan', channel: 'nathan', object: SAMPLE_OBJECT }, 'p');
-    await updateJob('p', {
+  async function parent(fields: Partial<JobDoc> = {}) {
+    await createJob(
+      { ...input, ownerUid: USER_A.uid, artistId: 'flr', object: SOURCE_OBJECT },
+      'p',
+    );
+    await patch('p', {
       state: 'REVIEW',
       probe: { durationSec: 180, width: 1920, height: 1080, hasAudio: true },
       hashtagCandidates: [SYNTHWAVE],
@@ -256,33 +363,34 @@ describe('createShort', () => {
         top: [],
       },
       pickVersion: 3,
-      ...patch,
+      destination: { channelId: 'UCflr', channelTitle: 'FLR' },
+      ...fields,
     });
-    await savePick('p', pick(2));
-    await savePick('p', pick(3));
+    await seedPicks('p', 2, 3);
     return (await getJob('p'))!;
   }
 
-  it('creates a HOOK job carrying the pick on screen, candidates, trace, and owner', async () => {
+  it('creates a HOOK job carrying the pick on screen, candidates, trace, owner and parent', async () => {
     const job = await parent();
-    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's1')).toEqual({ id: 's1' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
     const short = (await getJob('s1'))!;
     expect(short).toMatchObject({
       state: 'HOOK',
-      owner: 'nathan',
-      channel: 'nathan',
+      ownerUid: USER_A.uid,
+      artistId: 'flr',
+      parentId: 'p',
+      destination: null,
       songTitle: 'PeekaBoo',
       filename: 'peekaboo (Short).mp4',
       contentType: 'video/mp4',
       object: 'uploads/s1',
-      sourceObject: SAMPLE_OBJECT,
+      sourceObject: SOURCE_OBJECT,
       hashtagCandidates: [SYNTHWAVE],
       audience: { tags: [{ tag: 'synthwave', usedBy: 2 }] },
       pickVersion: 1,
       trace: { sentryTrace: 't-s-1', baggage: 'b' },
       shortId: null,
       short: {
-        parentId: 'p',
         sourceDurationSec: 180,
         reframe: 'blur',
         hook: null,
@@ -291,63 +399,35 @@ describe('createShort', () => {
         modelMs: 0,
       },
     });
-    const picks = await listPicks('s1');
-    expect(picks).toEqual([{ ...pick(3), version: 1, skipped: false }]);
+    expect(await listPicks('s1')).toEqual([{ ...pick(3), version: 1, skipped: false }]);
     expect((await getJob('p'))!.shortId).toBe('s1');
   });
 
   it('returns the live Short instead of starting a second one', async () => {
     const job = await parent();
-    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
-    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's1' });
-    expect(store.has('jobs/s2')).toBe(false);
+    await createShort(job, SHORT_SOURCE_STATES, 's1');
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's2')).toEqual({ id: 's1' });
+    expect(await exists('s2')).toBe(false);
   });
 
   it('starts a new Short once the old one was discarded', async () => {
     const job = await parent();
-    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
-    await updateJob('s1', { state: 'DISCARDED' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's2')).toEqual({ id: 's2' });
+    await createShort(job, SHORT_SOURCE_STATES, 's1');
+    await patch('s1', { state: 'DISCARDED' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's2')).toEqual({ id: 's2' });
     expect((await getJob('p'))!.shortId).toBe('s2');
   });
 
   it('starts a new Short when the recorded one is gone', async () => {
     const job = await parent({ shortId: 'vanished' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's3')).toEqual({ id: 's3' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's3')).toEqual({ id: 's3' });
   });
 
   it('refuses a parent that left the allowed states, or is missing', async () => {
     const job = await parent({ state: 'DISCARDED' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, null, 's1')).toBeNull();
-    expect(store.has('jobs/s1')).toBe(false);
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toBeNull();
+    expect(await exists('s1')).toBe(false);
     expect(await createShort({ ...job, id: 'ghost' }, SHORT_SOURCE_STATES)).toBeNull();
-  });
-
-  it('charges a new Short in the same transaction and starts it when the charge passes', async () => {
-    const job = await parent();
-    const charge = vi.fn(async () => null);
-    expect(await createShort(job, SHORT_SOURCE_STATES, charge, 's1')).toEqual({
-      id: 's1',
-    });
-    expect(charge).toHaveBeenCalledOnce();
-  });
-
-  it('starts nothing when the charge names a cap', async () => {
-    const job = await parent();
-    const charge = async () => '5 runs per visitor per day. Try again tomorrow.';
-    expect(await createShort(job, SHORT_SOURCE_STATES, charge, 's1')).toEqual({
-      blocked: '5 runs per visitor per day. Try again tomorrow.',
-    });
-    expect(store.has('jobs/s1')).toBe(false);
-    expect((await getJob('p'))!.shortId).toBeNull();
-  });
-
-  it('never charges for returning the live Short', async () => {
-    const job = await parent();
-    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
-    const charge = vi.fn(async () => null);
-    await createShort(job, SHORT_SOURCE_STATES, charge, 's2');
-    expect(charge).not.toHaveBeenCalled();
   });
 
   it('starts from the approved fields over the pick, as read inside the transaction', async () => {
@@ -358,24 +438,24 @@ describe('createShort', () => {
       hashtags: [],
       tags: ['synthwave'],
     };
-    await updateJob('p', { state: 'PUBLISHING', finalFields: final });
-    expect(await createShort(stale, SHORT_SOURCE_STATES, null, 's1')).toEqual({ id: 's1' });
+    await patch('p', { state: 'PUBLISHING', finalFields: final });
+    expect(await createShort(stale, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
     expect(await listPicks('s1')).toEqual([{ ...pick(3), ...final, version: 1, skipped: false }]);
   });
 
-  it('starts nothing, uncharged, when the video has no pick on screen', async () => {
-    const charge = vi.fn(async () => null);
+  it('starts nothing when the video has no pick on screen', async () => {
     const none = await parent({ pickVersion: null });
-    expect(await createShort(none, SHORT_SOURCE_STATES, charge, 's1')).toEqual({ noPick: true });
+    expect(await createShort(none, SHORT_SOURCE_STATES, 's1')).toEqual({ noPick: true });
+    await db().delete(jobs).where(eq(jobs.id, 'p'));
     const gone = await parent({ pickVersion: 9 });
-    expect(await createShort(gone, SHORT_SOURCE_STATES, charge, 's2')).toEqual({ noPick: true });
-    expect(charge).not.toHaveBeenCalled();
-    expect(store.has('jobs/s1') || store.has('jobs/s2')).toBe(false);
+    expect(await createShort(gone, SHORT_SOURCE_STATES, 's2')).toEqual({ noPick: true });
+    expect((await exists('s1')) || (await exists('s2'))).toBe(false);
+    expect(await db().select().from(jobPicks).where(eq(jobPicks.jobId, 's2'))).toEqual([]);
   });
 
   it('keeps a filename without an extension readable', async () => {
     const job = await parent({ filename: 'master take' });
-    await createShort(job, SHORT_SOURCE_STATES, null, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, 's1');
     expect((await getJob('s1'))!.filename).toBe('master take (Short).mp4');
   });
 });
@@ -391,10 +471,19 @@ describe('ok', () => {
 });
 
 describe('toPublic', () => {
-  it('passes the Short link and cut through, but not the source object', async () => {
+  it('passes the Short link, parent, destination and approved fields through', async () => {
     const job = await createJob(input, 'j');
-    const pub = toPublic({ ...job, shortId: 's1', sourceObject: 'uploads/p' });
-    expect(pub.shortId).toBe('s1');
+    const final = { title: 't', description: 'd', hashtags: [], tags: [] };
+    const destination = { channelId: 'UCflr', channelTitle: null };
+    const pub = toPublic({
+      ...job,
+      shortId: 's1',
+      parentId: 'p',
+      destination,
+      finalFields: final,
+      sourceObject: 'uploads/p',
+    });
+    expect(pub).toMatchObject({ shortId: 's1', parentId: 'p', destination, finalFields: final });
     expect(pub.short).toBeNull();
     expect(pub).not.toHaveProperty('sourceObject');
   });
@@ -404,28 +493,21 @@ describe('toPublic', () => {
     const pub = toPublic({
       ...job,
       upload: { sessionUri: 'secret', total: 1 },
-      claim: { token: 't', until: 1 },
+      uploadStartedAt: 1,
+      finalChunkAt: 2,
     });
-    expect(pub).not.toHaveProperty('upload');
-    expect(pub).not.toHaveProperty('claim');
-    expect(pub).not.toHaveProperty('ipHash');
-    expect(pub).not.toHaveProperty('trace');
+    for (const field of [
+      'upload',
+      'ownerUid',
+      'artistId',
+      'trace',
+      'uploadStartedAt',
+      'finalChunkAt',
+      'audience',
+    ]) {
+      expect(pub).not.toHaveProperty(field);
+    }
     expect(pub.songTitle).toBe('PeekaBoo');
-  });
-});
-
-describe('canAccess', () => {
-  it('lets anyone holding the ID see a visitor job', () => {
-    expect(canAccess({ owner: 'visitor' }, false)).toBe(true);
-  });
-
-  it('lets anyone holding the ID see a demo job', () => {
-    expect(canAccess({ owner: 'demo' }, false)).toBe(true);
-  });
-
-  it("keeps Nathan's jobs to allowlisted sessions", () => {
-    expect(canAccess({ owner: 'nathan' }, false)).toBe(false);
-    expect(canAccess({ owner: 'nathan' }, true)).toBe(true);
   });
 });
 

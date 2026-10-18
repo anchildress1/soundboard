@@ -30,3 +30,6 @@ export function resetDb(): void {
   pool = null;
   database = null;
 }
+
+/** A transaction handle, for helpers that write inside the caller's transaction. */
+export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];

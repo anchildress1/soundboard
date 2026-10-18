@@ -1,25 +1,26 @@
 import { randomBytes } from 'node:crypto';
-import type { Transaction } from '@google-cloud/firestore';
-import type { Channel, Chunk, JobOwner, JobState, Pick, PickFields, PublicJob } from '$lib/types';
-import { db } from '$lib/server/core/clients';
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
+import { db, type Tx } from '$lib/server/core/db';
+import { jobChunks, jobPicks, jobs } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import { fromRow, jobRow, jobSet } from './rows';
 
 /** A step's claim on a job; an aborted request frees the job when it lapses. */
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
 
-/** Longest video each owner may run, in minutes. */
-export const MAX_MINUTES = { nathan: 15, demo: 15, visitor: 5 } as const;
+/** Longest video anyone may run. */
+export const MAX_MINUTES = 15;
 
 export type JobDoc = PublicJob & {
+  ownerUid: string;
+  /** The owner's artist link when the job was created. */
+  artistId: string | null;
   object: string;
   contentType: string;
-  liveVideoId: string | null;
-  ipHash: string | null;
   consecutiveFailures: number;
-  claim: { token: string; until: number } | null;
   trace: { sentryTrace: string; baggage: string } | null;
   upload: { sessionUri: string; total: number } | null;
-  finalFields: PickFields | null;
   /** Version of the recommendation on screen; approve must name it. */
   pickVersion: number | null;
   /** The genre search behind the pick; re-runs reuse it. */
@@ -27,46 +28,42 @@ export type JobDoc = PublicJob & {
   verifyAttempts: number;
   /** A Short job's source video object; null on video jobs. */
   sourceObject: string | null;
+  /** Set before the first upload-initiation request; nothing clears it. */
+  uploadStartedAt: number | null;
+  /** Set before sending the chunk that reaches the file size; nothing clears it. */
+  finalChunkAt: number | null;
   updatedAt: number;
 };
 
 export type NewJob = {
-  owner: JobOwner;
-  channel: Channel;
+  ownerUid: string;
+  artistId: string | null;
   songTitle: string;
   notes: string;
   filename: string;
   contentType: string;
   object: string | null;
-  sampleId: string | null;
-  liveVideoId: string | null;
-  ipHash: string | null;
   trace: JobDoc['trace'];
 };
 
-/** 128 random bits: job IDs double as the capability to read a visitor job. */
+/** 128 random bits, so job IDs can't be guessed or enumerated. */
 export function newJobId(): string {
   return randomBytes(16).toString('base64url');
 }
-
-const jobs = () => db().collection('jobs');
-const pad = (n: number) => String(n).padStart(4, '0');
-export const jobRef = (id: string) => jobs().doc(id);
 
 export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
   return {
     id,
     state: input.object ? 'PREP' : 'AWAITING_UPLOAD',
-    owner: input.owner,
-    channel: input.channel,
+    ownerUid: input.ownerUid,
+    artistId: input.artistId,
+    parentId: null,
+    destination: null,
     songTitle: input.songTitle,
     notes: input.notes,
     filename: input.filename,
     contentType: input.contentType,
-    sampleId: input.sampleId,
-    liveVideoId: input.liveVideoId,
     object: input.object ?? `uploads/${id}`,
-    ipHash: input.ipHash,
     probe: null,
     measurements: null,
     chunkCount: 0,
@@ -75,9 +72,7 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
     error: null,
     uploadProgress: null,
     videoId: null,
-    payload: null,
     consecutiveFailures: 0,
-    claim: null,
     trace: input.trace,
     hashtagCandidates: null,
     audience: null,
@@ -88,6 +83,8 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
     shortId: null,
     short: null,
     sourceObject: null,
+    uploadStartedAt: null,
+    finalChunkAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -95,45 +92,55 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
 
 export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
   const doc = newJobDoc(input, id);
-  await jobs().doc(id).set(doc);
+  await db().insert(jobs).values(jobRow(doc));
   return doc;
 }
 
 export async function getJob(id: string): Promise<JobDoc | null> {
-  const snap = await jobs().doc(id).get();
-  return snap.exists ? (snap.data() as JobDoc) : null;
-}
-
-export async function updateJob(id: string, patch: Partial<JobDoc>): Promise<void> {
-  await jobs()
-    .doc(id)
-    .update({ ...patch, updatedAt: Date.now() });
+  const [row] = await db().select().from(jobs).where(eq(jobs.id, id));
+  return row ? fromRow(row) : null;
 }
 
 /**
- * Claims the job for one step and returns the job as read inside the claim, so the step never runs
- * on a snapshot another request already moved past. Returns null while another request holds an
- * unexpired claim, so a second tab waits instead of double-running the step.
+ * Claims the job for one step with a fresh token and returns the job as the claim left it, so the
+ * step never runs on a snapshot another request already moved past. Returns null while another
+ * request holds an unexpired claim, so a second tab waits instead of double-running the step.
  */
-export async function claimJob(
-  id: string,
-  now = Date.now(),
-): Promise<{ token: string; job: JobDoc } | null> {
-  const ref = jobs().doc(id);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) return null;
-    const job = snap.data() as JobDoc;
-    if (job.claim && job.claim.until > now) return null;
-    const token = randomBytes(8).toString('hex');
-    tx.update(ref, { claim: { token, until: now + CLAIM_TTL_MS } });
-    return { token, job };
-  });
+export async function claimJob(id: string): Promise<{ token: string; job: JobDoc } | null> {
+  const token = randomBytes(16).toString('hex');
+  const [row] = await db()
+    .update(jobs)
+    .set({
+      claimToken: token,
+      claimUntil: sql`now() + ${CLAIM_TTL_MS}::int * interval '1 millisecond'`,
+    })
+    .where(and(eq(jobs.id, id), or(isNull(jobs.claimUntil), lt(jobs.claimUntil, sql`now()`))))
+    .returning();
+  return row ? { token, job: fromRow(row) } : null;
 }
 
+export type StoredPick = Pick & { skipped: boolean };
+
+async function putPick(tx: Tx, jobId: string, pick: StoredPick): Promise<void> {
+  await tx
+    .insert(jobPicks)
+    .values({ jobId, version: pick.version, data: pick })
+    .onConflictDoUpdate({ target: [jobPicks.jobId, jobPicks.version], set: { data: pick } });
+}
+
+async function putChunk(tx: Tx, jobId: string, chunk: Chunk): Promise<void> {
+  await tx
+    .insert(jobChunks)
+    .values({ jobId, index: chunk.index, data: chunk })
+    .onConflictDoUpdate({ target: [jobChunks.jobId, jobChunks.index], set: { data: chunk } });
+}
+
+const released = { claimToken: null, claimUntil: null };
+
 /**
- * Applies the step's result and drops the claim. The patch is skipped when the claim lapsed to
- * someone else or an action (discard, re-run) moved the job off the state the step started from.
+ * Applies the step's result and drops the claim, only while `token` still holds it. The patch is
+ * skipped when an action (discard, re-run) moved the job off the state the step started from; a
+ * token whose claim lapsed to someone else writes nothing and leaves the newer claim in place.
  */
 export async function releaseJob(
   id: string,
@@ -142,23 +149,23 @@ export async function releaseJob(
   patch: Partial<JobDoc> = {},
   writes: { pick?: Pick; chunk?: Chunk } = {},
 ): Promise<boolean> {
-  const ref = jobs().doc(id);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists) return false;
-    const job = snap.data() as JobDoc;
-    if (job.claim?.token !== token) return false;
-    if (job.state !== claimedState) {
-      tx.update(ref, { claim: null, updatedAt: Date.now() });
+  const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
+  return db().transaction(async (tx) => {
+    const [kept] = await tx
+      .update(jobs)
+      .set({ ...jobSet(patch), ...released })
+      .where(and(held, eq(jobs.state, claimedState)))
+      .returning({ id: jobs.id });
+    if (!kept) {
+      await tx
+        .update(jobs)
+        .set({ ...jobSet({}), ...released })
+        .where(held);
       return false;
     }
     // Step output lands in the same transaction, so a worker that lost its claim persists nothing.
-    if (writes.pick) {
-      const stored: StoredPick = { ...writes.pick, skipped: false };
-      tx.set(ref.collection('pick').doc(pad(writes.pick.version)), stored);
-    }
-    if (writes.chunk) tx.set(ref.collection('chunks').doc(pad(writes.chunk.index)), writes.chunk);
-    tx.update(ref, { ...patch, claim: null, updatedAt: Date.now() });
+    if (writes.pick) await putPick(tx, id, { ...writes.pick, skipped: false });
+    if (writes.chunk) await putChunk(tx, id, writes.chunk);
     return true;
   });
 }
@@ -169,61 +176,82 @@ export async function transitionJob(
   from: readonly JobState[],
   patch: Partial<JobDoc>,
 ): Promise<boolean> {
-  const ref = jobs().doc(id);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || !from.includes((snap.data() as JobDoc).state)) return false;
-    tx.update(ref, { ...patch, updatedAt: Date.now() });
-    return true;
-  });
-}
-
-export async function saveChunk(id: string, chunk: Chunk): Promise<void> {
-  await jobs().doc(id).collection('chunks').doc(pad(chunk.index)).set(chunk);
+  const moved = await db()
+    .update(jobs)
+    .set(jobSet(patch))
+    .where(and(eq(jobs.id, id), inArray(jobs.state, [...from])))
+    .returning({ id: jobs.id });
+  return moved.length > 0;
 }
 
 export async function listChunks(id: string): Promise<Chunk[]> {
-  const snap = await jobs().doc(id).collection('chunks').get();
-  return snap.docs.map((d) => d.data() as Chunk).sort((a, b) => a.index - b.index);
-}
-
-export type StoredPick = Pick & { skipped: boolean };
-
-export async function savePick(id: string, pick: Pick): Promise<void> {
-  const stored: StoredPick = { ...pick, skipped: false };
-  await jobs().doc(id).collection('pick').doc(pad(pick.version)).set(stored);
+  const rows = await db()
+    .select({ data: jobChunks.data })
+    .from(jobChunks)
+    .where(eq(jobChunks.jobId, id))
+    .orderBy(asc(jobChunks.index));
+  return rows.map((r) => r.data as Chunk);
 }
 
 /**
- * Marks the pick skipped, queues a new pick, and commits `alsoWrite` (the SKIPPED feedback) in one
+ * Marks the pick skipped, queues a new pick, and runs `alsoWrite` (the SKIPPED feedback) in one
  * transaction; false if the job already left REVIEW.
  */
 export async function skipAndRepick(
   id: string,
   version: number | null,
-  alsoWrite: (tx: Transaction) => void = () => {},
+  alsoWrite: (tx: Tx) => Promise<void> = async () => {},
 ): Promise<boolean> {
-  const ref = jobs().doc(id);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || (snap.data() as JobDoc).state !== 'REVIEW') return false;
-    if (version !== null) tx.update(ref.collection('pick').doc(pad(version)), { skipped: true });
-    alsoWrite(tx);
-    tx.update(ref, { state: 'PICK', consecutiveFailures: 0, error: null, updatedAt: Date.now() });
+  return db().transaction(async (tx) => {
+    const moved = await tx
+      .update(jobs)
+      .set(jobSet({ state: 'PICK', consecutiveFailures: 0, error: null }))
+      .where(and(eq(jobs.id, id), eq(jobs.state, 'REVIEW')))
+      .returning({ id: jobs.id });
+    if (moved.length === 0) return false;
+    if (version !== null) {
+      await tx
+        .update(jobPicks)
+        .set({ data: sql`${jobPicks.data} || '{"skipped":true}'::jsonb` })
+        .where(and(eq(jobPicks.jobId, id), eq(jobPicks.version, version)));
+    }
+    await alsoWrite(tx);
     return true;
   });
 }
 
-/** Firestore key for a pick version, zero-padded so keys sort in version order. */
-export const pickKey = (version: number) => pad(version);
-
 export async function listPicks(id: string): Promise<StoredPick[]> {
-  const snap = await jobs().doc(id).collection('pick').get();
-  return snap.docs.map((d) => d.data() as StoredPick).sort((a, b) => a.version - b.version);
+  const rows = await db()
+    .select({ data: jobPicks.data })
+    .from(jobPicks)
+    .where(eq(jobPicks.jobId, id))
+    .orderBy(asc(jobPicks.version));
+  return rows.map((r) => r.data as StoredPick);
 }
 
 export async function latestPick(id: string): Promise<StoredPick | null> {
-  return (await listPicks(id)).at(-1) ?? null;
+  const [row] = await db()
+    .select({ data: jobPicks.data })
+    .from(jobPicks)
+    .where(eq(jobPicks.jobId, id))
+    .orderBy(desc(jobPicks.version))
+    .limit(1);
+  return (row?.data as StoredPick | undefined) ?? null;
+}
+
+/** The stored pick of one version, read inside the caller's transaction. */
+export async function pickIn(tx: Tx, id: string, version: number): Promise<StoredPick | null> {
+  const [row] = await tx
+    .select({ data: jobPicks.data })
+    .from(jobPicks)
+    .where(and(eq(jobPicks.jobId, id), eq(jobPicks.version, version)));
+  return (row?.data as StoredPick | undefined) ?? null;
+}
+
+/** Reads and row-locks the job inside the caller's transaction, so concurrent writers queue. */
+export async function lockJob(tx: Tx, id: string): Promise<JobDoc | null> {
+  const [row] = await tx.select().from(jobs).where(eq(jobs.id, id)).for('update');
+  return row ? fromRow(row) : null;
 }
 
 /** Strips server-only fields before a job reaches the browser. */
@@ -231,12 +259,11 @@ export function toPublic(doc: JobDoc): PublicJob {
   return {
     id: doc.id,
     state: doc.state,
-    owner: doc.owner,
-    channel: doc.channel,
+    parentId: doc.parentId,
+    destination: doc.destination,
     songTitle: doc.songTitle,
     notes: doc.notes,
     filename: doc.filename,
-    sampleId: doc.sampleId,
     probe: doc.probe,
     measurements: doc.measurements,
     chunkCount: doc.chunkCount,
@@ -245,17 +272,12 @@ export function toPublic(doc: JobDoc): PublicJob {
     error: doc.error,
     uploadProgress: doc.uploadProgress,
     videoId: doc.videoId,
-    payload: doc.payload,
+    finalFields: doc.finalFields,
     hashtagCandidates: doc.hashtagCandidates,
     shortId: doc.shortId,
     short: doc.short,
     createdAt: doc.createdAt,
   };
-}
-
-/** Visitor and demo jobs are reachable by their unguessable ID; Nathan's only from an allowlisted session. */
-export function canAccess(doc: { owner: JobOwner }, allowlisted: boolean): boolean {
-  return doc.owner !== 'nathan' || allowlisted;
 }
 
 /** A step that succeeded: the failure streak and the shown error reset. */
@@ -273,16 +295,13 @@ export function fail(state: JobState, message: string): Partial<JobDoc> {
 function shortDoc(current: JobDoc, id: string): JobDoc {
   const base = newJobDoc(
     {
-      owner: current.owner,
-      channel: current.channel,
+      ownerUid: current.ownerUid,
+      artistId: current.artistId,
       songTitle: current.songTitle,
       notes: current.notes,
       filename: `${current.filename.replace(/\.[^.]+$/, '')} (Short).mp4`,
       contentType: 'video/mp4',
       object: null,
-      sampleId: current.sampleId,
-      liveVideoId: null,
-      ipHash: current.ipHash,
       trace: current.trace,
     },
     id,
@@ -290,12 +309,12 @@ function shortDoc(current: JobDoc, id: string): JobDoc {
   return {
     ...base,
     state: 'HOOK',
+    parentId: current.id,
     hashtagCandidates: current.hashtagCandidates,
     audience: current.audience,
     pickVersion: 1,
     sourceObject: current.object,
     short: {
-      parentId: current.id,
       sourceDurationSec: current.probe?.durationSec ?? 0,
       reframe: 'blur',
       hook: null,
@@ -306,53 +325,41 @@ function shortDoc(current: JobDoc, id: string): JobDoc {
   };
 }
 
-/** The video's Short, unless it was discarded or is gone. */
-async function liveShortId(tx: Transaction, id: string | null): Promise<string | null> {
-  if (!id) return null;
-  const snap = await tx.get(jobs().doc(id));
-  return snap.exists && (snap.data() as JobDoc).state !== 'DISCARDED' ? id : null;
+/** Whether the Short exists and wasn't discarded. */
+async function isLive(tx: Tx, id: string): Promise<boolean> {
+  const [row] = await tx.select({ state: jobs.state }).from(jobs).where(eq(jobs.id, id));
+  return row !== undefined && row.state !== 'DISCARDED';
 }
 
-export type ShortStart = { id: string } | { blocked: string } | { noPick: true } | null;
+export type ShortStart = { id: string } | { noPick: true } | null;
 
 /**
  * Cuts a Short job from a video job. Everything is read inside the transaction, so an approval that
  * lands first is what the Short starts from: the video's approved fields over its pick on screen
  * become the Short's pick v1. Candidate lists come along so approve holds the same rules, and the
  * trace is shared, so the Short lands in the video's trace. One live Short per video: an existing
- * one that isn't discarded is returned instead, uncharged. A new one first passes `charge` (a run
- * cap) in the same transaction. Null when the parent left `states` before the transaction ran.
+ * one that isn't discarded is returned instead. Null when the parent left `states` before the
+ * transaction ran.
  */
 export async function createShort(
   parent: JobDoc,
   states: readonly JobState[],
-  charge: ((tx: Transaction) => Promise<string | null>) | null = null,
   id = newJobId(),
 ): Promise<ShortStart> {
-  const parentRef = jobs().doc(parent.id);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(parentRef);
-    const current = snap.exists ? (snap.data() as JobDoc) : null;
+  return db().transaction(async (tx) => {
+    const current = await lockJob(tx, parent.id);
     if (!current || !states.includes(current.state)) return null;
-    const live = await liveShortId(tx, current.shortId);
-    if (live) return { id: live };
-    const pickSnap =
-      current.pickVersion === null
-        ? null
-        : await tx.get(parentRef.collection('pick').doc(pad(current.pickVersion)));
-    if (!pickSnap?.exists) return { noPick: true };
-    const blocked = charge ? await charge(tx) : null;
-    if (blocked) return { blocked };
-    const pick: StoredPick = {
-      ...(pickSnap.data() as StoredPick),
-      ...current.finalFields,
-      version: 1,
-      skipped: false,
-    };
-    const doc = shortDoc(current, id);
-    tx.set(jobs().doc(id), doc);
-    tx.set(jobs().doc(id).collection('pick').doc(pad(1)), pick);
-    tx.update(parentRef, { shortId: id, updatedAt: Date.now() });
+    if (current.shortId && (await isLive(tx, current.shortId))) return { id: current.shortId };
+    const stored =
+      current.pickVersion === null ? null : await pickIn(tx, current.id, current.pickVersion);
+    if (!stored) return { noPick: true };
+    const pick: StoredPick = { ...stored, ...current.finalFields, version: 1, skipped: false };
+    await tx.insert(jobs).values(jobRow(shortDoc(current, id)));
+    await putPick(tx, id, pick);
+    await tx
+      .update(jobs)
+      .set(jobSet({ shortId: id }))
+      .where(eq(jobs.id, current.id));
     return { id };
   });
 }

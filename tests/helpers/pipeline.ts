@@ -1,6 +1,8 @@
 // Pure fixtures and fakes for the pipeline tests; the module mocks stay in the test file.
 import { EventEmitter } from 'node:events';
 import type { JobDoc } from '$lib/server/jobs/jobs';
+import { jobRow } from '$lib/server/jobs/rows';
+import { seed, type Seed } from './db';
 
 export const SYNTHWAVE = '#synthwave';
 export const RETROWAVE = '#retrowave';
@@ -175,22 +177,54 @@ export function defaultHandlers(): Handler[] {
   ];
 }
 
+// ---- users ----
+
+/** The e2e KMS fake's ciphertext format, so one fixture decrypts in unit tests and the E2E build. */
+export const sealed = (plain: string) => Buffer.from(`e2e-kms:${plain}`).toString('base64');
+
+/** Linked to Flies Like Robots, with YouTube connected to the FLR channel. */
+export const USER_A = { uid: 'uid-a', email: 'a@example.com', artistId: 'flr' } as const;
+/** Invited with no artist link and no connection. */
+export const USER_B = { uid: 'uid-b', email: 'b@example.com', artistId: null } as const;
+export const CHANNEL_A = 'UCflr';
+export const REFRESH_A = 'refresh-a';
+
+/** A and B as invited, signed-up users; A's YouTube grant is connected. */
+export const USERS = {
+  invites: [USER_A, USER_B].map((u) => ({ email: u.email, artistId: u.artistId, boundSub: u.uid })),
+  users: [USER_A, USER_B].map((u) => ({ ...u, inviteEmail: u.email, accessGeneration: 1 })),
+  connections: [
+    {
+      uid: USER_A.uid,
+      platform: 'youtube',
+      status: 'connected' as const,
+      channelId: CHANNEL_A,
+      channelTitle: 'Flies Like Robots',
+      scopes: ['openid', 'email'],
+      tokenCiphertext: sealed(REFRESH_A),
+      updatedAt: new Date(0),
+    },
+  ],
+} satisfies Seed;
+
+/** Patch for a job owned by A, on the FLR artist. */
+export const A_JOB = { ownerUid: USER_A.uid, artistId: USER_A.artistId } as const;
+
 // ---- jobs ----
 
 export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
   return {
     id: 'j1',
     state: 'PREP',
-    owner: 'visitor',
-    channel: null,
+    ownerUid: USER_B.uid,
+    artistId: null,
+    parentId: null,
+    destination: null,
     songTitle: 'PeekaBoo',
     notes: '',
     filename: 'peekaboo.mp4',
     contentType: 'video/mp4',
-    sampleId: null,
-    liveVideoId: null,
     object: 'uploads/j1',
-    ipHash: null,
     probe: null,
     measurements: null,
     chunkCount: 0,
@@ -199,9 +233,7 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     error: null,
     uploadProgress: null,
     videoId: null,
-    payload: null,
     consecutiveFailures: 0,
-    claim: null,
     trace: null,
     hashtagCandidates: null,
     audience: null,
@@ -212,8 +244,17 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     shortId: null,
     short: null,
     sourceObject: null,
+    uploadStartedAt: null,
+    finalChunkAt: null,
     createdAt: 1,
     updatedAt: 1,
     ...patch,
   };
+}
+
+/** Inserts `jobDoc(patch)`; its owner must already be seeded. */
+export async function seedJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
+  const doc = jobDoc(patch);
+  await seed({ jobs: [jobRow(doc)] });
+  return doc;
 }

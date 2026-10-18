@@ -1,39 +1,23 @@
 // @vitest-environment node
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
 import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jobs/actions';
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
-import {
-  createJob,
-  getJob,
-  listPicks,
-  savePick,
-  updateJob,
-  type JobDoc,
-  type NewJob,
-} from '$lib/server/jobs/jobs';
-import { quotaDay, UPLOADS_PER_DAY, VISITOR_UPLOADS_PER_DAY } from '$lib/server/jobs/quota';
-import type { Channel, Hook, JobOwner, JobState, Pick, Short } from '$lib/types';
+import { db } from '$lib/server/core/db';
+import { artistFeedback, connections, jobFeedback, jobs } from '$lib/server/core/schema';
+import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
+import { jobSet } from '$lib/server/jobs/rows';
+import type { Hook, JobState, Pick, Short } from '$lib/types';
+import { seed, truncate } from '../../../../helpers/db';
+import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const SYNTHWAVE_TAG = '#synthwave';
 const RETROWAVE = '#retrowave';
 const DESCRIPTION = 'A bright synth track.\n\n#synthwave #retrowave';
-const JOB_FEEDBACK = 'jobs/job1/feedback/';
 const EDITED_TITLE = 'Edited Title';
-const ARTIST_FEEDBACK = 'artists/flr/feedback/';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
-
-const sm = vi.hoisted(() => ({ accessSecretVersion: vi.fn() }));
-
-vi.mock('@google-cloud/secret-manager', () => ({
-  SecretManagerServiceClient: class {
-    accessSecretVersion = sm.accessSecretVersion;
-  },
-}));
+const CHANNEL_B = 'UCb';
+const RECONNECT = 'Reconnect YouTube to approve.';
 
 const candidates = [SYNTHWAVE_TAG, RETROWAVE, '#NewMusic'];
 
@@ -50,41 +34,44 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
   modelMs: 1,
 });
 
-const base: NewJob = {
-  owner: 'visitor',
-  channel: 'sandbox',
-  songTitle: 'PeekaBoo',
-  notes: '',
-  filename: 'p.mp4',
-  contentType: 'video/mp4',
-  object: 'samples/p.mp4',
-  sampleId: 'p',
-  liveVideoId: 'yt-p',
-  ipHash: null,
-  trace: null,
-};
+const patchJob = (fields: Partial<JobDoc>) =>
+  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'job1'));
 
+/** B's job by default: no artist link, so its feedback stays on the job. */
 async function makeJob(
   opts: {
-    owner?: JobOwner;
-    channel?: Channel;
+    owner?: typeof USER_A | typeof USER_B;
     state?: JobState;
     picks?: number;
     patch?: Partial<JobDoc>;
   } = {},
 ): Promise<JobDoc> {
+  const owner = opts.owner ?? USER_B;
   const id = 'job1';
+  // A second call replaces the job, like the tests that build two variants in a row expect.
+  await db().delete(jobs).where(eq(jobs.id, id));
   await createJob(
     {
-      ...base,
-      owner: opts.owner ?? 'visitor',
-      channel: opts.channel === undefined ? 'sandbox' : opts.channel,
+      ownerUid: owner.uid,
+      artistId: owner.artistId,
+      songTitle: 'PeekaBoo',
+      notes: '',
+      filename: 'p.mp4',
+      contentType: 'video/mp4',
+      object: 'uploads/p.mp4',
+      trace: null,
     },
     id,
   );
-  for (let v = 1; v <= (opts.picks ?? 1); v++) await savePick(id, pick(v));
   const picks = opts.picks ?? 1;
-  await updateJob(id, {
+  await seed({
+    jobPicks: Array.from({ length: picks }, (_, i) => ({
+      jobId: id,
+      version: i + 1,
+      data: { ...pick(i + 1), skipped: false },
+    })),
+  });
+  await patchJob({
     state: opts.state ?? 'REVIEW',
     hashtagCandidates: candidates,
     pickVersion: picks > 0 ? picks : null,
@@ -109,10 +96,10 @@ const input = (
   ...over,
 });
 
-const feedbackRows = (prefix: string) =>
-  [...store.entries()]
-    .filter(([k]) => k.startsWith(prefix))
-    .map(([, v]) => v as Record<string, unknown>);
+const jobRows = async () =>
+  (await db().select().from(jobFeedback)).map((r) => r.data as Record<string, unknown>);
+const artistRows = async () =>
+  (await db().select().from(artistFeedback)).map((r) => r.data as Record<string, unknown>);
 
 const rejection = async (promise: Promise<unknown>) => {
   const error = await promise.catch((e: unknown) => e);
@@ -120,15 +107,31 @@ const rejection = async (promise: Promise<unknown>) => {
   return error as ActionError;
 };
 
-const connected = () =>
-  sm.accessSecretVersion.mockResolvedValue([{ payload: { data: new TextEncoder().encode('rt') } }]);
+const setBStatus = (status: 'connected' | 'missing_scopes' | 'no_channel' | 'revoked') =>
+  db()
+    .update(connections)
+    .set({ status, tokenCiphertext: status === 'connected' ? 'c2VhbGVk' : null })
+    .where(eq(connections.uid, USER_B.uid));
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+beforeEach(async () => {
   resetClients();
   vi.clearAllMocks();
-  sm.accessSecretVersion.mockReset();
+  await truncate();
+  await seed(USERS);
+  await seed({
+    connections: [
+      {
+        uid: USER_B.uid,
+        platform: 'youtube',
+        status: 'connected',
+        channelId: CHANNEL_B,
+        channelTitle: 'B Sides',
+        scopes: [],
+        tokenCiphertext: 'c2VhbGVk',
+        updatedAt: new Date(0),
+      },
+    ],
+  });
 });
 
 describe('approve', () => {
@@ -140,7 +143,6 @@ describe('approve', () => {
   });
 
   it('refuses an approval with no recommendation on the job', async () => {
-    connected();
     const job = await makeJob({ picks: 0 });
     const error = await rejection(approve(job, input()));
     expect(error.status).toBe(409);
@@ -148,13 +150,12 @@ describe('approve', () => {
   });
 
   it('refuses an approval that names an older pick', async () => {
-    connected();
     const job = await makeJob({ picks: 2 });
     const error = await rejection(approve(job, input({ pickVersion: 1 })));
     expect(error.status).toBe(409);
     expect(error.message).toMatch(/newer recommendation/);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
   });
 
   it('refuses an approval with no pick version', async () => {
@@ -163,7 +164,6 @@ describe('approve', () => {
   });
 
   it('refuses when the job names a pick version that was never stored', async () => {
-    connected();
     const job = await makeJob({ patch: { pickVersion: 7 } });
     expect((await rejection(approve(job, input({ pickVersion: 7 })))).status).toBe(409);
   });
@@ -192,9 +192,9 @@ describe('approve', () => {
   });
 
   it('accepts the artist name and candidate tags in any case', async () => {
-    const job = await makeJob({ channel: null });
+    const job = await makeJob();
     await approve(job, input({ tags: ['flies like robots', 'SYNTHWAVE'] }));
-    expect((await getJob('job1'))!.state).toBe('PAYLOAD');
+    expect((await getJob('job1'))!.state).toBe('PUBLISHING');
   });
 
   it('reports a YouTube limit before the tag list', async () => {
@@ -210,7 +210,7 @@ describe('approve', () => {
     const error = await rejection(approve(job, input({ description: 'Out now #invented' })));
     expect(error.status).toBe(422);
     expect(error.fields).toEqual({ description: "Not in this job's hashtag list: #invented" });
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
 
@@ -234,80 +234,39 @@ describe('approve', () => {
 });
 
 describe('approve: where the upload goes', () => {
-  it('ends at the payload when the job has no channel', async () => {
-    const job = await makeJob({ channel: null });
-    await approve(job, input({ title: '  Title 1  ' }));
-    const after = (await getJob('job1'))!;
-    expect(after.state).toBe('PAYLOAD');
-    expect(after.payload).toEqual({
-      title: 'Title 1',
-      description: DESCRIPTION,
-      hashtags: [SYNTHWAVE_TAG, RETROWAVE],
-      tags: ['synthwave', 'outrun'],
-    });
-    expect(after.finalFields).toEqual(after.payload);
-    expect(sm.accessSecretVersion).not.toHaveBeenCalled();
+  it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
+    'refuses with 409 and changes nothing while YouTube is %s',
+    async (status) => {
+      await setBStatus(status);
+      const job = await makeJob();
+      const error = await rejection(approve(job, input()));
+      expect([error.status, error.message]).toEqual([409, RECONNECT]);
+      expect(await getJob('job1')).toMatchObject({ state: 'REVIEW', destination: null });
+      expect(await jobRows()).toHaveLength(0);
+    },
+  );
+
+  it('refuses with 409 when the owner never connected YouTube', async () => {
+    await db().delete(connections).where(eq(connections.uid, USER_B.uid));
+    const job = await makeJob();
+    expect((await rejection(approve(job, input()))).message).toBe(RECONNECT);
   });
 
-  it('ends at the payload with an error when the channel has no refresh token', async () => {
-    sm.accessSecretVersion.mockRejectedValue(Object.assign(new Error('nf'), { code: 5 }));
+  it("pins the owner's connected channel, never another user's", async () => {
     const job = await makeJob();
     await approve(job, input());
-    const after = (await getJob('job1'))!;
-    expect(after.state).toBe('PAYLOAD');
-    expect(after.error).toBe('The upload channel is not connected.');
-    expect(after.payload).not.toBeNull();
-    expect(sm.accessSecretVersion.mock.calls[0]![0]).toEqual({
-      name: 'projects/p/secrets/yt-refresh-sandbox/versions/latest',
+    expect((await getJob('job1'))!.destination).toEqual({
+      channelId: CHANNEL_B,
+      channelTitle: 'B Sides',
     });
-  });
-
-  it('ends at the payload when visitor upload quota is spent', async () => {
-    connected();
-    store.set(`quota/${quotaDay()}`, {
-      runs: 0,
-      ips: {},
-      uploads: VISITOR_UPLOADS_PER_DAY,
-      visitorUploads: VISITOR_UPLOADS_PER_DAY,
-    });
-    const job = await makeJob();
-    await approve(job, input());
-    const after = (await getJob('job1'))!;
-    expect(after.state).toBe('PAYLOAD');
-    expect(after.error).toBe("Today's upload quota is used up.");
-  });
-
-  it("still uploads Nathan's job when only the visitor share is spent", async () => {
-    connected();
-    store.set(`quota/${quotaDay()}`, {
-      runs: 0,
-      ips: {},
-      uploads: VISITOR_UPLOADS_PER_DAY,
-      visitorUploads: VISITOR_UPLOADS_PER_DAY,
-    });
-    const job = await makeJob({ owner: 'nathan', channel: 'nathan' });
-    await approve(job, input());
-    expect((await getJob('job1'))!.state).toBe('PUBLISHING');
-    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 5, visitorUploads: 4 });
-  });
-
-  it("ends Nathan's job at the payload once all six uploads are spent", async () => {
-    connected();
-    store.set(`quota/${quotaDay()}`, {
-      runs: 0,
-      ips: {},
-      uploads: UPLOADS_PER_DAY,
-      visitorUploads: 0,
-    });
-    const job = await makeJob({ owner: 'nathan', channel: 'nathan' });
-    await approve(job, input());
-    expect((await getJob('job1'))!.state).toBe('PAYLOAD');
   });
 
   it('moves to PUBLISHING with the final fields and maps hashtags to candidate casing', async () => {
-    connected();
     const job = await makeJob({ patch: { consecutiveFailures: 2, error: 'old' } });
-    await approve(job, input({ description: 'Edited.\n\n#synthwave #newmusic' }));
+    await approve(
+      job,
+      input({ title: '  Title 1  ', description: 'Edited.\n\n#synthwave #newmusic' }),
+    );
     const after = (await getJob('job1'))!;
     expect(after.state).toBe('PUBLISHING');
     expect(after.finalFields).toEqual({
@@ -316,55 +275,26 @@ describe('approve: where the upload goes', () => {
       hashtags: [SYNTHWAVE_TAG, '#NewMusic'],
       tags: ['synthwave', 'outrun'],
     });
-    // The approved fields stay visible while publishing, so the page shows what was sent.
-    expect(after.payload).toEqual(after.finalFields);
     expect(after.consecutiveFailures).toBe(0);
     expect(after.error).toBeNull();
-    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1, visitorUploads: 1 });
   });
 
-  it("uploads a demo job to the sandbox on the visitor share, never Nathan's slots", async () => {
-    connected();
-    store.set(`quota/${quotaDay()}`, {
-      runs: 0,
-      ips: {},
-      uploads: VISITOR_UPLOADS_PER_DAY,
-      visitorUploads: VISITOR_UPLOADS_PER_DAY,
-    });
-    const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
-    await approve(job, input());
-    const after = (await getJob('job1'))!;
-    expect(after.state).toBe('PAYLOAD');
-    expect(after.error).toBe("Today's upload quota is used up.");
-  });
-
-  it('keeps demo feedback on the job, out of the artist memory', async () => {
-    connected();
-    const job = await makeJob({ owner: 'demo', channel: 'sandbox' });
+  it('keeps feedback on a job with no artist link on the job', async () => {
+    const job = await makeJob();
     await approve(job, input({ title: EDITED_TITLE }));
-    expect((await getJob('job1'))!.state).toBe('PUBLISHING');
-    expect(feedbackRows(JOB_FEEDBACK).length).toBeGreaterThan(0);
-    expect(feedbackRows('artists/')).toHaveLength(0);
-  });
-
-  it('keeps visitor feedback on the job', async () => {
-    const job = await makeJob({ channel: null });
-    await approve(job, input({ title: EDITED_TITLE }));
-    const rows = feedbackRows(JOB_FEEDBACK);
+    const rows = await jobRows();
     expect(rows.map((r) => [r.kind, r.field])).toEqual([
       ['EDITED', 'title'],
       ['ACCEPTED', undefined],
     ]);
     expect(rows[0]).toMatchObject({ before: 'Title 1', after: EDITED_TITLE, pickVersion: 1 });
-    expect(feedbackRows('artists/')).toHaveLength(0);
+    expect(await artistRows()).toHaveLength(0);
   });
 
-  it("writes Nathan's feedback to the artist's memory", async () => {
-    connected();
-    const job = await makeJob({ owner: 'nathan', channel: 'nathan', picks: 2 });
+  it("writes feedback on Nathan's job to the artist's memory", async () => {
+    const job = await makeJob({ owner: USER_A, picks: 2 });
     await approve(job, input({ title: 'Title 2', pickVersion: 2 }));
-    const rows = feedbackRows(ARTIST_FEEDBACK);
-    expect(rows).toEqual([
+    expect(await artistRows()).toEqual([
       expect.objectContaining({
         kind: 'ACCEPTED',
         pickVersion: 2,
@@ -372,7 +302,8 @@ describe('approve: where the upload goes', () => {
         jobId: 'job1',
       }),
     ]);
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
+    expect((await getJob('job1'))!.destination?.channelId).toBe(CHANNEL_A);
   });
 });
 
@@ -389,8 +320,7 @@ describe('rerun', () => {
       [1, false],
       [2, true],
     ]);
-    const rows = feedbackRows(JOB_FEEDBACK);
-    expect(rows).toEqual([
+    expect(await jobRows()).toEqual([
       expect.objectContaining({
         kind: 'SKIPPED',
         pickVersion: 2,
@@ -405,56 +335,58 @@ describe('rerun', () => {
   });
 
   it("stores Nathan's skip in the artist's memory", async () => {
-    const job = await makeJob({ owner: 'nathan', channel: 'nathan' });
+    const job = await makeJob({ owner: USER_A });
     await rerun(job);
-    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(await artistRows()).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
+    expect(await jobRows()).toHaveLength(0);
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {
     const job = await makeJob({ picks: 0 });
     await rerun(job);
     expect((await getJob('job1'))!.state).toBe('PICK');
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
   });
 });
 
 describe('concurrent actions', () => {
   it('approves once when the same recommendation is submitted twice', async () => {
-    connected();
     const job = await makeJob();
     await approve(job, input());
     const second = await rejection(approve(job, input()));
     expect(second.status).toBe(409);
-    const quota = [...store.entries()].find(([k]) => k.startsWith('quota/'))![1] as {
-      uploads: number;
-    };
-    expect(quota.uploads).toBe(1);
-    expect(feedbackRows(JOB_FEEDBACK).filter((r) => r.kind === 'ACCEPTED')).toHaveLength(1);
+    expect((await jobRows()).filter((r) => r.kind === 'ACCEPTED')).toHaveLength(1);
+  });
+
+  it('approves once when two submits race', async () => {
+    const job = await makeJob();
+    const results = await Promise.allSettled([approve(job, input()), approve(job, input())]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect((await jobRows()).filter((r) => r.kind === 'ACCEPTED')).toHaveLength(1);
   });
 
   it('refuses a re-run once the job already left review', async () => {
     const job = await makeJob();
-    await updateJob('job1', { state: 'DISCARDED' });
+    await patchJob({ state: 'DISCARDED' });
     expect((await rejection(rerun(job))).status).toBe(409);
     expect((await getJob('job1'))!.state).toBe('DISCARDED');
   });
 
   it('refuses a discard once the job moved past discardable states', async () => {
     const job = await makeJob({ state: 'REVIEW' });
-    await updateJob('job1', { state: 'PUBLISHING' });
+    await patchJob({ state: 'PUBLISHING' });
     expect((await rejection(discard(job))).status).toBe(409);
   });
 
   it('refuses a retry once the job is no longer failed', async () => {
     const job = await makeJob({ state: 'FAILED', patch: { failedState: 'ANALYZE' } });
-    await updateJob('job1', { state: 'ANALYZE' });
+    await patchJob({ state: 'ANALYZE' });
     expect((await rejection(retry(job))).status).toBe(409);
   });
 });
 
 describe('discard', () => {
-  it.each<JobState>(['AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'REVIEW', 'FAILED', 'PAYLOAD'])(
+  it.each<JobState>(['AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'REVIEW', 'FAILED'])(
     'discards a %s job',
     async (state) => {
       const job = await makeJob({ state });
@@ -475,8 +407,8 @@ describe('discard', () => {
   it('learns nothing from a discard', async () => {
     const job = await makeJob();
     await discard(job);
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
-    expect(feedbackRows('artists/')).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
+    expect(await artistRows()).toHaveLength(0);
   });
 });
 
@@ -535,8 +467,13 @@ describe('makeShort', () => {
     const job = await makeJob({ picks: 2, patch: { probe: PROBE } });
     const id = await makeShort(job);
     const short = (await getJob(id))!;
-    expect(short.state).toBe('HOOK');
-    expect(short.short?.parentId).toBe('job1');
+    expect(short).toMatchObject({
+      state: 'HOOK',
+      parentId: 'job1',
+      ownerUid: USER_B.uid,
+      artistId: null,
+      destination: null,
+    });
     expect((await listPicks(id)).map((p) => [p.version, p.title])).toEqual([[1, 'Title 2']]);
     expect((await getJob('job1'))!.shortId).toBe(id);
   });
@@ -554,31 +491,15 @@ describe('makeShort', () => {
     expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
   });
 
-  it("charges a visitor's new Short as one of their runs", async () => {
-    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
-    await makeShort(job);
-    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ runs: 1, ips: { ipA: 1 } });
+  it("copies the owner and artist link from Nathan's video, never its destination", async () => {
+    const job = await makeJob({
+      owner: USER_A,
+      state: 'VERIFIED',
+      patch: { probe: PROBE, destination: { channelId: CHANNEL_A, channelTitle: 'FLR' } },
+    });
+    const short = (await getJob(await makeShort(job)))!;
+    expect(short).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr', destination: null });
   });
-
-  it('turns a visitor away with 429 once their runs are spent, starting nothing', async () => {
-    store.set(`quota/${quotaDay()}`, { runs: 5, ips: { ipA: 5 }, uploads: 0, visitorUploads: 0 });
-    const job = await makeJob({ patch: { probe: PROBE, ipHash: 'ipA' } });
-    const error = await rejection(makeShort(job));
-    expect([error.status, error.message]).toEqual([
-      429,
-      '5 runs per visitor per day. Try again tomorrow.',
-    ]);
-    expect((await getJob('job1'))!.shortId).toBeNull();
-  });
-
-  it.each(['nathan', 'demo'] as JobOwner[])(
-    'never charges a %s Short against visitor caps',
-    async (owner) => {
-      const job = await makeJob({ owner, patch: { probe: PROBE, ipHash: 'ipA' } });
-      await makeShort(job);
-      expect(store.has(`quota/${quotaDay()}`)).toBe(false);
-    },
-  );
 
   it('starts from fields approved after the caller read the video', async () => {
     const stale = await makeJob({ patch: { probe: PROBE } });
@@ -588,7 +509,7 @@ describe('makeShort', () => {
       hashtags: [SYNTHWAVE_TAG],
       tags: ['synthwave'],
     };
-    await updateJob('job1', { state: 'PUBLISHING', finalFields: final });
+    await patchJob({ state: 'PUBLISHING', finalFields: final });
     const [stored] = await listPicks(await makeShort(stale));
     expect(stored).toMatchObject({ ...final, version: 1 });
   });
@@ -607,7 +528,7 @@ describe('makeShort', () => {
       'A Short needs a video of at least 15 seconds.',
     ]);
     expect((await getJob('job1'))!.shortId).toBeNull();
-    await updateJob('job1', { probe: { ...PROBE, durationSec: 15 } });
+    await patchJob({ probe: { ...PROBE, durationSec: 15 } });
     expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
   });
 
@@ -640,7 +561,7 @@ describe('makeShort', () => {
 
   it('refuses when the video moved on before the transaction', async () => {
     const job = await makeJob({ patch: { probe: PROBE } });
-    await updateJob('job1', { state: 'DISCARDED' });
+    await patchJob({ state: 'DISCARDED' });
     expect((await rejection(makeShort(job))).message).toBe(
       'The video moved on before the Short could start.',
     );
@@ -649,7 +570,6 @@ describe('makeShort', () => {
 
 const HOOK: Hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands.' };
 const SHORT: Short = {
-  parentId: 'p1',
   sourceDurationSec: 180,
   reframe: 'blur',
   hook: HOOK,
@@ -659,11 +579,11 @@ const SHORT: Short = {
 };
 
 async function shortJob(
-  opts: { state?: JobState; short?: Partial<Short>; channel?: Channel } = {},
+  opts: { state?: JobState; short?: Partial<Short>; owner?: typeof USER_A } = {},
 ) {
   return makeJob({
     state: opts.state ?? 'REVIEW',
-    channel: opts.channel,
+    owner: opts.owner,
     patch: { short: { ...SHORT, ...opts.short }, sourceObject: 'uploads/p1' },
   });
 }
@@ -734,7 +654,7 @@ describe('recut', () => {
 
   it('refuses when the Short moved on before the transition', async () => {
     const job = await shortJob();
-    await updateJob('job1', { state: 'DISCARDED' });
+    await patchJob({ state: 'DISCARDED' });
     const error = await rejection(recut(job, { startSec: 70, lengthSec: 30, reframe: 'blur' }));
     expect([error.status, error.message]).toEqual([409, 'This Short was already handled.']);
   });
@@ -755,8 +675,8 @@ describe('rerun on a Short', () => {
       ],
     });
     expect((await listPicks('job1')).map((p) => p.skipped)).toEqual([false]);
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
-    expect(feedbackRows('artists/')).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
+    expect(await artistRows()).toHaveLength(0);
   });
 
   it('re-picks without adding a skip when no hook was set', async () => {
@@ -767,29 +687,27 @@ describe('rerun on a Short', () => {
 
   it('refuses when the Short moved on', async () => {
     const job = await shortJob();
-    await updateJob('job1', { state: 'RENDER' });
+    await patchJob({ state: 'RENDER' });
     expect((await rejection(rerun(job))).message).toBe('This Short was already handled.');
   });
 });
 
 describe('approve on a Short', () => {
   it('uploads through the same flow and does not count the acceptance twice', async () => {
-    connected();
-    const job = await shortJob({ channel: 'nathan' });
-    await approve({ ...job, owner: 'nathan' }, input());
+    const job = await shortJob({ owner: USER_A });
+    await approve(job, input());
     const after = (await getJob('job1'))!;
     expect(after.state).toBe('PUBLISHING');
     expect(after.finalFields?.title).toBe('Title 1');
-    expect(feedbackRows('artists/')).toHaveLength(0);
-    expect(feedbackRows(JOB_FEEDBACK)).toHaveLength(0);
-    expect(store.get(`quota/${quotaDay()}`)).toMatchObject({ uploads: 1 });
+    expect(after.destination?.channelId).toBe(CHANNEL_A);
+    expect(await artistRows()).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(0);
   });
 
   it("learns Nathan's edits to the Short's metadata", async () => {
-    connected();
-    const job = await shortJob({ channel: 'nathan' });
-    await approve({ ...job, owner: 'nathan' }, input({ title: 'Shorter title' }));
-    expect(feedbackRows(ARTIST_FEEDBACK)).toEqual([
+    const job = await shortJob({ owner: USER_A });
+    await approve(job, input({ title: 'Shorter title' }));
+    expect(await artistRows()).toEqual([
       expect.objectContaining({
         kind: 'EDITED',
         field: 'title',
@@ -820,7 +738,7 @@ describe('retry on a Short', () => {
     'resumes at the failed %s step',
     async (failedState) => {
       const job = await shortJob({ state: 'FAILED' });
-      await updateJob('job1', { failedState });
+      await patchJob({ failedState });
       await retry({ ...job, failedState });
       expect((await getJob('job1'))!.state).toBe(failedState);
     },

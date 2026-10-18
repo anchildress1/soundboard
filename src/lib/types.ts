@@ -10,7 +10,6 @@ export type JobState =
   | 'PUBLISHING'
   | 'CLAIMED_COMPLETE'
   | 'VERIFIED'
-  | 'PAYLOAD'
   | 'FAILED'
   | 'DISCARDED';
 
@@ -31,17 +30,10 @@ export const SHORT_SOURCE_STATES: readonly JobState[] = [
   'PUBLISHING',
   'CLAIMED_COMPLETE',
   'VERIFIED',
-  'PAYLOAD',
 ];
 
-/**
- * Who the job belongs to: allowlisted sessions own `nathan` jobs, demo sessions own `demo` jobs
- * (Nathan's memory read-only, sandbox channel), and everything else is a visitor job.
- */
-export type JobOwner = 'nathan' | 'demo' | 'visitor';
-
-/** Upload target: Nathan's channel, the throwaway sandbox channel, or none (ends at the would-be payload). */
-export type Channel = 'nathan' | 'sandbox' | null;
+/** The YouTube channel an approval pins the upload to. */
+export type Destination = { channelId: string; channelTitle: string | null };
 
 export type Measurements = {
   integratedLufs: number | null;
@@ -114,7 +106,6 @@ export type Hook = {
 
 /** A Short job's cut. Its metadata is the source video's pick, reviewed like any other. */
 export type Short = {
-  parentId: string;
   sourceDurationSec: number;
   reframe: Reframe;
   hook: Hook | null;
@@ -127,16 +118,16 @@ export type Short = {
 export type Wait =
   'waking model' | 'waiting on another run' | 'step running in another tab' | 'waiting on YouTube';
 
-/** The job as the browser sees it: no upload session URIs, claim tokens, or IP hashes. */
+/** The job as the browser sees it: no owner, upload session URIs, or claim tokens. */
 export type PublicJob = {
   id: string;
   state: JobState;
-  owner: JobOwner;
-  channel: Channel;
+  /** `null` on videos, the parent's ID on Shorts. */
+  parentId: string | null;
+  destination: Destination | null;
   songTitle: string;
   notes: string;
   filename: string;
-  sampleId: string | null;
   probe: Probe | null;
   measurements: Measurements | null;
   chunkCount: number;
@@ -145,7 +136,8 @@ export type PublicJob = {
   error: string | null;
   uploadProgress: { sent: number; total: number } | null;
   videoId: string | null;
-  payload: PickFields | null;
+  /** The approved fields, once approved. */
+  finalFields: PickFields | null;
   hashtagCandidates: string[] | null;
   /** Set on a video job once a Short is cut from it. */
   shortId: string | null;
@@ -161,14 +153,6 @@ export type JobView = {
   wait?: Wait;
   /** Signed playback URL of a rendered Short. */
   playbackUrl?: string;
-};
-
-export type Sample = {
-  id: string;
-  songTitle: string;
-  videoId: string;
-  object: string;
-  durationSec: number;
 };
 
 export type LiveMetadata = {
