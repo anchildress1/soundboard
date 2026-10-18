@@ -34,7 +34,7 @@ Nothing is carried over from Firestore (pre-beta). The FLR artist memory starts 
 | `updated_at`       | timestamptz, not null                                                  |                                                              |
 
 - One per user and platform (FR-014), always on the user's own Google account. Reconnect upserts the row in one statement, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
-- `revoked` is set when Google returns `invalid_grant` or YouTube refuses an upload's access token (401), and the ciphertext is cleared in the same `UPDATE`. A dead token is never kept.
+- `revoked` is set when Google returns `invalid_grant` or YouTube refuses the access token (401) during publish, verify, or confirm-upload, and the ciphertext is cleared in the same `UPDATE`. A dead token is never kept.
 - Disconnect: revoke at Google, then delete the row.
 
 ## `invites`
