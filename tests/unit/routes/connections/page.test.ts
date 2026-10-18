@@ -104,6 +104,17 @@ describe('connections page', () => {
     expect(nav.invalidateAll).toHaveBeenCalledOnce();
   });
 
+  it('disables Disconnect while the request is in flight', async () => {
+    let answer: (response: Response) => void = () => {};
+    fetchMock.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
+    const button = screen.getByRole('button', { name: 'Disconnect' });
+    await fireEvent.click(button);
+    expect(button).toBeDisabled();
+    answer(Response.json({ revokedAtGoogle: true }));
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+
   it('says why a disconnect failed and keeps the row', async () => {
     fetchMock.mockResolvedValue(Response.json({ message: 'Sign in first.' }, { status: 401 }));
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
