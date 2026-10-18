@@ -21,7 +21,9 @@ minimumReleaseAgeExclude:
   - '@vitest/*'
 
 # lefthook's postinstall only installs hooks; `make install` runs `lefthook install` explicitly.
-# protobufjs's postinstall only checks its CLI version.
+# protobufjs's postinstall only checks its CLI version. esbuild (via drizzle-kit) gets its binary
+# from an optional dependency, so its postinstall is redundant.
 allowBuilds:
+  esbuild: false
   lefthook: false
   protobufjs: false
