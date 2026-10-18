@@ -324,7 +324,7 @@ export async function sourceRange(
   });
   if (source.status === 404) return null;
   if (source.status !== 206 && source.status !== 200) {
-    // A plain error: a GCS 404 must not read as a lost upload session.
+    // A plain error: a GCS failure must not read as a lost upload session.
     throw new Error(`GCS range read ${source.status}`);
   }
   return source;
@@ -390,7 +390,7 @@ export type VideoOwner = { channelId: string; publishedAt: number };
 
 /**
  * The channel that owns the video, as the token's grant sees it, and when it was published; null
- * when it isn't visible.
+ * when it isn't visible or YouTube omits either field.
  */
 export async function videoChannel(accessToken: string, id: string): Promise<VideoOwner | null> {
   const query = new URLSearchParams({ part: 'snippet', id });

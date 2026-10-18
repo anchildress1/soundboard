@@ -10,7 +10,9 @@ import { channelsMine, YOUTUBE_SCOPES } from './youtube';
 
 type Stored = typeof connections.$inferSelect;
 
-/** A connection's own fields. Only a `connected` row holds a token, and it always names a channel. */
+/**
+ * A connection's own fields. Only a `connected` row holds a token, and it always names a channel.
+ */
 export type ConnectionRow =
   | {
       status: 'connected';
@@ -93,8 +95,8 @@ export async function revokeGrant(uid: string): Promise<boolean> {
 }
 
 /**
- * Marks the grant stored as `tokenCiphertext` revoked, dropping its token in the same write; a dead token
- * is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
+ * Marks the grant stored as `tokenCiphertext` revoked, dropping its token in the same write; a
+ * dead token is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
  */
 export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {
   await db()

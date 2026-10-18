@@ -211,15 +211,15 @@ async function youtubeWait(
 }
 
 /**
- * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
- * alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload here.
- * A spent daily limit and a refused grant are waits, never failures.
+ * One upload step. The grant is checked before every YouTube call, chunk PUTs included: the session
+ * URI alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload
+ * here. A spent daily limit and a refused grant are waits, never failures.
  */
 async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
   // No YouTube call at all: the page polls this wait, and polling must spend no quota.
   if (outcomeUnknown(job)) return pause(OUTCOME_UNKNOWN);
-  // Nor while the daily limit is spent: the quota is shared, and a refresh would spend nothing useful.
+  // Nor while the daily limit is spent: the quota is project-wide, so any call fails until reset.
   const now = Date.now();
   if (limited(job, now)) return pause(DAILY_LIMIT);
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);

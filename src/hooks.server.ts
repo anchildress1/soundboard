@@ -10,8 +10,9 @@ const SENTRY_TRACE = /^[0-9a-f]{32}-[0-9a-f]{16}(?:-[01])?$/;
 const BAGGAGE = /^(?:[\w.-]+=[\w%.!~*'()-]*(?:,[\w.-]+=[\w%.!~*'()-]*)*)?$/;
 
 /**
- * Swaps the request's trace meta tags for job `jobId`'s, so the browser continues the job's trace.
- * Returns the page unchanged when either value is not one Sentry's `getTraceData()` could write.
+ * Swaps the request's trace meta tags for the job's, so the browser continues the job's trace.
+ * Returns the page unchanged when either value is not one Sentry's `getTraceData()` could write;
+ * `jobId` only tags that drop report.
  */
 export function replaceTraceMeta(
   html: string,
