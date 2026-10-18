@@ -210,7 +210,6 @@ describe('runStep: AWAITING_UPLOAD', () => {
 
   it('keeps waiting while the object is missing', async () => {
     h.objects.clear();
-    h.refreshError = null;
     expect(await runStep(await put({ state: 'AWAITING_UPLOAD' }))).toEqual({});
     expect((await saved()).state).toBe('AWAITING_UPLOAD');
   });
@@ -313,7 +312,6 @@ describe('runStep: PREP', () => {
 
   it('fails when the upload never reached storage', async () => {
     h.objects.clear();
-    h.refreshError = null;
     await runStep(await put({ state: 'PREP' }));
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PREP' });
     expect((await saved()).error).toMatch(/never reached storage/);
@@ -878,7 +876,6 @@ describe('runStep: PUBLISHING', () => {
 
   it('fails when the source expired from storage', async () => {
     h.objects.clear();
-    h.refreshError = null;
     await runStep(await publishing());
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PUBLISHING' });
   });
