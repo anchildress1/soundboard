@@ -1066,6 +1066,21 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
   });
 
+  it('records a failure when the grant is on another channel, keeping the video ID', async () => {
+    await db()
+      .update(connections)
+      .set({ channelId: 'UCother' })
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      consecutiveFailures: 1,
+      error: "Connected channel doesn't match this job's channel.",
+    });
+    expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
+  });
+
   it('counts a read-back error as a failure and asks the page to wait', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => new Response('oops', { status: 500 }));
     expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
