@@ -7,8 +7,10 @@ import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 import { load as layoutLoad } from '$routes/+layout.server';
 import { load as homeLoad } from '$routes/+page.server';
 import { load as jobLoad } from '$routes/jobs/[id]/+page.server';
+import { load as connectionsLoad } from '$routes/connections/+page.server';
 import { GET as getJobApi } from '$routes/api/jobs/[id]/+server';
 import { POST as approve } from '$routes/api/jobs/[id]/approve/+server';
+import { POST as confirmUpload } from '$routes/api/jobs/[id]/confirm-upload/+server';
 import { POST as discard } from '$routes/api/jobs/[id]/discard/+server';
 import { POST as recut } from '$routes/api/jobs/[id]/recut/+server';
 import { POST as rerun } from '$routes/api/jobs/[id]/rerun/+server';
@@ -37,6 +39,7 @@ type User = typeof USER_A | typeof USER_B;
 type Layout = { channel: { handle: string } | null };
 type Home = { jobs: { id: string }[] };
 type JobPage = { view: { job: { id: string } }; playbackUrl: string | null };
+type Connections = { youtube: { channelTitle: string | null } | null };
 
 const CHANNEL_B = 'UCb';
 const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
@@ -45,6 +48,7 @@ const event = (user: User, id?: string, body: unknown = {}) =>
   ({
     locals: { user },
     params: id ? { id } : {},
+    url: new URL('http://localhost/connections'),
     request: new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }),
   }) as never;
 const status = (error: unknown) => (isHttpError(error) ? error.status : error);
@@ -148,6 +152,10 @@ const FOREIGN_CALLS: [string, (user: User, video: string, short: string) => unkn
       recut(event(user, short, { startSec: 10, lengthSec: 20, reframe: 'crop' })),
   ],
   ['make Short', (user, video) => makeShort(event(user, video))],
+  [
+    'confirm upload',
+    (user, video) => confirmUpload(event(user, video, { url: 'https://youtu.be/dQw4w9WgXcQ' })),
+  ],
 ];
 
 afterEach(() => {
@@ -156,16 +164,19 @@ afterEach(() => {
 });
 
 describe('one process, A → B → A', () => {
-  it('serves each user only their own stats, jobs, media and Shorts', async () => {
+  it('serves each user only their own stats, Connections, jobs, media and Shorts', async () => {
     const turns = [
-      [USER_A, 'a', 'b', CHANNEL_A],
-      [USER_B, 'b', 'a', CHANNEL_B],
-      [USER_A, 'a', 'b', CHANNEL_A],
+      [USER_A, 'a', 'b', CHANNEL_A, 'Flies Like Robots'],
+      [USER_B, 'b', 'a', CHANNEL_B, 'B'],
+      [USER_A, 'a', 'b', CHANNEL_A, 'Flies Like Robots'],
     ] as const;
     const shorts: Record<string, string> = {};
-    for (const [user, own, other, channel] of turns) {
+    for (const [user, own, other, channel, title] of turns) {
       const layout = (await layoutLoad(event(user))) as Layout;
       expect(layout.channel?.handle).toBe(`@${channel}`);
+
+      const connections = (await connectionsLoad(event(user))) as Connections;
+      expect(connections.youtube?.channelTitle).toBe(title);
 
       const home = (await homeLoad(event(user))) as Home;
       expect(home.jobs.map((j) => j.id)).toEqual([own]);
