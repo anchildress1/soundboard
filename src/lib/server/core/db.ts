@@ -14,7 +14,11 @@ let database: Database | null = null;
 /** Drizzle over one `pg` Pool on `DATABASE_URL`, created on first use. */
 export function db(): Database {
   if (!database) {
-    pool = new Pool({ connectionString: required('DATABASE_URL') });
+    // Bounded, so a cold or unreachable Neon fails the request instead of hanging it.
+    pool = new Pool({
+      connectionString: required('DATABASE_URL'),
+      connectionTimeoutMillis: 10_000,
+    });
     // Neon closes idle connections when it scales to zero; unhandled, that error kills the process.
     // The pool already discards the dead client, so report it and carry on.
     pool.on('error', (error) => captureException(error, { tags: { component: 'db' } }));
@@ -25,8 +29,7 @@ export function db(): Database {
 
 /** Drops the pool so the next `db()` reconnects with current env vars. */
 export function resetDb(): void {
-  // end() only rejects when called twice; the reference is cleared, so it never is.
-  void pool?.end();
+  pool?.end().catch((error: unknown) => captureException(error, { tags: { component: 'db' } }));
   pool = null;
   database = null;
 }

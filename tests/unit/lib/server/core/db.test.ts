@@ -47,6 +47,7 @@ describe('db', () => {
     expect(pg.pools).toHaveLength(1);
     expect(pg.pools[0]!.options).toEqual({
       connectionString: 'postgres://app@pooler.test/soundboard',
+      connectionTimeoutMillis: 10_000,
     });
   });
 
@@ -80,7 +81,18 @@ describe('resetDb', () => {
     expect(pg.pools).toHaveLength(2);
     expect(pg.pools[1]!.options).toEqual({
       connectionString: 'postgres://app@other.test/soundboard',
+      connectionTimeoutMillis: 10_000,
     });
+  });
+
+  it('reports a pool that fails to end', async () => {
+    db();
+    const error = new Error('end failed');
+    pg.pools[0]!.end.mockRejectedValueOnce(error);
+    resetDb();
+    await vi.waitFor(() =>
+      expect(captureException).toHaveBeenCalledWith(error, { tags: { component: 'db' } }),
+    );
   });
 
   it('is a no-op before first use', () => {
