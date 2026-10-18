@@ -73,6 +73,8 @@ test.describe('job list', () => {
     await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
     await expect(page).toHaveURL('/');
     await expect(page.getByLabel(/^Title/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Your runs' })).toHaveCount(0);
   });
 
   test('continues a run whose media expired, keeping its details', async ({ page }) => {

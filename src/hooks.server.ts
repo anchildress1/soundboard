@@ -40,15 +40,24 @@ const session: Handle = async ({ event, resolve }) => {
 };
 
 /** Paths a signed-out request may reach; every other page and every API needs a session. */
-const OPEN = new Set(['/', '/auth/login', '/auth/callback', '/auth/logout', '/health']);
+const OPEN = new Set([
+  '/',
+  '/auth/login',
+  '/auth/callback',
+  '/auth/logout',
+  '/auth/signed-out',
+  '/health',
+]);
 
 const gate: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
   if (event.locals.user || OPEN.has(pathname)) return resolve(event);
   if (pathname === '/api' || pathname.startsWith('/api/'))
     return json({ message: 'Sign in first.' }, { status: 401 });
-  // SvelteKit rebuilds this as its JSON redirect for a client-side navigation's data request.
-  return new Response(null, { status: 303, headers: { location: '/' } });
+  // A client-side navigation would follow a redirect to `/` in place and keep its cached signed-in
+  // layout, so its data request goes through a server-only route that forces a full page load.
+  const location = event.isDataRequest ? '/auth/signed-out' : '/';
+  return new Response(null, { status: 303, headers: { location } });
 };
 
 const securityHeaders: Handle = async ({ event, resolve }) => {

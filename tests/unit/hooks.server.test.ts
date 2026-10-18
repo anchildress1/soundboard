@@ -211,7 +211,14 @@ const ROUTES = Object.keys(
   )
   .map((path) => path || '/');
 const PATHS = [...new Set(ROUTES)];
-const EXEMPT = ['/', '/auth/login', '/auth/callback', '/auth/logout', '/health'];
+const EXEMPT = [
+  '/',
+  '/auth/login',
+  '/auth/callback',
+  '/auth/logout',
+  '/auth/signed-out',
+  '/health',
+];
 const CSP = "frame-ancestors 'self'";
 
 describe('gate', () => {
@@ -261,10 +268,10 @@ describe('gate', () => {
     },
   );
 
-  it('sends a signed-out client navigation home with the same 303, for SvelteKit to rebuild', async () => {
+  it('sends a signed-out client navigation through /auth/signed-out for a full page load', async () => {
     const { resolve, seen } = renderer();
     const response = await run(event(undefined, {}, '/jobs/x', true), resolve);
-    expect([response.status, response.headers.get('location')]).toEqual([303, '/']);
+    expect([response.status, response.headers.get('location')]).toEqual([303, '/auth/signed-out']);
     expect(seen.resolved).toBe(0);
   });
 

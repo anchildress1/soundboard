@@ -19,6 +19,14 @@ test.describe('signed out', () => {
     });
   }
 
+  test("answers a client navigation's data request with a redirect through /auth/signed-out", async ({
+    request,
+  }) => {
+    const response = await request.get('/jobs/e2e-b-review/__data.json', { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toEqual({ type: 'redirect', location: '/auth/signed-out' });
+  });
+
   test('refuses POST /api/jobs with 401', async ({ request }) => {
     const response = await request.post('/api/jobs', { data: { songTitle: 'PeekaBoo' } });
     expect(response.status()).toBe(401);
