@@ -31,8 +31,11 @@ export async function add(db: Queryable, email: string, artistId: string | null)
   ]);
 }
 
-/** Deactivates the invite and signs its bound user out everywhere, in one transaction. */
-export async function revoke(db: Queryable, email: string): Promise<void> {
+/**
+ * Deactivates the invite and signs its bound user out everywhere, in one transaction. Returns the
+ * bound user's uid, or null when nobody signed in with the invite.
+ */
+export async function revoke(db: Queryable, email: string): Promise<string | null> {
   await db.query('begin');
   try {
     const { rows } = await db.query(
@@ -45,8 +48,14 @@ export async function revoke(db: Queryable, email: string): Promise<void> {
       invite.bound_sub,
     ]);
     await db.query('commit');
+    return invite.bound_sub;
   } catch (error) {
-    await db.query('rollback');
+    // A failed rollback must not hide why the revoke failed.
+    await db.query('rollback').catch((rollback: unknown) => {
+      const why = error instanceof Error ? error.message : String(error);
+      const also = rollback instanceof Error ? rollback.message : String(rollback);
+      throw new Error(`${why} (rollback also failed: ${also})`, { cause: error });
+    });
     throw error;
   }
 }
@@ -67,46 +76,64 @@ export async function list(db: Queryable): Promise<Invite[]> {
   return rows as Invite[];
 }
 
-/** Runs one command line and returns what to print; a bad command line throws `USAGE`. */
-export async function run(args: string[], db: Queryable): Promise<string> {
-  const [command, email, flag, artist, ...rest] = args;
-  if (command === 'list' && !email) {
-    const rows = await list(db);
-    return rows
-      .map((r) =>
-        [r.email, r.active ? 'active' : 'revoked', r.artist_id ?? '-', r.bound_sub ?? '-'].join(
-          '\t',
-        ),
-      )
-      .join('\n');
-  }
+export type Command =
+  | { name: 'list' }
+  | { name: 'add'; email: string; artistId: string | null }
+  | { name: 'revoke' | 'reactivate'; email: string };
+
+/** One command line as a command; a bad command line throws `USAGE`. */
+export function parse(args: string[]): Command {
+  const [name, email, flag, artist, ...rest] = args;
+  if (name === 'list' && !email) return { name };
   if (!email || rest.length > 0) throw new Error(USAGE);
-  if (command === 'add' && (flag === undefined || (flag === '--artist' && artist))) {
-    await add(db, email, artist ?? null);
-    return `Invited ${normalize(email)}`;
+  if (name === 'add' && (flag === undefined || (flag === '--artist' && artist))) {
+    return { name, email, artistId: artist ?? null };
   }
   if (flag !== undefined) throw new Error(USAGE);
-  if (command === 'revoke') {
-    await revoke(db, email);
-    return `Revoked ${normalize(email)}`;
-  }
-  if (command === 'reactivate') {
-    await reactivate(db, email);
-    return `Reactivated ${normalize(email)}`;
-  }
+  if (name === 'revoke' || name === 'reactivate') return { name, email };
   throw new Error(USAGE);
 }
 
+/** Runs one command line and returns what to print; a bad command line throws `USAGE`. */
+export async function run(args: string[], db: Queryable): Promise<string> {
+  const command = parse(args);
+  switch (command.name) {
+    case 'list':
+      return (await list(db))
+        .map((r) =>
+          [r.email, r.active ? 'active' : 'revoked', r.artist_id ?? '-', r.bound_sub ?? '-'].join(
+            '\t',
+          ),
+        )
+        .join('\n');
+    case 'add':
+      await add(db, command.email, command.artistId);
+      return `Invited ${normalize(command.email)}`;
+    case 'revoke': {
+      const bound = await revoke(db, command.email);
+      return `Revoked ${normalize(command.email)}${bound ? '' : ' (never signed in)'}`;
+    }
+    case 'reactivate':
+      await reactivate(db, command.email);
+      return `Reactivated ${normalize(command.email)}`;
+  }
+}
+
 if (import.meta.main) {
+  const args = process.argv.slice(2);
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  let connected = false;
   try {
+    // A bad command line never needs the database.
+    parse(args);
     if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL');
     await client.connect();
-    console.log(await run(process.argv.slice(2), client));
+    connected = true;
+    console.log(await run(args, client));
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   } finally {
-    await client.end();
+    if (connected) await client.end();
   }
 }
