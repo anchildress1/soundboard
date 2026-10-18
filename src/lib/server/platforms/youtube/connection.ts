@@ -1,4 +1,4 @@
-import { captureMessage } from '@sentry/sveltekit';
+import { captureException, captureMessage } from '@sentry/sveltekit';
 import { and, eq } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db, type Database, type Tx } from '$lib/server/core/db';
@@ -54,6 +54,35 @@ export async function putConnection(uid: string, row: ConnectionRow): Promise<vo
 
 export async function deleteConnection(uid: string): Promise<void> {
   await db().delete(connections).where(mine(uid));
+}
+
+const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
+
+/**
+ * Disconnects YouTube: revokes the stored grant at Google, then deletes the row. A failed revoke is
+ * reported and the row is deleted anyway, so the app holds no token either way.
+ */
+export async function revokeGrant(uid: string): Promise<void> {
+  const connection = await getConnection(uid);
+  if (connection?.tokenCiphertext) {
+    try {
+      const response = await fetch(REVOKE_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: await decrypt(connection.tokenCiphertext) }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        captureMessage('YouTube revoke refused', {
+          level: 'warning',
+          tags: { status: response.status },
+        });
+      }
+    } catch (error) {
+      captureException(error, { tags: { component: 'youtube-revoke' } });
+    }
+  }
+  await deleteConnection(uid);
 }
 
 /**

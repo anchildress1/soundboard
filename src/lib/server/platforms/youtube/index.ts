@@ -1,10 +1,10 @@
 export {
   accessTokenFor,
   connectGrant,
-  deleteConnection,
   getConnection,
   markRevoked,
   putConnection,
+  revokeGrant,
   type Connection,
   type ConnectionRow,
   type ConnectionGrant,

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { captureMessage } from '@sentry/sveltekit';
+import { captureException, captureMessage } from '@sentry/sveltekit';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
@@ -10,6 +10,7 @@ import {
   getConnection,
   markRevoked,
   putConnection,
+  revokeGrant,
   type ConnectionRow,
 } from '$lib/server/platforms/youtube/connection';
 import { seed } from '../../../../../helpers/db';
@@ -78,6 +79,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe('putConnection / getConnection', () => {
@@ -266,5 +268,82 @@ describe('accessTokenFor', () => {
     const error = await accessTokenFor(UID, CHANNEL).catch((e: unknown) => e as Error);
     expect(error).toMatchObject({ message: "Couldn't unlock the YouTube grant.", cause });
     expect(oauth.getAccessToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('revokeGrant', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('revokes the decrypted refresh token at Google, then deletes the row', async () => {
+    await putConnection(UID, connected());
+    await putConnection('sub-b', connected({ channelId: 'UC-b' }));
+    await revokeGrant(UID);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://oauth2.googleapis.com/revoke');
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    expect(String(init!.body)).toBe('token=1%2F%2Frefresh');
+    expect(await getConnection(UID)).toBeNull();
+    expect(await getConnection('sub-b')).not.toBeNull();
+  });
+
+  it('reports a refused revoke without the token and deletes the row anyway', async () => {
+    await putConnection(UID, connected());
+    fetchMock.mockResolvedValue(new Response('{"error":"invalid_token"}', { status: 400 }));
+    await revokeGrant(UID);
+    expect(captureMessage).toHaveBeenCalledWith('YouTube revoke refused', {
+      level: 'warning',
+      tags: { status: 400 },
+    });
+    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('refresh');
+    expect(await getConnection(UID)).toBeNull();
+  });
+
+  it('reports a network failure and deletes the row anyway', async () => {
+    await putConnection(UID, connected());
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    await revokeGrant(UID);
+    expect(captureException).toHaveBeenCalledWith(expect.any(TypeError), {
+      tags: { component: 'youtube-revoke' },
+    });
+    expect(await getConnection(UID)).toBeNull();
+  });
+
+  it('deletes the row without calling Google when KMS cannot unlock the token', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValue(new Error('kms down'));
+    await revokeGrant(UID);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledOnce();
+    expect(await getConnection(UID)).toBeNull();
+  });
+
+  it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
+    'deletes a %s row without calling Google, since it holds no token',
+    async (status) => {
+      await putConnection(UID, {
+        status,
+        channelId: null,
+        channelTitle: null,
+        scopes: [],
+        tokenCiphertext: null,
+      });
+      await revokeGrant(UID);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await getConnection(UID)).toBeNull();
+    },
+  );
+
+  it('is a no-op without a connection', async () => {
+    await revokeGrant(UID);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
