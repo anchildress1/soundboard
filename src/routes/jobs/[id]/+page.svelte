@@ -253,6 +253,7 @@
         youtubeDone={job.state === 'VERIFIED'}
         shortDone={shortView?.job.state === 'VERIFIED'}
         {bandcampDone}
+        destination={job.destination}
       >
         {#snippet youtube()}
           {#if job.state === 'VERIFIED' && job.videoId}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { Destination } from '$lib/types';
 
   type Tab = { id: 'youtube' | 'short' | 'bandcamp'; label: string; done: boolean; panel: Snippet };
 
@@ -10,6 +11,7 @@
     youtubeDone,
     shortDone,
     bandcampDone,
+    destination = null,
   }: {
     youtube: Snippet;
     short: Snippet;
@@ -17,6 +19,8 @@
     youtubeDone: boolean;
     shortDone: boolean;
     bandcampDone: boolean;
+    /** The channel an approval pinned the upload to; null before approval. */
+    destination?: Destination | null;
   } = $props();
 
   const tabs = $derived<Tab[]>([
@@ -74,6 +78,12 @@
       hidden={active !== tab.id}
       tabindex="0"
     >
+      {#if tab.id === 'youtube' && destination}
+        <p class="channel">
+          Uploads to <strong>{destination.channelTitle ?? 'your channel'}</strong>
+          <span>{destination.channelId}</span>
+        </p>
+      {/if}
       {@render tab.panel()}
     </div>
   {/each}
@@ -171,6 +181,20 @@
 
   [role='tabpanel'][hidden] {
     display: none;
+  }
+
+  .channel {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .channel span {
+    color: var(--muted);
+    font-family: var(--mono);
   }
 
   [role='tabpanel']:focus-visible {

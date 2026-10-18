@@ -609,6 +609,13 @@ describe('job page: Short tab', () => {
     expect(shortPanel()).toHaveAttribute('aria-labelledby', 'tab-short');
   });
 
+  it('names the channel an approved upload is pinned to', () => {
+    fetchMock.mockImplementation(hang);
+    const destination = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
+    setup(view({ state: 'PUBLISHING', destination }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Flies Like Robots UCflr');
+  });
+
   it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
     'offers Make a Short in %s',
     async (state) => {
