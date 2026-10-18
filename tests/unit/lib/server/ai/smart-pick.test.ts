@@ -4,6 +4,7 @@ import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from 
 import type { Fact, Feedback } from '$lib/server/artist/memory';
 import {
   allowedLinks,
+  ARTIST_CREDITS,
   ARTIST_VOICE,
   CONTACT_LINE,
   buildPickMessages,
@@ -236,6 +237,7 @@ describe('buildPickMessages', () => {
   it("writes the description in the artist's own voice on runs that may name him", () => {
     const rules = system(buildPickMessages(ctx()));
     expect(rules).toContain(ARTIST_VOICE);
+    expect(rules).toContain(ARTIST_CREDITS);
     expect(rules).toContain('hacked and slashed');
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
@@ -283,8 +285,22 @@ describe('buildPickMessages', () => {
     expect(body.candidateTags).toEqual(tagCandidates);
     expect(system(messages)).not.toContain(ARTIST);
     expect(system(messages)).not.toContain('recentUploads are');
-    // The voice stays shared until spec 002.
     expect(system(messages)).toContain(ARTIST_VOICE);
+  });
+
+  it("keeps the artist's credit and contact lines out of an unlinked job", () => {
+    const rules = system(buildPickMessages(ctx({ artist: false })));
+    expect(rules).not.toContain(ARTIST_CREDITS);
+    expect(rules).not.toContain(CONTACT_LINE);
+    expect(rules).not.toContain('flieslikerobots@');
+    expect(rules).not.toContain('hacked and slashed');
+    expect(rules).not.toContain('the credit line and contact line');
+    expect(rules).toContain('bandcamp.credits: an empty string.');
+  });
+
+  it('keeps identity out of the shared voice', () => {
+    expect(ARTIST_VOICE).not.toContain(CONTACT_LINE);
+    expect(ARTIST_VOICE).not.toContain('hacked and slashed');
   });
 
   it('grounds title, description, and tags in the genre search', () => {
