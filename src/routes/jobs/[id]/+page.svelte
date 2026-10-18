@@ -384,8 +384,9 @@
       <section class="paused" aria-labelledby="paused-title">
         <h2 id="paused-title">Upload outcome unknown</h2>
         <p>
-          YouTube lost the upload after its last bytes went out, so the video may be there. Check
-          your uploads; if it is, paste its link. Soundboard never uploads it again on its own.
+          YouTube lost the upload session after its last bytes may have gone out, so the video may
+          be there. Check your uploads; if it is, paste its link. Soundboard never uploads it again
+          on its own.
         </p>
         <a
           href="https://studio.youtube.com/channel/{job.destination.channelId}/videos/upload"

@@ -68,7 +68,7 @@ describe('connections page', () => {
   it.each<[Notice, string]>([
     ['missing_scopes', "Google didn't grant upload and read access. Reconnect and allow both."],
     ['no_channel', 'That Google account has no YouTube channel. Create one, then reconnect.'],
-    ['mismatch', 'That connect expired or started in another session. Try again.'],
+    ['mismatch', 'That connection attempt expired or started in another session. Try again.'],
     ['wrong-account', 'Connect YouTube with the Google account you signed in with.'],
   ])('explains the %s callback outcome', (notice, line) => {
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' }, notice);
