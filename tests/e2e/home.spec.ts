@@ -16,7 +16,7 @@ test.describe('home page', () => {
     await expect(analyze).toBeDisabled();
     await page.getByLabel(/^Song title/).fill('PeekaBoo');
     await expect(analyze).toBeDisabled();
-    await expect(page.getByText('up to 5 min')).toBeVisible();
+    await expect(page.getByText('up to 15 min')).toBeVisible();
   });
 
   test('lets dev.to frame the page', async ({ request }) => {

@@ -6,16 +6,14 @@ import { defineConfig, type Plugin } from 'vite';
 const fake = (name: string) =>
   fileURLToPath(new URL(`tests/e2e/fakes/${name}.ts`, import.meta.url));
 
-// E2E builds swap Google Cloud clients for in-memory fakes seeded with fixture jobs; release and
-// check builds never include them.
+// E2E builds swap Google Cloud clients for in-memory fakes and the database for a PGlite seeded
+// with fixture users and jobs; release and check builds never include them.
 const e2eFakes =
   process.env.E2E_FAKES === '1'
     ? {
         alias: {
-          '@google-cloud/firestore': fake('firestore'),
           '@google-cloud/kms': fake('kms'),
           '@google-cloud/storage': fake('storage'),
-          '@google-cloud/secret-manager': fake('secret-manager'),
         },
       }
     : undefined;
