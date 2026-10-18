@@ -561,13 +561,39 @@ describe('jobSet', () => {
       uploadStartedAt: 5,
     });
     // A widened patch, as a step's spread result could carry, still writes none of them.
-    const widened = { destination: null, uploadStartedAt: null, state: 'PREP' } as JobPatch;
+    const widened = {
+      id: 'other',
+      ownerUid: USER_B.uid,
+      createdAt: 1,
+      artistId: null,
+      parentId: 'p',
+      destination: null,
+      uploadStartedAt: null,
+      finalChunkAt: 9,
+      state: 'PREP',
+    } as JobPatch;
     await patch('j', widened);
     expect(await getJob('j')).toMatchObject({
+      id: 'j',
+      parentId: null,
       state: 'PREP',
       destination: { channelId: 'UCflr', channelTitle: 'FLR' },
       uploadStartedAt: 5,
+      finalChunkAt: null,
     });
+    const [row] = await db().select().from(jobs).where(eq(jobs.id, 'j'));
+    for (const key of [
+      'id',
+      'ownerUid',
+      'createdAt',
+      'artistId',
+      'parentId',
+      'destination',
+      'uploadStartedAt',
+      'finalChunkAt',
+    ]) {
+      expect(row!.data).not.toHaveProperty(key);
+    }
   });
 });
 

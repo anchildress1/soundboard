@@ -71,31 +71,31 @@ export function jobRow(doc: JobDoc): typeof jobs.$inferInsert {
   };
 }
 
-/**
- * What a step or action may change on a job. Identity, lineage and the upload lock (destination
- * and its markers) are written only by their own guarded statements.
- */
-export type JobPatch = Partial<
-  Omit<
-    JobDoc,
-    | 'id'
-    | 'ownerUid'
-    | 'createdAt'
-    | 'artistId'
-    | 'parentId'
-    | 'uploadStartedAt'
-    | 'finalChunkAt'
-    | 'destination'
-  >
->;
+// Identity, lineage, the destination and `uploadStartedAt` each have their own guarded statement;
+// `finalChunkAt` has none yet, so nothing writes it.
+const GUARDED = [
+  'id',
+  'ownerUid',
+  'createdAt',
+  'artistId',
+  'parentId',
+  'destination',
+  'uploadStartedAt',
+  'finalChunkAt',
+] as const;
+const guarded = new Set<string>(GUARDED);
+
+/** What a step or action may change on a job; `jobSet` drops the guarded fields at runtime too. */
+export type JobPatch = Partial<Omit<JobDoc, (typeof GUARDED)[number]>>;
 
 /**
  * A patch as an UPDATE's SET: column fields directly, everything else merged into `data` in the
- * same statement, so no read-modify-write races another writer. Undefined fields are left alone,
- * and a saved `videoId` is never replaced or cleared.
+ * same statement, so no read-modify-write races another writer. Undefined fields and guarded ones
+ * a widened patch carries are left alone, and a saved `videoId` is never replaced or cleared.
  */
 export function jobSet(patch: JobPatch) {
-  const { state, videoId, ...data } = patch;
+  const { state, videoId, ...rest } = patch;
+  const data = Object.fromEntries(Object.entries(rest).filter(([key]) => !guarded.has(key)));
   return {
     state,
     videoId: videoId === undefined ? undefined : sql`coalesce(${jobs.videoId}, ${videoId})`,
