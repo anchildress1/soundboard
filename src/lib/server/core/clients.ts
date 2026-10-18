@@ -1,6 +1,7 @@
 import { Firestore } from '@google-cloud/firestore';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
+import { resetDb } from '$lib/server/core/db';
 import { required } from './env';
 
 let firestore: Firestore | null = null;
@@ -30,4 +31,5 @@ export function resetClients(): void {
   firestore = null;
   storage = null;
   secrets = null;
+  resetDb();
 }
