@@ -1,6 +1,6 @@
 import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields } from '$lib/metadata';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '$lib/types';
 import { db } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
@@ -95,18 +95,15 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
       current.short ? feedback.filter((f) => f.kind === 'EDITED') : feedback,
       current,
     );
+    // The destination is pinned only before any upload began; nothing rewrites it after.
     await tx
       .update(jobs)
-      .set(
-        jobSet({
-          state: 'PUBLISHING',
-          finalFields: final,
-          destination,
-          consecutiveFailures: 0,
-          error: null,
-        }),
-      )
-      .where(eq(jobs.id, job.id));
+      .set({
+        ...jobSet({ state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null }),
+        destinationChannelId: destination.channelId,
+        destinationChannelTitle: destination.channelTitle,
+      })
+      .where(and(eq(jobs.id, job.id), isNull(jobs.uploadStartedAt)));
     return 'approved';
   });
   if (outcome === 'handled') throw new ActionError(409, 'This recommendation was already handled.');

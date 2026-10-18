@@ -6,24 +6,35 @@ import { decrypt, encrypt } from '$lib/server/core/kms';
 import { connections } from '$lib/server/core/schema';
 import { channelsMine, YOUTUBE_SCOPES } from './youtube';
 
-export type ConnectionStatus = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
-export type Connection = typeof connections.$inferSelect;
+type Stored = typeof connections.$inferSelect;
 
-/** Everything a (re)connect writes. `tokenCiphertext` must be null unless `connected`. */
-export type ConnectionRow = {
-  status: ConnectionStatus;
-  channelId: string | null;
-  channelTitle: string | null;
-  scopes: string[];
-  tokenCiphertext: string | null;
-};
+/** A connection's own fields. Only a `connected` row holds a token, and it always names a channel. */
+export type ConnectionRow =
+  | {
+      status: 'connected';
+      channelId: string;
+      channelTitle: string | null;
+      scopes: string[];
+      tokenCiphertext: string;
+    }
+  | {
+      status: Exclude<Stored['status'], 'connected'>;
+      channelId: string | null;
+      channelTitle: string | null;
+      scopes: string[];
+      tokenCiphertext: null;
+    };
+
+export type Connection = ConnectionRow & Pick<Stored, 'uid' | 'platform' | 'updatedAt'>;
+export type ConnectionStatus = Connection['status'];
 
 const PLATFORM = 'youtube';
 const mine = (uid: string) => and(eq(connections.uid, uid), eq(connections.platform, PLATFORM));
 
 export async function getConnection(uid: string): Promise<Connection | null> {
   const [row] = await db().select().from(connections).where(mine(uid));
-  return row ?? null;
+  // The table's check constraints hold the union's shape.
+  return (row as Connection | undefined) ?? null;
 }
 
 /** Writes the user's whole connection in one upsert, so a reconnect never leaves a mixed row. */

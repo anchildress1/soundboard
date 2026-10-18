@@ -4,7 +4,7 @@ import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
 import { db, type Tx } from '$lib/server/core/db';
 import { jobChunks, jobPicks, jobs } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
-import { fromRow, jobRow, jobSet } from './rows';
+import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 
 /** A step's claim on a job; an aborted request frees the job when it lapses. */
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
@@ -118,7 +118,6 @@ export async function listJobs(uid: string): Promise<JobListItem[]> {
     .limit(20);
   return rows.map((row) => ({
     ...row,
-    state: row.state as JobState,
     createdAt: row.createdAt.getTime(),
   }));
 }
@@ -168,7 +167,7 @@ export async function releaseJob(
   id: string,
   token: string,
   claimedState: JobState,
-  patch: Partial<JobDoc> = {},
+  patch: JobPatch = {},
   writes: { pick?: Pick; chunk?: Chunk } = {},
 ): Promise<boolean> {
   const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
@@ -204,7 +203,7 @@ export async function markUploadStarted(id: string): Promise<void> {
 export async function transitionJob(
   id: string,
   from: readonly JobState[],
-  patch: Partial<JobDoc>,
+  patch: JobPatch,
 ): Promise<boolean> {
   const moved = await db()
     .update(jobs)
@@ -311,13 +310,13 @@ export function toPublic(doc: JobDoc): PublicJob {
 }
 
 /** A step that succeeded: the failure streak and the shown error reset. */
-export const ok = (patch: Partial<JobDoc>): Partial<JobDoc> => ({
+export const ok = (patch: JobPatch): JobPatch => ({
   ...patch,
   consecutiveFailures: 0,
   error: null,
 });
 
-export function fail(state: JobState, message: string): Partial<JobDoc> {
+export function fail(state: JobState, message: string): JobPatch {
   return { state: 'FAILED', failedState: state, error: message };
 }
 

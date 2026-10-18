@@ -11,6 +11,8 @@ import {
   timestamp,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+// Relative, not $lib: drizzle-kit loads this file outside Vite's aliases.
+import { JOB_STATES } from '../../types';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -59,6 +61,10 @@ export const connections = pgTable(
       'connections_token_check',
       sql`${t.status} = 'connected' or ${t.tokenCiphertext} is null`,
     ),
+    check(
+      'connections_connected_check',
+      sql`${t.status} <> 'connected' or (${t.tokenCiphertext} is not null and ${t.channelId} is not null)`,
+    ),
   ],
 );
 
@@ -71,7 +77,7 @@ export const jobs = pgTable(
       .references(() => users.uid),
     artistId: text('artist_id'),
     parentId: text('parent_id').references((): AnyPgColumn => jobs.id),
-    state: text('state').notNull(),
+    state: text('state', { enum: JOB_STATES }).notNull(),
     createdAt: at('created_at').notNull(),
     claimUntil: at('claim_until'),
     claimToken: text('claim_token'),
@@ -83,6 +89,10 @@ export const jobs = pgTable(
     data: jsonb('data').notNull(),
   },
   (t) => [
+    check(
+      'jobs_state_check',
+      sql`${t.state} in (${sql.raw(JOB_STATES.map((state) => `'${state}'`).join(', '))})`,
+    ),
     index('jobs_owner_list_idx')
       .on(t.ownerUid, t.createdAt.desc())
       .where(sql`${t.parentId} is null`),
@@ -106,7 +116,7 @@ export const jobChunks = pgTable(
   (t) => [primaryKey({ columns: [t.jobId, t.index] })],
 );
 
-// Feedback rows have no natural key: Firestore stored them under auto IDs.
+// Feedback rows have no natural key.
 export const jobFeedback = pgTable(
   'job_feedback',
   {

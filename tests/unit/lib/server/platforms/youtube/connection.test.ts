@@ -40,7 +40,9 @@ vi.mock('google-auth-library', () => ({
   },
 }));
 
-const connected = (overrides: Partial<ConnectionRow> = {}): ConnectionRow => ({
+type Connected = Extract<ConnectionRow, { status: 'connected' }>;
+
+const connected = (overrides: Partial<Connected> = {}): Connected => ({
   status: 'connected',
   channelId: CHANNEL,
   channelTitle: 'Flies Like Robots',
@@ -48,6 +50,10 @@ const connected = (overrides: Partial<ConnectionRow> = {}): ConnectionRow => ({
   tokenCiphertext: 'c2VhbGVk',
   ...overrides,
 });
+
+/** A row the types forbid, to prove the table refuses it too. */
+const unchecked = (overrides: Record<string, unknown>) =>
+  ({ ...connected(), ...overrides }) as ConnectionRow;
 
 const invalidGrant = () =>
   Object.assign(new Error('reauth required'), { response: { data: { error: 'invalid_grant' } } });
@@ -108,8 +114,16 @@ describe('putConnection / getConnection', () => {
 
   it('rejects a token on a connection that is not connected', async () => {
     await expect(
-      putConnection(UID, connected({ status: 'missing_scopes', tokenCiphertext: 'x' })),
+      putConnection(UID, unchecked({ status: 'missing_scopes', tokenCiphertext: 'x' })),
     ).rejects.toThrow();
+    expect(await getConnection(UID)).toBeNull();
+  });
+
+  it.each([
+    ['token', { tokenCiphertext: null }],
+    ['channel', { channelId: null }],
+  ])('rejects a connected row without its %s', async (_label, overrides) => {
+    await expect(putConnection(UID, unchecked(overrides))).rejects.toThrow();
     expect(await getConnection(UID)).toBeNull();
   });
 
@@ -175,15 +189,13 @@ describe('accessTokenFor', () => {
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
     'returns null when the connection is %s',
     async (status) => {
-      await putConnection(UID, connected({ status, tokenCiphertext: null }));
+      await putConnection(UID, { ...connected(), status, tokenCiphertext: null });
       expect(await accessTokenFor(UID, CHANNEL)).toBeNull();
       expect(oauth.getAccessToken).not.toHaveBeenCalled();
     },
   );
 
-  it('returns null with no connection or a connected row missing its token', async () => {
-    expect(await accessTokenFor(UID, CHANNEL)).toBeNull();
-    await putConnection(UID, connected({ tokenCiphertext: null }));
+  it('returns null with no connection', async () => {
     expect(await accessTokenFor(UID, CHANNEL)).toBeNull();
     expect(kms.decrypt).not.toHaveBeenCalled();
   });

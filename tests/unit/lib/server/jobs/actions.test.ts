@@ -7,7 +7,7 @@ import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { artistFeedback, connections, jobFeedback, jobs, users } from '$lib/server/core/schema';
 import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
-import { jobSet } from '$lib/server/jobs/rows';
+import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import type { Hook, JobState, Pick, Short } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
@@ -34,7 +34,7 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
   modelMs: 1,
 });
 
-const patchJob = (fields: Partial<JobDoc>) =>
+const patchJob = (fields: JobPatch) =>
   db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'job1'));
 
 /** B's job by default: no artist link, so its feedback stays on the job. */

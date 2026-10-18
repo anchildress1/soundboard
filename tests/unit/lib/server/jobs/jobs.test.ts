@@ -20,10 +20,9 @@ import {
   skipAndRepick,
   toPublic,
   transitionJob,
-  type JobDoc,
   type NewJob,
 } from '$lib/server/jobs/jobs';
-import { jobSet } from '$lib/server/jobs/rows';
+import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
@@ -72,7 +71,7 @@ const pick = (version: number): Pick => ({
   modelMs: 1,
 });
 
-const patch = (id: string, fields: Partial<JobDoc>) =>
+const patch = (id: string, fields: JobPatch) =>
   db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, id));
 const seedPicks = (jobId: string, ...versions: number[]) =>
   seed({
@@ -154,8 +153,10 @@ describe('createJob / getJob', () => {
   });
 
   it('stores the owner, artist, destination and upload markers as columns', async () => {
-    await createJob({ ...input, ownerUid: USER_A.uid, artistId: 'flr' }, 'j');
-    await patch('j', {
+    await seedJob({
+      id: 'j',
+      ownerUid: USER_A.uid,
+      artistId: 'flr',
       destination: { channelId: 'UCflr', channelTitle: 'Flies Like Robots' },
       uploadStartedAt: 5,
       finalChunkAt: 6,
@@ -381,7 +382,7 @@ describe('newJobDoc', () => {
 });
 
 describe('createShort', () => {
-  async function parent(fields: Partial<JobDoc> = {}) {
+  async function parent(fields: JobPatch = {}) {
     await createJob(
       { ...input, ownerUid: USER_A.uid, artistId: 'flr', object: SOURCE_OBJECT },
       'p',
@@ -397,7 +398,6 @@ describe('createShort', () => {
         top: [],
       },
       pickVersion: 3,
-      destination: { channelId: 'UCflr', channelTitle: 'FLR' },
       ...fields,
     });
     await seedPicks('p', 2, 3);
@@ -542,6 +542,32 @@ describe('toPublic', () => {
       expect(pub).not.toHaveProperty(field);
     }
     expect(pub.songTitle).toBe('PeekaBoo');
+  });
+});
+
+describe('jobSet', () => {
+  it('never replaces or clears a saved videoId', async () => {
+    await createJob(input, 'j');
+    await patch('j', { videoId: 'first' });
+    await patch('j', { videoId: 'second' });
+    await patch('j', { videoId: null });
+    expect((await getJob('j'))!.videoId).toBe('first');
+  });
+
+  it('leaves the upload lock to its own statements', async () => {
+    await seedJob({
+      id: 'j',
+      destination: { channelId: 'UCflr', channelTitle: 'FLR' },
+      uploadStartedAt: 5,
+    });
+    // A widened patch, as a step's spread result could carry, still writes none of them.
+    const widened = { destination: null, uploadStartedAt: null, state: 'PREP' } as JobPatch;
+    await patch('j', widened);
+    expect(await getJob('j')).toMatchObject({
+      state: 'PREP',
+      destination: { channelId: 'UCflr', channelTitle: 'FLR' },
+      uploadStartedAt: 5,
+    });
   });
 });
 

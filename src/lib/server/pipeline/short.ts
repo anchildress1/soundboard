@@ -15,6 +15,7 @@ import {
 } from '$lib/server/media/ffmpeg';
 import { signedReadUrl, uploadFile } from '$lib/server/media/gcs';
 import { fail, listChunks, ok, type JobDoc } from '$lib/server/jobs/jobs';
+import type { JobPatch } from '$lib/server/jobs/rows';
 import { chatJson, stepDeadline } from '$lib/server/ai/model';
 import { stripNumerics } from '$lib/server/ai/numerics';
 import { isFiniteNumber, isString, shape } from '$lib/server/ai/shape';
@@ -209,7 +210,7 @@ export function placeCut(
 }
 
 /** HOOK step: the model picks the window and length, then ffmpeg's loudness places the start. */
-export async function hookStep(job: JobDoc): Promise<Partial<JobDoc>> {
+export async function hookStep(job: JobDoc): Promise<JobPatch> {
   const short = requireShort(job);
   const chunks = job.parentId ? await listChunks(job.parentId) : [];
   if (chunks.length === 0) throw new Error("The source video's analysis is gone.");
@@ -262,7 +263,7 @@ const READBACK_TIMEOUT_MS = 10_000;
  * is read back from storage before review. A new object per render means the player never shows a
  * cached earlier cut.
  */
-export async function renderStep(job: JobDoc): Promise<Partial<JobDoc>> {
+export async function renderStep(job: JobDoc): Promise<JobPatch> {
   const short = requireShort(job);
   if (!short.hook) throw new Error('The Short has no hook to cut.');
   const renders = short.renders + 1;

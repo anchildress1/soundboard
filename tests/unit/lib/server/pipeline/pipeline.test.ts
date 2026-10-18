@@ -44,7 +44,7 @@ import {
 } from '$lib/server/core/schema';
 import { retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, type JobDoc } from '$lib/server/jobs/jobs';
-import { jobSet } from '$lib/server/jobs/rows';
+import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
 import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 
@@ -111,7 +111,7 @@ const chatBodies = () =>
 
 const put = (patch: Partial<JobDoc> = {}) => seedJob(patch);
 const saved = async () => (await getJob('j1'))!;
-const patchJob = (fields: Partial<JobDoc>) =>
+const patchJob = (fields: JobPatch) =>
   db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
 const claimToken = async () =>
   (await db().select({ token: jobs.claimToken }).from(jobs).where(eq(jobs.id, 'j1')))[0]!.token;

@@ -23,6 +23,7 @@ import { required } from '$lib/server/core/env';
 import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { hookStep, renderStep } from './short';
 import { runPick } from '$lib/server/ai/smart-pick';
+import type { JobPatch } from '$lib/server/jobs/rows';
 import { invokeAgent } from '$lib/server/core/tracing';
 import {
   accessTokenFor,
@@ -38,7 +39,7 @@ import {
 export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 3;
 
-type Patch = Partial<JobDoc>;
+type Patch = JobPatch;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
 type StepOutput = Patch & { pick?: Pick; chunk?: Chunk; wait?: Wait };
 

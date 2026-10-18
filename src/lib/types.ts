@@ -1,17 +1,20 @@
 /** Pipeline states. `CLAIMED_COMPLETE` comes from the insert response; only read-back sets `VERIFIED`. */
-export type JobState =
-  | 'AWAITING_UPLOAD'
-  | 'PREP'
-  | 'ANALYZE'
-  | 'PICK'
-  | 'HOOK'
-  | 'RENDER'
-  | 'REVIEW'
-  | 'PUBLISHING'
-  | 'CLAIMED_COMPLETE'
-  | 'VERIFIED'
-  | 'FAILED'
-  | 'DISCARDED';
+export const JOB_STATES = [
+  'AWAITING_UPLOAD',
+  'PREP',
+  'ANALYZE',
+  'PICK',
+  'HOOK',
+  'RENDER',
+  'REVIEW',
+  'PUBLISHING',
+  'CLAIMED_COMPLETE',
+  'VERIFIED',
+  'FAILED',
+  'DISCARDED',
+] as const;
+
+export type JobState = (typeof JOB_STATES)[number];
 
 /** Steps the status page drives with `POST /api/jobs/{id}/step`. */
 export const DRIVEN_STATES: readonly JobState[] = [
