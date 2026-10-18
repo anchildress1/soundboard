@@ -224,6 +224,29 @@ describe('accessTokenFor', () => {
     expect(reported).not.toContain('1//refresh');
   });
 
+  it('reports the revoke even when recording it fails', async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockRejectedValueOnce(invalidGrant());
+    await db().execute(sql`
+      create function refuse_write() returns trigger language plpgsql
+        as $$ begin raise exception 'write refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_write before update on connections
+        for each row execute function refuse_write()
+    `);
+    try {
+      await expect(accessTokenFor(UID, CHANNEL)).rejects.toThrow();
+    } finally {
+      await db().execute(sql`drop trigger refuse_write on connections`);
+      await db().execute(sql`drop function refuse_write`);
+    }
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube grant revoked', {
+      level: 'info',
+    });
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
   it('wraps other refresh errors with their cause and keeps the grant', async () => {
     await putConnection(UID, connected());
     const cause = new Error('ECONNRESET');
