@@ -75,7 +75,8 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
 export async function accessTokenFor(uid: string, channelId: string): Promise<string | null> {
   const connection = await getConnection(uid);
   if (connection?.status !== 'connected') return null;
-  // The channel lock means a reconnect can't bring the job's channel back, so this never waits.
+  // The channel lock means a reconnect can't bring the job's channel back, so this throws rather
+  // than returning null.
   if (connection.channelId !== channelId)
     throw new Error("Connected channel doesn't match this job's channel.");
   const cipher = connection.tokenCiphertext;
