@@ -1209,6 +1209,8 @@ describe('runStep: PUBLISHING recovery', () => {
       Boolean((context as { tags?: { step?: string } }).tags?.step),
     )!;
     expect(stepError).not.toBe(cancelError);
+    // Drizzle wraps the driver error; the trigger's message is on its cause.
+    expect(String((stepError as Error).cause)).toMatch(/marker refused/);
     expect(called(/upload\.example\/s1/)).toHaveLength(1);
     expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
