@@ -87,6 +87,10 @@ export function discardBrandProposal() {
   return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
 }
 
+export function disconnectYouTube() {
+  return call<unknown>('/api/connections/youtube/disconnect', { method: 'POST' });
+}
+
 /** Signed PUT straight to GCS, with progress. The headers must match what the URL was signed with. */
 export function uploadToGcs(
   url: string,

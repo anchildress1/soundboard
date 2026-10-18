@@ -46,12 +46,8 @@
           <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
         </p>
       {/if}
-      {#if data.user && !data.connected}
-        <!-- A page load, not client routing: the route redirects to Google. -->
-        <form method="GET" action="/auth/login" data-sveltekit-reload>
-          <input type="hidden" name="connect" value="youtube" />
-          <button class="btn ghost small" type="submit">Connect YouTube</button>
-        </form>
+      {#if data.user}
+        <a class="btn ghost small" href={resolve('/connections')}>Connections</a>
       {/if}
       {#if data.user?.artistId === 'flr'}
         <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>

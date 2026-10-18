@@ -128,7 +128,7 @@ description: 'Task list for Google sign-in and connections'
 - [x] T036 [US2] Rewrite src/routes/auth/callback/+server.ts: verify state (delete `sb_oauth` on first read), exchange code, verify the ID token and email; sign-in → `redeemInvite` → `updateProfile` → set `sb_session` with a new `sid` → evaluate YouTube; evaluation per contract steps 1–6, splitting `tokens.scope` on spaces, `channels.list?mine=true` through the new access token, encrypt and write in one `putConnection`
 - [x] T037 [US2] Return `{email, sub, idToken claims, scopes, refreshToken, accessToken}` from `exchangeCode` in src/lib/server/auth/auth.ts and add `channelsMine(accessToken)` in src/lib/server/platforms/youtube/youtube.ts returning `{id, title} | null`; tests alongside
 - [x] T038 [US2] Delete `sb_oauth` as well as `sb_session` in src/routes/auth/logout/+server.ts
-- [x] T039 [US2] Show the signed-in user's own channel in the header: `channelStats(channelId)` with a cache keyed by channel ID in src/lib/server/platforms/youtube/youtube.ts (FR-030 fix for today's single cache), read from `getConnection(locals.user.uid)` in src/routes/+layout.server.ts; header links Connections and, only when `artistId === 'flr'`, Brand guide in src/routes/+layout.svelte. Update tests/unit/routes/layout.server.test.ts and layout.test.ts (partial: the Connections header link lands with the `/connections` route in Phase 8)
+- [x] T039 [US2] Show the signed-in user's own channel in the header: `channelStats(channelId)` with a cache keyed by channel ID in src/lib/server/platforms/youtube/youtube.ts (FR-030 fix for today's single cache), read from `getConnection(locals.user.uid)` in src/routes/+layout.server.ts; header links Connections and, only when `artistId === 'flr'`, Brand guide in src/routes/+layout.svelte. Update tests/unit/routes/layout.server.test.ts and layout.test.ts
 
 **Checkpoint**: US1 + US2 testable.
 
@@ -212,7 +212,7 @@ description: 'Task list for Google sign-in and connections'
 
 ### Tests
 
-- [ ] T062 [P] [US5] Connections page tests in tests/unit/routes/connections/page.server.test.ts and page.test.ts: every status renders its plain fix line
+- [x] T062 [P] [US5] Connections page tests in tests/unit/routes/connections/page.server.test.ts and page.test.ts: every status renders its plain fix line
 - [x] T063 [P] [US5] Disconnect tests in tests/unit/routes/api/connections/youtube/disconnect/server.test.ts: revokes at Google, deletes the row on revoke failure too, 204, 401 signed out
 - [x] T064 [P] [US5] Connect-callback tests in tests/unit/routes/auth/callback/server.test.ts: `uid` or `sid` mismatch, signed out, or a stale callback after sign-out and back in → 303 `/connections?connect=mismatch`, no change (FR-026); a grant whose ID token `sub` ≠ the session `uid` → 303 `/connections?connect=wrong-account`, no change (FR-023); a failed reconnect keeps the stored connection
 - [x] T065 [P] [US5] Recovery tests in tests/unit/lib/server/pipeline/pipeline.test.ts:
@@ -229,7 +229,7 @@ description: 'Task list for Google sign-in and connections'
 
 ### Implementation
 
-- [ ] T069 [US5] Create src/routes/connections/+page.server.ts and +page.svelte: one YouTube row with status, channel title, and Reconnect (`/auth/login?connect=youtube`) or Disconnect
+- [x] T069 [US5] Create src/routes/connections/+page.server.ts and +page.svelte: one YouTube row with status, channel title, and Reconnect (`/auth/login?connect=youtube`) or Disconnect
 - [x] T070 [US5] Add `revokeGrant(uid)` in src/lib/server/platforms/youtube/connection.ts (POST to `https://oauth2.googleapis.com/revoke`, log a failure and delete the row anyway) and export it from index.ts, with tests; create src/routes/api/connections/youtube/disconnect/+server.ts calling it and returning 204
 - [x] T071 [US5] Connect branch of src/routes/auth/callback/+server.ts: require session `uid` and `sid` to equal the state's and the ID token `sub` to equal the session `uid`; validate the new grant fully before one overwriting write (FR-027)
 - [x] T072 [US5] Final-chunk marker in src/lib/server/pipeline/pipeline.ts: persist top-level `finalChunkAt` before sending the chunk that reaches the file size; on session 404 branch per [data-model.md](data-model.md#publishing-and-verification-with-a-pinned-destination), clearing `upload` when `finalChunkAt` is set; export one `outcomeUnknown(job)` predicate for steps and T075; map YouTube `quotaExceeded` and `uploadLimitExceeded` to wait "Daily upload limit reached. Try tomorrow." (extend `uploadFailure()`'s existing `'quota-spent'` outcome in src/lib/server/platforms/youtube/youtube.ts to cover `uploadLimitExceeded`)

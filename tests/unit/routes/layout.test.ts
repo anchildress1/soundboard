@@ -8,7 +8,7 @@ const NATHAN_EMAIL = 'nathan@example.com';
 const STRANGER_EMAIL = 'someone@example.com';
 const BRAND_GUIDE = 'Brand guide';
 
-type Props = { data: { channel: unknown; connected: boolean; user: unknown }; children: unknown };
+type Props = { data: { channel: unknown; user: unknown }; children: unknown };
 
 const NATHAN = { email: NATHAN_EMAIL, artistId: 'flr' };
 const STRANGER = { email: STRANGER_EMAIL, artistId: null };
@@ -17,7 +17,7 @@ const children = createRawSnippet(() => ({ render: () => '<main>page body</main>
 
 function setup(data: Partial<Props['data']> = {}) {
   return render(Layout, {
-    props: { data: { channel: null, connected: true, user: null, ...data }, children } as never,
+    props: { data: { channel: null, user: null, ...data }, children } as never,
   });
 }
 
@@ -108,26 +108,24 @@ describe('layout', () => {
     const brand = screen.getByRole('link', { name: BRAND_GUIDE });
     expect(brand).toHaveAttribute('href', '/brand');
     expect(brand.closest('header')).not.toBeNull();
-    expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Connect (YouTube|channel)/ })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
   });
 
-  it('offers an unconnected user a YouTube connect that forces consent', () => {
-    setup({ user: STRANGER, connected: false });
-    const connect = screen.getByRole('button', { name: 'Connect YouTube' });
-    const form = connect.closest('form')!;
-    expect(form).toHaveAttribute('action', '/auth/login');
-    expect(form).toHaveAttribute('method', 'GET');
-    expect(form).toHaveAttribute('data-sveltekit-reload');
-    expect(new FormData(form).get('connect')).toBe('youtube');
+  it.each([
+    ['Nathan', NATHAN],
+    ['an unlinked user', STRANGER],
+  ])('links %s to Connections in the header, the one place to connect YouTube', (_l, user) => {
+    setup({ user });
+    const link = screen.getByRole('link', { name: 'Connections' });
+    expect(link).toHaveAttribute('href', '/connections');
+    expect(link.closest('header')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Connect YouTube' })).toBeNull();
   });
 
-  it.each([
-    ['a connected user', { user: STRANGER, connected: true }],
-    ['a signed-out visitor', { user: null, connected: false }],
-  ])('offers no connect to %s', (_label, data) => {
-    setup(data);
-    expect(screen.queryByRole('button', { name: 'Connect YouTube' })).toBeNull();
+  it('offers no Connections link when signed out', () => {
+    setup();
+    expect(screen.queryByRole('link', { name: 'Connections' })).toBeNull();
   });
 
   it('offers a skip link to the page content', () => {

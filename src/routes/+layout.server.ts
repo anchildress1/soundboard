@@ -16,7 +16,6 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   }
   return {
     channel,
-    connected: connection?.status === 'connected',
     user: user ? { email: user.email, artistId: user.artistId } : null,
   };
 };
