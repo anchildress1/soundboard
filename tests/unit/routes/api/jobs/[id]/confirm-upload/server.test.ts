@@ -270,6 +270,13 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
+  it('skips the publish-time check when the upload start was never recorded', async () => {
+    await seedJob({ ...PAUSED, uploadStartedAt: null });
+    videoOn(CHANNEL_A, '2020-01-01T00:00:00Z');
+    expect((await confirm({ url: `https://youtu.be/${ID}` })).status).toBe(200);
+    expect(await getJob('j1')).toMatchObject({ state: 'CLAIMED_COMPLETE', videoId: ID });
+  });
+
   it('409s when the job left the paused state while the video was read', async () => {
     await seedJob(PAUSED);
     fetchMock.mockImplementation(async () => {
