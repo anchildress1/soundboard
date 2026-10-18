@@ -371,11 +371,14 @@ export async function channelsMine(
 }
 
 /**
- * YouTube's verdict on a read-back upload. `reason` is the status word it rejected with, as in
- * "YouTube <reason> the upload."
+ * YouTube's verdict on a read-back upload. `reason` is YouTube's past-tense status word
+ * (`rejected`, `failed`, `deleted`). Every documented word is sorted, so `raw` on a pending verdict
+ * is a word YouTube added since, or null when it sent none.
  */
 export type UploadVerdict =
-  { status: 'accepted' | 'pending' } | { status: 'rejected'; reason: string };
+  | { status: 'accepted' }
+  | { status: 'pending'; raw: string | null }
+  | { status: 'rejected'; reason: string };
 
 /** Reads the video back from the target channel; only this result can mark a publish verified. */
 export type ReadBack = LiveMetadata & UploadVerdict;
@@ -388,7 +391,8 @@ function verdict(uploadStatus: string | undefined): UploadVerdict {
   if (uploadStatus && REJECTED_UPLOADS.has(uploadStatus)) {
     return { status: 'rejected', reason: uploadStatus };
   }
-  return { status: uploadStatus && ACCEPTED_UPLOADS.has(uploadStatus) ? 'accepted' : 'pending' };
+  if (uploadStatus && ACCEPTED_UPLOADS.has(uploadStatus)) return { status: 'accepted' };
+  return { status: 'pending', raw: uploadStatus || null };
 }
 
 export async function readBack(accessToken: string, videoId: string): Promise<ReadBack | null> {

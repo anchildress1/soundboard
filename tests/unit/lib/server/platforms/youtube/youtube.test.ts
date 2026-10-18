@@ -548,8 +548,9 @@ describe('readBack', () => {
     ['rejected', { status: 'rejected', reason: 'rejected' }],
     ['failed', { status: 'rejected', reason: 'failed' }],
     ['deleted', { status: 'rejected', reason: 'deleted' }],
-    [undefined, { status: 'pending' }],
-    ['someNewStatus', { status: 'pending' }],
+    [undefined, { status: 'pending', raw: null }],
+    ['', { status: 'pending', raw: null }],
+    ['someNewStatus', { status: 'pending', raw: 'someNewStatus' }],
   ])('reads uploadStatus %s as %o', async (uploadStatus, expected) => {
     fetchMock.mockResolvedValueOnce(
       json({ items: [{ ...video('pub1'), status: { uploadStatus } }] }),
@@ -561,7 +562,7 @@ describe('readBack', () => {
 
   it('reads a video with no status part as pending', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [video('pub1')] }));
-    expect(await readBack('tok', 'pub1')).toMatchObject({ status: 'pending' });
+    expect(await readBack('tok', 'pub1')).toMatchObject({ status: 'pending', raw: null });
   });
 
   it('returns null when the video is not listed yet', async () => {

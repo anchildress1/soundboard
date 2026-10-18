@@ -1458,11 +1458,41 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     expect(await publishes()).toEqual([]);
   });
 
-  it('keeps waiting while a listed upload has no accepted status yet', async () => {
+  it('counts an attempt without a report while a listed upload has no status', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status: {} }] }));
     expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
     expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
+    expect(captureMessage).not.toHaveBeenCalled();
   });
+
+  it('reports an unknown upload status and keeps waiting', async () => {
+    on(/com\/youtube\/v3\/videos\?/, () =>
+      json({ items: [{ id: 'vid1', status: { uploadStatus: 'quarantined' } }] }),
+    );
+    expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
+    expect(await saved()).toMatchObject({ state: 'CLAIMED_COMPLETE', verifyAttempts: 1 });
+    expect(captureMessage).toHaveBeenCalledExactlyOnceWith('Unknown YouTube uploadStatus', {
+      level: 'warning',
+      tags: { 'job.id': 'j1', uploadStatus: 'quarantined' },
+    });
+  });
+
+  it.each([
+    [{ uploadStatus: 'quarantined' }, 'YouTube kept the upload at "quarantined".'],
+    [{}, 'YouTube kept the upload at "no status".'],
+  ])(
+    `fails naming the status YouTube kept after ${VERIFY_ATTEMPTS} read-backs of %o`,
+    async (status, error) => {
+      on(/com\/youtube\/v3\/videos\?/, () => json({ items: [{ id: 'vid1', status }] }));
+      await runStep(await claimed({ verifyAttempts: VERIFY_ATTEMPTS - 1 }));
+      expect(await saved()).toMatchObject({
+        state: 'FAILED',
+        failedState: 'CLAIMED_COMPLETE',
+        error,
+      });
+      expect(await publishes()).toEqual([]);
+    },
+  );
 
   it('waits on YouTube while the video is not listed yet', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => json({ items: [] }));

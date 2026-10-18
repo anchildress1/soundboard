@@ -342,10 +342,20 @@ async function verified(job: JobDoc, videoId: string, video: ReadBack | null): P
     await recordVerified(job, videoId);
     return ok({ state: 'VERIFIED' });
   }
+  if (video?.raw) {
+    captureMessage('Unknown YouTube uploadStatus', {
+      level: 'warning',
+      tags: { 'job.id': job.id, uploadStatus: video.raw },
+    });
+  }
   const attempts = job.verifyAttempts + 1;
-  if (attempts >= VERIFY_ATTEMPTS)
-    return fail('CLAIMED_COMPLETE', 'YouTube never returned the uploaded video.');
-  return { verifyAttempts: attempts };
+  if (attempts < VERIFY_ATTEMPTS) return { verifyAttempts: attempts };
+  return fail(
+    'CLAIMED_COMPLETE',
+    video
+      ? `YouTube kept the upload at "${video.raw ?? 'no status'}".`
+      : 'YouTube never returned the uploaded video.',
+  );
 }
 
 const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> = {
