@@ -31,3 +31,15 @@ export function allowlist(): Set<string> {
 export function demoEmails(): Set<string> {
   return emailSet('DEMO_EMAILS');
 }
+
+/** Who may sign in: invited emails only (the default), or any Google account. */
+export function signupMode(): 'invite' | 'open' {
+  const mode = optional('SIGNUP_MODE', 'invite');
+  if (mode !== 'invite' && mode !== 'open') throw new Error(`Unknown SIGNUP_MODE ${mode}`);
+  return mode;
+}
+
+/** Resource name of the Cloud KMS key that encrypts refresh tokens. */
+export function kmsKey(): string {
+  return required('KMS_KEY');
+}
