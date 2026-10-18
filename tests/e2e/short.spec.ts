@@ -28,9 +28,12 @@ test.describe('destination tabs', () => {
 
   test('moves between tabs from the keyboard', async ({ page }) => {
     await page.goto(TABS_JOB);
-    await tab(page, 'YouTube').focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(tab(page, 'Short')).toBeFocused();
+    // A key pressed before hydration attaches the tablist's handler does nothing, so retry it.
+    await expect(async () => {
+      await tab(page, 'YouTube').focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(tab(page, 'Short')).toBeFocused({ timeout: 1000 });
+    }).toPass();
     await expect(tab(page, 'Short')).toHaveAttribute('aria-selected', 'true');
     await expect(shortPanel(page)).toBeVisible();
     await page.keyboard.press('End');

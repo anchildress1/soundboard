@@ -248,7 +248,7 @@ description: 'Task list for Google sign-in and connections'
 - [x] T078 [P] Update AGENTS.md "Data and access" for users, invites, connections and `ownerUid`, removing allowlist/demo/visitor rules (FR-021); replace its Firestore lines (step claim, mock boundaries, E2E aliases) with Postgres, PGlite and the db alias. Update docs/prd.md the same way: replace its Firestore security-rules line, the State and Region lines, the step-claim line and the `### Firestore` section with Neon, Drizzle and the claim token (FR-021)
 - [x] T079 [P] Update README.md setup: Neon `DATABASE_URL`, `drizzle-kit migrate`, invites, `SIGNUP_MODE`, KMS key, Connections; remove sample and sandbox guidance
 - [x] T080 Legacy sweep for SC-007: `grep -rn "visitor\|demo\|sample\|sandbox\|allowlist\|dev\.to\|DEMO_EMAILS\|ALLOWLIST" src tests scripts deploy.sh service.yaml README.md AGENTS.md` returns only removal text
-- [ ] T081 Run `make ai-checks` (coverage floors 85/85/85/80) and `pnpm test:e2e`; run the Sonar and Semgrep scans; fix every warning
+- [x] T081 Run `make ai-checks` (coverage floors 85/85/85/80) and `pnpm test:e2e`; run the Sonar and Semgrep scans; fix every warning
 - [ ] T082 Run the deployed manual checks in [quickstart.md](quickstart.md#manual-deployed)
 
 ---
