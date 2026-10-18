@@ -10,7 +10,7 @@ import {
   type OAuthState,
 } from '$lib/server/auth/auth';
 import { redeemInvite, upsertUser } from '$lib/server/auth/users';
-import { connectGrant } from '$lib/server/platforms/youtube';
+import { connectGrant, type ConnectOutcome } from '$lib/server/platforms/youtube';
 import type { RequestHandler } from './$types';
 
 type Callback = { url: URL; cookies: Cookies; code: string };
@@ -37,7 +37,7 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
     maxAge: SESSION_TTL_SEC,
   });
   // The session is already set: a YouTube or KMS failure leaves the user signed in, unconnected.
-  let outcome: Awaited<ReturnType<typeof connectGrant>> | null = null;
+  let outcome: ConnectOutcome | null = null;
   try {
     outcome = await connectGrant(user.uid, grant, 'sign-in');
   } catch (error) {
@@ -61,8 +61,8 @@ async function connect(
   const grant = await exchangeCode(url.origin, code);
   if (!grant) redirect(303, '/?signin=expired');
   if (grant.sub !== uid) redirect(303, '/connections?connect=wrong-account');
-  await connectGrant(uid, grant, 'connect');
-  redirect(303, '/connections');
+  const outcome = await connectGrant(uid, grant, 'connect');
+  redirect(303, outcome === 'connected' ? '/connections' : `/connections?connect=${outcome}`);
 }
 
 export const GET: RequestHandler = async ({ url, cookies, locals }) => {

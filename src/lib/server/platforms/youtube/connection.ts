@@ -1,7 +1,9 @@
+import { captureMessage } from '@sentry/sveltekit';
 import { and, eq } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
+import { invalidGrant } from '$lib/server/core/errors';
 import { decrypt, encrypt } from '$lib/server/core/kms';
 import { connections } from '$lib/server/core/schema';
 import { channelsMine, YOUTUBE_SCOPES } from './youtube';
@@ -51,59 +53,68 @@ export async function deleteConnection(uid: string): Promise<void> {
 }
 
 /**
- * Marks the grant revoked and drops its token in the same write; a dead token is never kept. With
- * `tokenCiphertext`, only that grant is revoked, so a reconnect that lands mid-refresh survives.
+ * Marks the grant `tokenCiphertext` revoked and drops its token in the same write; a dead token is
+ * never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
  */
-export async function markRevoked(uid: string, tokenCiphertext?: string): Promise<void> {
-  const grant = tokenCiphertext ? eq(connections.tokenCiphertext, tokenCiphertext) : undefined;
+export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {
   await db()
     .update(connections)
     .set({ status: 'revoked', tokenCiphertext: null, updatedAt: new Date() })
-    .where(and(mine(uid), grant));
+    .where(and(mine(uid), eq(connections.tokenCiphertext, tokenCiphertext)));
 }
-
-// Read from the response body: the library rewrites the message for reauth-required grants.
-const revoked = (error: unknown) =>
-  (error as { response?: { data?: { error?: string } } }).response?.data?.error === 'invalid_grant';
 
 /**
  * A fresh access token for the user's grant on `channelId`, or null unless the connection is
- * `connected` to that channel. Google rejecting the refresh token marks the connection revoked.
+ * `connected` to that channel. Google rejecting the refresh token marks the connection revoked;
+ * any other failure throws.
  */
 export async function accessTokenFor(uid: string, channelId: string): Promise<string | null> {
   const connection = await getConnection(uid);
   if (connection?.status !== 'connected' || connection.channelId !== channelId) return null;
   const cipher = connection.tokenCiphertext;
-  if (!cipher) return null;
+  const refreshToken = await decrypt(cipher).catch((cause: unknown) => {
+    throw new Error("Couldn't unlock the YouTube grant.", { cause });
+  });
   const client = new OAuth2Client({
     clientId: required('GOOGLE_OAUTH_CLIENT_ID'),
     clientSecret: required('GOOGLE_OAUTH_CLIENT_SECRET'),
   });
-  client.setCredentials({ refresh_token: await decrypt(cipher) });
+  client.setCredentials({ refresh_token: refreshToken });
+  let token: string | null | undefined;
   try {
-    const { token } = await client.getAccessToken();
-    return token ?? null;
+    ({ token } = await client.getAccessToken());
   } catch (error) {
-    if (!revoked(error)) throw error;
+    if (!invalidGrant(error))
+      throw new Error("Couldn't refresh the YouTube grant.", { cause: error });
     await markRevoked(uid, cipher);
+    captureMessage('YouTube grant revoked', { level: 'info' });
     return null;
   }
+  if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
+  return token;
 }
 
 /** The parts of a fresh Google grant a connection needs. */
-export type Grant = { scopes: string[]; refreshToken: string | null; accessToken: string };
+export type ConnectionGrant = {
+  scopes: string[];
+  refreshToken: string | null;
+  accessToken: string;
+};
+
+/** What a fresh grant made of the connection; `consent` needs the forced-consent connect. */
+export type ConnectOutcome = 'connected' | 'missing_scopes' | 'no_channel' | 'consent';
 
 /**
  * Evaluates a fresh grant for the user's YouTube connection and writes it in at most one upsert.
- * A failed grant never touches a `connected` row, so a sign-in never erases a working connection.
- * Returns `consent` on a sign-in that brought no refresh token and has no stored grant to fall back
- * on: only a forced-consent connect can finish it.
+ * A failed grant never touches a `connected` row, so a sign-in never erases a working connection;
+ * the grant's own outcome is still returned. Returns `consent` on a sign-in that brought no refresh
+ * token and has no stored grant to fall back on: only a forced-consent connect can finish it.
  */
 export async function connectGrant(
   uid: string,
-  grant: Grant,
+  grant: ConnectionGrant,
   purpose: 'sign-in' | 'connect',
-): Promise<'done' | 'consent'> {
+): Promise<ConnectOutcome> {
   const stored = await getConnection(uid);
   const kept = stored?.status === 'connected';
   const fail = async (status: 'missing_scopes' | 'no_channel') => {
@@ -116,7 +127,7 @@ export async function connectGrant(
         tokenCiphertext: null,
       });
     }
-    return 'done' as const;
+    return status;
   };
 
   // Read-only, upload-only and identity-only grants all fail here.
@@ -131,9 +142,9 @@ export async function connectGrant(
       scopes: grant.scopes,
       tokenCiphertext: await encrypt(grant.refreshToken),
     });
-    return 'done';
+    return 'connected';
   }
-  if (kept && stored.channelId === channel.id) return 'done';
+  if (kept && stored.channelId === channel.id) return 'connected';
   // Google only returns a refresh token on consent, so an account that granted this client before
   // (or a revoked one) needs the forced-consent connect.
   if (!kept && purpose === 'sign-in') return 'consent';

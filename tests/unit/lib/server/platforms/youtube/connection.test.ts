@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { captureMessage } from '@sentry/sveltekit';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
@@ -149,7 +150,7 @@ describe('deleteConnection', () => {
 describe('markRevoked', () => {
   it('sets revoked and clears the token in one write, keeping the channel', async () => {
     await putConnection(UID, connected());
-    await markRevoked(UID);
+    await markRevoked(UID, 'c2VhbGVk');
     expect(await getConnection(UID)).toMatchObject({
       status: 'revoked',
       tokenCiphertext: null,
@@ -200,31 +201,42 @@ describe('accessTokenFor', () => {
     expect(kms.decrypt).not.toHaveBeenCalled();
   });
 
-  it('returns null when Google returns no token', async () => {
+  it('throws when Google refreshes without an access token, keeping the grant', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: null });
-    expect(await accessTokenFor(UID, CHANNEL)).toBeNull();
+    await expect(accessTokenFor(UID, CHANNEL)).rejects.toThrow('without an access token');
     expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
   });
 
-  it('marks the connection revoked on invalid_grant', async () => {
+  it('marks the connection revoked on invalid_grant and reports it without the token', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockRejectedValueOnce(invalidGrant());
     expect(await accessTokenFor(UID, CHANNEL)).toBeNull();
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube grant revoked', {
+      level: 'info',
+    });
+    const reported = JSON.stringify(vi.mocked(captureMessage).mock.calls);
+    expect(reported).not.toContain('c2VhbGVk');
+    expect(reported).not.toContain('1//refresh');
   });
 
-  it('rethrows other refresh errors and keeps the grant', async () => {
+  it('wraps other refresh errors with their cause and keeps the grant', async () => {
     await putConnection(UID, connected());
-    oauth.getAccessToken.mockRejectedValueOnce(new Error('ECONNRESET'));
-    await expect(accessTokenFor(UID, CHANNEL)).rejects.toThrow('ECONNRESET');
+    const cause = new Error('ECONNRESET');
+    oauth.getAccessToken.mockRejectedValueOnce(cause);
+    const error = await accessTokenFor(UID, CHANNEL).catch((e: unknown) => e as Error);
+    expect(error).toMatchObject({ message: "Couldn't refresh the YouTube grant.", cause });
     expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+    expect(vi.mocked(captureMessage)).not.toHaveBeenCalled();
   });
 
-  it('rethrows KMS failures without refreshing', async () => {
+  it('wraps KMS failures with their cause, without refreshing', async () => {
     await putConnection(UID, connected());
-    kms.decrypt.mockRejectedValueOnce(new Error('PERMISSION_DENIED'));
-    await expect(accessTokenFor(UID, CHANNEL)).rejects.toThrow('PERMISSION_DENIED');
+    const cause = new Error('PERMISSION_DENIED');
+    kms.decrypt.mockRejectedValueOnce(cause);
+    const error = await accessTokenFor(UID, CHANNEL).catch((e: unknown) => e as Error);
+    expect(error).toMatchObject({ message: "Couldn't unlock the YouTube grant.", cause });
     expect(oauth.getAccessToken).not.toHaveBeenCalled();
   });
 });

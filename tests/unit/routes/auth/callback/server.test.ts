@@ -499,18 +499,33 @@ describe('GET /auth/callback: connect', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('keeps the stored connection when the reconnect fails', async () => {
+  it('keeps the stored connection when the reconnect fails, reporting why', async () => {
     const before = await connectionOf(USER_A.uid);
     google(USER_A.uid, USER_A.email, { scopes: ['openid', 'email', READ] });
     const { thrown } = await call({ cookie: connectState(), user: USER_A });
-    expect(redirectTo(thrown)).toEqual([303, '/connections']);
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=missing_scopes']);
     expect(await connectionOf(USER_A.uid)).toEqual(before);
+  });
+
+  it('reports a reconnect to an account without a channel', async () => {
+    channel(null);
+    google(USER_B.uid, USER_B.email);
+    const { thrown } = await call({ cookie: connectState(USER_B), user: USER_B });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=no_channel']);
+    expect(await connectionOf(USER_B.uid)).toMatchObject({ status: 'no_channel' });
+  });
+
+  it('lands on Connections when a reconnect without a refresh token keeps the same channel', async () => {
+    channel({ id: CHANNEL_A, title: 'Flies Like Robots' });
+    google(USER_A.uid, USER_A.email, { refresh: null });
+    const { thrown } = await call({ cookie: connectState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections']);
   });
 
   it('records missing_scopes rather than looping when a connect brings no refresh token', async () => {
     google(USER_B.uid, USER_B.email, { refresh: null });
     const { thrown } = await call({ cookie: connectState(USER_B), user: USER_B });
-    expect(redirectTo(thrown)).toEqual([303, '/connections']);
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=missing_scopes']);
     expect(await connectionOf(USER_B.uid)).toMatchObject({
       status: 'missing_scopes',
       tokenCiphertext: null,

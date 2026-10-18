@@ -7,8 +7,9 @@ export {
   putConnection,
   type Connection,
   type ConnectionRow,
+  type ConnectionGrant,
   type ConnectionStatus,
-  type Grant,
+  type ConnectOutcome,
 } from './connection';
 export {
   channelsMine,
