@@ -144,6 +144,7 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     ['a video ID', { videoId: 'vid1' }],
     ['another state', { state: 'CLAIMED_COMPLETE', videoId: 'vid1' }],
     ['a discarded job', { state: 'DISCARDED' }],
+    ['no destination', { destination: null }],
   ])('409s a job with %s, without a YouTube call', async (_label, patch) => {
     const before = await seedJob({ ...PAUSED, ...patch });
     const response = await confirm({ url: `https://youtu.be/${ID}` });
