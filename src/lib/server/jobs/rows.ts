@@ -5,19 +5,6 @@ import { jobs } from '$lib/server/core/schema';
 import type { JobDoc } from './jobs';
 
 type Row = typeof jobs.$inferSelect;
-type JobData = Omit<
-  JobDoc,
-  | 'id'
-  | 'ownerUid'
-  | 'artistId'
-  | 'parentId'
-  | 'state'
-  | 'createdAt'
-  | 'destination'
-  | 'uploadStartedAt'
-  | 'finalChunkAt'
-  | 'videoId'
->;
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 const toMs = (date: Date | null) => (date === null ? null : date.getTime());
@@ -84,9 +71,10 @@ const GUARDED = [
   'finalChunkAt',
 ] as const;
 const guarded = new Set<string>(GUARDED);
+type JobData = Omit<JobDoc, (typeof GUARDED)[number] | 'state' | 'videoId'>;
 
 /** What a step or action may change on a job; `jobSet` drops the guarded fields at runtime too. */
-export type JobPatch = Partial<Omit<JobDoc, (typeof GUARDED)[number]>>;
+export type JobPatch = Partial<Omit<JobDoc, (typeof GUARDED)[number] | 'updatedAt'>>;
 
 /**
  * A patch as an UPDATE's SET: column fields directly, everything else merged into `data` in the
