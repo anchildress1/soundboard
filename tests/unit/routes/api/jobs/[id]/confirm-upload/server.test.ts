@@ -262,7 +262,9 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     await db().update(connections).set(connection).where(eq(connections.uid, USER_A.uid));
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(502);
-    expect(await errorOf(response)).toBe("Couldn't use your YouTube connection. Try reconnecting.");
+    expect(await errorOf(response)).toBe(
+      "Couldn't use your YouTube connection. Try again, or reconnect if it keeps failing.",
+    );
     expect(captureException).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });

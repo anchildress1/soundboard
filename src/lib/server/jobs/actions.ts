@@ -213,7 +213,10 @@ async function pastedVideo(job: Paused, videoId: string) {
     access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   } catch (error) {
     captureException(error, { tags: { action: 'confirm-upload' } });
-    throw new ActionError(502, "Couldn't use your YouTube connection. Try reconnecting.");
+    throw new ActionError(
+      502,
+      "Couldn't use your YouTube connection. Try again, or reconnect if it keeps failing.",
+    );
   }
   if (!access) throw new ActionError(409, RECONNECT_TO_CONFIRM);
   try {
