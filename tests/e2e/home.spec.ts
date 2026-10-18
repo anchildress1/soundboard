@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { signIn, USER_B } from './session';
 
 test.describe('home page', () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page, USER_B);
+  });
+
   test('renders the Soundboard frame', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle('Soundboard');
@@ -17,24 +22,6 @@ test.describe('home page', () => {
     await page.getByLabel(/^Song title/).fill('PeekaBoo');
     await expect(analyze).toBeDisabled();
     await expect(page.getByText('up to 15 min')).toBeVisible();
-  });
-
-  test('lets dev.to frame the page', async ({ request }) => {
-    const response = await request.get('/');
-    expect(response.ok()).toBe(true);
-    const csp = response.headers()['content-security-policy'] ?? '';
-    expect(csp).toContain('frame-ancestors');
-    expect(csp).toContain("'self'");
-    expect(csp).toContain('https://dev.to');
-    expect(csp).toContain('https://*.dev.to');
-    expect(response.headers()['x-content-type-options']).toBe('nosniff');
-  });
-
-  test('sets zero cookies for a signed-out visitor', async ({ page, context }) => {
-    const response = await page.goto('/');
-    expect(response?.headers()['set-cookie']).toBeUndefined();
-    await page.waitForLoadState('load');
-    expect(await context.cookies()).toEqual([]);
   });
 
   test('stacks the tape above the form on phones and side by side on desktop', async ({
