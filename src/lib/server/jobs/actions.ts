@@ -201,13 +201,16 @@ export async function discard(job: JobDoc): Promise<void> {
 
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";
 
+type Paused = JobDoc & { destination: NonNullable<JobDoc['destination']> };
+const paused = (job: JobDoc): job is Paused => outcomeUnknown(job) && job.destination !== null;
+
 const RECONNECT_TO_CONFIRM = 'Reconnect YouTube to confirm.';
 
 /** The pasted video as the pinned grant sees it; YouTube's refusals become the action's errors. */
-async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
+async function pastedVideo(job: Paused, videoId: string) {
   let access: Access | null;
   try {
-    access = await accessTokenFor(job.ownerUid, channelId);
+    access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   } catch (error) {
     captureException(error, { tags: { action: 'confirm-upload' } });
     throw new ActionError(502, "Couldn't use your YouTube connection. Try reconnecting.");
@@ -218,7 +221,7 @@ async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
   } catch (error) {
     const failure = uploadFailure(error);
     if (failure === 'access-lost') {
-      await access.refused({ jobId: job.id });
+      await access.refused(job.id);
       throw new ActionError(409, RECONNECT_TO_CONFIRM);
     }
     if (failure === 'quota-spent') {
@@ -239,11 +242,11 @@ const startSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
  * normal read-back then sets VERIFIED.
  */
 export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
-  if (!outcomeUnknown(job) || !job.destination) throw new ActionError(409, NOT_PAUSED);
+  if (!paused(job)) throw new ActionError(409, NOT_PAUSED);
   const videoId = videoIdFromUrl(url);
   if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
   const { channelId, channelTitle } = job.destination;
-  const video = await pastedVideo(job, channelId, videoId);
+  const video = await pastedVideo(job, videoId);
   if (!video) throw new ActionError(422, "Couldn't find that video.");
   if (video.channelId !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);

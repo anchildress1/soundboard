@@ -109,7 +109,7 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
  * A fresh access token, and how to give up its grant once YouTube refuses the token. `refused`
  * never throws: a failed write is reported, so the caller still answers with its reconnect wait.
  */
-export type Access = { token: string; refused: (tags: { jobId: string }) => Promise<void> };
+export type Access = { token: string; refused: (jobId: string) => Promise<void> };
 
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
@@ -145,7 +145,7 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<Ac
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
   return {
     token,
-    refused: async ({ jobId }) => {
+    refused: async (jobId) => {
       const tags = { 'job.id': jobId };
       captureMessage('YouTube refused the grant', { level: 'warning', tags });
       try {

@@ -187,7 +187,7 @@ describe('accessTokenFor', () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
     const access = (await accessTokenFor(UID, CHANNEL))!;
-    await access.refused({ jobId: 'j1' });
+    await access.refused('j1');
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
     expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the grant', {
       level: 'warning',
@@ -201,7 +201,7 @@ describe('accessTokenFor', () => {
     oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
     const access = (await accessTokenFor(UID, CHANNEL))!;
     await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
-    await access.refused({ jobId: 'j1' });
+    await access.refused('j1');
     expect(await getConnection(UID)).toMatchObject({
       status: 'connected',
       tokenCiphertext: 'bmV3',
@@ -221,7 +221,7 @@ describe('accessTokenFor', () => {
         for each row execute function refuse_write()
     `);
     try {
-      await expect(access.refused({ jobId: 'j1' })).resolves.toBeUndefined();
+      await expect(access.refused('j1')).resolves.toBeUndefined();
     } finally {
       await db().execute(sql`drop trigger refuse_write on connections`);
       await db().execute(sql`drop function refuse_write`);

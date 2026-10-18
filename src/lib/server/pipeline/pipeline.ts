@@ -206,7 +206,7 @@ async function youtubeWait(
   if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
   if (failure !== 'access-lost') throw error;
   // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
-  await access.refused({ jobId: job.id });
+  await access.refused(job.id);
   return pause(RECONNECT);
 }
 
