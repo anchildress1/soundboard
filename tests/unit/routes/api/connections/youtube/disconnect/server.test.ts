@@ -51,8 +51,10 @@ describe('POST /api/connections/youtube/disconnect', () => {
     expect(await getConnection(USER_A.uid)).toBeNull();
   });
 
-  it("leaves other users' connections alone", async () => {
-    expect((await disconnect(USER_B)).status).toBe(200);
+  it("leaves other users' connections alone, with nothing of the caller's to revoke", async () => {
+    const response = await disconnect(USER_B);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revokedAtGoogle: true });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await getConnection(USER_A.uid)).not.toBeNull();
   });
