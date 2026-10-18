@@ -1034,6 +1034,18 @@ describe('runStep: PUBLISHING', () => {
     });
   });
 
+  it('fails plainly when the source expired from storage mid-upload, sending nothing', async () => {
+    on(/storage\.googleapis\.com/, () => new Response('gone', { status: 404 }));
+    await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));
+    expect(await saved()).toMatchObject({
+      state: 'FAILED',
+      failedState: 'PUBLISHING',
+      error: 'The source video has expired from storage.',
+      finalChunkAt: null,
+    });
+    expect(called(/upload\.example\/s1/)).toHaveLength(1);
+  });
+
   it('keeps the session and counts a failure when the range read errors otherwise', async () => {
     on(/upload\.example\/s1/, () => new Response('oops', { status: 500 }));
     await runStep(await publishing({ upload: { sessionUri: SESSION_URI, total: 1000 } }));

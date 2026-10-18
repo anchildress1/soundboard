@@ -182,6 +182,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
 const RECONNECT: Wait = 'reconnect YouTube';
+const SOURCE_EXPIRED = 'The source video has expired from storage.';
 
 /** A wait is never a failure: it ends the failure streak and clears a stale error. */
 const pause = (wait: Wait, patch: Patch = {}): StepOutput => ({ ...ok(patch), wait });
@@ -217,7 +218,7 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
 
 async function initiate(job: JobDoc, token: string, fields: PickFields): Promise<StepOutput> {
   const info = await objectInfo(job.object);
-  if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
+  if (!info) return fail('PUBLISHING', SOURCE_EXPIRED);
   // Durable before the request: a crash after YouTube opened the session still shows it began.
   await markUploadStarted(job.id);
   const sessionUri = await startResumableUpload(token, fields, info.size, job.contentType);
@@ -241,6 +242,7 @@ async function sendChunk(
     result = await uploadOffset(sessionUri, total);
     if (!result.done) {
       const source = await sourceRange(await signedReadUrl(job.object), result.next, total);
+      if (!source) return fail('PUBLISHING', SOURCE_EXPIRED);
       // Marked once GCS answered and just before the PUT: a source that never opened sent nothing,
       // and a lost reply to this PUT must never lead to a second upload.
       if (finalChunk(result.next, total)) {

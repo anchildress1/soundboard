@@ -434,7 +434,7 @@ describe('sourceRange', () => {
     const total = UPLOAD_CHUNK_BYTES * 2 + 10;
     fetchMock.mockResolvedValueOnce(new Response('bytes', { status: 206 }));
     const source = await sourceRange('https://gcs/signed', 0, total);
-    expect(source.status).toBe(206);
+    expect(source?.status).toBe(206);
     expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
     expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
   });
@@ -446,7 +446,12 @@ describe('sourceRange', () => {
     expect(headersOf(0)).toEqual({ range: `bytes=${offset}-${offset + 99}` });
   });
 
-  it.each([403, 404, 503])('throws a plain error on a GCS %i', async (status) => {
+  it('returns null once the object is gone', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('gone', { status: 404 }));
+    expect(await sourceRange('g', 0, 10)).toBeNull();
+  });
+
+  it.each([403, 503])('throws a plain error on a GCS %i', async (status) => {
     fetchMock.mockResolvedValueOnce(new Response('denied', { status }));
     const error = await sourceRange('g', 0, 10).catch((e: unknown) => e);
     expect(error).not.toBeInstanceOf(YouTubeError);

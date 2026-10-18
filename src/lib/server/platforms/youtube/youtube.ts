@@ -312,16 +312,17 @@ export async function uploadOffset(sessionUri: string, total: number): Promise<C
 const chunkEnd = (offset: number, total: number) =>
   Math.min(offset + UPLOAD_CHUNK_BYTES, total) - 1;
 
-/** Opens the GCS range that the chunk starting at `offset` sends. */
+/** Opens the GCS range that the chunk starting at `offset` sends; null once the object is gone. */
 export async function sourceRange(
   sourceUrl: string,
   offset: number,
   total: number,
-): Promise<Response> {
+): Promise<Response | null> {
   const source = await fetch(sourceUrl, {
     headers: { range: `bytes=${offset}-${chunkEnd(offset, total)}` },
     signal: AbortSignal.timeout(110_000),
   });
+  if (source.status === 404) return null;
   if (source.status !== 206 && source.status !== 200) {
     // A plain error: a GCS 404 must not read as a lost upload session.
     throw new Error(`GCS range read ${source.status}`);
