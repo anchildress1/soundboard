@@ -16,7 +16,13 @@ import {
 import { jobSet } from './rows';
 import { approvalFeedback, artistJob, writeFeedback } from '$lib/server/artist/memory';
 import { tagPool } from '$lib/server/ai/smart-pick';
-import { getConnection } from '$lib/server/platforms/youtube';
+import {
+  accessTokenFor,
+  getConnection,
+  videoChannel,
+  videoIdFromUrl,
+} from '$lib/server/platforms/youtube';
+import { outcomeUnknown } from '$lib/server/pipeline/pipeline';
 import { ActionError } from '$lib/server/core/errors';
 
 function requireState(job: JobDoc, states: JobState[]): void {
@@ -188,6 +194,37 @@ export async function discard(job: JobDoc): Promise<void> {
   if (!(await transitionJob(job.id, DISCARDABLE, { state: 'DISCARDED' }))) {
     throw new ActionError(409, 'The job moved on before it could be discarded.');
   }
+}
+
+const NOT_PAUSED = "This job isn't waiting on a pasted video.";
+
+/**
+ * Records the video the owner found for a job paused with its upload outcome unknown. The video is
+ * read through the pinned channel's grant and must be on that channel; the job and destination are
+ * re-checked in the transaction that saves the ID. Only the normal read-back then sets VERIFIED.
+ */
+export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
+  if (!outcomeUnknown(job) || !job.destination) throw new ActionError(409, NOT_PAUSED);
+  const videoId = videoIdFromUrl(url);
+  if (!videoId) throw new ActionError(400, 'Paste a YouTube video URL.');
+  const { channelId, channelTitle } = job.destination;
+  const token = await accessTokenFor(job.ownerUid, channelId);
+  if (!token) throw new ActionError(409, 'Reconnect YouTube to confirm.');
+  if ((await videoChannel(token, videoId)) !== channelId) {
+    throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);
+  }
+  const saved = await db().transaction(async (tx) => {
+    const current = await lockJob(tx, job.id);
+    if (!current || !outcomeUnknown(current) || current.destination?.channelId !== channelId) {
+      return false;
+    }
+    await tx
+      .update(jobs)
+      .set(jobSet({ state: 'CLAIMED_COMPLETE', videoId, verifyAttempts: 0, error: null }))
+      .where(eq(jobs.id, job.id));
+    return true;
+  });
+  if (!saved) throw new ActionError(409, NOT_PAUSED);
 }
 
 /**
