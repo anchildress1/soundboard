@@ -212,4 +212,22 @@ describe('scripts/invite.ts as a standalone script', () => {
     expect(result.stderr.trim()).toBe(USAGE);
     expect(result.stdout).toBe('');
   });
+
+  it('asks for DATABASE_URL on a valid command line without it, never ending a client', () => {
+    const env = { ...process.env };
+    delete env.DATABASE_URL;
+    // Preloaded on the pg the script resolves, so a call to end() shows up on stderr.
+    const spy =
+      `import { createRequire } from 'node:module';` +
+      `createRequire(${JSON.stringify(SCRIPT)})('pg').Client.prototype.end = ` +
+      `async () => { console.error('end called'); };`;
+    const result = spawnSync(
+      process.execPath,
+      ['--import', `data:text/javascript,${encodeURIComponent(spy)}`, SCRIPT, 'list'],
+      { env, encoding: 'utf8' },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr.trim()).toBe('Set DATABASE_URL');
+    expect(result.stdout).toBe('');
+  });
 });
