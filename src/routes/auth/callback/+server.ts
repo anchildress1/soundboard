@@ -1,3 +1,4 @@
+import { captureException, captureMessage } from '@sentry/sveltekit';
 import { redirect, type Cookies } from '@sveltejs/kit';
 import {
   exchangeCode,
@@ -15,13 +16,19 @@ import type { RequestHandler } from './$types';
 
 type Callback = { url: URL; cookies: Cookies; code: string };
 
-/** Admits an invited account, starts its session, then evaluates the YouTube half of the grant. */
+/**
+ * Admits the account (per SIGNUP_MODE), starts its session, then evaluates the YouTube half of the
+ * grant.
+ */
 async function signIn({ url, cookies, code }: Callback): Promise<never> {
   const grant = await exchangeCode(url.origin, code);
   if (!grant) redirect(303, '/?signin=expired');
   // Nothing is written for an account the invite check turns away.
   const redeemed = await redeemInvite(grant.sub, grant.email);
-  if (redeemed === 'denied') redirect(303, '/?signin=denied');
+  if (redeemed === 'denied') {
+    captureMessage('Sign-in denied', { level: 'info' });
+    redirect(303, '/?signin=denied');
+  }
   const user = (await upsertUser(grant.sub, { email: grant.email, name: grant.name })) ?? redeemed;
   cookies.set(SESSION_COOKIE, sessionCookie(user.uid, user.accessGeneration), {
     path: '/',
@@ -30,9 +37,14 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
     sameSite: 'lax',
     maxAge: SESSION_TTL_SEC,
   });
-  if ((await connectGrant(user.uid, grant, 'sign-in')) === 'consent')
-    redirect(303, '/auth/login?connect=youtube');
-  redirect(303, '/');
+  // The session is already set: a YouTube or KMS failure leaves the user signed in, unconnected.
+  let outcome: Awaited<ReturnType<typeof connectGrant>> | null = null;
+  try {
+    outcome = await connectGrant(user.uid, grant, 'sign-in');
+  } catch (error) {
+    captureException(error, { tags: { component: 'sign-in-connect' } });
+  }
+  redirect(303, outcome === 'consent' ? '/auth/login?connect=youtube' : '/');
 }
 
 /**

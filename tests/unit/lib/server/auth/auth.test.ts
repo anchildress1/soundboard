@@ -203,7 +203,7 @@ describe('oauthClient / authUrl', () => {
 
   it('asks sign-in for identity and YouTube offline in one consent, with the chooser', () => {
     const state = newOAuthState('sign-in', null);
-    const url = authUrl(ORIGIN, state);
+    const url = authUrl(ORIGIN, state, NATHAN_EMAIL);
     expect(url).toContain('accounts.google.com');
     expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
       scope: SCOPES,
@@ -288,9 +288,23 @@ describe('exchangeCode', () => {
     expect(oauth.verifyIdToken).not.toHaveBeenCalled();
   });
 
-  it('propagates a failed code exchange', async () => {
-    oauth.getToken.mockRejectedValueOnce(new Error('invalid_grant'));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('invalid_grant');
+  it('returns null for a used or expired code', async () => {
+    oauth.getToken.mockRejectedValueOnce(
+      Object.assign(new Error('Bad Request'), { response: { data: { error: 'invalid_grant' } } }),
+    );
+    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
+    expect(oauth.verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a network failure', new Error('ECONNRESET')],
+    [
+      'another token error',
+      Object.assign(new Error('Unauthorized'), { response: { data: { error: 'invalid_client' } } }),
+    ],
+  ])('propagates %s in the code exchange', async (_label, error) => {
+    oauth.getToken.mockRejectedValueOnce(error);
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toBe(error);
   });
 
   it.each([
@@ -303,9 +317,9 @@ describe('exchangeCode', () => {
     expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
   });
 
-  it('returns null for an ID token that fails verification', async () => {
+  it('propagates an ID token that fails verification', async () => {
     oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
     oauth.verifyIdToken.mockRejectedValueOnce(new Error('Wrong recipient'));
-    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Wrong recipient');
   });
 });

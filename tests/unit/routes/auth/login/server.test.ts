@@ -86,7 +86,9 @@ describe('GET /auth/login: sign-in', () => {
   it('starts a plain sign-in even when already signed in', () => {
     const session = sessionCookie(USER_A.uid, 1);
     const { thrown, cookies } = call('', { user: USER_A, session });
-    expect(location(thrown).searchParams.get('prompt')).toBe('select_account');
+    const url = location(thrown);
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.get('login_hint')).toBeNull();
     expect(readOAuthState(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
       purpose: 'sign-in',
       uid: null,

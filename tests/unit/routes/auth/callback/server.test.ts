@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { captureException, captureMessage } from '@sentry/sveltekit';
 import { isRedirect } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -119,6 +120,8 @@ beforeEach(async () => {
   resetClients();
   await truncate();
   for (const fn of Object.values(h)) fn.mockReset();
+  vi.mocked(captureException).mockClear();
+  vi.mocked(captureMessage).mockClear();
   h.encrypt.mockImplementation(async ({ plaintext }: { plaintext: Buffer }) => [
     { ciphertext: Buffer.concat([Buffer.from('sealed:'), plaintext]) },
   ]);
@@ -151,6 +154,19 @@ describe('GET /auth/callback: state checks', () => {
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.set).not.toHaveBeenCalled();
     expect(h.getToken).not.toHaveBeenCalled();
+  });
+
+  it('sends a cancelled consent back to sign in again, writing nothing', async () => {
+    await seed({ invites: [{ email: EMAIL }] });
+    const { thrown, cookies } = await call({
+      cookie: sign(state()),
+      query: '?error=access_denied&state=nonce-1',
+    });
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(h.getToken).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual([]);
+    expect(await allConnections()).toEqual([]);
   });
 
   it('sends a callback without a code back to sign in again', async () => {
@@ -242,12 +258,33 @@ describe('GET /auth/callback: sign-in', () => {
     expect(await allUsers()).toEqual([]);
   });
 
-  it('sends an ID token that fails verification back to sign in again', async () => {
+  it('sends a used or expired code back to sign in again, writing nothing', async () => {
+    await seed({ invites: [{ email: EMAIL }] });
+    h.getToken.mockRejectedValue(
+      Object.assign(new Error('Bad Request'), { response: { data: { error: 'invalid_grant' } } }),
+    );
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual([]);
+    expect(await allConnections()).toEqual([]);
+  });
+
+  it('fails loudly when the ID token fails verification, writing nothing', async () => {
     await seed({ invites: [{ email: EMAIL }] });
     google(SUB, EMAIL);
     h.verifyIdToken.mockRejectedValue(new Error('Wrong recipient'));
     const { thrown, cookies } = await call({ cookie: sign(state()) });
-    expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
+    expect((thrown as Error).message).toBe('Wrong recipient');
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual([]);
+  });
+
+  it('fails loudly when the code exchange fails for another reason', async () => {
+    await seed({ invites: [{ email: EMAIL }] });
+    h.getToken.mockRejectedValue(new Error('ECONNRESET'));
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect((thrown as Error).message).toBe('ECONNRESET');
     expect(cookies.set).not.toHaveBeenCalled();
   });
 });
@@ -346,21 +383,33 @@ describe('GET /auth/callback: evaluating YouTube on sign-in', () => {
     expect(await connectionOf(USER_A.uid)).toEqual(before);
   });
 
-  it('propagates a YouTube failure without touching the connection', async () => {
+  it('signs the user in unconnected when YouTube fails, reporting it', async () => {
     const before = await allConnections();
     fetchMock.mockResolvedValue(new Response('boom', { status: 500 }));
     google(USER_B.uid, USER_B.email);
-    const { thrown } = await call({ cookie: sign(state()) });
-    expect((thrown as Error).message).toContain('channels.list 500');
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/']);
+    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
+      uid: USER_B.uid,
+    });
     expect(await allConnections()).toEqual(before);
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('channels.list 500') }),
+      { tags: { component: 'sign-in-connect' } },
+    );
   });
 
-  it('propagates a KMS failure without writing the grant', async () => {
+  it('signs the user in unconnected when KMS fails, reporting it', async () => {
     h.encrypt.mockRejectedValue(new Error('PERMISSION_DENIED'));
     google(USER_B.uid, USER_B.email);
-    const { thrown } = await call({ cookie: sign(state()) });
-    expect((thrown as Error).message).toBe('PERMISSION_DENIED');
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/']);
+    expect(cookies.set).toHaveBeenCalledTimes(1);
     expect(await connectionOf(USER_B.uid)).toBeUndefined();
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'PERMISSION_DENIED' }),
+      { tags: { component: 'sign-in-connect' } },
+    );
   });
 });
 
@@ -374,6 +423,8 @@ describe('GET /auth/callback: denied sign-in', () => {
     expect(await allConnections()).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(h.encrypt).not.toHaveBeenCalled();
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('Sign-in denied', { level: 'info' });
+    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('stranger');
   });
 
   it('denies an invite already bound to another account', async () => {

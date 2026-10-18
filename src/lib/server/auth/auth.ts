@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client, type Credentials } from 'google-auth-library';
 import { required } from '$lib/server/core/env';
+import { invalidGrant } from '$lib/server/core/errors';
 import { YOUTUBE_SCOPES } from '$lib/server/platforms/youtube';
 
 export const SESSION_COOKIE = 'sb_session';
@@ -46,8 +47,7 @@ export function sessionCookie(uid: string, gen: number, now = Date.now()): strin
 }
 
 /**
- * The signed session, or null for a bad signature, an expired one, or a payload without a `uid`.
- * Whether the user still exists at that generation is the caller's check.
+ * The signed session, or null for a bad signature, an expired one, or a malformed payload. Whether the user still exists at that generation is the caller's check.
  */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
   const data = unsign<Partial<Session>>(cookie);
@@ -97,8 +97,8 @@ export function oauthClient(origin: string): OAuth2Client {
 
 /**
  * Every flow asks for all scopes offline, folding in earlier grants. Sign-in shows the account
- * chooser; connect also forces consent so Google returns a refresh token, hinting at the user's own
- * account because the grant must belong to them.
+ * chooser; connect also forces consent so Google returns a refresh token, and passes `loginHint`
+ * (the user's email) because the grant must belong to them. Sign-in ignores `loginHint`.
  */
 export function authUrl(origin: string, state: OAuthState, loginHint?: string): string {
   const connect = state.purpose === 'connect';
@@ -108,7 +108,7 @@ export function authUrl(origin: string, state: OAuthState, loginHint?: string): 
     access_type: 'offline',
     include_granted_scopes: true,
     prompt: connect ? 'select_account consent' : 'select_account',
-    ...(loginHint ? { login_hint: loginHint } : {}),
+    ...(connect && loginHint ? { login_hint: loginHint } : {}),
   });
 }
 
@@ -123,19 +123,24 @@ export type Grant = {
 };
 
 /**
- * Exchanges the code and verifies the ID token's audience and verified email. Returns null when the
- * ID token or its email fails verification; a failed exchange throws.
+ * Exchanges the code and verifies the ID token's audience and verified email. Returns null for a
+ * used or expired code and for a missing or unverified email; any other failure throws.
  */
 export async function exchangeCode(origin: string, code: string): Promise<Grant | null> {
   const client = oauthClient(origin);
-  const { tokens } = await client.getToken(code);
+  let tokens: Credentials;
+  try {
+    ({ tokens } = await client.getToken(code));
+  } catch (error) {
+    if (invalidGrant(error)) return null;
+    throw error;
+  }
   if (!tokens.id_token || !tokens.access_token) throw new Error('Google returned no tokens');
-  const payload = await client
-    .verifyIdToken({ idToken: tokens.id_token, audience: required('GOOGLE_OAUTH_CLIENT_ID') })
-    .then(
-      (ticket) => ticket.getPayload(),
-      () => undefined,
-    );
+  const ticket = await client.verifyIdToken({
+    idToken: tokens.id_token,
+    audience: required('GOOGLE_OAUTH_CLIENT_ID'),
+  });
+  const payload = ticket.getPayload();
   if (!payload?.email || !payload.email_verified) return null;
   return {
     sub: payload.sub,
