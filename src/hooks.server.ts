@@ -1,21 +1,31 @@
-import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
+import { captureMessage, handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
 import { json, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
 import { getUser } from '$lib/server/auth/users';
 
-const escapeAttr = (value: string) =>
-  value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+const SENTRY_TRACE = /^[0-9a-f]{32}-[0-9a-f]{16}(?:-[01])?$/;
+// Stricter than W3C baggage, which allows raw `&`, `<`, and `>`: Sentry percent-encodes values with
+// encodeURIComponent, so nothing it writes needs escaping inside a double-quoted attribute.
+const BAGGAGE = /^(?:[\w.-]+=[\w%.!~*'()-]*(?:,[\w.-]+=[\w%.!~*'()-]*)*)?$/;
 
-/** Swaps the request's trace meta tags for the job's, so the browser continues the job's trace. */
+/**
+ * Swaps the request's trace meta tags for the job's, so the browser continues the job's trace.
+ * Returns the page unchanged when either value is not one Sentry's `getTraceData()` could write.
+ */
 export function replaceTraceMeta(
   html: string,
   trace: { sentryTrace: string; baggage: string },
 ): string {
+  // Values come from `getTraceData()` at job creation, but round-trip through the database first.
+  if (!SENTRY_TRACE.test(trace.sentryTrace) || !BAGGAGE.test(trace.baggage)) {
+    captureMessage('Job trace dropped: malformed sentry-trace or baggage', { level: 'warning' });
+    return html;
+  }
   const stripped = html.replaceAll(/<meta name="(?:sentry-trace|baggage)"[^>]*>\s*/g, '');
   const tags =
-    `<meta name="sentry-trace" content="${escapeAttr(trace.sentryTrace)}"/>` +
-    `<meta name="baggage" content="${escapeAttr(trace.baggage)}"/>`;
+    `<meta name="sentry-trace" content="${trace.sentryTrace}"/>` +
+    `<meta name="baggage" content="${trace.baggage}"/>`;
   return stripped.replace('<head>', `<head>${tags}`);
 }
 

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { captureMessage } from '@sentry/sveltekit';
 import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
@@ -17,6 +18,10 @@ const PAGE =
   '<meta name="baggage" content="req-baggage"/>\n<title>Soundboard</title></head><body></body></html>';
 
 type Locals = RequestEvent['locals'];
+
+const TRACE_ID = '0123456789abcdef0123456789abcdef';
+const JOB_TRACE = `${TRACE_ID}-0123456789abcdef-1`;
+const JOB_BAGGAGE = `sentry-trace_id=${TRACE_ID},sentry-environment=production,sentry-release=soundboard%401.0.0`;
 
 /** The locals `cookie` resolves to for `user`, carrying that cookie's own sid. */
 const signedIn = (user: typeof USER_A | typeof USER_B, cookie: string) => ({
@@ -86,40 +91,77 @@ beforeEach(async () => {
 });
 
 describe('replaceTraceMeta', () => {
+  beforeEach(() => vi.mocked(captureMessage).mockClear());
+
+  const head = '<head><title>x</title></head>';
+  const tags = (trace: string, baggage: string) =>
+    `<head><meta name="sentry-trace" content="${trace}"/><meta name="baggage" content="${baggage}"/>`;
+
   it("swaps the request's trace tags for the job's", () => {
-    const out = replaceTraceMeta(PAGE, { sentryTrace: 'job-trace', baggage: 'sentry-trace_id=1' });
+    const out = replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE });
     expect(out).not.toContain('req-trace');
     expect(out).not.toContain('req-baggage');
-    expect(out).toContain(
-      '<head><meta name="sentry-trace" content="job-trace"/><meta name="baggage" content="sentry-trace_id=1"/>',
-    );
+    expect(out).toContain(tags(JOB_TRACE, JOB_BAGGAGE));
     expect(out.match(/name="sentry-trace"/g)).toHaveLength(1);
     expect(out.match(/name="baggage"/g)).toHaveLength(1);
+    expect(vi.mocked(captureMessage)).not.toHaveBeenCalled();
   });
 
   it('inserts tags when the page has none', () => {
-    const out = replaceTraceMeta('<head><title>x</title></head>', {
-      sentryTrace: 'a',
-      baggage: 'b',
-    });
-    expect(out).toBe(
-      '<head><meta name="sentry-trace" content="a"/><meta name="baggage" content="b"/><title>x</title></head>',
+    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE });
+    expect(out).toBe(`${tags(JOB_TRACE, JOB_BAGGAGE)}<title>x</title></head>`);
+  });
+
+  it.each([
+    ['sampled', `${TRACE_ID}-0123456789abcdef-1`],
+    ['unsampled', `${TRACE_ID}-0123456789abcdef-0`],
+    ['no sampling decision', `${TRACE_ID}-0123456789abcdef`],
+  ])('accepts a %s sentry-trace', (_label, sentryTrace) => {
+    const out = replaceTraceMeta(head, { sentryTrace, baggage: JOB_BAGGAGE });
+    expect(out).toContain(`content="${sentryTrace}"`);
+  });
+
+  it('accepts empty baggage, which getTraceData yields without a DSC', () => {
+    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: '' });
+    expect(out).toBe(`${tags(JOB_TRACE, '')}<title>x</title></head>`);
+  });
+
+  it.each([
+    ['markup', '"><script>x</script>'],
+    ['uppercase hex', `${TRACE_ID.toUpperCase()}-0123456789abcdef-1`],
+    ['a short trace id', '0123456789abcdef-0123456789abcdef-1'],
+    ['a sampled flag other than 0 or 1', `${TRACE_ID}-0123456789abcdef-2`],
+    ['trailing text', `${JOB_TRACE} `],
+    ['an empty value', ''],
+  ])('keeps the page as rendered when sentry-trace has %s', (_label, sentryTrace) => {
+    expect(replaceTraceMeta(PAGE, { sentryTrace, baggage: JOB_BAGGAGE })).toBe(PAGE);
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith(
+      'Job trace dropped: malformed sentry-trace or baggage',
+      { level: 'warning' },
     );
   });
 
-  it('escapes quotes, ampersands, and angle brackets in the values', () => {
-    const out = replaceTraceMeta('<head></head>', {
-      sentryTrace: '"><script>x</script>',
-      baggage: 'a=1&b="2"',
-    });
-    expect(out).toContain('content="&quot;>&lt;script>x&lt;/script>"');
-    expect(out).toContain('content="a=1&amp;b=&quot;2&quot;"');
-    expect(out).not.toContain('<script>');
+  it.each([
+    ['a double quote', 'sentry-a="1"'],
+    ['an angle bracket', 'sentry-a=<script>'],
+    ['an ampersand', 'sentry-a=1&b=2'],
+    ['whitespace', 'sentry-a=1, sentry-b=2'],
+    ['a member without a value separator', 'sentry-a'],
+    ['an empty member', 'sentry-a=1,,sentry-b=2'],
+    ['a property', 'sentry-a=1;p'],
+  ])('keeps the page as rendered when baggage has %s', (_label, baggage) => {
+    expect(replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage })).toBe(PAGE);
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a dropped trace without its raw value', () => {
+    replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: 'sentry-secret="x"' });
+    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('secret');
   });
 
   it('leaves unrelated meta tags alone', () => {
     const html = '<head><meta name="description" content="d"/></head>';
-    expect(replaceTraceMeta(html, { sentryTrace: 'a', baggage: 'b' })).toContain(
+    expect(replaceTraceMeta(html, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE })).toContain(
       '<meta name="description" content="d"/>',
     );
   });
@@ -180,11 +222,11 @@ describe('handle', () => {
   it("renders the job's trace into the page when the job page set one", async () => {
     const { resolve } = renderer();
     const ev = event(sessionCookie(USER_A.uid, 1), {
-      jobTrace: { sentryTrace: 'job-trace', baggage: 'job-bag' },
+      jobTrace: { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE },
     });
     const html = await (await run(ev, resolve)).text();
-    expect(html).toContain('<meta name="sentry-trace" content="job-trace"/>');
-    expect(html).toContain('<meta name="baggage" content="job-bag"/>');
+    expect(html).toContain(`<meta name="sentry-trace" content="${JOB_TRACE}"/>`);
+    expect(html).toContain(`<meta name="baggage" content="${JOB_BAGGAGE}"/>`);
     expect(html).not.toContain('req-trace');
   });
 
@@ -192,13 +234,13 @@ describe('handle', () => {
     const { resolve } = renderer();
     const html = await (await run(event(undefined, {}, '/'), resolve)).text();
     expect(html).toContain('req-trace');
-    expect(html).not.toContain('job-trace');
+    expect(html).not.toContain(JOB_TRACE);
   });
 
   it('skips chunks without a <head>', async () => {
     const { resolve } = renderer('<div>partial</div>');
     const ev = event(sessionCookie(USER_A.uid, 1), {
-      jobTrace: { sentryTrace: 'job-trace', baggage: 'b' },
+      jobTrace: { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE },
     });
     expect(await (await run(ev, resolve)).text()).toBe('<div>partial</div>');
   });
