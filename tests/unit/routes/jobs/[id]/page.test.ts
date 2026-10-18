@@ -99,13 +99,17 @@ const json = (body: unknown, status = 200) =>
 const hang = () => new Promise<Response>(() => {});
 const paths = () => fetchMock.mock.calls.map(([p]) => String(p));
 
-function setup(v: JobView, extra: { playbackUrl?: string | null; short?: JobView | null } = {}) {
+function setup(
+  v: JobView,
+  extra: { playbackUrl?: string | null; short?: JobView | null; expired?: boolean } = {},
+) {
   return render(Page, {
     props: {
       data: {
         view: v,
         playbackUrl: extra.playbackUrl ?? PLAYBACK_URL,
         short: extra.short ?? null,
+        expired: extra.expired ?? false,
         trace: TRACE,
         channel: null,
         user: null,
@@ -607,6 +611,20 @@ describe('job page: Short tab', () => {
     expect(tab('Short')).toHaveTextContent('To do');
     expect(shortPanel()).toHaveAttribute('hidden');
     expect(shortPanel()).toHaveAttribute('aria-labelledby', 'tab-short');
+  });
+
+  it('keeps the saved details and asks for a new upload once the media expired', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }), { expired: true, playbackUrl: null });
+    expect(screen.getByRole('note')).toHaveTextContent(/gone from storage after 7 days/);
+    expect(screen.getByRole('note')).toHaveTextContent(/upload it again/);
+    expect(screen.getByLabelText(/^Title/)).toHaveValue(PICK.title);
+  });
+
+  it('says nothing about storage while the media is there', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    expect(screen.queryByRole('note')).toBeNull();
   });
 
   it('names the channel an approved upload is pinned to', () => {

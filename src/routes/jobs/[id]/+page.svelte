@@ -238,6 +238,12 @@
   </section>
 
   <div class="right">
+    {#if data.expired}
+      <p class="expired" role="note">
+        This video is gone from storage after 7 days. Its saved details stay here; upload it again
+        from the home page to finish anything that needs the video.
+      </p>
+    {/if}
     {#if fields && view.pick}
       {@const pick = view.pick}
       {#if pick.flags.length > 0}
@@ -400,6 +406,13 @@
 
   .uploaded a {
     color: var(--green);
+  }
+
+  .expired {
+    margin: 0;
+    padding: 12px 14px;
+    border-left: 3px solid var(--yellow);
+    background: var(--panel);
   }
 
   .placeholder {

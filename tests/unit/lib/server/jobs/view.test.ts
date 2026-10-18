@@ -3,10 +3,12 @@ import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { createJob, listChunks, type NewJob } from '$lib/server/jobs/jobs';
-import { authorizedJob, buildView } from '$lib/server/jobs/view';
+import { authorizedJob, buildView, mediaExpired } from '$lib/server/jobs/view';
 import type { Chunk, JobState, Pick, Short } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
-import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { jobDoc, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+
+const stored = vi.hoisted(() => ({ objects: new Set<string>() }));
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -14,6 +16,8 @@ vi.mock('@google-cloud/storage', () => ({
       return {
         file: (object: string) => ({
           getSignedUrl: async () => [`https://storage.googleapis.com/${name}/${object}?sig=read`],
+          exists: async () => [stored.objects.has(object)],
+          getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
         }),
       };
     }
@@ -173,4 +177,27 @@ describe('buildView for a Short', () => {
     const job = await createJob(input(), 'v');
     expect(await buildView({ ...job, state: 'REVIEW' })).not.toHaveProperty('playbackUrl');
   });
+});
+
+describe('mediaExpired', () => {
+  it.each(['PREP', 'ANALYZE', 'PICK', 'REVIEW', 'PUBLISHING', 'FAILED'] as JobState[])(
+    'is true in %s once the object is gone',
+    async (state) => {
+      stored.objects.clear();
+      expect(await mediaExpired(jobDoc({ state }))).toBe(true);
+    },
+  );
+
+  it('is false while the object is still stored', async () => {
+    stored.objects.add('uploads/j1');
+    expect(await mediaExpired(jobDoc({ state: 'REVIEW' }))).toBe(false);
+  });
+
+  it.each(['AWAITING_UPLOAD', 'CLAIMED_COMPLETE', 'VERIFIED', 'DISCARDED'] as JobState[])(
+    'is false in %s, whose remaining work needs no media',
+    async (state) => {
+      stored.objects.clear();
+      expect(await mediaExpired(jobDoc({ state }))).toBe(false);
+    },
+  );
 });

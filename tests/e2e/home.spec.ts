@@ -64,6 +64,15 @@ test.describe('job list', () => {
     await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
   });
 
+  test('continues a run whose media expired, keeping its details', async ({ page }) => {
+    await signIn(page, USER_A);
+    await page.goto('/');
+    await page.getByRole('link', { name: 'Continue Gone Song' }).click();
+    await expect(page).toHaveURL('/jobs/e2e-expired');
+    await expect(page.getByRole('note')).toContainText('upload it again');
+    await expect(page.getByLabel(/^Title/)).toHaveValue('PeekaBoo (Official Video)');
+  });
+
   test("leaves another user's runs and every Short off the list", async ({ page }) => {
     await signIn(page, USER_A);
     await page.goto('/');

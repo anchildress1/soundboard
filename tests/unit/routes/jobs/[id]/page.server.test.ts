@@ -8,7 +8,7 @@ import type { JobView } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
-const signed = vi.hoisted(() => ({ objects: [] as string[] }));
+const signed = vi.hoisted(() => ({ objects: [] as string[], missing: new Set<string>() }));
 
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
@@ -19,6 +19,8 @@ vi.mock('@google-cloud/storage', () => ({
             signed.objects.push(object);
             return [`https://storage.googleapis.com/${name}/${object}?sig=${action}`];
           },
+          exists: async () => [!signed.missing.has(object)],
+          getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
         }),
       };
     }
@@ -27,6 +29,7 @@ vi.mock('@google-cloud/storage', () => ({
 
 type Event = Parameters<typeof load>[0];
 type Data = {
+  expired: boolean;
   view: JobView;
   short: JobView | null;
   playbackUrl: string | null;
@@ -54,6 +57,7 @@ beforeEach(async () => {
   vi.stubEnv('GCS_BUCKET', 'bkt');
   resetClients();
   signed.objects.length = 0;
+  signed.missing.clear();
   await truncate();
   await seed(USERS);
 });
@@ -67,6 +71,21 @@ describe('job page load', () => {
     expect(data.view.job.id).toBe('j');
     expect(data.view.job).not.toHaveProperty('trace');
     expect(data.playbackUrl).toBe('https://storage.googleapis.com/bkt/uploads/j?sig=read');
+  });
+
+  it('flags expired media and signs no playback for it, keeping the saved job', async () => {
+    await put('j', { state: 'REVIEW', songTitle: 'PeekaBoo' });
+    signed.missing.add('uploads/j');
+    const { data } = await run('j');
+    expect(data.expired).toBe(true);
+    expect(data.playbackUrl).toBeNull();
+    expect(data.view.job.songTitle).toBe('PeekaBoo');
+    expect(signed.objects).toEqual([]);
+  });
+
+  it('does not flag media that is still in storage', async () => {
+    await put('j', { state: 'REVIEW' });
+    expect((await run('j')).data.expired).toBe(false);
   });
 
   it('skips playback while the browser upload is still running', async () => {

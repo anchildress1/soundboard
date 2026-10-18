@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { JobState, JobView, Pick, Wait } from '$lib/types';
-import { signedReadUrl } from '$lib/server/media/gcs';
+import { objectInfo, signedReadUrl } from '$lib/server/media/gcs';
 import { getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
 
 /** Loads the caller's own job; anyone else's, or any job when signed out, reads as missing. */
@@ -8,6 +8,23 @@ export async function authorizedJob(id: string, uid: string | undefined): Promis
   const job = uid ? await getJob(id) : null;
   if (!job || job.ownerUid !== uid) error(404, 'Job not found');
   return job;
+}
+
+/** States whose remaining work reads the job's media: everything but waiting, read-back and done. */
+const NEEDS_MEDIA: ReadonlySet<JobState> = new Set([
+  'PREP',
+  'ANALYZE',
+  'PICK',
+  'HOOK',
+  'RENDER',
+  'REVIEW',
+  'PUBLISHING',
+  'FAILED',
+]);
+
+/** Whether the bucket's 7-day lifecycle already deleted media the job's remaining work needs. */
+export async function mediaExpired(job: JobDoc): Promise<boolean> {
+  return NEEDS_MEDIA.has(job.state) && (await objectInfo(job.object)) === null;
 }
 
 /** States in which a Short's rendered object is the one on screen. */

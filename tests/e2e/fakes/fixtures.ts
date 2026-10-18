@@ -107,6 +107,7 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
     chunks: [0, 1, 2, 3, 4].map(chunk),
   },
+  { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
   {
     job: job('e2e-analyzing', { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
