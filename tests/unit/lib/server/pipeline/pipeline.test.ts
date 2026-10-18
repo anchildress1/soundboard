@@ -951,16 +951,28 @@ describe('runStep: PUBLISHING', () => {
     expect((await saved()).limitUntil).toBeGreaterThan(Date.now());
   });
 
-  it('waits without a failure when the upload limit hits mid-upload, keeping the session', async () => {
-    const upload = { sessionUri: SESSION_URI, total: 1000 };
-    on(/upload\.example\/s1/, (_url, init) =>
-      headers(init)['content-range'] === 'bytes */1000'
-        ? new Response('', { status: 308, headers: { range: 'bytes=0-399' } })
-        : new Response('uploadLimitExceeded', { status: 400 }),
-    );
-    expect(await runStep(await publishing({ upload }))).toEqual({ wait: DAILY_LIMIT });
-    expect(await saved()).toMatchObject({ state: 'PUBLISHING', consecutiveFailures: 0, upload });
-  });
+  it.each([
+    [400, 'uploadLimitExceeded'],
+    [403, 'quotaExceeded'],
+  ])(
+    'waits without a failure when a chunk gets %i %s, keeping the session',
+    async (status, reason) => {
+      const upload = { sessionUri: SESSION_URI, total: 1000 };
+      on(/upload\.example\/s1/, (_url, init) =>
+        headers(init)['content-range'] === 'bytes */1000'
+          ? new Response('', { status: 308, headers: { range: 'bytes=0-399' } })
+          : new Response(`{"error":{"errors":[{"reason":"${reason}"}]}}`, { status }),
+      );
+      expect(await runStep(await publishing({ upload }))).toEqual({ wait: DAILY_LIMIT });
+      expect(await saved()).toMatchObject({
+        state: 'PUBLISHING',
+        consecutiveFailures: 0,
+        upload,
+        limitUntil: expect.any(Number),
+      });
+      expect(captureException).not.toHaveBeenCalled();
+    },
+  );
 
   it('counts a 401 as lost access, not an unknown outcome, revoking the grant', async () => {
     on(/upload\/youtube\/v3\/videos/, () => new Response('unauthorized', { status: 401 }));
@@ -1265,6 +1277,36 @@ describe('runStep: PUBLISHING recovery', () => {
     await reconnectA();
     await runStep(await saved());
     expect(initiations()).toHaveLength(1);
+    expect(JSON.parse(String(initiations()[0]!.init.body)).snippet.title).toBe(FIELDS.title);
+    expect(await saved()).toMatchObject({ destination: DESTINATION, finalFields: FIELDS });
+  });
+
+  it('resumes from the offset after a lost final response, with no second upload', async () => {
+    on(/upload\.example\/s1/, (_url, init) =>
+      headers(init)['content-range'] === 'bytes */1000'
+        ? new Response('', { status: 308, headers: { range: 'bytes=0-599' } })
+        : json({ id: 'vid1' }),
+    );
+    await runStep(await publishing({ upload: UPLOAD, finalChunkAt: 5 }));
+    expect(headers(called(/storage\.googleapis\.com/)[0]!.init).range).toBe('bytes=600-999');
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      finalChunkAt: 5,
+    });
+    expect(initiations()).toHaveLength(0);
+  });
+
+  it('keeps the video ID when the job is discarded during the final chunk', async () => {
+    on(/upload\.example\/s1/, async (_url, init) => {
+      if (headers(init)['content-range'] === 'bytes */1000')
+        return new Response('', { status: 308, headers: { range: 'bytes=0-399' } });
+      await patchJob({ state: 'DISCARDED' });
+      return json({ id: 'vid1' });
+    });
+    expect(await runStep(await publishing({ upload: UPLOAD }))).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'DISCARDED', videoId: 'vid1' });
+    expect(await claimToken()).toBeNull();
   });
 
   it('resumes verification after a reconnect, without uploading', async () => {
