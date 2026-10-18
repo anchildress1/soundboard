@@ -1,41 +1,33 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../helpers/fake-firestore';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { load } from '$routes/brand/+page.server';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../../helpers/db';
+import { USER_A, USER_B } from '../../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];
-const run = (session: Event['locals']['session']) =>
-  load({ locals: { session } } as unknown as Event);
+const run = (user: Event['locals']['user']) => load({ locals: { user } } as unknown as Event);
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+beforeEach(async () => {
   resetClients();
+  await truncate();
 });
 
 describe('/brand load', () => {
-  it.each([null, { email: 'v@example.com', allowlisted: false, demo: false }])(
-    '404s for %o',
-    async (session) => {
-      store.set('artists/flr/brand/approved', { statement: 'secret' });
-      const error = await Promise.resolve()
-        .then(() => run(session))
-        .catch((e: unknown) => e);
-      expect(isHttpError(error) && error.status).toBe(404);
-    },
-  );
+  it.each([
+    ['signed out', null],
+    ['an unlinked user', USER_B],
+  ])('404s when %s', async (_label, user) => {
+    await seed({ artistBrand: [{ artistId: 'flr', slot: 'approved', data: { statement: 's' } }] });
+    const error = await Promise.resolve()
+      .then(() => run(user))
+      .catch((e: unknown) => e);
+    expect(isHttpError(error) && error.status).toBe(404);
+  });
 
-  it('returns the approved guide and the proposal', async () => {
-    store.set('artists/flr/brand/proposal', { statement: 'p' });
-    expect(await run({ email: 'n@example.com', allowlisted: true, demo: false })).toEqual({
-      approved: null,
-      proposal: { statement: 'p' },
-    });
+  it("returns the artist's approved guide and proposal", async () => {
+    await seed({ artistBrand: [{ artistId: 'flr', slot: 'proposal', data: { statement: 'p' } }] });
+    expect(await run(USER_A)).toEqual({ approved: null, proposal: { statement: 'p' } });
   });
 });

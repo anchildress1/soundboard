@@ -74,7 +74,7 @@ description: 'Task list for Google sign-in and connections'
   - Delete src/lib/server/jobs/quota.ts and tests/unit/lib/server/jobs/quota.test.ts; YouTube's own limits replace the app count (research R8)
   - actions.ts: remove `allowlistedFor`, the upload-slot reservation and the visitor `ipHash` charge in `makeShort`; `makeShort` copies `ownerUid`, `artistId` and a null destination from the parent and sets top-level `parentId`
   - Port tests/unit/lib/server/jobs/actions.test.ts
-- [ ] T020 [P] Move src/lib/server/artist/memory.ts and src/lib/server/artist/brand.ts to the artist tables (`artist_facts`, `artist_feedback`, `artist_publishes`, `artist_brand`); port their tests
+- [x] T020 [P] Move src/lib/server/artist/memory.ts and src/lib/server/artist/brand.ts to the artist tables (`artist_facts`, `artist_feedback`, `artist_publishes`, `artist_brand`); port their tests
 - [ ] T021 Remove `@google-cloud/firestore` from package.json and pnpm-lock.yaml once `grep -rn "@google-cloud/firestore" src tests scripts` is empty
 
 ### Remove legacy paths (FR-020)
@@ -324,7 +324,7 @@ T062–T068
 
 ## Phase 10: Convergence
 
-- [ ] T083 Move per-job feedback from `jobs/{id}/feedback` to the `job_feedback` child table in src/lib/server/artist/memory.ts, so unlinked users' feedback stays on the job, with tests per FR-018 (partial)
+- [x] T083 Move per-job feedback from `jobs/{id}/feedback` to the `job_feedback` child table in src/lib/server/artist/memory.ts, so unlinked users' feedback stays on the job, with tests per FR-018 (partial)
 - [ ] T084 Port tests/e2e/header.spec.ts, tests/e2e/brand.spec.ts and tests/e2e/short.spec.ts from allowlisted/demo cookies to the seeded users and `{uid, sid, gen, exp}` sessions per FR-020 (partial)
 - [ ] T085 Add an E2E in tests/e2e/auth.spec.ts: a session that stops validating mid-run makes the job page navigate to `/` per quickstart E2E and Edge Cases (missing)
 - [ ] T086 Remove the sample-only `excludeId` parameter from src/lib/server/pipeline/hashtags.ts and its callers and tests per FR-020 (partial)

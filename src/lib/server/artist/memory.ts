@@ -1,6 +1,7 @@
-import type { Transaction } from '@google-cloud/firestore';
+import { desc, eq } from 'drizzle-orm';
 import type { PickFields } from '$lib/types';
-import { db } from '$lib/server/core/clients';
+import { db, type Tx } from '$lib/server/core/db';
+import { artistFacts, artistFeedback, artistPublishes, jobFeedback } from '$lib/server/core/schema';
 
 export const ARTIST_ID = 'flr';
 export const ARTIST_NAME = 'Flies Like Robots';
@@ -27,43 +28,56 @@ export const SEED_FACTS: Fact[] = [
   { key: 'mr-kill', value: 'Connected to the artist Mr. Kill', kind: 'INFERENCE', public: false },
 ];
 
-/** What a visitor job may know about the artist without reading `artists/*`. */
+/** What a job outside the artist may know about them without reading the artist tables. */
 export const PUBLIC_FACTS: Fact[] = [SEED_FACTS[0]!];
 
-const artist = () => db().collection('artists').doc(ARTIST_ID);
-
 /**
- * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty collection is seeded on first
- * use; without it, the seeds are returned in memory and nothing is written, so demo jobs stay
- * read-only.
+ * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty table is seeded on first
+ * use; without it, the seeds are returned in memory and nothing is written.
  */
 export async function listFacts({ seed }: { seed: boolean }): Promise<Fact[]> {
-  const col = artist().collection('facts');
-  const snap = await col.get();
-  if (!snap.empty) return snap.docs.map((d) => d.data() as Fact);
-  if (seed) await Promise.all(SEED_FACTS.map((fact) => col.doc(fact.key).set(fact)));
+  const rows = await db()
+    .select({ data: artistFacts.data })
+    .from(artistFacts)
+    .where(eq(artistFacts.artistId, ARTIST_ID));
+  if (rows.length > 0) return rows.map((r) => r.data as Fact);
+  if (seed) {
+    await db()
+      .insert(artistFacts)
+      .values(SEED_FACTS.map((fact) => ({ artistId: ARTIST_ID, key: fact.key, data: fact })))
+      .onConflictDoNothing();
+  }
   return SEED_FACTS;
 }
 
 /**
- * Queues feedback rows in the caller's transaction, so they commit with the state change they
- * describe. Allowlisted feedback goes to the artist; visitor feedback stays on its job.
+ * Writes feedback rows in the caller's transaction, so they commit with the state change they
+ * describe. Feedback on the artist's jobs goes to the artist; any other job's stays on that job.
  */
-export function writeFeedback(
-  tx: Transaction,
+export async function writeFeedback(
+  tx: Tx,
   entries: Feedback[],
-  target: { allowlisted: boolean; jobId: string },
-): void {
-  const col = target.allowlisted
-    ? artist().collection('feedback')
-    : db().collection('jobs').doc(target.jobId).collection('feedback');
-  for (const entry of entries) tx.set(col.doc(), entry);
+  target: { toArtist: boolean; jobId: string },
+): Promise<void> {
+  if (entries.length === 0) return;
+  if (target.toArtist) {
+    await tx
+      .insert(artistFeedback)
+      .values(entries.map((data) => ({ artistId: ARTIST_ID, at: new Date(data.at), data })));
+  } else {
+    await tx.insert(jobFeedback).values(entries.map((data) => ({ jobId: target.jobId, data })));
+  }
 }
 
-/** Allowlisted callers only: Nathan's latest feedback, newest first. */
+/** Nathan's latest feedback, newest first. */
 export async function recentFeedback(limit = 20): Promise<Feedback[]> {
-  const snap = await artist().collection('feedback').orderBy('at', 'desc').limit(limit).get();
-  return snap.docs.map((d) => d.data() as Feedback);
+  const rows = await db()
+    .select({ data: artistFeedback.data })
+    .from(artistFeedback)
+    .where(eq(artistFeedback.artistId, ARTIST_ID))
+    .orderBy(desc(artistFeedback.at))
+    .limit(limit);
+  return rows.map((r) => r.data as Feedback);
 }
 
 export async function recordPublish(record: {
@@ -74,7 +88,13 @@ export async function recordPublish(record: {
   status: 'VERIFIED';
   at: number;
 }): Promise<void> {
-  await artist().collection('publishes').doc(record.videoId).set(record);
+  await db()
+    .insert(artistPublishes)
+    .values({ artistId: ARTIST_ID, videoId: record.videoId, data: record })
+    .onConflictDoUpdate({
+      target: [artistPublishes.artistId, artistPublishes.videoId],
+      set: { data: record },
+    });
 }
 
 const asText = (v: string | string[]) => (Array.isArray(v) ? v.join(', ') : v);

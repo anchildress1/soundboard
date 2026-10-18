@@ -1,44 +1,42 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../helpers/fake-firestore';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { artistBrand } from '$lib/server/core/schema';
 import { POST } from '$routes/api/brand/discard/+server';
-
-const PROPOSAL_DOC = 'artists/flr/brand/proposal';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../../../../helpers/db';
+import { USER_A, USER_B } from '../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
-const discard = (allowlisted: boolean) =>
-  POST({ locals: { session: { email: 'a@example.com', allowlisted } } } as unknown as Event);
+const discard = (user: typeof USER_A | typeof USER_B) =>
+  POST({ locals: { user } } as unknown as Event);
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+const proposals = () => db().select().from(artistBrand);
+
+beforeEach(async () => {
   resetClients();
-  store.set(PROPOSAL_DOC, { statement: 's' });
+  await truncate();
+  await seed({ artistBrand: [{ artistId: 'flr', slot: 'proposal', data: { statement: 's' } }] });
 });
 
 describe('POST /api/brand/discard', () => {
-  it('404s for a non-allowlisted session and keeps the proposal', async () => {
+  it('404s for a user not linked to the artist and keeps the proposal', async () => {
     const error = await Promise.resolve()
-      .then(() => discard(false))
+      .then(() => discard(USER_B))
       .catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
-    expect(store.has(PROPOSAL_DOC)).toBe(true);
+    expect(await proposals()).toHaveLength(1);
   });
 
   it('drops the proposal', async () => {
-    const response = await discard(true);
+    const response = await discard(USER_A);
     expect(await response.json()).toEqual({ proposal: null });
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await proposals()).toEqual([]);
   });
 
   it('succeeds when there is nothing to discard', async () => {
-    store.clear();
-    expect((await discard(true)).status).toBe(200);
+    await truncate();
+    expect((await discard(USER_A)).status).toBe(200);
   });
 });

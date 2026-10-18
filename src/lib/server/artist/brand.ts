@@ -11,8 +11,9 @@ import {
 } from '$lib/brand';
 import type { Wait } from '$lib/types';
 import { ActionError } from '$lib/server/core/errors';
-import type { Session } from '$lib/server/auth/auth';
-import { db } from '$lib/server/core/clients';
+import { and, eq } from 'drizzle-orm';
+import { db, type Database, type Tx } from '$lib/server/core/db';
+import { artistBrand } from '$lib/server/core/schema';
 import { ARTIST_ID } from './memory';
 import { chatJson, ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { stripDeep } from '$lib/server/ai/numerics';
@@ -124,19 +125,27 @@ export function cleanGuide(raw: BrandGuide): BrandGuide {
   };
 }
 
-/** The brand guide is Nathan's: anyone else gets the same 404 as a missing page. */
-export function requireAllowlisted(session: Session | null): void {
-  if (!session?.allowlisted) error(404, 'Not found');
+/** The brand guide is Nathan's: anyone not linked to his artist gets the same 404 as a missing page. */
+export function requireArtist(user: { artistId: string | null } | null): void {
+  if (user?.artistId !== ARTIST_ID) error(404, 'Not found');
 }
 
-const brand = () => db().collection('artists').doc(ARTIST_ID).collection('brand');
+type Slot = 'approved' | 'proposal';
+const slot = (name: Slot) => and(eq(artistBrand.artistId, ARTIST_ID), eq(artistBrand.slot, name));
 
-async function read(id: 'approved' | 'proposal'): Promise<StoredBrand | null> {
-  const snap = await brand().doc(id).get();
-  return snap.exists ? (snap.data() as StoredBrand) : null;
+async function read(name: Slot): Promise<StoredBrand | null> {
+  const [row] = await db().select({ data: artistBrand.data }).from(artistBrand).where(slot(name));
+  return (row?.data as StoredBrand | undefined) ?? null;
 }
 
-/** Allowlisted callers only: the approved guide and any pending proposal. */
+async function write(tx: Database | Tx, name: Slot, data: StoredBrand): Promise<void> {
+  await tx
+    .insert(artistBrand)
+    .values({ artistId: ARTIST_ID, slot: name, data })
+    .onConflictDoUpdate({ target: [artistBrand.artistId, artistBrand.slot], set: { data } });
+}
+
+/** Linked callers only: the approved guide and any pending proposal. */
 export async function getBrand(): Promise<{
   approved: StoredBrand | null;
   proposal: StoredBrand | null;
@@ -163,7 +172,7 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
   if (status === 'loading') return { wait: 'waking model' };
   if (status === 'busy') return { wait: 'waiting on another run' };
 
-  const videos = await recentVideos(BRAND_VIDEOS, null);
+  const videos = await recentVideos(BRAND_VIDEOS);
   if (videos.length === 0)
     throw new ActionError(409, 'The channel has no public uploads to learn from.');
   const withThumbs = await Promise.all(
@@ -198,7 +207,7 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
     createdAt: Date.now(),
     approvedAt: null,
   };
-  await brand().doc('proposal').set(proposal);
+  await write(db(), 'proposal', proposal);
   return { proposal };
 }
 
@@ -223,10 +232,14 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
   };
   const problem = guideError(guide);
   if (problem) throw new ActionError(422, problem);
-  return db().runTransaction(async (tx) => {
-    const snap = await tx.get(brand().doc('proposal'));
-    if (!snap.exists) throw new ActionError(409, 'There is no proposal to approve.');
-    const proposal = snap.data() as StoredBrand;
+  return db().transaction(async (tx) => {
+    const [row] = await tx
+      .select({ data: artistBrand.data })
+      .from(artistBrand)
+      .where(slot('proposal'))
+      .for('update');
+    if (!row) throw new ActionError(409, 'There is no proposal to approve.');
+    const proposal = row.data as StoredBrand;
     if (proposal.createdAt !== proposedAt) {
       throw new ActionError(409, 'A newer proposal replaced this one. Reload to review it.');
     }
@@ -237,13 +250,13 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
       createdAt: proposal.createdAt,
       approvedAt: Date.now(),
     };
-    tx.set(brand().doc('approved'), approved);
-    tx.delete(brand().doc('proposal'));
+    await write(tx, 'approved', approved);
+    await tx.delete(artistBrand).where(slot('proposal'));
     return approved;
   });
 }
 
 /** Drops the pending proposal; the approved guide, if any, stays. */
 export async function discardBrandProposal(): Promise<void> {
-  await brand().doc('proposal').delete();
+  await db().delete(artistBrand).where(slot('proposal'));
 }
