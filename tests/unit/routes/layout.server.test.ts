@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { eq } from 'drizzle-orm';
+import { captureException } from '@sentry/sveltekit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '$lib/server/core/db';
 import { connections } from '$lib/server/core/schema';
@@ -9,7 +10,7 @@ import { seed, truncate } from '../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];
-type Data = { channel: unknown; user: unknown };
+type Data = { channel: unknown; connected: boolean; user: unknown };
 
 const run = async (user: Event['locals']['user']) =>
   (await load({ locals: { user } } as unknown as Event)) as Data;
@@ -107,9 +108,28 @@ describe('layout load', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('renders without stats when YouTube errors', async () => {
+  it('renders without stats when YouTube errors, reporting it', async () => {
+    vi.mocked(captureException).mockClear();
     fetchMock.mockResolvedValue(new Response('nope', { status: 500 }));
-    expect((await run(USER_A)).channel).toBeNull();
+    const data = await run(USER_A);
+    expect(data.channel).toBeNull();
+    expect(data.connected).toBe(true);
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(expect.any(Error), {
+      tags: { component: 'header-stats' },
+    });
+  });
+
+  it.each([
+    ['connected', USER_A, true],
+    ['without a connection', USER_B, false],
+    ['signed out', null, false],
+  ])('reports whether the user is connected: %s', async (_label, user, connected) => {
+    expect((await run(user)).connected).toBe(connected);
+  });
+
+  it('reports a revoked connection as not connected', async () => {
+    await connectB('revoked');
+    expect((await run(USER_B)).connected).toBe(false);
   });
 
   it('passes only the email and artist link of the user', async () => {

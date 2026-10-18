@@ -35,7 +35,6 @@
       <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
     </h1>
     <div class="bar">
-      <!-- The signed-in user's own connected channel. -->
       {#if data.channel}
         <p class="chip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
@@ -46,6 +45,13 @@
           <b>{data.channel.handle}</b>
           <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
         </p>
+      {/if}
+      {#if data.user && !data.connected}
+        <!-- A page load, not client routing: the route redirects to Google. -->
+        <form method="GET" action="/auth/login" data-sveltekit-reload>
+          <input type="hidden" name="connect" value="youtube" />
+          <button class="btn ghost small" type="submit">Connect YouTube</button>
+        </form>
       {/if}
       {#if data.user?.artistId === 'flr'}
         <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>
