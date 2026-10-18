@@ -236,7 +236,7 @@ description: 'Task list for Google sign-in and connections'
 - [x] T073 [US5] Keep `videoId` and upload progress in `releaseJob` when the job moved state in src/lib/server/jobs/jobs.ts only if the claim token still matches, preserving the new state and unrelated data; stale tokens never write or release a newer claim. Allow discard in `PUBLISHING` and `CLAIMED_COMPLETE` in src/lib/server/jobs/actions.ts and src/routes/api/jobs/[id]/discard/+server.ts
 - [x] T074 [US5] Add `videoChannel(accessToken, id): Promise<string | null>` (`videos.list?part=snippet&id=`) in src/lib/server/platforms/youtube/youtube.ts and export it from index.ts
 - [x] T075 [US5] Create src/routes/api/jobs/[id]/confirm-upload/+server.ts per the contract: require `outcomeUnknown(job)`, parse `{url}`, read through the pinned grant, atomically re-check job and destination, save the ID, move to `CLAIMED_COMPLETE`
-- [ ] T076 [US5] Outcome-unknown UI in src/routes/jobs/[id]/+page.svelte: YouTube Studio uploads link for the pinned channel, a paste-URL field posting to confirm-upload, and Discard; plain labels only
+- [x] T076 [US5] Outcome-unknown UI in src/routes/jobs/[id]/+page.svelte: YouTube Studio uploads link for the pinned channel, a paste-URL field posting to confirm-upload, and Discard; plain labels only
 
 **Checkpoint**: All stories testable.
 

@@ -66,6 +66,12 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
+  // A publish that waits on the owner, not on YouTube: lost access or an unknown upload outcome.
+  const paused = $derived(
+    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') &&
+      (view.wait === 'reconnect YouTube' || view.wait === 'upload outcome unknown'),
+  );
+  let pastedUrl = $state('');
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
 
   // Reading `view` reruns this whenever a new view lands.
@@ -282,6 +288,7 @@
               {serverErrors}
               destination={job.destination ?? (editable ? data.approveTo : null)}
               uploaded={job.videoId !== null}
+              discardable={paused}
               onapprove={(f) =>
                 act('approve', {
                   ...f,
@@ -351,6 +358,50 @@
       <section class="placeholder" aria-label="What goes to YouTube">
         <h2>{job.songTitle}</h2>
         <p>The recommendation appears here once every chunk is analyzed.</p>
+      </section>
+    {/if}
+
+    {#if paused && view.wait === 'reconnect YouTube'}
+      <section class="paused" aria-labelledby="paused-title">
+        <h2 id="paused-title">Upload paused</h2>
+        <p>
+          YouTube access is lost. <a href={resolve('/connections')}>Reconnect on Connections</a>
+          to resume, or discard the job.
+        </p>
+      </section>
+    {:else if paused && job.destination}
+      <section class="paused" aria-labelledby="paused-title">
+        <h2 id="paused-title">Upload outcome unknown</h2>
+        <p>
+          YouTube lost the upload after its last bytes went out, so the video may be there. Check
+          your uploads; if it is, paste its link. Soundboard never uploads it again on its own.
+        </p>
+        <a
+          href="https://studio.youtube.com/channel/{job.destination.channelId}/videos/upload"
+          target="_blank"
+          rel="noopener">Open YouTube Studio uploads</a
+        >
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void act('confirm-upload', { url: pastedUrl });
+          }}
+        >
+          <div class="field">
+            <label for="pasted-url">Video link</label>
+            <input
+              id="pasted-url"
+              type="url"
+              required
+              placeholder="https://youtu.be/…"
+              bind:value={pastedUrl}
+              disabled={busy}
+            />
+          </div>
+          <button class="btn primary" type="submit" disabled={busy || !pastedUrl.trim()}
+            >Confirm video</button
+          >
+        </form>
       </section>
     {/if}
 
@@ -490,6 +541,38 @@
     display: flex;
     gap: 10px;
     justify-content: flex-end;
+  }
+
+  .paused {
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+    padding: 12px 14px;
+    border: 1px solid var(--yellow);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
+  }
+
+  .paused h2 {
+    color: var(--yellow);
+  }
+
+  .paused p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .paused a {
+    color: var(--ink);
+  }
+
+  .paused form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 10px;
+    width: 100%;
   }
 
   .toast {

@@ -166,6 +166,21 @@ describe('Label: read-only', () => {
   });
 });
 
+describe('Label: a paused publish', () => {
+  it('enables only Discard', async () => {
+    const { ondiscard } = setup({ editable: false, done: true, discardable: true });
+    expect(screen.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: RERUN })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(ondiscard).toHaveBeenCalledOnce();
+  });
+
+  it('keeps Discard disabled while an action runs', () => {
+    setup({ editable: false, done: true, discardable: true, busy: true });
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  });
+});
+
 describe('Label: a second label on the page', () => {
   it('prefixes field ids so labels stay tied to their own fields', () => {
     const { container } = setup({ idPrefix: 'short-' });

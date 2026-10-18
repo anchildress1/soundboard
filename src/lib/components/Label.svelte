@@ -21,6 +21,7 @@
     serverErrors = {},
     destination,
     uploaded = false,
+    discardable = false,
     idPrefix = '',
     heading = 'YouTube',
     rerunLabel = 'Re-run model',
@@ -41,6 +42,8 @@
     destination: Destination | null;
     /** YouTube holds the video, so the channel line reads in the past tense. */
     uploaded?: boolean;
+    /** A publish paused on lost access or an unknown outcome can still be discarded. */
+    discardable?: boolean;
     /** Keeps field ids unique when two labels share a page. */
     idPrefix?: string;
     heading?: string;
@@ -109,8 +112,11 @@
   {/if}
   {#if editable || done}
     <div class="actions">
-      <button class="btn ghost" type="button" onclick={ondiscard} disabled={busy || done}
-        >Discard</button
+      <button
+        class="btn ghost"
+        type="button"
+        onclick={ondiscard}
+        disabled={busy || (done && !discardable)}>Discard</button
       >
       <button class="btn ghost" type="button" onclick={onrerun} disabled={busy || done}
         >{rerunLabel}</button

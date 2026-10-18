@@ -438,6 +438,112 @@ describe('job page: actions', () => {
   });
 });
 
+describe('job page: paused publish', () => {
+  const FINAL = {
+    title: PICK.title,
+    description: PICK.description,
+    hashtags: PICK.hashtags,
+    tags: PICK.tags,
+  };
+  const publishing = (wait?: JobView['wait'], patch: Partial<PublicJob> = {}) =>
+    view(
+      { state: 'PUBLISHING', destination: CONNECTED, finalFields: FINAL, ...patch },
+      { pick: PICK, ...(wait ? { wait } : {}) },
+    );
+  /** Steps answer `stepView`; every other call answers by path. */
+  const serve = (stepView: JobView, other: Record<string, Response> = {}) =>
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      return path === STEP_PATH ? json(stepView) : (other[path] ?? hang());
+    });
+  const paused = () => screen.findByRole('region', { name: 'Upload outcome unknown' });
+
+  it('links the pinned channel in YouTube Studio and offers a pasted link and Discard', async () => {
+    serve(publishing('upload outcome unknown'));
+    setup(publishing());
+    const panel = await paused();
+    expect(
+      within(panel).getByRole('link', { name: 'Open YouTube Studio uploads' }),
+    ).toHaveAttribute('href', 'https://studio.youtube.com/channel/UCflr/videos/upload');
+    expect(within(panel).getByLabelText('Video link')).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+    expect(chip()).toHaveTextContent('upload outcome unknown');
+  });
+
+  it('posts the pasted link to confirm-upload and drops the panel once confirmed', async () => {
+    const url = 'https://youtu.be/dQw4w9WgXcQ';
+    serve(publishing('upload outcome unknown'), {
+      '/api/jobs/j1/confirm-upload': json(
+        view(
+          {
+            state: 'CLAIMED_COMPLETE',
+            destination: CONNECTED,
+            finalFields: FINAL,
+            videoId: 'dQw4w9WgXcQ',
+          },
+          { pick: PICK },
+        ),
+      ),
+    });
+    setup(publishing());
+    const panel = await paused();
+    await fireEvent.input(within(panel).getByLabelText('Video link'), { target: { value: url } });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Upload outcome unknown' })).toBeNull(),
+    );
+    const call = fetchMock.mock.calls.find(([p]) => String(p) === '/api/jobs/j1/confirm-upload')!;
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ url });
+  });
+
+  it('shows why a pasted link was refused and keeps the panel', async () => {
+    serve(publishing('upload outcome unknown'), {
+      '/api/jobs/j1/confirm-upload': json({ error: "That video isn't on Flies Like Robots." }, 422),
+    });
+    setup(publishing());
+    const panel = await paused();
+    await fireEvent.input(within(panel).getByLabelText('Video link'), {
+      target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
+    });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    expect(await screen.findByText("That video isn't on Flies Like Robots.")).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Upload outcome unknown' })).toBeInTheDocument();
+  });
+
+  it('points a job that lost YouTube access to Connections and lets it be discarded', async () => {
+    serve(publishing('reconnect YouTube'), {
+      '/api/jobs/j1/discard': json(view({ state: 'DISCARDED' }, { pick: PICK })),
+    });
+    setup(publishing());
+    const panel = await screen.findByRole('region', { name: 'Upload paused' });
+    expect(within(panel).getByRole('link', { name: 'Reconnect on Connections' })).toHaveAttribute(
+      'href',
+      '/connections',
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
+  });
+
+  it('lets a verifying job that lost access be discarded too', async () => {
+    serve(publishing('reconnect YouTube', { state: 'CLAIMED_COMPLETE', videoId: 'vid1' }));
+    setup(publishing(undefined, { state: 'CLAIMED_COMPLETE', videoId: 'vid1' }));
+    await screen.findByRole('region', { name: 'Upload paused' });
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+  });
+
+  it.each([undefined, 'Daily upload limit reached. Try tomorrow.'] as const)(
+    'shows no paused panel and keeps Discard off while waiting on %s',
+    async (wait) => {
+      serve(publishing(wait));
+      setup(publishing());
+      await waitFor(() => expect(paths()).toContain(STEP_PATH));
+      expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    },
+  );
+});
+
 describe('job page: upload hand-off', () => {
   const file = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
 
