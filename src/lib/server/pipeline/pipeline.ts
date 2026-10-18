@@ -181,6 +181,10 @@ async function pick(job: JobDoc): Promise<StepOutput> {
 
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
+const RECONNECT: Wait = 'reconnect YouTube';
+
+/** A wait is never a failure: it ends the failure streak and clears a stale error. */
+const pause = (wait: Wait, patch: Patch = {}): StepOutput => ({ ...ok(patch), wait });
 
 /**
  * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
@@ -190,12 +194,12 @@ const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
 async function publishing(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
   // No YouTube call at all: the page polls this wait, and polling must spend no quota.
-  if (outcomeUnknown(job)) return { wait: OUTCOME_UNKNOWN };
+  if (outcomeUnknown(job)) return pause(OUTCOME_UNKNOWN);
   // Nor while the daily limit is spent: the quota is shared, and a refresh would spend nothing useful.
   const now = Date.now();
-  if (job.limitUntil && now < job.limitUntil) return { wait: DAILY_LIMIT };
+  if (job.limitUntil && now < job.limitUntil) return pause(DAILY_LIMIT);
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!access) return { wait: 'reconnect YouTube' };
+  if (!access) return pause(RECONNECT);
   try {
     const output = job.upload
       ? await sendChunk(job, job.upload)
@@ -203,11 +207,11 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
     return job.limitUntil ? { ...output, limitUntil: null } : output;
   } catch (error) {
     const failure = uploadFailure(error);
-    if (failure === 'quota-spent') return { limitUntil: quotaResetAt(now), wait: DAILY_LIMIT };
+    if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
     if (failure !== 'access-lost') throw error;
     // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
     await access.refused();
-    return { wait: 'reconnect YouTube' };
+    return pause(RECONNECT);
   }
 }
 
@@ -247,7 +251,7 @@ async function sendChunk(
     }
   } catch (error) {
     if (uploadFailure(error) !== 'session-lost') throw error;
-    if (finalSent) return { upload: null, wait: OUTCOME_UNKNOWN };
+    if (finalSent) return pause(OUTCOME_UNKNOWN, { upload: null });
     return ok({ upload: null, uploadProgress: null });
   }
   if (result.done) {
@@ -283,7 +287,7 @@ async function verify(job: JobDoc): Promise<StepOutput> {
     return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   }
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!access) return { wait: 'reconnect YouTube' };
+  if (!access) return pause(RECONNECT);
   const video = await readBack(access.token, job.videoId);
   const uploadStatus = video?.uploadStatus ?? '';
   if (REJECTED_UPLOADS.has(uploadStatus)) {

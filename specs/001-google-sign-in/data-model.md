@@ -112,7 +112,7 @@ stateDiagram-v2
   - The step returns wait "upload outcome unknown" with a link to the channel's uploads in YouTube Studio. It makes no YouTube call, so the page's polling costs no quota.
   - The owner pastes the video's URL. The app reads it through the pinned grant and requires the pinned `channelId`; then it records the ID, moves to `CLAIMED_COMPLETE` and runs normal read-back.
   - Without confirmation, the job stays paused and the owner may discard it. Discard does not prove the upload failed or remove any video already created.
-- Waits are step wait reasons, like "waking model". They are not new states, and they never count as failures.
+- Waits are step wait reasons, like "waking model". They are not new states, and they never count as failures: a wait ends the failure streak and clears a stale error.
 - YouTube's project quota-spent (`quotaExceeded`) and per-channel `uploadLimitExceeded` responses return wait "Daily upload limit reached. Try tomorrow." and keep the job in `PUBLISHING`; nothing counts uploads app-side. The job stores `limitUntil` in `data`, the next midnight Pacific time when YouTube's quota resets. Until then a step returns the same wait with no grant refresh and no YouTube call, since the quota is shared. A successful upload call clears it.
 - `PAYLOAD` has no remaining entry point (its visitor, "not connected" and quota-spent uses are gone), so the state, the job's `payload` field and `Payload.svelte` are removed.
 

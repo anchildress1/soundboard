@@ -769,6 +769,26 @@ describe('runStep: PUBLISHING', () => {
     expect(called(/upload\/youtube/)).toHaveLength(0);
   });
 
+  it.each<[string, () => Promise<unknown>, Partial<JobDoc>, string]>([
+    ['reconnect', revokeA, {}, RECONNECT],
+    ['an unknown outcome', async () => {}, { finalChunkAt: 5 }, OUTCOME_UNKNOWN],
+    ['a spent limit', async () => {}, { limitUntil: Date.now() + 60_000 }, DAILY_LIMIT],
+    [
+      'reconnect while verifying',
+      revokeA,
+      { state: 'CLAIMED_COMPLETE', videoId: 'vid1' },
+      RECONNECT,
+    ],
+  ])(
+    'a %s wait ends the failure streak and clears a stale error',
+    async (_l, arrange, patch, wait) => {
+      await arrange();
+      const job = await publishing({ consecutiveFailures: 1, error: 'stale', ...patch });
+      expect(await runStep(job)).toEqual({ wait });
+      expect(await saved()).toMatchObject({ consecutiveFailures: 0, error: null });
+    },
+  );
+
   it('records a failure when the grant is on another channel, without calling YouTube', async () => {
     await db()
       .update(connections)
@@ -890,12 +910,12 @@ describe('runStep: PUBLISHING', () => {
       /upload\/youtube\/v3\/videos/,
       () => new Response(`{"error":{"errors":[{"reason":"${reason}"}]}}`, { status }),
     );
-    expect(await runStep(await publishing({ consecutiveFailures: 1 }))).toEqual({
+    expect(await runStep(await publishing({ consecutiveFailures: 1, error: 'stale' }))).toEqual({
       wait: DAILY_LIMIT,
     });
     expect(await saved()).toMatchObject({
       state: 'PUBLISHING',
-      consecutiveFailures: 1,
+      consecutiveFailures: 0,
       error: null,
       upload: null,
     });
