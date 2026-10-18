@@ -46,7 +46,9 @@ import {
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  type Access,
   type ChunkResult,
+  type ReadBack,
 } from '$lib/server/platforms/youtube';
 
 export const VERIFY_ATTEMPTS = 10;
@@ -187,6 +189,22 @@ const SOURCE_EXPIRED = 'The source video has expired from storage.';
 /** A wait is never a failure: it ends the failure streak and clears a stale error. */
 const pause = (wait: Wait, patch: Patch = {}): StepOutput => ({ ...ok(patch), wait });
 
+const limited = (job: JobDoc, now: number) => job.limitUntil !== null && now < job.limitUntil;
+
+/** A step that reached YouTube clears a limit that has passed. */
+const unlimited = (job: JobDoc, output: StepOutput): StepOutput =>
+  job.limitUntil ? { ...output, limitUntil: null } : output;
+
+/** A spent daily limit or a refused grant becomes its wait; any other error is rethrown. */
+async function youtubeWait(error: unknown, access: Access, now: number): Promise<StepOutput> {
+  const failure = uploadFailure(error);
+  if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
+  if (failure !== 'access-lost') throw error;
+  // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
+  await access.refused();
+  return pause(RECONNECT);
+}
+
 /**
  * One upload step. The grant is checked first on every step, chunk PUTs included: the session URI
  * alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload here.
@@ -198,21 +216,18 @@ async function publishing(job: JobDoc): Promise<StepOutput> {
   if (outcomeUnknown(job)) return pause(OUTCOME_UNKNOWN);
   // Nor while the daily limit is spent: the quota is shared, and a refresh would spend nothing useful.
   const now = Date.now();
-  if (job.limitUntil && now < job.limitUntil) return pause(DAILY_LIMIT);
+  if (limited(job, now)) return pause(DAILY_LIMIT);
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   if (!access) return pause(RECONNECT);
   try {
-    const output = job.upload
-      ? await sendChunk(job, job.upload)
-      : await initiate(job, access.token, job.finalFields);
-    return job.limitUntil ? { ...output, limitUntil: null } : output;
+    return unlimited(
+      job,
+      job.upload
+        ? await sendChunk(job, job.upload)
+        : await initiate(job, access.token, job.finalFields),
+    );
   } catch (error) {
-    const failure = uploadFailure(error);
-    if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
-    if (failure !== 'access-lost') throw error;
-    // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
-    await access.refused();
-    return pause(RECONNECT);
+    return youtubeWait(error, access, now);
   }
 }
 
@@ -294,15 +309,26 @@ async function verify(job: JobDoc): Promise<StepOutput> {
   if (!job.destination || !job.videoId) {
     return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   }
+  const now = Date.now();
+  if (limited(job, now)) return pause(DAILY_LIMIT);
   const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
   if (!access) return pause(RECONNECT);
-  const video = await readBack(access.token, job.videoId);
+  let video: ReadBack | null;
+  try {
+    video = await readBack(access.token, job.videoId);
+  } catch (error) {
+    return youtubeWait(error, access, now);
+  }
+  return unlimited(job, await verified(job, job.videoId, video));
+}
+
+async function verified(job: JobDoc, videoId: string, video: ReadBack | null): Promise<StepOutput> {
   const uploadStatus = video?.uploadStatus ?? '';
   if (REJECTED_UPLOADS.has(uploadStatus)) {
     return fail('CLAIMED_COMPLETE', `YouTube ${uploadStatus} the upload.`);
   }
   if (ACCEPTED_UPLOADS.has(uploadStatus)) {
-    await recordVerified(job, job.videoId);
+    await recordVerified(job, videoId);
     return ok({ state: 'VERIFIED' });
   }
   const attempts = job.verifyAttempts + 1;

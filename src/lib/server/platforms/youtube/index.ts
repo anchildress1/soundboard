@@ -33,6 +33,7 @@ export {
   type CatalogVideo,
   type ChunkResult,
   type ChannelStats,
+  type ReadBack,
   type VideoDuration,
   type VideoOwner,
 } from './youtube';

@@ -1444,6 +1444,69 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     expect(called(/com\/youtube\/v3\/videos\?/)).toHaveLength(0);
   });
 
+  it('holds the daily-limit wait with no grant refresh or YouTube call', async () => {
+    h.refreshError = new Error('a refresh would fail the step');
+    const limitUntil = Date.now() + 60_000;
+    expect(await runStep(await claimed({ limitUntil }))).toEqual({ wait: DAILY_LIMIT });
+    expect(calls).toHaveLength(0);
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      verifyAttempts: 0,
+      consecutiveFailures: 0,
+      limitUntil,
+    });
+  });
+
+  it('waits until the Pacific midnight reset when the read-back finds the limit spent', async () => {
+    vi.setSystemTime(Date.parse('2026-10-18T19:00:00Z'));
+    try {
+      on(/com\/youtube\/v3\/videos\?/, () => new Response('quotaExceeded', { status: 403 }));
+      expect(await runStep(await claimed({ consecutiveFailures: 1, error: 'stale' }))).toEqual({
+        wait: DAILY_LIMIT,
+      });
+      expect(await saved()).toMatchObject({
+        state: 'CLAIMED_COMPLETE',
+        verifyAttempts: 0,
+        consecutiveFailures: 0,
+        error: null,
+        limitUntil: quotaResetAt(Date.parse('2026-10-18T19:00:00Z')),
+      });
+      expect(captureException).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits to reconnect and revokes the grant when the read-back is refused', async () => {
+    on(/com\/youtube\/v3\/videos\?/, () => new Response('unauthorized', { status: 401 }));
+    expect(await runStep(await claimed())).toEqual({ wait: RECONNECT });
+    expect(await saved()).toMatchObject({
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      verifyAttempts: 0,
+      consecutiveFailures: 0,
+    });
+    const [connection] = await db()
+      .select()
+      .from(connections)
+      .where(eq(connections.uid, A_JOB.ownerUid));
+    expect(connection).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it('clears a passed limit once the read-back answers', async () => {
+    on(/com\/youtube\/v3\/videos\?/, () => json({ items: [] }));
+    expect(await runStep(await claimed({ limitUntil: Date.now() - 1 }))).toEqual({
+      wait: WAITING_ON_YOUTUBE,
+    });
+    expect(await saved()).toMatchObject({ verifyAttempts: 1, limitUntil: null });
+  });
+
+  it('clears a passed limit when the read-back verifies', async () => {
+    await runStep(await claimed({ limitUntil: Date.now() - 1 }));
+    expect(await saved()).toMatchObject({ state: 'VERIFIED', limitUntil: null });
+  });
+
   it('counts a read-back error as a failure and asks the page to wait', async () => {
     on(/com\/youtube\/v3\/videos\?/, () => new Response('oops', { status: 500 }));
     expect(await runStep(await claimed())).toEqual({ wait: WAITING_ON_YOUTUBE });
