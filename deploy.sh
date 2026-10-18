@@ -152,7 +152,8 @@ sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
 sync_secret DATABASE_URL DATABASE_URL
-sync_secret DATABASE_URL_UNPOOLED DATABASE_URL_UNPOOLED
+# Only drizzle-kit on the deploying machine uses the direct URL; the runtime never reads it.
+sync_secret DATABASE_URL_UNPOOLED DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
 
 # Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
 # image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
