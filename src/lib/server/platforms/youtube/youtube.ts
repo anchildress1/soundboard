@@ -129,21 +129,23 @@ async function uploadsPage(playlistId: string, maxResults: number): Promise<Play
   return body.items ?? [];
 }
 
-let statsCache: { at: number; value: ChannelStats } | null = null;
+// Keyed by channel ID: each user's header shows their own channel, never another's.
+const statsCache = new Map<string, { at: number; value: ChannelStats }>();
 const STATS_TTL_MS = 10 * 60 * 1000;
 
 const latestUpload = async (playlistId: string): Promise<PlaylistItem | undefined> =>
   playlistId ? (await uploadsPage(playlistId, 1))[0] : undefined;
 
-/** FLR channel header stats; cached so the home page doesn't spend a read on every visit. */
-export async function channelStats(now = Date.now()): Promise<ChannelStats> {
-  if (statsCache && now - statsCache.at < STATS_TTL_MS) return statsCache.value;
+/** A channel's header stats; cached so the home page doesn't spend a read on every visit. */
+export async function channelStats(channelId: string, now = Date.now()): Promise<ChannelStats> {
+  const cached = statsCache.get(channelId);
+  if (cached && now - cached.at < STATS_TTL_MS) return cached.value;
   const body = await keyGet<ListResponse<ChannelItem>>('channels', {
     part: 'snippet,statistics,contentDetails',
-    id: required('FLR_CHANNEL_ID'),
+    id: channelId,
   });
   const item = body.items?.[0];
-  if (!item) throw new YouTubeError(404, 'FLR channel not found');
+  if (!item) throw new YouTubeError(404, 'Channel not found');
   const uploadsPlaylist = item.contentDetails?.relatedPlaylists?.uploads ?? '';
   const latest = await latestUpload(uploadsPlaylist);
   const value: ChannelStats = {
@@ -153,17 +155,17 @@ export async function channelStats(now = Date.now()): Promise<ChannelStats> {
     lastUploadAt: latest?.contentDetails?.videoPublishedAt ?? null,
     uploadsPlaylist,
   };
-  statsCache = { at: now, value };
+  statsCache.set(channelId, { at: now, value });
   return value;
 }
 
 export function clearStatsCache(): void {
-  statsCache = null;
+  statsCache.clear();
 }
 
 /** FLR's most recent public uploads, newest first. */
 export async function recentVideos(count: number): Promise<CatalogVideo[]> {
-  const { uploadsPlaylist } = await channelStats();
+  const { uploadsPlaylist } = await channelStats(required('FLR_CHANNEL_ID'));
   const items = await uploadsPage(uploadsPlaylist, count + 5);
   const ids = items
     .map((item) => item.contentDetails?.videoId)

@@ -35,7 +35,7 @@
       <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
     </h1>
     <div class="bar">
-      <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
+      <!-- The signed-in user's own connected channel. -->
       {#if data.channel}
         <p class="chip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"

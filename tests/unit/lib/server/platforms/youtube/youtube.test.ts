@@ -142,7 +142,7 @@ describe('catalog reads', () => {
 describe('channelStats', () => {
   it('reads the channel and its latest upload', async () => {
     fetchMock.mockResolvedValueOnce(json(channel)).mockResolvedValueOnce(json(playlist('v1')));
-    const stats = await channelStats(1_000);
+    const stats = await channelStats('UCflr', 1_000);
     expect(stats).toEqual({
       handle: '@flieslikerobots',
       videoCount: 42,
@@ -160,33 +160,46 @@ describe('channelStats', () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).includes('/channels') ? json(channel) : json(playlist('v1')),
     );
-    await channelStats(0);
-    await channelStats(10 * 60 * 1000 - 1);
+    await channelStats('UCflr', 0);
+    await channelStats('UCflr', 10 * 60 * 1000 - 1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    await channelStats(10 * 60 * 1000);
+    await channelStats('UCflr', 10 * 60 * 1000);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('caches each channel on its own, never serving one channel for another', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (!url.pathname.endsWith('/channels')) return json(playlist('v1'));
+      const id = url.searchParams.get('id');
+      return json({ items: [{ snippet: { customUrl: `@${id}` } }] });
+    });
+    expect((await channelStats('UCa', 0)).handle).toBe('@UCa');
+    expect((await channelStats('UCb', 0)).handle).toBe('@UCb');
+    expect((await channelStats('UCa', 1)).handle).toBe('@UCa');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('clearStatsCache forces a fresh read', async () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).includes('/channels') ? json(channel) : json(playlist('v1')),
     );
-    await channelStats(0);
+    await channelStats('UCflr', 0);
     clearStatsCache();
-    await channelStats(1);
+    await channelStats('UCflr', 1);
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('throws a 404 YouTubeError when the channel is missing', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [] }));
-    const error = await channelStats().catch((e: unknown) => e);
+    const error = await channelStats('UCflr').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(YouTubeError);
     expect((error as YouTubeError).status).toBe(404);
   });
 
   it('falls back to the title and zeros, and skips the playlist read without uploads', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [{ snippet: { title: 'FLR' } }] }));
-    expect(await channelStats()).toEqual({
+    expect(await channelStats('UCflr')).toEqual({
       handle: 'FLR',
       videoCount: 0,
       subscriberCount: 0,
@@ -202,7 +215,7 @@ describe('channelStats', () => {
         json({ items: [{ contentDetails: { relatedPlaylists: { uploads: 'UU1' } } }] }),
       )
       .mockResolvedValueOnce(json({}));
-    const stats = await channelStats();
+    const stats = await channelStats('UCflr');
     expect(stats.handle).toBe('');
     expect(stats.lastUploadAt).toBeNull();
   });
