@@ -273,12 +273,18 @@ describe('gate', () => {
     },
   );
 
-  it('sends a signed-out client navigation through /auth/signed-out for a full page load', async () => {
-    const { resolve, seen } = renderer();
-    const response = await run(event(undefined, {}, '/jobs/x', true), resolve);
-    expect([response.status, response.headers.get('location')]).toEqual([303, '/auth/signed-out']);
-    expect(seen.resolved).toBe(0);
-  });
+  it.each(['/jobs/x', '/'])(
+    'sends a signed-out client navigation to %s through /auth/signed-out for a full page load',
+    async (path) => {
+      const { resolve, seen } = renderer();
+      const response = await run(event(undefined, {}, path, true), resolve);
+      expect([response.status, response.headers.get('location')]).toEqual([
+        303,
+        '/auth/signed-out',
+      ]);
+      expect(seen.resolved).toBe(0);
+    },
+  );
 
   it.each(PATHS)('lets a signed-in request reach %s', async (path) => {
     const { resolve, seen } = renderer();

@@ -70,3 +70,16 @@ test('a session that stops validating mid-run sends the job page home', async ({
   await expect(page).toHaveURL('/');
   await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
 });
+
+test('a client navigation home after the session ends drops the signed-in layout', async ({
+  page,
+}) => {
+  await signIn(page, USER_B);
+  await page.goto('/jobs/e2e-b-review');
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await page.context().clearCookies();
+  await page.getByRole('link', { name: 'Soundboard' }).click();
+  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+  await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
+});

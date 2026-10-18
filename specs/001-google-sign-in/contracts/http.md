@@ -4,19 +4,19 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## Gate
 
-| Request without a session                     | Response                                                |
-| --------------------------------------------- | ------------------------------------------------------- |
-| `GET /`                                       | 200, sign-in view only, no `Set-Cookie`                 |
-| `GET /auth/login`                             | 303 to Google, sets `sb_oauth`                          |
-| `GET /auth/callback`                          | Validates its own flow (below)                          |
-| `POST /auth/logout`, `GET /health`            | Unchanged                                               |
-| `GET /auth/signed-out`                        | 303 → `/`                                               |
-| Any other page                                | 303 → `/`                                               |
-| Any other page's data request (`__data.json`) | 200 `{"type":"redirect","location":"/auth/signed-out"}` |
-| Any `/api/*`                                  | 401 `{"message":"Sign in first."}`, no writes           |
+| Request without a session                    | Response                                                |
+| -------------------------------------------- | ------------------------------------------------------- |
+| `GET /`                                      | 200, sign-in view only, no `Set-Cookie`                 |
+| `GET /auth/login`                            | 303 to Google, sets `sb_oauth`                          |
+| `GET /auth/callback`                         | Validates its own flow (below)                          |
+| `POST /auth/logout`, `GET /health`           | Unchanged                                               |
+| `GET /auth/signed-out`                       | 303 → `/`                                               |
+| Any other page                               | 303 → `/`                                               |
+| Any data request (`__data.json`), even `/`'s | 200 `{"type":"redirect","location":"/auth/signed-out"}` |
+| Any `/api/*`                                 | 401 `{"message":"Sign in first."}`, no writes           |
 
 - Every response sends `content-security-policy: frame-ancestors 'self'` (FR-019).
-- A client-side navigation follows a redirect to `/` in place and keeps its cached signed-in layout. `/auth/signed-out` is server-only, so the client reloads the page instead.
+- A client-side navigation, even to `/`, keeps its cached signed-in layout. `/auth/signed-out` is server-only, so the client reloads the page instead.
 
 ## `GET /auth/login`
 
