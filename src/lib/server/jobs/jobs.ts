@@ -159,9 +159,10 @@ async function putChunk(tx: Tx, jobId: string, chunk: Chunk): Promise<void> {
 const released = { claimToken: null, claimUntil: null };
 
 /**
- * Applies the step's result and drops the claim, only while `token` still holds it. The patch is
- * skipped when an action (discard, re-run) moved the job off the state the step started from; a
- * token whose claim lapsed to someone else writes nothing and leaves the newer claim in place.
+ * Applies the step's result and drops the claim, only while `token` still holds it. When an action
+ * (discard, re-run) moved the job off the state the step started from, only the video ID and upload
+ * progress land, so the record of what YouTube holds survives; a token whose claim lapsed to someone
+ * else writes nothing and leaves the newer claim in place.
  */
 export async function releaseJob(
   id: string,
@@ -178,9 +179,10 @@ export async function releaseJob(
       .where(and(held, eq(jobs.state, claimedState)))
       .returning({ id: jobs.id });
     if (!kept) {
+      const { videoId, upload, uploadProgress } = patch;
       await tx
         .update(jobs)
-        .set({ ...jobSet({}), ...released })
+        .set({ ...jobSet({ videoId, upload, uploadProgress }), ...released })
         .where(held);
       return false;
     }

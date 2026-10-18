@@ -24,12 +24,15 @@ beforeEach(async () => {
 });
 
 describe('POST /api/jobs/[id]/discard', () => {
-  it.each<JobState>(['REVIEW', 'ANALYZE', 'FAILED'])('ends a %s job', async (from) => {
-    await seedJob({ state: from });
-    const response = await discard('j1');
-    expect(response.status).toBe(200);
-    expect(((await response.json()) as JobView).job.state).toBe('DISCARDED');
-  });
+  it.each<JobState>(['REVIEW', 'ANALYZE', 'FAILED', 'PUBLISHING', 'CLAIMED_COMPLETE'])(
+    'ends a %s job',
+    async (from) => {
+      await seedJob({ state: from });
+      const response = await discard('j1');
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as JobView).job.state).toBe('DISCARDED');
+    },
+  );
 
   it('learns nothing from a discard', async () => {
     await seedJob({ state: 'REVIEW' });
@@ -38,7 +41,7 @@ describe('POST /api/jobs/[id]/discard', () => {
     expect(await db().select().from(artistFeedback)).toEqual([]);
   });
 
-  it('409s once the upload has started', async () => {
+  it('409s once the upload is verified', async () => {
     await seedJob({ state: 'VERIFIED' });
     const response = await discard('j1');
     expect(response.status).toBe(409);

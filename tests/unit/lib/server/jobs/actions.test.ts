@@ -456,7 +456,7 @@ describe('concurrent actions', () => {
 
   it('refuses a discard once the job moved past discardable states', async () => {
     const job = await makeJob({ state: 'REVIEW' });
-    await patchJob({ state: 'PUBLISHING' });
+    await patchJob({ state: 'VERIFIED' });
     expect((await rejection(discard(job))).status).toBe(409);
   });
 
@@ -468,23 +468,32 @@ describe('concurrent actions', () => {
 });
 
 describe('discard', () => {
-  it.each<JobState>(['AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'REVIEW', 'FAILED'])(
-    'discards a %s job',
-    async (state) => {
-      const job = await makeJob({ state });
-      await discard(job);
-      expect((await getJob('job1'))!.state).toBe('DISCARDED');
-    },
-  );
+  it.each<JobState>([
+    'AWAITING_UPLOAD',
+    'PREP',
+    'ANALYZE',
+    'PICK',
+    'REVIEW',
+    'FAILED',
+    'PUBLISHING',
+    'CLAIMED_COMPLETE',
+  ])('discards a %s job', async (state) => {
+    const job = await makeJob({ state });
+    await discard(job);
+    expect((await getJob('job1'))!.state).toBe('DISCARDED');
+  });
 
-  it.each<JobState>(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'DISCARDED'])(
-    'refuses a %s job with 409',
-    async (state) => {
-      const job = await makeJob({ state });
-      expect((await rejection(discard(job))).status).toBe(409);
-      expect((await getJob('job1'))!.state).toBe(state);
-    },
-  );
+  it.each<JobState>(['VERIFIED', 'DISCARDED'])('refuses a %s job with 409', async (state) => {
+    const job = await makeJob({ state });
+    expect((await rejection(discard(job))).status).toBe(409);
+    expect((await getJob('job1'))!.state).toBe(state);
+  });
+
+  it('keeps the video ID YouTube already returned', async () => {
+    const job = await makeJob({ state: 'CLAIMED_COMPLETE', patch: { videoId: 'vid1' } });
+    await discard(job);
+    expect(await getJob('job1')).toMatchObject({ state: 'DISCARDED', videoId: 'vid1' });
+  });
 
   it('learns nothing from a discard', async () => {
     const job = await makeJob();

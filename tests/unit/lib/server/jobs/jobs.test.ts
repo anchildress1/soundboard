@@ -263,6 +263,52 @@ describe('claimJob / releaseJob', () => {
     expect(await listPicks('j')).toEqual([]);
   });
 
+  it('keeps the video ID and upload progress from a step that outlived a discard', async () => {
+    await createJob(input, 'j');
+    await patch('j', { state: 'PUBLISHING', notes: 'kept' });
+    const { token } = (await claimJob('j'))!;
+    await patch('j', { state: 'DISCARDED', notes: 'newer' });
+    const upload = { sessionUri: 'https://upload.example/s1', total: 10 };
+    const released = await releaseJob('j', token, 'PUBLISHING', {
+      state: 'CLAIMED_COMPLETE',
+      videoId: 'vid1',
+      upload,
+      uploadProgress: { sent: 10, total: 10 },
+      notes: 'step',
+      consecutiveFailures: 0,
+    });
+    expect(released).toBe(false);
+    expect(await getJob('j')).toMatchObject({
+      state: 'DISCARDED',
+      videoId: 'vid1',
+      upload,
+      uploadProgress: { sent: 10, total: 10 },
+      notes: 'newer',
+    });
+    expect(await claimRow('j')).toEqual({ token: null, until: null });
+  });
+
+  it('never replaces a saved video ID from a step that outlived a discard', async () => {
+    await createJob(input, 'j');
+    await patch('j', { state: 'CLAIMED_COMPLETE', videoId: 'first' });
+    const { token } = (await claimJob('j'))!;
+    await patch('j', { state: 'DISCARDED' });
+    await releaseJob('j', token, 'CLAIMED_COMPLETE', { videoId: 'second' });
+    expect(await getJob('j')).toMatchObject({ state: 'DISCARDED', videoId: 'first' });
+  });
+
+  it('lets a superseded token save no video ID after a discard', async () => {
+    await createJob(input, 'j');
+    await patch('j', { state: 'PUBLISHING' });
+    const a = (await claimJob('j'))!;
+    await expireClaim('j');
+    const b = (await claimJob('j'))!;
+    await patch('j', { state: 'DISCARDED' });
+    expect(await releaseJob('j', a.token, 'PUBLISHING', { videoId: 'late' })).toBe(false);
+    expect(await getJob('j')).toMatchObject({ state: 'DISCARDED', videoId: null });
+    expect((await claimRow('j')).token).toBe(b.token);
+  });
+
   it('refuses a stale token and leaves the live claim alone', async () => {
     await createJob(input, 'j');
     const { token } = (await claimJob('j'))!;

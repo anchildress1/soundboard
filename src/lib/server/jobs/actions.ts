@@ -175,9 +175,14 @@ const DISCARDABLE: JobState[] = [
   'RENDER',
   'REVIEW',
   'FAILED',
+  'PUBLISHING',
+  'CLAIMED_COMPLETE',
 ];
 
-/** Ends the job. Nothing is learned from a discard; a step still running drops its result. */
+/**
+ * Ends the job, including one paused mid-publish. Nothing is learned from a discard, and it deletes
+ * no video: a video ID YouTube already returned stays recorded, even from a step still running.
+ */
 export async function discard(job: JobDoc): Promise<void> {
   requireState(job, DISCARDABLE);
   if (!(await transitionJob(job.id, DISCARDABLE, { state: 'DISCARDED' }))) {
