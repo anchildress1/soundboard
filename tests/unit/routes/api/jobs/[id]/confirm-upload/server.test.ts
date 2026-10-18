@@ -260,6 +260,16 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
+  it('422s a video YouTube forbids reading, without reporting it', async () => {
+    await seedJob(PAUSED);
+    fetchMock.mockImplementation(async () => new Response('forbidden', { status: 403 }));
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(response.status).toBe(422);
+    expect(await errorOf(response)).toBe("Couldn't find that video.");
+    expect(captureException).not.toHaveBeenCalled();
+    expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
+  });
+
   it('409s when the job left the paused state while the video was read', async () => {
     await seedJob(PAUSED);
     fetchMock.mockImplementation(async () => {

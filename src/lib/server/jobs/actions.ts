@@ -24,6 +24,7 @@ import {
   uploadFailure,
   videoChannel,
   videoIdFromUrl,
+  YouTubeError,
   type Access,
 } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
@@ -224,6 +225,10 @@ async function pastedVideo(job: JobDoc, channelId: string, videoId: string) {
     }
     if (failure === 'quota-spent') {
       throw new ActionError(429, 'Daily YouTube limit reached. Try tomorrow.');
+    }
+    // Any other 403 is YouTube declining to show this video to the grant.
+    if (error instanceof YouTubeError && error.status === 403) {
+      throw new ActionError(422, NOT_FOUND);
     }
     captureException(error, { tags: { action: 'confirm-upload' } });
     throw new ActionError(502, "YouTube didn't answer. Try again.");

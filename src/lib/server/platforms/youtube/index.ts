@@ -30,6 +30,7 @@ export {
   videoIdFromUrl,
   videosByIds,
   YOUTUBE_SCOPES,
+  YouTubeError,
   type CatalogVideo,
   type ChunkResult,
   type ChannelStats,
