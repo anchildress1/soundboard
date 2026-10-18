@@ -98,7 +98,7 @@ describe('replaceTraceMeta', () => {
     `<head><meta name="sentry-trace" content="${trace}"/><meta name="baggage" content="${baggage}"/>`;
 
   it("swaps the request's trace tags for the job's", () => {
-    const out = replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE });
+    const out = replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE }, 'j1');
     expect(out).not.toContain('req-trace');
     expect(out).not.toContain('req-baggage');
     expect(out).toContain(tags(JOB_TRACE, JOB_BAGGAGE));
@@ -108,7 +108,7 @@ describe('replaceTraceMeta', () => {
   });
 
   it('inserts tags when the page has none', () => {
-    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE });
+    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE }, 'j1');
     expect(out).toBe(`${tags(JOB_TRACE, JOB_BAGGAGE)}<title>x</title></head>`);
   });
 
@@ -117,12 +117,12 @@ describe('replaceTraceMeta', () => {
     ['unsampled', `${TRACE_ID}-0123456789abcdef-0`],
     ['no sampling decision', `${TRACE_ID}-0123456789abcdef`],
   ])('accepts a %s sentry-trace', (_label, sentryTrace) => {
-    const out = replaceTraceMeta(head, { sentryTrace, baggage: JOB_BAGGAGE });
+    const out = replaceTraceMeta(head, { sentryTrace, baggage: JOB_BAGGAGE }, 'j1');
     expect(out).toContain(`content="${sentryTrace}"`);
   });
 
   it('accepts empty baggage, which getTraceData yields without a DSC', () => {
-    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: '' });
+    const out = replaceTraceMeta(head, { sentryTrace: JOB_TRACE, baggage: '' }, 'j1');
     expect(out).toBe(`${tags(JOB_TRACE, '')}<title>x</title></head>`);
   });
 
@@ -134,10 +134,10 @@ describe('replaceTraceMeta', () => {
     ['trailing text', `${JOB_TRACE} `],
     ['an empty value', ''],
   ])('keeps the page as rendered when sentry-trace has %s', (_label, sentryTrace) => {
-    expect(replaceTraceMeta(PAGE, { sentryTrace, baggage: JOB_BAGGAGE })).toBe(PAGE);
+    expect(replaceTraceMeta(PAGE, { sentryTrace, baggage: JOB_BAGGAGE }, 'j1')).toBe(PAGE);
     expect(vi.mocked(captureMessage)).toHaveBeenCalledWith(
       'Job trace dropped: malformed sentry-trace or baggage',
-      { level: 'warning' },
+      { level: 'warning', tags: { 'job.id': 'j1' } },
     );
   });
 
@@ -150,20 +150,20 @@ describe('replaceTraceMeta', () => {
     ['an empty member', 'sentry-a=1,,sentry-b=2'],
     ['a property', 'sentry-a=1;p'],
   ])('keeps the page as rendered when baggage has %s', (_label, baggage) => {
-    expect(replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage })).toBe(PAGE);
+    expect(replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage }, 'j1')).toBe(PAGE);
     expect(vi.mocked(captureMessage)).toHaveBeenCalledTimes(1);
   });
 
   it('reports a dropped trace without its raw value', () => {
-    replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: 'sentry-secret="x"' });
+    replaceTraceMeta(PAGE, { sentryTrace: JOB_TRACE, baggage: 'sentry-secret="x"' }, 'j1');
     expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('secret');
   });
 
   it('leaves unrelated meta tags alone', () => {
     const html = '<head><meta name="description" content="d"/></head>';
-    expect(replaceTraceMeta(html, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE })).toContain(
-      '<meta name="description" content="d"/>',
-    );
+    expect(
+      replaceTraceMeta(html, { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE }, 'j1'),
+    ).toContain('<meta name="description" content="d"/>');
   });
 });
 
@@ -228,6 +228,19 @@ describe('handle', () => {
     expect(html).toContain(`<meta name="sentry-trace" content="${JOB_TRACE}"/>`);
     expect(html).toContain(`<meta name="baggage" content="${JOB_BAGGAGE}"/>`);
     expect(html).not.toContain('req-trace');
+  });
+
+  it("reports a malformed job trace tagged with the page's job", async () => {
+    const { resolve } = renderer();
+    const ev = event(sessionCookie(USER_A.uid, 1), {
+      jobTrace: { sentryTrace: 'bad', baggage: JOB_BAGGAGE },
+    });
+    ev.params = { id: 'j1' };
+    expect(await (await run(ev, resolve)).text()).toContain('req-trace');
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith(
+      'Job trace dropped: malformed sentry-trace or baggage',
+      { level: 'warning', tags: { 'job.id': 'j1' } },
+    );
   });
 
   it('keeps the page as rendered without a job trace', async () => {

@@ -10,16 +10,20 @@ const SENTRY_TRACE = /^[0-9a-f]{32}-[0-9a-f]{16}(?:-[01])?$/;
 const BAGGAGE = /^(?:[\w.-]+=[\w%.!~*'()-]*(?:,[\w.-]+=[\w%.!~*'()-]*)*)?$/;
 
 /**
- * Swaps the request's trace meta tags for the job's, so the browser continues the job's trace.
+ * Swaps the request's trace meta tags for job `jobId`'s, so the browser continues the job's trace.
  * Returns the page unchanged when either value is not one Sentry's `getTraceData()` could write.
  */
 export function replaceTraceMeta(
   html: string,
   trace: { sentryTrace: string; baggage: string },
+  jobId: string | undefined,
 ): string {
   // Values come from `getTraceData()` at job creation, but round-trip through the database first.
   if (!SENTRY_TRACE.test(trace.sentryTrace) || !BAGGAGE.test(trace.baggage)) {
-    captureMessage('Job trace dropped: malformed sentry-trace or baggage', { level: 'warning' });
+    captureMessage('Job trace dropped: malformed sentry-trace or baggage', {
+      level: 'warning',
+      tags: { 'job.id': jobId },
+    });
     return html;
   }
   const stripped = html.replaceAll(/<meta name="(?:sentry-trace|baggage)"[^>]*>\s*/g, '');
@@ -34,7 +38,9 @@ const jobTraceMeta: Handle = ({ event, resolve }) =>
   resolve(event, {
     transformPageChunk: ({ html }) => {
       const trace = event.locals.jobTrace;
-      return trace && html.includes('<head>') ? replaceTraceMeta(html, trace) : html;
+      return trace && html.includes('<head>')
+        ? replaceTraceMeta(html, trace, event.params.id)
+        : html;
     },
   });
 
