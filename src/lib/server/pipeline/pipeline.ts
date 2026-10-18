@@ -336,16 +336,16 @@ async function verify(job: JobDoc): Promise<StepOutput> {
 
 async function verified(job: JobDoc, videoId: string, video: ReadBack | null): Promise<StepOutput> {
   if (video?.status === 'rejected') {
-    return fail('CLAIMED_COMPLETE', `YouTube ${video.reason} the upload.`);
+    return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
   }
   if (video?.status === 'accepted') {
     await recordVerified(job, videoId);
     return ok({ state: 'VERIFIED' });
   }
-  if (video?.raw) {
+  if (video?.uploadStatus) {
     captureMessage('Unknown YouTube uploadStatus', {
       level: 'warning',
-      tags: { 'job.id': job.id, uploadStatus: video.raw },
+      tags: { 'job.id': job.id, uploadStatus: video.uploadStatus },
     });
   }
   const attempts = job.verifyAttempts + 1;
@@ -353,7 +353,7 @@ async function verified(job: JobDoc, videoId: string, video: ReadBack | null): P
   return fail(
     'CLAIMED_COMPLETE',
     video
-      ? `YouTube kept the upload at "${video.raw ?? 'no status'}".`
+      ? `YouTube kept the upload at "${video.uploadStatus ?? 'no status'}".`
       : 'YouTube never returned the uploaded video.',
   );
 }

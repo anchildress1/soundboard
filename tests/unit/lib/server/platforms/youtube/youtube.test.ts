@@ -545,24 +545,24 @@ describe('readBack', () => {
   it.each([
     ['uploaded', { status: 'accepted' }],
     ['processed', { status: 'accepted' }],
-    ['rejected', { status: 'rejected', reason: 'rejected' }],
-    ['failed', { status: 'rejected', reason: 'failed' }],
-    ['deleted', { status: 'rejected', reason: 'deleted' }],
-    [undefined, { status: 'pending', raw: null }],
-    ['', { status: 'pending', raw: null }],
-    ['someNewStatus', { status: 'pending', raw: 'someNewStatus' }],
+    ['rejected', { status: 'rejected', uploadStatus: 'rejected' }],
+    ['failed', { status: 'rejected', uploadStatus: 'failed' }],
+    ['deleted', { status: 'rejected', uploadStatus: 'deleted' }],
+    [undefined, { status: 'pending', uploadStatus: null }],
+    ['', { status: 'pending', uploadStatus: null }],
+    ['someNewStatus', { status: 'pending', uploadStatus: 'someNewStatus' }],
   ])('reads uploadStatus %s as %o', async (uploadStatus, expected) => {
     fetchMock.mockResolvedValueOnce(
       json({ items: [{ ...video('pub1'), status: { uploadStatus } }] }),
     );
     const live = await readBack('tok', 'pub1');
     expect(live).toMatchObject({ videoId: 'pub1', ...expected });
-    expect(live && 'reason' in live).toBe('reason' in expected);
+    expect(live && 'uploadStatus' in live).toBe('uploadStatus' in expected);
   });
 
   it('reads a video with no status part as pending', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [video('pub1')] }));
-    expect(await readBack('tok', 'pub1')).toMatchObject({ status: 'pending', raw: null });
+    expect(await readBack('tok', 'pub1')).toMatchObject({ status: 'pending', uploadStatus: null });
   });
 
   it('returns null when the video is not listed yet', async () => {
