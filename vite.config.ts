@@ -1,7 +1,7 @@
 import { sentrySvelteKit } from '@sentry/sveltekit/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 const fake = (name: string) =>
   fileURLToPath(new URL(`tests/e2e/fakes/${name}.ts`, import.meta.url));
@@ -13,11 +13,24 @@ const e2eFakes =
     ? {
         alias: {
           '@google-cloud/firestore': fake('firestore'),
+          '@google-cloud/kms': fake('kms'),
           '@google-cloud/storage': fake('storage'),
           '@google-cloud/secret-manager': fake('secret-manager'),
         },
       }
     : undefined;
+
+// The app's database module can't be swapped by `resolve.alias`: SvelteKit's `$lib` alias rewrites
+// the specifier first. Matching the resolved file catches every import of it.
+const dbModule = fileURLToPath(new URL('src/lib/server/core/db.ts', import.meta.url));
+const e2eDb: Plugin = {
+  name: 'e2e-db',
+  enforce: 'pre',
+  async resolveId(id, importer) {
+    const resolved = await this.resolve(id, importer, { skipSelf: true });
+    return resolved?.id === dbModule ? fake('db') : null;
+  },
+};
 
 export default defineConfig({
   plugins: [
@@ -31,6 +44,7 @@ export default defineConfig({
       telemetry: false,
     }),
     sveltekit(),
+    ...(e2eFakes ? [e2eDb] : []),
   ],
   resolve: e2eFakes,
 });
