@@ -46,7 +46,7 @@ description: 'Task list for Google sign-in and connections'
 - [ ] T010 [P] Set `locals.user: {uid, email, artistId} | null` in src/app.d.ts
 - [ ] T011 [P] Remove `allowlist()` and `demoEmails()` and add `signupMode(): 'invite' | 'open'` (default `invite`) and `kmsKey()` in src/lib/server/core/env.ts, with tests in tests/unit/lib/server/core/env.test.ts
 - [x] T012 [P] Create src/lib/server/core/kms.ts with `encrypt(plain): Promise<string>` (base64 ciphertext) and `decrypt(cipher): Promise<string>` against `KMS_KEY`, never logging or setting either value on a span; tests in tests/unit/lib/server/core/kms.test.ts mocking the KMS client
-- [ ] T013 [P] Create tests/e2e/fakes/kms.ts: a reversible in-memory encrypt/decrypt with the `KeyManagementServiceClient` surface kms.ts uses
+- [x] T013 [P] Create tests/e2e/fakes/kms.ts: a reversible in-memory encrypt/decrypt with the `KeyManagementServiceClient` surface kms.ts uses
 - [ ] T014 Create src/lib/server/auth/users.ts:
   - `getUser(uid)`
   - `upsertUser(uid, {email, name})`, which updates email/name only and **never writes `accessGeneration`**
