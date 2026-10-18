@@ -203,7 +203,7 @@ export async function retry(job: JobDoc): Promise<void> {
 
 /**
  * Starts a Short from a video whose analysis is done, or returns the live one it already has. Its
- * metadata starts from what the artist approved, else the recommendation on screen.
+ * metadata starts from what the owner approved, else the recommendation on screen.
  */
 export async function makeShort(job: JobDoc): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
@@ -225,7 +225,7 @@ export async function makeShort(job: JobDoc): Promise<string> {
 export const REFRAMES: readonly Reframe[] = ['blur', 'crop'];
 
 /**
- * Re-renders the Short with the artist's start, length, and framing; no model call. Moving the cut
+ * Re-renders the Short with the owner's start, length, and framing; no model call. Moving the cut
  * clears the model's reason, since it no longer describes what's on screen.
  */
 export async function recut(

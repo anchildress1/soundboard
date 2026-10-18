@@ -82,7 +82,7 @@ export type PickFields = {
   tags: string[];
 };
 
-/** Copy for Bandcamp's track editor; artist accounts have no upload API, so Nathan pastes it. */
+/** Copy for Bandcamp's track editor; artist accounts have no upload API, so the user pastes it. */
 export type BandcampDraft = { about: string; credits: string };
 
 export type Pick = PickFields & {
@@ -103,7 +103,7 @@ export type Hook = {
   window: number;
   startSec: number;
   lengthSec: number;
-  /** Why the model picked it; cleared when the artist moves the cut. */
+  /** Why the model picked it; cleared when the owner moves the cut. */
   reason: string;
 };
 

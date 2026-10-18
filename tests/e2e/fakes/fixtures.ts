@@ -1,6 +1,6 @@
 // Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
-// job but `e2e-b-review`; user B is invited and unlinked. Each test owns its job IDs, so parallel tests and both
-// Playwright projects never share mutable state.
+// job but `e2e-b-review`; user B is invited and unlinked. Each test owns its job IDs, so parallel
+// tests and both Playwright projects never share mutable state.
 import type { JobDoc } from '$lib/server/jobs/jobs';
 import { jobRow } from '$lib/server/jobs/rows';
 import type { Chunk, Pick, Short } from '$lib/types';

@@ -7,7 +7,7 @@ const tab = (page: Page, name: 'YouTube' | 'Short' | 'Bandcamp') =>
   page.getByRole('tab', { name: new RegExp(name) });
 const shortPanel = (page: Page) => page.locator('#panel-short');
 
-// Every job here is Nathan's.
+// Every job here is user A's, linked to FLR.
 test.beforeEach(async ({ page }) => {
   await signIn(page, USER_A);
 });

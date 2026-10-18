@@ -62,7 +62,7 @@
   );
   const bounds = $derived(lengthBounds(short.sourceDurationSec));
 
-  // Overridable: the artist's edits stick until a new hook or render resets them.
+  // Overridable: the owner's edits stick until a new hook or render resets them.
   let startSec = $derived(hook?.startSec ?? 0);
   let lengthSec = $derived(hook?.lengthSec ?? bounds.min);
   let reframe = $derived<Reframe>(short.reframe);

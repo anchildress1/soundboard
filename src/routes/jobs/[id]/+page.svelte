@@ -247,7 +247,7 @@
     {#if fields && view.pick}
       {@const pick = view.pick}
       {#if pick.flags.length > 0}
-        <!-- Above both tabs: an audio or video problem matters wherever the song goes. -->
+        <!-- Above the tabs: an audio or video problem matters wherever the song goes. -->
         <section class="warning" aria-labelledby="warning-title">
           <h2 id="warning-title"><span aria-hidden="true">⚠</span> Check before uploading</h2>
           <ul>

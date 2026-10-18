@@ -9,7 +9,7 @@ import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 /** A step's claim on a job; an aborted request frees the job when it lapses. */
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
 
-/** Longest video anyone may run. */
+/** Longest video a job accepts. */
 export const MAX_MINUTES = 15;
 
 export type JobDoc = PublicJob & {
