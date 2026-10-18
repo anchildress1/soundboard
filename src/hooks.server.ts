@@ -1,5 +1,5 @@
 import { handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import type { Handle } from '@sveltejs/kit';
+import { json, redirect, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
 import { getUser } from '$lib/server/auth/users';
@@ -39,17 +39,28 @@ const session: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-/** The DEV post embeds the app; everything else is refused as a frame parent. */
-const FRAME_ANCESTORS = "frame-ancestors 'self' https://dev.to https://*.dev.to";
+/** Paths a signed-out request may reach; every other page and every API needs a session. */
+const OPEN = new Set(['/', '/auth/login', '/auth/callback', '/auth/logout', '/health']);
+
+const gate: Handle = async ({ event, resolve }) => {
+  const { pathname } = event.url;
+  if (event.locals.user || OPEN.has(pathname)) return resolve(event);
+  if (pathname === '/api' || pathname.startsWith('/api/'))
+    return json({ message: 'Sign in first.' }, { status: 401 });
+  // A client-side navigation needs SvelteKit's JSON redirect, which only a thrown redirect produces.
+  if (event.isDataRequest) redirect(303, '/');
+  return new Response(null, { status: 303, headers: { location: '/' } });
+};
 
 const securityHeaders: Handle = async ({ event, resolve }) => {
   const response = await resolve(event);
-  response.headers.set('content-security-policy', FRAME_ANCESTORS);
+  response.headers.set('content-security-policy', "frame-ancestors 'self'");
   response.headers.set('x-content-type-options', 'nosniff');
   response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
   return response;
 };
 
-export const handle = sequence(jobTraceMeta, sentryHandle(), session, securityHeaders);
+// The gate runs inside securityHeaders so its own 303 and 401 responses carry them too.
+export const handle = sequence(jobTraceMeta, sentryHandle(), session, securityHeaders, gate);
 
 export const handleError = handleErrorWithSentry();

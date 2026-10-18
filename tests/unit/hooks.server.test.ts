@@ -1,5 +1,5 @@
 // @vitest-environment node
-import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
+import { isRedirect, type RequestEvent, type ResolveOptions } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { eq } from 'drizzle-orm';
@@ -17,12 +17,17 @@ const PAGE =
 
 type Locals = RequestEvent['locals'];
 
-function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
-  const url = new URL('http://localhost/jobs/j1');
+function event(
+  cookie?: string,
+  locals: Partial<Locals> = {},
+  path = '/jobs/j1',
+  isDataRequest = false,
+): RequestEvent {
+  const url = new URL(`http://localhost${path}`);
   return {
     request: new Request(url),
-    route: { id: '/jobs/[id]' },
-    params: { id: 'j1' },
+    route: { id: null },
+    params: {},
     locals: { user: null, ...locals } as Locals,
     cookies: {
       get: (name: string) => (name === SESSION_COOKIE ? cookie : undefined),
@@ -33,7 +38,7 @@ function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
     },
     getClientAddress: () => '127.0.0.1',
     setHeaders: vi.fn(),
-    isDataRequest: false,
+    isDataRequest,
     isSubRequest: false,
     isRemoteRequest: false,
     tracing: { enabled: false, root: {}, current: {} },
@@ -44,8 +49,9 @@ function event(cookie?: string, locals: Partial<Locals> = {}): RequestEvent {
 
 /** Stands in for SvelteKit's renderer: applies the page-chunk transform the hooks registered. */
 function renderer(html = PAGE) {
-  const seen: { locals?: Locals } = {};
+  const seen: { locals?: Locals; resolved: number } = { resolved: 0 };
   const resolve = async (ev: RequestEvent, opts?: ResolveOptions) => {
+    seen.resolved += 1;
     seen.locals = ev.locals;
     const body = opts?.transformPageChunk
       ? await opts.transformPageChunk({ html, done: true })
@@ -113,19 +119,17 @@ describe('replaceTraceMeta', () => {
 });
 
 describe('handle', () => {
-  it('lets the DEV post frame the app and nothing else', async () => {
+  it('lets only the app itself frame its pages', async () => {
     const { resolve } = renderer();
-    const response = await run(event(), resolve);
-    expect(response.headers.get('content-security-policy')).toBe(
-      "frame-ancestors 'self' https://dev.to https://*.dev.to",
-    );
+    const response = await run(event(sessionCookie(USER_A.uid, 1)), resolve);
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
   });
 
   it('leaves a signed-out request without a user or cookies', async () => {
     const { resolve, seen } = renderer();
-    const ev = event();
+    const ev = event(undefined, {}, '/');
     const response = await run(ev, resolve);
     expect(seen.locals?.user).toBeNull();
     expect(ev.cookies.set).not.toHaveBeenCalled();
@@ -147,26 +151,28 @@ describe('handle', () => {
   it('signs out a session from before the access generation was bumped', async () => {
     await db().update(users).set({ accessGeneration: 2 }).where(eq(users.uid, USER_A.uid));
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie(USER_A.uid, 1)), resolve);
+    await run(event(sessionCookie(USER_A.uid, 1), {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it('signs out a session whose user no longer exists', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie('uid-gone', 1)), resolve);
+    await run(event(sessionCookie('uid-gone', 1), {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it('drops a tampered cookie', async () => {
     const { resolve, seen } = renderer();
     const forged = sessionCookie(USER_A.uid, 1).replace(/\.[^.]+$/, '.forged');
-    await run(event(forged), resolve);
+    await run(event(forged, {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it("renders the job's trace into the page when the job page set one", async () => {
     const { resolve } = renderer();
-    const ev = event(undefined, { jobTrace: { sentryTrace: 'job-trace', baggage: 'job-bag' } });
+    const ev = event(sessionCookie(USER_A.uid, 1), {
+      jobTrace: { sentryTrace: 'job-trace', baggage: 'job-bag' },
+    });
     const html = await (await run(ev, resolve)).text();
     expect(html).toContain('<meta name="sentry-trace" content="job-trace"/>');
     expect(html).toContain('<meta name="baggage" content="job-bag"/>');
@@ -175,14 +181,102 @@ describe('handle', () => {
 
   it('keeps the page as rendered without a job trace', async () => {
     const { resolve } = renderer();
-    const html = await (await run(event(), resolve)).text();
+    const html = await (await run(event(undefined, {}, '/'), resolve)).text();
     expect(html).toContain('req-trace');
     expect(html).not.toContain('job-trace');
   });
 
   it('skips chunks without a <head>', async () => {
     const { resolve } = renderer('<div>partial</div>');
-    const ev = event(undefined, { jobTrace: { sentryTrace: 'job-trace', baggage: 'b' } });
+    const ev = event(sessionCookie(USER_A.uid, 1), {
+      jobTrace: { sentryTrace: 'job-trace', baggage: 'b' },
+    });
     expect(await (await run(ev, resolve)).text()).toBe('<div>partial</div>');
+  });
+});
+
+// Every route file in the app, as the URL a request would use (`[param]` → `x`).
+const ROUTES = Object.keys(
+  import.meta.glob(['/src/routes/**/+page*.{ts,svelte}', '/src/routes/**/+server.ts']),
+)
+  .map((file) =>
+    file
+      .replace(/^\/src\/routes/, '')
+      .replace(/\/\+(page|server)[^/]*$/, '')
+      .replaceAll(/\[[^\]]+\]/g, 'x'),
+  )
+  .map((path) => path || '/');
+const PATHS = [...new Set(ROUTES)];
+const EXEMPT = ['/', '/auth/login', '/auth/callback', '/auth/logout', '/health'];
+const CSP = "frame-ancestors 'self'";
+
+describe('gate', () => {
+  it('sweeps every exempt route and some gated ones', () => {
+    expect(PATHS).toEqual(expect.arrayContaining([...EXEMPT, '/brand', '/jobs/x', '/api/jobs']));
+  });
+
+  it.each(EXEMPT)('lets a signed-out request reach %s', async (path) => {
+    const { resolve, seen } = renderer();
+    const response = await run(event(undefined, {}, path), resolve);
+    expect(seen.resolved).toBe(1);
+    expect(seen.locals?.user).toBeNull();
+    expect(response.headers.get('content-security-policy')).toBe(CSP);
+  });
+
+  it.each(PATHS.filter((p) => !EXEMPT.includes(p) && !p.startsWith('/api/')))(
+    'redirects a signed-out page request for %s home',
+    async (path) => {
+      const { resolve, seen } = renderer();
+      const response = await run(event(undefined, {}, path), resolve);
+      expect(seen.resolved).toBe(0);
+      expect(response.status).toBe(303);
+      expect(response.headers.get('location')).toBe('/');
+      expect(response.headers.get('content-security-policy')).toBe(CSP);
+    },
+  );
+
+  it.each(PATHS.filter((p) => p.startsWith('/api/')))(
+    'answers a signed-out %s with 401 and never runs the route',
+    async (path) => {
+      const { resolve, seen } = renderer();
+      const response = await run(event(undefined, {}, path), resolve);
+      expect(seen.resolved).toBe(0);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ message: 'Sign in first.' });
+      expect(response.headers.get('content-security-policy')).toBe(CSP);
+    },
+  );
+
+  it.each(['/api', '/connections', '/nowhere', '/healthz', '/auth', '/auth/login/x'])(
+    'gates %s, which is no exempt path',
+    async (path) => {
+      const { resolve, seen } = renderer();
+      const response = await run(event(undefined, {}, path), resolve);
+      expect(seen.resolved).toBe(0);
+      expect(response.status).toBe(path === '/api' ? 401 : 303);
+    },
+  );
+
+  it("sends a signed-out client navigation home through SvelteKit's redirect", async () => {
+    const { resolve, seen } = renderer();
+    const thrown = await run(event(undefined, {}, '/jobs/x', true), resolve).catch(
+      (e: unknown) => e,
+    );
+    expect(isRedirect(thrown) && [thrown.status, thrown.location]).toEqual([303, '/']);
+    expect(seen.resolved).toBe(0);
+  });
+
+  it.each(PATHS)('lets a signed-in request reach %s', async (path) => {
+    const { resolve, seen } = renderer();
+    await run(event(sessionCookie(USER_B.uid, 1), {}, path), resolve);
+    expect(seen.resolved).toBe(1);
+    expect(seen.locals?.user).toEqual(USER_B);
+  });
+
+  it('gates a revoked session like no session', async () => {
+    await db().update(users).set({ accessGeneration: 2 }).where(eq(users.uid, USER_A.uid));
+    const { resolve } = renderer();
+    const response = await run(event(sessionCookie(USER_A.uid, 1), {}, '/api/jobs'), resolve);
+    expect(response.status).toBe(401);
   });
 });

@@ -96,12 +96,12 @@ description: 'Task list for Google sign-in and connections'
 
 ### Tests
 
-- [ ] T026 [P] [US1] Route sweep in tests/unit/hooks.server.test.ts: enumerate every `src/routes/**/+page*.ts` and `+server.ts` via `import.meta.glob`; signed-out pages → 303 `/`, `/api/*` → 401 `{"message":"Sign in first."}`; only `/`, `/auth/login`, `/auth/callback`, `/auth/logout`, `/health` exempt, each asserted individually (SC-001); every response carries `content-security-policy: frame-ancestors 'self'` (FR-019)
+- [x] T026 [P] [US1] Route sweep in tests/unit/hooks.server.test.ts: enumerate every `src/routes/**/+page*.ts` and `+server.ts` via `import.meta.glob`; signed-out pages → 303 `/`, `/api/*` → 401 `{"message":"Sign in first."}`; only `/`, `/auth/login`, `/auth/callback`, `/auth/logout`, `/health` exempt, each asserted individually (SC-001); every response carries `content-security-policy: frame-ancestors 'self'` (FR-019)
 - [ ] T027 [P] [US1] E2E in tests/e2e/auth.spec.ts: signed-out `/` sets zero cookies (SC-002), `/jobs/x`, `/brand`, `/connections` redirect to `/`, `POST /api/jobs` returns 401; desktop Chrome and Pixel 7
 
 ### Implementation
 
-- [ ] T028 [US1] Gate in src/hooks.server.ts: resolve the session cookie → `getUser(uid)` → require `gen === accessGeneration`, set `locals.user` or null; apply the contract's gate table with no wildcard API exemption (FR-002); set `content-security-policy: frame-ancestors 'self'` (drop dev.to, FR-019)
+- [x] T028 [US1] Gate in src/hooks.server.ts: resolve the session cookie → `getUser(uid)` → require `gen === accessGeneration`, set `locals.user` or null; apply the contract's gate table with no wildcard API exemption (FR-002); set `content-security-policy: frame-ancestors 'self'` (drop dev.to, FR-019)
 - [ ] T029 [P] [US1] Create src/lib/components/SignIn.svelte: a single "Sign in with Google" link to `/auth/login`, plain notices for `?signin=denied` ("not invited") and `?signin=expired` ("sign-in expired, try again"); tests in tests/unit/lib/components/SignIn.test.ts
 - [ ] T030 [US1] Render SignIn when `locals.user` is null in src/routes/+page.server.ts and src/routes/+page.svelte, with no app data and no `Set-Cookie`; remove the sample list and signed-out upload. Update tests/unit/routes/page.server.test.ts and page.test.ts
 - [ ] T031 [US1] Make a 401 from any step final in src/lib/driver.ts: stop and navigate to `/` (today it retries a 401 forever). Update tests/unit/lib/driver.test.ts
