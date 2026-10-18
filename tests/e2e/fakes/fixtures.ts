@@ -108,11 +108,11 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     chunks: [0, 1, 2, 3, 4].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
-  {
-    job: job('e2e-analyzing', { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
+  ...['e2e-analyzing', 'e2e-signout-chromium', 'e2e-signout-mobile'].map((id) => ({
+    job: job(id, { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
     chunks: [chunk(0)],
-  },
+  })),
 ];
 
 /** Every row the E2E database starts with, in `seed()` order. */

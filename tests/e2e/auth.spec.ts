@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { signIn, USER_B } from './session';
+import { sessionCookie, signIn, USER_A, USER_B } from './session';
 
 test.describe('signed out', () => {
   test('shows only the sign-in view and sets zero cookies', async ({ page, context }) => {
@@ -41,4 +41,24 @@ test('a signed-in user gets the upload form, not sign-in', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('form', { name: 'Start a run' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Sign in with Google' })).toHaveCount(0);
+});
+
+test('a session that stops validating mid-run sends the job page home', async ({
+  page,
+}, testInfo) => {
+  await signIn(page, USER_A);
+  const job = `/jobs/e2e-signout-${testInfo.project.name}`;
+  const first = page.waitForResponse((r) => r.url().endsWith(`${job}/step`));
+  await page.goto(job);
+  expect((await first).status()).toBe(200);
+  // A cookie from an older access generation, as after a revoke: present, but no longer valid.
+  await page
+    .context()
+    .addCookies([
+      { name: 'sb_session', value: sessionCookie(USER_A, 0), url: 'http://localhost:4173' },
+    ]);
+  const refused = await page.waitForResponse((r) => r.url().endsWith(`${job}/step`));
+  expect(refused.status()).toBe(401);
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
 });
