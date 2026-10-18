@@ -4,16 +4,19 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## Gate
 
-| Request without a session          | Response                                      |
-| ---------------------------------- | --------------------------------------------- |
-| `GET /`                            | 200, sign-in view only, no `Set-Cookie`       |
-| `GET /auth/login`                  | 303 to Google, sets `sb_oauth`                |
-| `GET /auth/callback`               | Validates its own flow (below)                |
-| `POST /auth/logout`, `GET /health` | Unchanged                                     |
-| Any other page                     | 303 → `/`                                     |
-| Any `/api/*`                       | 401 `{"message":"Sign in first."}`, no writes |
+| Request without a session                     | Response                                                |
+| --------------------------------------------- | ------------------------------------------------------- |
+| `GET /`                                       | 200, sign-in view only, no `Set-Cookie`                 |
+| `GET /auth/login`                             | 303 to Google, sets `sb_oauth`                          |
+| `GET /auth/callback`                          | Validates its own flow (below)                          |
+| `POST /auth/logout`, `GET /health`            | Unchanged                                               |
+| `GET /auth/signed-out`                        | 303 → `/`                                               |
+| Any other page                                | 303 → `/`                                               |
+| Any other page's data request (`__data.json`) | 200 `{"type":"redirect","location":"/auth/signed-out"}` |
+| Any `/api/*`                                  | 401 `{"message":"Sign in first."}`, no writes           |
 
 - Every response sends `content-security-policy: frame-ancestors 'self'` (FR-019).
+- A client-side navigation follows a redirect to `/` in place and keeps its cached signed-in layout. `/auth/signed-out` is server-only, so the client reloads the page instead.
 
 ## `GET /auth/login`
 
@@ -29,12 +32,14 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 | Case                                                      | Result                                                                      |
 | --------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Missing, expired or mismatched `state`, or no `code`      | 303 `/?signin=expired`; nothing stored                                      |
-| ID token unverified or email unverified                   | 303 `/?signin=expired`                                                      |
+| Code exchange returns `invalid_grant` (used or expired)   | 303 `/?signin=expired`; nothing stored                                      |
+| Email missing or unverified                               | 303 `/?signin=expired`; nothing stored                                      |
+| ID token fails verification, or any other Google error    | 500, reported to Sentry; nothing stored                                     |
 | Sign-in, not invited (or invite bound to another `sub`)   | 303 `/?signin=denied`; no cookie, no user, no token (FR-005)                |
 | Sign-in, invited                                          | Upsert user, bind invite, set `sb_session`, then evaluate YouTube → 303 `/` |
 | Connect, `uid` or `sid` differs from state, or no session | 303 `/connections?connect=mismatch`; no change (FR-026)                     |
 | Connect, ID token `sub` ≠ session `uid`                   | 303 `/connections?connect=wrong-account`; no change (FR-023)                |
-| Connect, valid                                            | Evaluate YouTube → 303 `/connections`                                       |
+| Connect, valid                                            | Evaluate YouTube → 303 `/connections`, or `/connections?connect=<outcome>`  |
 
 **Evaluating YouTube (FR-027):**
 
@@ -44,6 +49,8 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 4. No refresh token came back, the stored row is `connected`, and its channel ID matches → keep the stored grant.
 5. No refresh token came back and there's no usable stored grant → on sign-in, 303 straight to `/auth/login?connect=youtube`, which forces consent. This covers anyone who granted this client before v2, such as Ashley.
 6. Otherwise → `missing_scopes`, with "Reconnect to finish". A sign-in never erases a stored grant.
+
+A connect redirects to `/connections` when the outcome is `connected`, else to `/connections?connect=missing_scopes` or `/connections?connect=no_channel`.
 
 ## `/connections` (page)
 
@@ -56,14 +63,14 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 
 ## Job APIs (changed behavior)
 
-| Route                                      | Change                                                                                                                        |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                   |
-| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                            |
-| `POST /api/jobs/{id}/approve`              | 409 `"Reconnect YouTube to approve."` unless connected. Records `destination`                                                 |
-| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing or revoked grant for the pinned channel |
-| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                  |
-| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                           |
+| Route                                      | Change                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/jobs`                           | `{sampleId}` is removed. Owner is `session.uid`. 15-minute cap for everyone                                                                                                                                                                                                                                                                  |
+| `GET/POST /api/jobs/{id}/**`, `/jobs/{id}` | 404 unless `job.ownerUid === session.uid` (FR-012)                                                                                                                                                                                                                                                                                           |
+| `POST /api/jobs/{id}/approve`              | Body requires `channelId`, else 400 `"Name the channel being approved to."`. 409 `"Reconnect YouTube to approve."` unless connected; 409 `"Your YouTube channel changed. Reload to approve."` when `channelId` isn't the connected channel; 409 `"This job already started uploading."` once `uploadStartedAt` is set. Records `destination` |
+| `POST /api/jobs/{id}/step`                 | In `PUBLISHING` / `CLAIMED_COMPLETE`, returns wait `"reconnect YouTube"` on a missing or revoked grant. A grant connected to a channel other than the pinned one records a step failure instead, since the channel lock means reconnecting can't fix it                                                                                      |
+| `POST /api/jobs/{id}/discard`              | Also allowed in `PUBLISHING` and `CLAIMED_COMPLETE` (FR-025)                                                                                                                                                                                                                                                                                 |
+| `GET /` (signed in)                        | Data adds `jobs: {id, songTitle, state, createdAt}[]`, newest 20 root jobs (FR-029)                                                                                                                                                                                                                                                          |
 
 - Upload start is the durable `uploadStartedAt` marker, not the presence of `job.upload`. Session expiry and retries never unlock the destination.
 - Each upload step checks the pinned channel's connection is `connected` before touching the session, because session PUTs carry no auth header.

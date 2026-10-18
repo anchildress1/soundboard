@@ -98,7 +98,7 @@ src/
 │   ├── core/db.ts          (new)      # Drizzle over a pg Pool; replaces Firestore in core/clients.ts
 │   ├── core/kms.ts         (new)      # encrypt/decrypt
 │   ├── auth/auth.ts                   # session {uid,sid,gen,exp}, OAuth state {purpose,uid,sid}, prompts
-│   ├── auth/users.ts       (new)      # getUser, redeemInvite (transaction), upsertUser (never writes gen)
+│   ├── auth/users.ts       (new)      # getUser, redeemInvite (transaction), updateProfile (never writes gen)
 │   ├── jobs/jobs.ts                   # ownerUid, parentId, destination, upload markers; listJobs(uid); releaseJob keeps videoId
 │   ├── jobs/create.ts                 # drop samples, visitor runs, ownerFor
 │   ├── jobs/actions.ts                # approve pins destination; discard in PUBLISHING/CLAIMED_COMPLETE
