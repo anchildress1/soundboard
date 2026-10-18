@@ -75,7 +75,7 @@ description: 'Task list for Google sign-in and connections'
   - actions.ts: remove `allowlistedFor`, the upload-slot reservation and the visitor `ipHash` charge in `makeShort`; `makeShort` copies `ownerUid`, `artistId` and a null destination from the parent and sets top-level `parentId`
   - Port tests/unit/lib/server/jobs/actions.test.ts
 - [x] T020 [P] Move src/lib/server/artist/memory.ts and src/lib/server/artist/brand.ts to the artist tables (`artist_facts`, `artist_feedback`, `artist_publishes`, `artist_brand`); port their tests
-- [ ] T021 Remove `@google-cloud/firestore` from package.json and pnpm-lock.yaml once `grep -rn "@google-cloud/firestore" src tests scripts` is empty
+- [x] T021 Remove `@google-cloud/firestore` from package.json and pnpm-lock.yaml once `grep -rn "@google-cloud/firestore" src tests scripts` is empty
 
 ### Remove legacy paths (FR-020)
 
