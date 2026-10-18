@@ -9,18 +9,11 @@
   import wordmarkFont from '@fontsource/mr-dafoe/files/mr-dafoe-latin-400-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
-  import { page } from '$app/state';
   import Footer from '$lib/components/Footer.svelte';
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
-
-  const notice = $derived(
-    page.url.searchParams.get('signin') === 'denied'
-      ? "That Google account isn't invited, so you're still signed out."
-      : null,
-  );
 </script>
 
 <svelte:head>
@@ -61,15 +54,9 @@
         <form method="POST" action="/auth/logout">
           <button class="btn ghost small" type="submit" title={data.user.email}>Sign out</button>
         </form>
-      {:else}
-        <a class="btn ghost small" href={resolve('/auth/login')} data-sveltekit-reload>Sign in</a>
       {/if}
     </div>
   </header>
-
-  {#if notice}
-    <p class="notice" role="status">{notice}</p>
-  {/if}
 
   <div id="content" class="content" tabindex="-1">
     {@render children()}
@@ -202,14 +189,6 @@
   .chip b {
     color: var(--ink);
     font-weight: 500;
-  }
-
-  .notice {
-    margin: 0;
-    padding: 10px 14px;
-    border-left: 3px solid var(--info);
-    background: var(--panel);
-    font-size: 14px;
   }
 
   /* A real box, not display: contents, so the skip link can focus and scroll to it. */

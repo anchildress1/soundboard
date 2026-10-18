@@ -5,8 +5,12 @@
   import { ApiError, createJob } from '$lib/api';
   import Heard from '$lib/components/Heard.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
+  import SignIn from '$lib/components/SignIn.svelte';
   import { setPending } from '$lib/pending';
   import { TITLE_MAX } from '$lib/metadata';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   const maxMinutes = 15;
 
@@ -63,41 +67,46 @@
   });
 </script>
 
-<main>
-  <section class="tape" aria-label="The video">
-    <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
-    <Heard tags={[]} measurements={null} />
-  </section>
+{#if data.user}
+  <main>
+    <section class="tape" aria-label="The video">
+      <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
+      <Heard tags={[]} measurements={null} />
+    </section>
 
-  <form class="label" onsubmit={start} aria-label="Start a run">
-    <div class="field" class:err={tooLong}>
-      <label for="video">Video <span>up to {maxMinutes} min</span></label>
-      <input id="video" type="file" accept="video/*" onchange={pick} disabled={busy} />
-      {#if tooLong}<span class="msg">This video runs over {maxMinutes} minutes.</span>{/if}
-    </div>
-    <div class="field">
-      <label for="song">Song title <span>required</span></label>
-      <input
-        id="song"
-        bind:value={songTitle}
-        maxlength={TITLE_MAX}
-        autocomplete="off"
-        required
-        disabled={busy}
-      />
-    </div>
-    <div class="field">
-      <label for="notes">Notes <span>optional</span></label>
-      <textarea id="notes" rows="3" bind:value={notes} maxlength="1000" disabled={busy}></textarea>
-    </div>
-    <div class="actions">
-      <button class="btn primary" type="submit" disabled={!canStart}
-        >{busy ? 'Starting' : 'Analyze'}</button
-      >
-    </div>
-    <p class="toast" aria-live="polite">{message}</p>
-  </form>
-</main>
+    <form class="label" onsubmit={start} aria-label="Start a run">
+      <div class="field" class:err={tooLong}>
+        <label for="video">Video <span>up to {maxMinutes} min</span></label>
+        <input id="video" type="file" accept="video/*" onchange={pick} disabled={busy} />
+        {#if tooLong}<span class="msg">This video runs over {maxMinutes} minutes.</span>{/if}
+      </div>
+      <div class="field">
+        <label for="song">Song title <span>required</span></label>
+        <input
+          id="song"
+          bind:value={songTitle}
+          maxlength={TITLE_MAX}
+          autocomplete="off"
+          required
+          disabled={busy}
+        />
+      </div>
+      <div class="field">
+        <label for="notes">Notes <span>optional</span></label>
+        <textarea id="notes" rows="3" bind:value={notes} maxlength="1000" disabled={busy}
+        ></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn primary" type="submit" disabled={!canStart}
+          >{busy ? 'Starting' : 'Analyze'}</button
+        >
+      </div>
+      <p class="toast" aria-live="polite">{message}</p>
+    </form>
+  </main>
+{:else}
+  <SignIn />
+{/if}
 
 <style>
   main {

@@ -7,16 +7,22 @@ const FILE_NAME = 'peekaboo.mp4';
 const LOCAL_BLOB = 'blob:local-1';
 const SIGNED_PUT = 'https://storage.googleapis.com/put';
 
-const h = vi.hoisted(() => ({ goto: vi.fn() }));
+const h = vi.hoisted(() => ({
+  goto: vi.fn(),
+  page: { url: new URL('https://soundboard.test/') },
+}));
 
 vi.mock('$app/navigation', () => ({ goto: h.goto }));
+vi.mock('$app/state', () => ({ page: h.page }));
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function setup() {
-  return render(Page, { props: { data: { user: null, channel: null } } as never });
+const USER = { email: 'b@example.com', artistId: null };
+
+function setup(user: typeof USER | null = USER) {
+  return render(Page, { props: { data: { user, channel: null } } as never });
 }
 
 const analyze = () => screen.getByRole('button', { name: /Analyze|Starting/ });
@@ -45,7 +51,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('home page: signed out', () => {
+  it('shows only the sign-in view, with no upload form or tape', () => {
+    setup(null);
+    expect(screen.getByRole('link', { name: 'Sign in with Google' })).toHaveAttribute(
+      'href',
+      '/auth/login',
+    );
+    expect(screen.queryByRole('form', { name: 'Start a run' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'The video' })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('home page: form', () => {
+  it('offers no sign-in link once signed in', () => {
+    setup();
+    expect(screen.queryByRole('link', { name: 'Sign in with Google' })).toBeNull();
+  });
+
   it('keeps Analyze disabled until a file and a title are given', async () => {
     const { container } = setup();
     expect(analyze()).toBeDisabled();

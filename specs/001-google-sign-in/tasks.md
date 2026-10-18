@@ -102,8 +102,8 @@ description: 'Task list for Google sign-in and connections'
 ### Implementation
 
 - [x] T028 [US1] Gate in src/hooks.server.ts: resolve the session cookie → `getUser(uid)` → require `gen === accessGeneration`, set `locals.user` or null; apply the contract's gate table with no wildcard API exemption (FR-002); set `content-security-policy: frame-ancestors 'self'` (drop dev.to, FR-019)
-- [ ] T029 [P] [US1] Create src/lib/components/SignIn.svelte: a single "Sign in with Google" link to `/auth/login`, plain notices for `?signin=denied` ("not invited") and `?signin=expired` ("sign-in expired, try again"); tests in tests/unit/lib/components/SignIn.test.ts
-- [ ] T030 [US1] Render SignIn when `locals.user` is null in src/routes/+page.server.ts and src/routes/+page.svelte, with no app data and no `Set-Cookie`; remove the sample list and signed-out upload. Update tests/unit/routes/page.server.test.ts and page.test.ts
+- [x] T029 [P] [US1] Create src/lib/components/SignIn.svelte: a single "Sign in with Google" link to `/auth/login`, plain notices for `?signin=denied` ("not invited") and `?signin=expired` ("sign-in expired, try again"); tests in tests/unit/lib/components/SignIn.test.ts
+- [x] T030 [US1] Render SignIn when `locals.user` is null in src/routes/+page.server.ts and src/routes/+page.svelte, with no app data and no `Set-Cookie`; remove the sample list and signed-out upload. Update tests/unit/routes/page.server.test.ts and page.test.ts
 - [ ] T031 [US1] Make a 401 from any step final in src/lib/driver.ts: stop and navigate to `/` (today it retries a 401 forever). Update tests/unit/lib/driver.test.ts
 
 **Checkpoint**: US1 independently testable.
