@@ -23,39 +23,6 @@ const setup = (youtubeDone = false, bandcampDone = false, shortDone = false) =>
 const tab = (name: RegExp) => screen.getByRole('tab', { name });
 
 describe('Destinations', () => {
-  it('names the pinned channel by title and ID once approved', () => {
-    render(Destinations, {
-      youtube: panel(YOUTUBE_PANEL),
-      short: panel(SHORT_PANEL),
-      bandcamp: panel(BANDCAMP_PANEL),
-      youtubeDone: false,
-      shortDone: false,
-      bandcampDone: false,
-      destination: { channelId: 'UCflr', channelTitle: 'Flies Like Robots' },
-    });
-    const line = screen.getByText(/Uploads to/);
-    expect(line).toHaveTextContent('Uploads to Flies Like Robots UCflr');
-    expect(document.getElementById('panel-youtube')).toContainElement(line);
-  });
-
-  it('falls back to a plain label when the channel has no title', () => {
-    render(Destinations, {
-      youtube: panel(YOUTUBE_PANEL),
-      short: panel(SHORT_PANEL),
-      bandcamp: panel(BANDCAMP_PANEL),
-      youtubeDone: false,
-      shortDone: false,
-      bandcampDone: false,
-      destination: { channelId: 'UCx', channelTitle: null },
-    });
-    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to your channel UCx');
-  });
-
-  it('names no channel before approval', () => {
-    setup();
-    expect(screen.queryByText(/Uploads to/)).toBeNull();
-  });
-
   it('opens on YouTube with the other panels hidden', () => {
     setup();
     expect(tab(/YouTube/)).toHaveAttribute(SELECTED, 'true');

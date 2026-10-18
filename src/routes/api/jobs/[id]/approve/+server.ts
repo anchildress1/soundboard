@@ -16,6 +16,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
       title: text(body.title),
       description: text(body.description),
       pickVersion: num(body.pickVersion),
+      channelId: text(body.channelId),
       tags,
     });
     return buildView((await getJob(job.id)) ?? job);

@@ -8,7 +8,7 @@
     validateFields,
     type FieldErrors,
   } from '$lib/metadata';
-  import type { PickFields } from '$lib/types';
+  import type { Destination, PickFields } from '$lib/types';
 
   type Fields = { title: string; description: string; tags: string[] };
 
@@ -19,6 +19,7 @@
     busy = false,
     done = false,
     serverErrors = {},
+    destination,
     idPrefix = '',
     heading = 'YouTube',
     rerunLabel = 'Re-run model',
@@ -32,6 +33,11 @@
     busy?: boolean;
     done?: boolean;
     serverErrors?: FieldErrors;
+    /**
+     * The channel Approve uploads to: the one approval pinned, else the owner's connected channel.
+     * Null when the owner has none, which blocks approval.
+     */
+    destination: Destination | null;
     /** Keeps field ids unique when two labels share a page. */
     idPrefix?: string;
     heading?: string;
@@ -90,6 +96,14 @@
   </div>
 
   {#if editable || done}
+    {#if destination}
+      <p class="channel">
+        Uploads to <strong>{destination.channelTitle ?? 'your channel'}</strong>
+        <span>{destination.channelId}</span>
+      </p>
+    {:else if editable}
+      <p class="channel">Reconnect YouTube to approve.</p>
+    {/if}
     <div class="actions">
       <button class="btn ghost" type="button" onclick={ondiscard} disabled={busy || done}
         >Discard</button
@@ -101,7 +115,7 @@
         class="btn primary"
         class:done
         type="button"
-        disabled={busy || done || invalid}
+        disabled={busy || done || invalid || !destination}
         onclick={() => onapprove({ title, description, tags })}
         >{done ? 'Uploaded' : 'Approve & upload'}</button
       >
@@ -139,6 +153,20 @@
     background: var(--well);
     border: 1px solid var(--line);
     font: 500 13px/1.5 var(--mono);
+  }
+
+  .channel {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .channel span {
+    color: var(--muted);
+    font-family: var(--mono);
   }
 
   /* One group, always together: right-aligned on wide screens, one block on phones. */

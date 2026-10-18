@@ -99,9 +99,16 @@ const json = (body: unknown, status = 200) =>
 const hang = () => new Promise<Response>(() => {});
 const paths = () => fetchMock.mock.calls.map(([p]) => String(p));
 
+const CONNECTED = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
+
 function setup(
   v: JobView,
-  extra: { playbackUrl?: string | null; short?: JobView | null; expired?: boolean } = {},
+  extra: {
+    playbackUrl?: string | null;
+    short?: JobView | null;
+    expired?: boolean;
+    approveTo?: typeof CONNECTED | null;
+  } = {},
 ) {
   return render(Page, {
     props: {
@@ -110,6 +117,7 @@ function setup(
         playbackUrl: extra.playbackUrl ?? PLAYBACK_URL,
         short: extra.short ?? null,
         expired: extra.expired ?? false,
+        approveTo: extra.approveTo === undefined ? CONNECTED : extra.approveTo,
         trace: TRACE,
         channel: null,
         user: null,
@@ -330,7 +338,21 @@ describe('job page: actions', () => {
       description: PICK.description,
       tags: PICK.tags,
       pickVersion: PICK.version,
+      channelId: CONNECTED.channelId,
     });
+  });
+
+  it('shows the connected channel beside Approve before approval', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+  });
+
+  it('blocks approval while YouTube is not connected', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }), { approveTo: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: APPROVE })).toBeDisabled();
   });
 
   it('keeps driving after an approval starts the upload', async () => {
@@ -629,9 +651,9 @@ describe('job page: Short tab', () => {
 
   it('names the channel an approved upload is pinned to', () => {
     fetchMock.mockImplementation(hang);
-    const destination = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
+    const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
     setup(view({ state: 'PUBLISHING', destination }, { pick: PICK }));
-    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Flies Like Robots UCflr');
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
   });
 
   it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
@@ -824,7 +846,11 @@ describe('job page: Short actions', () => {
     await waitFor(() => expect(paths()).toContain(SHORT_STEP_PATH));
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/api/jobs/s1/approve');
-    expect(JSON.parse(String(init!.body))).toMatchObject({ title: PICK.title, pickVersion: 1 });
+    expect(JSON.parse(String(init!.body))).toMatchObject({
+      title: PICK.title,
+      pickVersion: 1,
+      channelId: CONNECTED.channelId,
+    });
   });
 
   it('shows field errors from a rejected Short approval in the Short tab', async () => {

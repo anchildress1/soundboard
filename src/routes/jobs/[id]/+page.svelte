@@ -259,7 +259,6 @@
         youtubeDone={job.state === 'VERIFIED'}
         shortDone={shortView?.job.state === 'VERIFIED'}
         {bandcampDone}
-        destination={job.destination}
       >
         {#snippet youtube()}
           {#if job.state === 'VERIFIED' && job.videoId}
@@ -281,7 +280,13 @@
               {busy}
               {done}
               {serverErrors}
-              onapprove={(f) => act('approve', { ...f, pickVersion: pick.version })}
+              destination={job.destination ?? data.approveTo}
+              onapprove={(f) =>
+                act('approve', {
+                  ...f,
+                  pickVersion: pick.version,
+                  channelId: data.approveTo?.channelId,
+                })}
               onrerun={() => act('rerun')}
               ondiscard={() => act('discard')}
             />
@@ -295,9 +300,14 @@
               busy={shortBusy}
               message={shortMessage}
               serverErrors={shortErrors}
+              approveTo={data.approveTo}
               onrecut={(cut) => actShort('recut', cut)}
               onapprove={(f) =>
-                actShort('approve', { ...f, pickVersion: shortView?.pick?.version })}
+                actShort('approve', {
+                  ...f,
+                  pickVersion: shortView?.pick?.version,
+                  channelId: data.approveTo?.channelId,
+                })}
               onrerun={() => actShort('rerun')}
               ondiscard={() => actShort('discard')}
               onretry={() => actShort('retry')}

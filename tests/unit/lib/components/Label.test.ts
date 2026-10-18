@@ -16,6 +16,7 @@ const fields: PickFields = {
 };
 
 const candidates = ['#synthwave', '#retrowave', '#newmusic'];
+const CHANNEL = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
 
 function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
   const onapprove = vi.fn();
@@ -25,6 +26,7 @@ function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
     fields,
     candidates,
     editable: true,
+    destination: CHANNEL,
     onapprove,
     onrerun,
     ondiscard,
@@ -193,5 +195,36 @@ describe('Label: a second label on the page', () => {
     expect(screen.queryByRole('button', { name: RERUN })).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Re-pick hook' }));
     expect(onrerun).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Label: where Approve uploads', () => {
+  it('names the channel by title and ID beside Approve', () => {
+    setup();
+    const line = screen.getByText(/Uploads to/);
+    expect(line).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(line.nextElementSibling).toContainElement(approveButton());
+  });
+
+  it('falls back to a plain label when the channel has no title', () => {
+    setup({ destination: { channelId: 'UCx', channelTitle: null } });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to your channel UCx');
+  });
+
+  it('blocks approval with a plain fix while YouTube is not connected', () => {
+    setup({ destination: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.queryByText(/Uploads to/)).toBeNull();
+    expect(approveButton()).toBeDisabled();
+  });
+
+  it('names the pinned channel once uploaded', () => {
+    setup({ editable: false, done: true });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+  });
+
+  it('shows no channel line on a read-only draft', () => {
+    setup({ editable: false, destination: null });
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
   });
 });

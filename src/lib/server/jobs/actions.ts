@@ -39,7 +39,14 @@ function tagError(tags: string[], job: JobDoc, artist: boolean): string | undefi
   return undefined;
 }
 
-type ApprovalInput = { title: string; description: string; tags: string[]; pickVersion: number };
+type ApprovalInput = {
+  title: string;
+  description: string;
+  tags: string[];
+  pickVersion: number;
+  /** The channel the page showed beside Approve. */
+  channelId: string;
+};
 
 /** The approved fields, or a 422 naming each field that breaks the job's rules. */
 function finalFields(input: ApprovalInput, job: JobDoc, artist: boolean): PickFields {
@@ -60,20 +67,16 @@ function finalFields(input: ApprovalInput, job: JobDoc, artist: boolean): PickFi
 
 /**
  * Approves the edited fields of the recommendation on screen and pins the upload to the owner's
- * connected channel. One transaction re-checks REVIEW and the pick version, validates against the
- * job and the owner's current artist link, moves the job, and records the feedback, so a double
- * submit or a stale tab can't approve twice or approve an older pick.
+ * connected channel, which must still be the one the page showed. One transaction re-checks REVIEW,
+ * the pick version and the connection, validates against the job and the owner's current artist
+ * link, moves the job, and records the feedback, so a double submit or a stale tab can't approve
+ * twice, approve an older pick, or upload to a channel nobody saw.
  */
 export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> {
   requireState(job, ['REVIEW']);
   if (!Number.isInteger(input.pickVersion)) {
     throw new ActionError(400, 'Name the recommendation version being approved.');
   }
-  const connection = await getConnection(job.ownerUid);
-  if (connection?.status !== 'connected' || !connection.channelId) {
-    throw new ActionError(409, 'Reconnect YouTube to approve.');
-  }
-  const destination = { channelId: connection.channelId, channelTitle: connection.channelTitle };
 
   const outcome = await db().transaction(async (tx) => {
     const current = await lockJob(tx, job.id);
@@ -81,6 +84,13 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
     if (current.pickVersion !== input.pickVersion) return 'stale';
     const proposed = await pickIn(tx, job.id, input.pickVersion);
     if (!proposed) return 'stale';
+    const connection = await getConnection(current.ownerUid, tx);
+    if (connection?.status !== 'connected') {
+      throw new ActionError(409, 'Reconnect YouTube to approve.');
+    }
+    if (connection.channelId !== input.channelId) {
+      throw new ActionError(409, 'Your YouTube channel changed. Reload to approve.');
+    }
     const final = finalFields(input, current, await artistJob(current, tx));
 
     const feedback = approvalFeedback(proposed, final, {
@@ -96,14 +106,16 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
       current,
     );
     // The destination is pinned only before any upload began; nothing rewrites it after.
-    await tx
+    const pinned = await tx
       .update(jobs)
       .set({
         ...jobSet({ state: 'PUBLISHING', finalFields: final, consecutiveFailures: 0, error: null }),
-        destinationChannelId: destination.channelId,
-        destinationChannelTitle: destination.channelTitle,
+        destinationChannelId: connection.channelId,
+        destinationChannelTitle: connection.channelTitle,
       })
-      .where(and(eq(jobs.id, job.id), isNull(jobs.uploadStartedAt)));
+      .where(and(eq(jobs.id, job.id), isNull(jobs.uploadStartedAt)))
+      .returning({ id: jobs.id });
+    if (pinned.length === 0) throw new ActionError(409, 'This job already started uploading.');
     return 'approved';
   });
   if (outcome === 'handled') throw new ActionError(409, 'This recommendation was already handled.');

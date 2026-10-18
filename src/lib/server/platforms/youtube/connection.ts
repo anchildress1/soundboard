@@ -1,7 +1,7 @@
 import { captureMessage } from '@sentry/sveltekit';
 import { and, eq } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
-import { db } from '$lib/server/core/db';
+import { db, type Database, type Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
 import { invalidGrant } from '$lib/server/core/errors';
 import { decrypt, encrypt } from '$lib/server/core/kms';
@@ -33,8 +33,12 @@ export type ConnectionStatus = Connection['status'];
 const PLATFORM = 'youtube';
 const mine = (uid: string) => and(eq(connections.uid, uid), eq(connections.platform, PLATFORM));
 
-export async function getConnection(uid: string): Promise<Connection | null> {
-  const [row] = await db().select().from(connections).where(mine(uid));
+/** The user's YouTube connection; pass a transaction to read it where it is used. */
+export async function getConnection(
+  uid: string,
+  q: Database | Tx = db(),
+): Promise<Connection | null> {
+  const [row] = await q.select().from(connections).where(mine(uid));
   // The table's check constraints hold the union's shape.
   return (row as Connection | undefined) ?? null;
 }

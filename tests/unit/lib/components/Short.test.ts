@@ -5,6 +5,7 @@ import Short from '$lib/components/Short.svelte';
 import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$lib/types';
 
 const INVALID = 'aria-invalid';
+const CONNECTED = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
 
 const SPEC: ShortSpec = {
   sourceDurationSec: 180,
@@ -73,6 +74,7 @@ function setup(props: Partial<ComponentProps<typeof Short>> = {}) {
   const utils = render(Short, {
     view: view(),
     src: 'https://storage.googleapis.com/bkt/uploads/s1-1?sig=read',
+    approveTo: CONNECTED,
     ...handlers,
     ...props,
   });
@@ -292,5 +294,27 @@ describe('Short: accessibility', () => {
     const ids = [...container.querySelectorAll('[id]')].map((el) => el.id);
     expect(ids.filter((id) => !id.startsWith('short-'))).toEqual([]);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('Short: where Approve uploads', () => {
+  it("shows the owner's connected channel beside Approve in review", () => {
+    setup();
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(screen.getByRole('button', { name: 'Approve & upload' })).toBeEnabled();
+  });
+
+  it('blocks approval while YouTube is not connected', () => {
+    setup({ approveTo: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve & upload' })).toBeDisabled();
+  });
+
+  it('shows the pinned channel once approved, whatever is connected now', () => {
+    setup({
+      view: view('PUBLISHING', {}, { destination: { channelId: 'UCold', channelTitle: 'Old' } }),
+      approveTo: null,
+    });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
   });
 });

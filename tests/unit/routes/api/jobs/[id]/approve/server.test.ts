@@ -78,6 +78,7 @@ const fields = {
   description: 'Night drive. #synthwave #retrowave',
   tags: 'synthwave, outrun',
   pickVersion: 1,
+  channelId: CHANNEL_A,
 };
 
 beforeEach(async () => {
@@ -116,6 +117,16 @@ describe('POST /api/jobs/[id]/approve', () => {
     expect(await db().select().from(jobFeedback)).toEqual([]);
   });
 
+  it('409s an approval for a channel other than the connected one', async () => {
+    await put('j');
+    const response = await approve('j', { ...fields, channelId: 'UCstale' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: 'Your YouTube channel changed. Reload to approve.',
+    });
+    expect((await job('j')).state).toBe('REVIEW');
+  });
+
   it('accepts tags as an array', async () => {
     await put('j');
     await approve('j', { ...fields, tags: ['synthwave', 42] });
@@ -146,7 +157,7 @@ describe('POST /api/jobs/[id]/approve', () => {
 
   it('treats missing fields as empty and reports the title', async () => {
     await put('j');
-    const response = await approve('j', { pickVersion: 1 });
+    const response = await approve('j', { pickVersion: 1, channelId: CHANNEL_A });
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ fields: { title: 'Title is required.' } });
   });

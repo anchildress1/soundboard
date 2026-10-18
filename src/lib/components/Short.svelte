@@ -3,7 +3,7 @@
   import type { FieldErrors } from '$lib/metadata';
   import { cutErrors, lengthBounds, tenth } from '$lib/short';
   import { jobStatus, modelSeconds } from '$lib/status';
-  import type { JobView, PickFields, Reframe } from '$lib/types';
+  import type { Destination, JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
   import Track from './Track.svelte';
@@ -17,6 +17,7 @@
     busy = false,
     message = '',
     serverErrors = {},
+    approveTo,
     onrecut,
     onapprove,
     onrerun,
@@ -28,6 +29,8 @@
     busy?: boolean;
     message?: string;
     serverErrors?: FieldErrors;
+    /** The owner's connected channel, shown beside Approve until approval pins one. */
+    approveTo: Destination | null;
     onrecut: (cut: Cut) => void;
     onapprove: (fields: Fields) => void;
     onrerun: () => void;
@@ -169,6 +172,7 @@
         {busy}
         {done}
         {serverErrors}
+        destination={job.destination ?? approveTo}
         idPrefix="short-"
         heading="YouTube Short"
         rerunLabel="Re-pick hook"

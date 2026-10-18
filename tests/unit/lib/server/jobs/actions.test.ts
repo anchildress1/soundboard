@@ -86,15 +86,20 @@ async function makeJob(
   return (await getJob(id))!;
 }
 
-const input = (
-  over: Partial<{ title: string; description: string; tags: string[]; pickVersion: number }> = {},
-) => ({
+type Input = Parameters<typeof approve>[1];
+
+/** An approval of B's job, as the page sends it: B's connected channel was shown. */
+const input = (over: Partial<Input> = {}): Input => ({
   title: 'Title 1',
   description: DESCRIPTION,
   tags: ['synthwave', 'outrun'],
   pickVersion: 1,
+  channelId: CHANNEL_B,
   ...over,
 });
+
+/** An approval of A's job, which shows A's channel. */
+const inputA = (over: Partial<Input> = {}) => input({ channelId: CHANNEL_A, ...over });
 
 const jobRows = async () =>
   (await db().select().from(jobFeedback)).map((r) => r.data as Record<string, unknown>);
@@ -196,7 +201,7 @@ describe('approve', () => {
 
   it("accepts the artist name and candidate tags in any case on Nathan's job", async () => {
     const job = await makeJob({ owner: USER_A });
-    await approve(job, input({ tags: ['flies like robots', 'SYNTHWAVE'] }));
+    await approve(job, inputA({ tags: ['flies like robots', 'SYNTHWAVE'] }));
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
   });
 
@@ -218,7 +223,7 @@ describe('approve', () => {
   it("rejects the artist name once Nathan's job owner is unlinked", async () => {
     const job = await makeJob({ owner: USER_A });
     await unlinkA();
-    const error = await rejection(approve(job, input({ tags: [ARTIST] })));
+    const error = await rejection(approve(job, inputA({ tags: [ARTIST] })));
     expect(error.status).toBe(422);
     expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
@@ -278,6 +283,38 @@ describe('approve: where the upload goes', () => {
     expect((await rejection(approve(job, input()))).message).toBe(RECONNECT);
   });
 
+  it('refuses with 409 and changes nothing when the connected channel changed since the page loaded', async () => {
+    const job = await makeJob();
+    await db()
+      .update(connections)
+      .set({ channelId: 'UCnew', channelTitle: 'New' })
+      .where(eq(connections.uid, USER_B.uid));
+    const error = await rejection(approve(job, input()));
+    expect([error.status, error.message]).toEqual([
+      409,
+      'Your YouTube channel changed. Reload to approve.',
+    ]);
+    expect(await getJob('job1')).toMatchObject({ state: 'REVIEW', destination: null });
+    expect(await jobRows()).toHaveLength(0);
+  });
+
+  it('refuses an approval that names no channel', async () => {
+    const job = await makeJob();
+    expect((await rejection(approve(job, input({ channelId: '' })))).status).toBe(409);
+  });
+
+  it('never re-pins a job whose upload already started, rolling back its feedback', async () => {
+    const job = await makeJob();
+    await db()
+      .update(jobs)
+      .set({ uploadStartedAt: new Date(5) })
+      .where(eq(jobs.id, 'job1'));
+    const error = await rejection(approve(job, input({ title: EDITED_TITLE })));
+    expect([error.status, error.message]).toEqual([409, 'This job already started uploading.']);
+    expect(await getJob('job1')).toMatchObject({ state: 'REVIEW', destination: null });
+    expect(await jobRows()).toHaveLength(0);
+  });
+
   it("pins the owner's connected channel, never another user's", async () => {
     const job = await makeJob();
     await approve(job, input());
@@ -319,7 +356,7 @@ describe('approve: where the upload goes', () => {
 
   it("writes feedback on Nathan's job to the artist's memory", async () => {
     const job = await makeJob({ owner: USER_A, picks: 2 });
-    await approve(job, input({ title: 'Title 2', pickVersion: 2 }));
+    await approve(job, inputA({ title: 'Title 2', pickVersion: 2 }));
     expect(await artistRows()).toEqual([
       expect.objectContaining({
         kind: 'ACCEPTED',
@@ -337,7 +374,7 @@ describe('approve: artist memory follows the current link', () => {
   it("keeps feedback on the job once Nathan's job owner is unlinked", async () => {
     const job = await makeJob({ owner: USER_A });
     await unlinkA();
-    await approve(job, input({ title: EDITED_TITLE }));
+    await approve(job, inputA({ title: EDITED_TITLE }));
     expect(await artistRows()).toHaveLength(0);
     expect((await jobRows()).map((r) => r.kind)).toEqual(['EDITED', 'ACCEPTED']);
   });
@@ -739,7 +776,7 @@ describe('rerun on a Short', () => {
 describe('approve on a Short', () => {
   it('uploads through the same flow and does not count the acceptance twice', async () => {
     const job = await shortJob({ owner: USER_A });
-    await approve(job, input());
+    await approve(job, inputA());
     const after = (await getJob('job1'))!;
     expect(after.state).toBe('PUBLISHING');
     expect(after.finalFields?.title).toBe('Title 1');
@@ -750,7 +787,7 @@ describe('approve on a Short', () => {
 
   it("learns Nathan's edits to the Short's metadata", async () => {
     const job = await shortJob({ owner: USER_A });
-    await approve(job, input({ title: 'Shorter title' }));
+    await approve(job, inputA({ title: 'Shorter title' }));
     expect(await artistRows()).toEqual([
       expect.objectContaining({
         kind: 'EDITED',

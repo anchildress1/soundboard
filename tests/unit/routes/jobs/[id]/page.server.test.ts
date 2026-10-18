@@ -6,7 +6,7 @@ import type { JobDoc } from '$lib/server/jobs/jobs';
 import { load } from '$routes/jobs/[id]/+page.server';
 import type { JobView } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
-import { seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { CHANNEL_A, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const signed = vi.hoisted(() => ({ objects: [] as string[], missing: new Set<string>() }));
 
@@ -30,6 +30,7 @@ vi.mock('@google-cloud/storage', () => ({
 type Event = Parameters<typeof load>[0];
 type Data = {
   expired: boolean;
+  approveTo: { channelId: string; channelTitle: string | null } | null;
   view: JobView;
   short: JobView | null;
   playbackUrl: string | null;
@@ -105,6 +106,40 @@ describe('job page load', () => {
     expect(isHttpError(error) && error.status).toBe(404);
     expect(locals.jobTrace).toBeUndefined();
     expect(signed.objects).toEqual([]);
+  });
+});
+
+describe('job page load: where Approve uploads', () => {
+  it("offers the owner's connected channel", async () => {
+    await put('a', { ownerUid: USER_A.uid, state: 'REVIEW' });
+    expect((await run('a', USER_A)).data.approveTo).toEqual({
+      channelId: CHANNEL_A,
+      channelTitle: 'Flies Like Robots',
+    });
+  });
+
+  it('offers no channel to an owner without a connection', async () => {
+    await put('b', { state: 'REVIEW' });
+    expect((await run('b')).data.approveTo).toBeNull();
+  });
+
+  it('offers no channel while the connection is revoked', async () => {
+    await seed({
+      connections: [
+        {
+          uid: USER_B.uid,
+          platform: 'youtube',
+          status: 'revoked',
+          channelId: 'UCb',
+          channelTitle: 'B',
+          scopes: [],
+          tokenCiphertext: null,
+          updatedAt: new Date(0),
+        },
+      ],
+    });
+    await put('b', { state: 'REVIEW' });
+    expect((await run('b')).data.approveTo).toBeNull();
   });
 });
 
