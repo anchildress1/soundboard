@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { signIn, USER_A, USER_B } from './session';
 
 test.describe('brand guide', () => {
-  test('sends a signed-out visitor home and refuses its API', async ({ page, request }) => {
+  test('sends a signed-out user home and refuses its API', async ({ page, request }) => {
     const response = await request.get('/brand', { maxRedirects: 0 });
     expect([response.status(), response.headers().location]).toEqual([303, '/']);
     expect((await request.post('/api/brand/propose')).status()).toBe(401);

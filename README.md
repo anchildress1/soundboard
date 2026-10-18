@@ -3,7 +3,6 @@
 Soundboard analyzes a finished music video and drafts its YouTube title, description, hashtags, and tags. The artist approves, edits, or re-runs the draft; on approval, Soundboard uploads the video as private and confirms the upload through the YouTube API.
 
 [![Live app](https://img.shields.io/badge/live-soundboard.anchildress1.dev-ff2e88)](https://soundboard.anchildress1.dev)
-[![DEV submission](https://img.shields.io/badge/DEV-challenge%20submission-0a0a0a?logo=devdotto&logoColor=white)](https://dev.to/anchildress1/20-years-of-friendship-one-weekend-to-build-his-marketing-department-23c9-temp-slug-938322?preview=f731687adb96e0fe58253c4699ccf0957b2dc3e5a70455cc0e76de3a9787cd2e234b928b92371a51327d88b5d479b434078e40ffbedef2978b9b0cc1)
 [![CI](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=coverage)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)

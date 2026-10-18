@@ -182,7 +182,7 @@ describe('Short: review', () => {
     expect(recut()).toBeDisabled();
   });
 
-  it('names the length bounds for a 30-second sample', () => {
+  it('names the length bounds for a 30-second video', () => {
     setup({
       view: view('REVIEW', {
         sourceDurationSec: 30,

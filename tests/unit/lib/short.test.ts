@@ -36,7 +36,7 @@ describe('lengthBounds', () => {
     expect(lengthBounds(240)).toEqual({ min: SHORT_MIN_SEC, max: SHORT_MAX_SEC });
   });
 
-  it('caps the length at the source for a 30-second sample', () => {
+  it('caps the length at the source for a 30-second video', () => {
     expect(lengthBounds(30.04)).toEqual({ min: 15, max: 30 });
     // Rounding to nearest would allow 30.1 s, past the end of the source.
     expect(lengthBounds(30.06)).toEqual({ min: 15, max: 30 });

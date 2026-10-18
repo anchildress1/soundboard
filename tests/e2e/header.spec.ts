@@ -5,7 +5,7 @@ const overlaps = (a: { x: number; y: number; width: number; height: number }, b:
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 for (const [who, uid, brand, signOut] of [
-  ['a signed-out visitor', null, 0, 0],
+  ['a signed-out user', null, 0, 0],
   ['Nathan', USER_A, 1, 1],
   ['an unlinked user', USER_B, 0, 1],
 ] as const) {

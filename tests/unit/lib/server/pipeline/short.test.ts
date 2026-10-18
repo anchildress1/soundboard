@@ -226,11 +226,11 @@ describe('settleHook', () => {
     expect(settleHook({ window: 1.6, lengthSec: 30, reason: '' }, ctx()).window).toBe(2);
   });
 
-  it('clamps the length to 15–60 s, and to the source for a short sample', () => {
+  it('clamps the length to 15–60 s, and to the source for a short video', () => {
     expect(settleHook({ window: 0, lengthSec: 5, reason: '' }, ctx()).lengthSec).toBe(15);
     expect(settleHook({ window: 0, lengthSec: 600, reason: '' }, ctx()).lengthSec).toBe(60);
-    const sample = ctx({ sourceDurationSec: 30, chunks: [chunk(0)] });
-    expect(settleHook({ window: 0, lengthSec: 45, reason: '' }, sample).lengthSec).toBe(30);
+    const thirtySec = ctx({ sourceDurationSec: 30, chunks: [chunk(0)] });
+    expect(settleHook({ window: 0, lengthSec: 45, reason: '' }, thirtySec).lengthSec).toBe(30);
   });
 
   it("caps a late window's length at what's left of the source from its start", () => {
@@ -275,7 +275,7 @@ describe('buildHookMessages', () => {
     expect(context.skippedHooks).toBeUndefined();
   });
 
-  it('names the sample-length bounds and the skipped hooks on a re-pick', () => {
+  it('names the length bounds and the skipped hooks on a re-pick', () => {
     const [system, user] = buildHookMessages(
       ctx({
         sourceDurationSec: 30,
