@@ -170,8 +170,8 @@ const released = { claimToken: null, claimUntil: null };
 
 /**
  * Applies the step's result and drops the claim, only while `token` still holds it. When an action
- * (discard, re-run) moved the job off the state the step started from, only the video ID and upload
- * progress land, so the record of what YouTube holds survives; a token whose claim lapsed to someone
+ * (discard, re-run) moved the job off the state the step started from, only the video ID, upload
+ * session, and upload progress land, so the record of what YouTube holds survives; a token whose claim lapsed to someone
  * else writes nothing and leaves the newer claim in place.
  */
 export async function releaseJob(
@@ -203,7 +203,7 @@ export async function releaseJob(
   });
 }
 
-/** Records when the first upload initiation went out; later calls keep the first time. */
+/** Records when the first upload initiation was about to go out; later calls keep the first time. */
 export async function markUploadStarted(id: string): Promise<void> {
   await db()
     .update(jobs)
@@ -212,7 +212,7 @@ export async function markUploadStarted(id: string): Promise<void> {
 }
 
 /**
- * Records when the chunk reaching the file size first went out; later calls keep the first time.
+ * Records when the final chunk was first about to be sent; later calls keep the first time.
  * Unconditional on the claim: the marker must exist whenever final bytes may have been sent.
  */
 export async function markFinalChunk(id: string): Promise<void> {

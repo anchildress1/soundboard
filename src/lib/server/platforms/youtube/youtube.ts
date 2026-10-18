@@ -31,7 +31,7 @@ export function uploadFailure(error: unknown): UploadFailure {
   if (!(error instanceof YouTubeError)) return 'other';
   if (error.status === 404 || error.status === 410) return 'session-lost';
   if (error.status === 401) return 'access-lost';
-  // Google's docs don't pin the channel limit's status, so its reason counts on either 4xx.
+  // Google's docs don't pin the channel limit's status, so its reason counts on 400 or 403.
   if ([400, 403].includes(error.status) && /uploadLimitExceeded/.test(error.message))
     return 'quota-spent';
   if (error.status === 403 && /quota/i.test(error.message)) return 'quota-spent';

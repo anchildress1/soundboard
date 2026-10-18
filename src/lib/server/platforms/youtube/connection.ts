@@ -93,7 +93,7 @@ export async function revokeGrant(uid: string): Promise<boolean> {
 }
 
 /**
- * Revokes the grant stored as `tokenCiphertext`, dropping its token in the same write; a dead token
+ * Marks the grant stored as `tokenCiphertext` revoked, dropping its token in the same write; a dead token
  * is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
  */
 export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {

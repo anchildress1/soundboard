@@ -6,7 +6,7 @@ import type { PageServerLoad } from './$types';
 const NOTICES = ['missing_scopes', 'no_channel', 'mismatch', 'wrong-account'] as const;
 
 export const load: PageServerLoad = async ({ locals, url }) => {
-  // The gate already sends signed-out page loads home.
+  // Narrows locals.user; the gate already sends signed-out page loads home.
   if (!locals.user) redirect(303, '/');
   const connection = await getConnection(locals.user.uid);
   const notice = url.searchParams.get('connect');

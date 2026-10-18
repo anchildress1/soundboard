@@ -59,7 +59,7 @@ export function jobRow(doc: JobDoc): typeof jobs.$inferInsert {
 }
 
 // Identity and lineage are fixed at insert; the destination and the upload markers change only
-// through their own guarded statements.
+// through their own statements, never a step or action patch.
 const GUARDED = [
   'id',
   'ownerUid',
