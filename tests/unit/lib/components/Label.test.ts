@@ -218,15 +218,30 @@ describe('Label: where Approve uploads', () => {
     expect(approveButton()).toBeDisabled();
   });
 
-  it('names the pinned channel once uploaded', () => {
+  it('names the pinned channel while the upload is under way', () => {
     setup({ editable: false, done: true });
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+  });
+
+  it('names the pinned channel in the past tense once YouTube holds the video', () => {
+    setup({ editable: false, done: true, uploaded: true });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent(
+      'Uploaded to Flies Like Robots UCflr',
+    );
+    expect(screen.queryByText(/Uploads to/)).toBeNull();
   });
 
   it('names the pinned channel on a failed upload, without actions', () => {
     setup({ editable: false, done: false });
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('keeps the past tense when a job fails after YouTube took the video', () => {
+    setup({ editable: false, done: false, uploaded: true });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent(
+      'Uploaded to Flies Like Robots UCflr',
+    );
   });
 
   it('shows no channel line on a read-only draft', () => {

@@ -281,6 +281,7 @@
               {done}
               {serverErrors}
               destination={job.destination ?? (editable ? data.approveTo : null)}
+              uploaded={job.videoId !== null}
               onapprove={(f) =>
                 act('approve', {
                   ...f,

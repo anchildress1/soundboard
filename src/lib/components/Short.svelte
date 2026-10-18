@@ -182,6 +182,7 @@
         {done}
         {serverErrors}
         destination={job.destination ?? (editable ? approveTo : null)}
+        uploaded={job.videoId !== null}
         idPrefix="short-"
         heading="YouTube Short"
         rerunLabel="Re-pick hook"

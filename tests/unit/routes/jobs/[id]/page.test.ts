@@ -668,6 +668,20 @@ describe('job page: Short tab', () => {
     },
   );
 
+  it.each([
+    ['VERIFIED', null],
+    ['FAILED', 'CLAIMED_COMPLETE'],
+  ] as const)(
+    'says the video uploaded to the pinned channel once %s holds it',
+    (state, failedState) => {
+      fetchMock.mockImplementation(hang);
+      const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+      setup(view({ state, failedState, destination, videoId: 'vid1' }, { pick: PICK }));
+      const lines = screen.getAllByText(/Uploaded to/).map((line) => line.textContent);
+      expect(lines).toContain('Uploaded to Old Channel UCold');
+    },
+  );
+
   it('names no channel on a job that failed before approval', () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'FAILED', failedState: 'PICK', error: 'boom' }, { pick: PICK }));

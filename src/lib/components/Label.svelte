@@ -20,6 +20,7 @@
     done = false,
     serverErrors = {},
     destination,
+    uploaded = false,
     idPrefix = '',
     heading = 'YouTube',
     rerunLabel = 'Re-run model',
@@ -38,6 +39,8 @@
      * connected channel. Shown whenever set; null in review blocks approval.
      */
     destination: Destination | null;
+    /** YouTube holds the video, so the channel line reads in the past tense. */
+    uploaded?: boolean;
     /** Keeps field ids unique when two labels share a page. */
     idPrefix?: string;
     heading?: string;
@@ -97,7 +100,8 @@
 
   {#if destination}
     <p class="channel">
-      Uploads to <strong>{destination.channelTitle ?? 'your channel'}</strong>
+      {uploaded ? 'Uploaded to' : 'Uploads to'}
+      <strong>{destination.channelTitle ?? 'your channel'}</strong>
       <span>{destination.channelId}</span>
     </p>
   {:else if editable}

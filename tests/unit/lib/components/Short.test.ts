@@ -318,6 +318,18 @@ describe('Short: where Approve uploads', () => {
     expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
   });
 
+  it('says the Short uploaded to the pinned channel once YouTube holds it', () => {
+    setup({
+      view: view(
+        'VERIFIED',
+        {},
+        { videoId: 'abc123', destination: { channelId: 'UCold', channelTitle: 'Old' } },
+      ),
+      approveTo: null,
+    });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent('Uploaded to Old UCold');
+  });
+
   it('still names the pinned channel when the upload failed', () => {
     setup({
       view: view(
