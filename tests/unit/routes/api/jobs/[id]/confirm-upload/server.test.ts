@@ -37,20 +37,21 @@ vi.mock('google-auth-library', () => ({
 type Event = Parameters<typeof POST>[0];
 
 const ID = 'dQw4w9WgXcQ';
+const AFTER_START = '2026-10-18T12:00:00Z';
 const PAUSED: Partial<JobDoc> = {
   ...A_JOB,
   state: 'PUBLISHING',
   destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
   finalFields: { title: 't', description: 'd', hashtags: [], tags: [] },
-  finalChunkAt: 5,
-  uploadStartedAt: 4,
+  finalChunkAt: Date.parse(AFTER_START) + 60_000,
+  uploadStartedAt: Date.parse(AFTER_START),
 };
 
 const fetchMock = vi.fn<typeof fetch>();
 /** videos.list answers with the video on `channelId`, or with no video when null. */
-const videoOn = (channelId: string | null) =>
+const videoOn = (channelId: string | null, publishedAt = AFTER_START) =>
   fetchMock.mockImplementation(async () =>
-    json({ items: channelId ? [{ id: ID, snippet: { channelId } }] : [] }),
+    json({ items: channelId ? [{ id: ID, snippet: { channelId, publishedAt } }] : [] }),
   );
 
 const confirm = async (body: unknown, user: typeof USER_A | typeof USER_B = USER_A) =>
@@ -98,7 +99,7 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
       state: 'CLAIMED_COMPLETE',
       videoId: ID,
       destination: PAUSED.destination,
-      uploadStartedAt: 4,
+      uploadStartedAt: PAUSED.uploadStartedAt,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     const [input, init] = fetchMock.mock.calls[0]!;
@@ -150,16 +151,45 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await getJob('j1')).toMatchObject({ state: before.state, videoId: before.videoId });
   });
 
-  it.each([
-    ['missing', null],
-    ['on another channel', 'UCother'],
-  ])('422s a video %s, with no job change', async (_label, channel) => {
+  it.each<[string, () => void, string]>([
+    ['a missing video', () => videoOn(null), "Couldn't find that video."],
+    [
+      'a video with no publish time',
+      () =>
+        fetchMock.mockImplementation(async () =>
+          json({ items: [{ id: ID, snippet: { channelId: CHANNEL_A } }] }),
+        ),
+      "Couldn't find that video.",
+    ],
+    [
+      'a video on another channel',
+      () => videoOn('UCother'),
+      "That video isn't on Flies Like Robots.",
+    ],
+    [
+      'a video published before the upload started',
+      () => videoOn(CHANNEL_A, '2026-10-18T11:59:59Z'),
+      'That video was published before this upload started.',
+    ],
+  ])('422s %s, with no job change', async (_label, answer, message) => {
     await seedJob(PAUSED);
-    videoOn(channel);
+    answer();
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(422);
-    expect(await errorOf(response)).toBe("That video isn't on Flies Like Robots.");
+    expect(await errorOf(response)).toBe(message);
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
+  });
+
+  it('accepts a video YouTube stamped in the second the upload started', async () => {
+    await seedJob({ ...PAUSED, uploadStartedAt: Date.parse(AFTER_START) + 700 });
+    expect((await confirm({ url: `https://youtu.be/${ID}` })).status).toBe(200);
+  });
+
+  it('names the channel generically when its title is unknown', async () => {
+    await seedJob({ ...PAUSED, destination: { channelId: CHANNEL_A, channelTitle: null } });
+    videoOn('UCother');
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(await errorOf(response)).toBe("That video isn't on this channel.");
   });
 
   it('409s without a YouTube call when the grant is gone', async () => {
@@ -174,7 +204,9 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     await seedJob(PAUSED);
     fetchMock.mockImplementation(async () => {
       await db().update(jobs).set({ state: 'DISCARDED' }).where(eq(jobs.id, 'j1'));
-      return json({ items: [{ id: ID, snippet: { channelId: CHANNEL_A } }] });
+      return json({
+        items: [{ id: ID, snippet: { channelId: CHANNEL_A, publishedAt: AFTER_START } }],
+      });
     });
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(409);

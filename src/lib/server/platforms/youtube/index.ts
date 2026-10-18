@@ -33,4 +33,5 @@ export {
   type ChunkResult,
   type ChannelStats,
   type VideoDuration,
+  type VideoOwner,
 } from './youtube';

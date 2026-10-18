@@ -198,10 +198,14 @@ export async function discard(job: JobDoc): Promise<void> {
 
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";
 
+// YouTube stamps whole seconds, so a video from this upload can read as up to a second early.
+const startSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
+
 /**
  * Records the video the owner found for a job paused with its upload outcome unknown. The video is
- * read through the pinned channel's grant and must be on that channel; the job and destination are
- * re-checked in the transaction that saves the ID. Only the normal read-back then sets VERIFIED.
+ * read through the pinned channel's grant, must be on that channel, and must not predate the
+ * upload; the job and destination are re-checked in the transaction that saves the ID. Only the
+ * normal read-back then sets VERIFIED.
  */
 export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   if (!outcomeUnknown(job) || !job.destination) throw new ActionError(409, NOT_PAUSED);
@@ -210,8 +214,13 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   const { channelId, channelTitle } = job.destination;
   const access = await accessTokenFor(job.ownerUid, channelId);
   if (!access) throw new ActionError(409, 'Reconnect YouTube to confirm.');
-  if ((await videoChannel(access.token, videoId)) !== channelId) {
+  const video = await videoChannel(access.token, videoId);
+  if (!video) throw new ActionError(422, "Couldn't find that video.");
+  if (video.channelId !== channelId) {
     throw new ActionError(422, `That video isn't on ${channelTitle ?? 'this channel'}.`);
+  }
+  if (job.uploadStartedAt !== null && video.publishedAt < startSecond(job.uploadStartedAt)) {
+    throw new ActionError(422, 'That video was published before this upload started.');
   }
   const saved = await db().transaction(async (tx) => {
     const current = await lockJob(tx, job.id);

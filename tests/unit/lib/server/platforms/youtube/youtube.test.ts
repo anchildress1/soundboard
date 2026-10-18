@@ -616,9 +616,19 @@ describe('YOUTUBE_SCOPES', () => {
 describe('videoChannel', () => {
   it("reads the video's channel through the caller's grant", async () => {
     fetchMock.mockResolvedValueOnce(
-      json({ items: [{ id: 'dQw4w9WgXcQ', snippet: { channelId: 'UCflr' } }] }),
+      json({
+        items: [
+          {
+            id: 'dQw4w9WgXcQ',
+            snippet: { channelId: 'UCflr', publishedAt: '2026-10-18T12:00:00Z' },
+          },
+        ],
+      }),
     );
-    expect(await videoChannel('tok', 'dQw4w9WgXcQ')).toBe('UCflr');
+    expect(await videoChannel('tok', 'dQw4w9WgXcQ')).toEqual({
+      channelId: 'UCflr',
+      publishedAt: Date.parse('2026-10-18T12:00:00Z'),
+    });
     expect(urlOf(0).pathname).toBe('/youtube/v3/videos');
     expect(urlOf(0).searchParams.get('part')).toBe('snippet');
     expect(urlOf(0).searchParams.get('id')).toBe('dQw4w9WgXcQ');
@@ -630,6 +640,8 @@ describe('videoChannel', () => {
     ['no items', {}],
     ['an empty list', { items: [] }],
     ['no snippet', { items: [{ id: 'x' }] }],
+    ['no publish time', { items: [{ id: 'x', snippet: { channelId: 'UCflr' } }] }],
+    ['no channel', { items: [{ id: 'x', snippet: { publishedAt: '2026-10-18T12:00:00Z' } }] }],
   ])('returns null for %s', async (_label, body) => {
     fetchMock.mockResolvedValueOnce(json(body));
     expect(await videoChannel('tok', 'x')).toBeNull();

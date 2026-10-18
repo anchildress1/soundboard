@@ -357,17 +357,28 @@ export async function readBack(accessToken: string, videoId: string): Promise<Re
   return item ? { ...toCatalog(item), uploadStatus: item.status?.uploadStatus ?? null } : null;
 }
 
-/** The channel that owns the video, read through the owner's grant; null when it isn't visible. */
-export async function videoChannel(accessToken: string, id: string): Promise<string | null> {
+export type VideoOwner = { channelId: string; publishedAt: number };
+
+/**
+ * The channel that owns the video, as the token's grant sees it, and when it was published; null
+ * when it isn't visible.
+ */
+export async function videoChannel(accessToken: string, id: string): Promise<VideoOwner | null> {
   const query = new URLSearchParams({ part: 'snippet', id });
-  const body = await readJson<ListResponse<{ snippet?: { channelId?: string } }>>(
+  const body = await readJson<
+    ListResponse<{ snippet?: { channelId?: string; publishedAt?: string } }>
+  >(
     await fetch(`${API}/videos?${query}`, {
       headers: { authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(15_000),
     }),
     'videos.list',
   );
-  return body.items?.[0]?.snippet?.channelId ?? null;
+  const snippet = body.items?.[0]?.snippet;
+  const publishedAt = Date.parse(snippet?.publishedAt ?? '');
+  return snippet?.channelId && Number.isFinite(publishedAt)
+    ? { channelId: snippet.channelId, publishedAt }
+    : null;
 }
 
 const VIDEO_ID = /^[\w-]{11}$/;

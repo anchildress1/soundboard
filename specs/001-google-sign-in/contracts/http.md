@@ -81,7 +81,7 @@ A connect redirects to `/connections` when the outcome is `connected`, else to `
 ## `POST /api/jobs/{id}/confirm-upload`
 
 - Requires the job owner's session, a job in the outcome-unknown wait (`PUBLISHING`, `finalChunkAt` set, `upload` and `videoId` null, per [data-model](../data-model.md#publishing-and-verification-with-a-pinned-destination)), and `{url}` pasted by the owner. Accepts `watch?v=`, `youtu.be/`, `/shorts/` and Studio `/video/` URLs; anything else returns 400. A foreign job returns 404; a stale or ineligible job returns 409.
-- Read the selected video through the owner's pinned-channel grant and return 422 `"That video isn't on <channel title>."` for a missing video or a channel mismatch, with no job change. Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload.
+- Read the selected video through the owner's pinned-channel grant. With no job change, return 422 `"Couldn't find that video."` when it is missing or not visible, `"That video isn't on <channel title>."` on another channel, and `"That video was published before this upload started."` when its `publishedAt` predates `uploadStartedAt` (to the second). Atomically re-check the job and destination, save the confirmed ID and move to `CLAIMED_COMPLETE`; normal read-back alone sets `VERIFIED`. This action never initiates an upload.
 
 ## Removed
 
