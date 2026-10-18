@@ -299,10 +299,6 @@ async function sendChunk(
   return ok({ uploadProgress: { sent: result.next, total } });
 }
 
-// Only an upload YouTube kept counts as verified; `uploaded` is still processing but kept.
-const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
-const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
-
 /** Verified uploads on artist jobs join the artist's memory; no one else's do. */
 async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
   if (!job.finalFields || !(await artistJob(job))) return;
@@ -334,11 +330,10 @@ async function verify(job: JobDoc): Promise<StepOutput> {
 }
 
 async function verified(job: JobDoc, videoId: string, video: ReadBack | null): Promise<StepOutput> {
-  const uploadStatus = video?.uploadStatus ?? '';
-  if (REJECTED_UPLOADS.has(uploadStatus)) {
-    return fail('CLAIMED_COMPLETE', `YouTube ${uploadStatus} the upload.`);
+  if (video?.status === 'rejected') {
+    return fail('CLAIMED_COMPLETE', `YouTube ${video.reason} the upload.`);
   }
-  if (ACCEPTED_UPLOADS.has(uploadStatus)) {
+  if (video?.status === 'accepted') {
     await recordVerified(job, videoId);
     return ok({ state: 'VERIFIED' });
   }

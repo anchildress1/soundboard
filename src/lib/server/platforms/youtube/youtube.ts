@@ -370,8 +370,26 @@ export async function channelsMine(
   return item ? { id: item.id, title: item.snippet?.title ?? '' } : null;
 }
 
+/**
+ * YouTube's verdict on a read-back upload. `reason` is the status word it rejected with, as in
+ * "YouTube <reason> the upload."
+ */
+export type UploadVerdict =
+  { status: 'accepted' | 'pending' } | { status: 'rejected'; reason: string };
+
 /** Reads the video back from the target channel; only this result can mark a publish verified. */
-export type ReadBack = LiveMetadata & { uploadStatus: string | null };
+export type ReadBack = LiveMetadata & UploadVerdict;
+
+// Only an upload YouTube kept counts as accepted; `uploaded` is still processing but kept.
+const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
+const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
+
+function verdict(uploadStatus: string | undefined): UploadVerdict {
+  if (uploadStatus && REJECTED_UPLOADS.has(uploadStatus)) {
+    return { status: 'rejected', reason: uploadStatus };
+  }
+  return { status: uploadStatus && ACCEPTED_UPLOADS.has(uploadStatus) ? 'accepted' : 'pending' };
+}
 
 export async function readBack(accessToken: string, videoId: string): Promise<ReadBack | null> {
   const query = new URLSearchParams({ part: 'snippet,status', id: videoId });
@@ -383,7 +401,7 @@ export async function readBack(accessToken: string, videoId: string): Promise<Re
     'videos.list',
   );
   const item = body.items?.[0];
-  return item ? { ...toCatalog(item), uploadStatus: item.status?.uploadStatus ?? null } : null;
+  return item ? { ...toCatalog(item), ...verdict(item.status?.uploadStatus) } : null;
 }
 
 export type VideoOwner = { channelId: string; publishedAt: number };
