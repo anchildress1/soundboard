@@ -146,15 +146,25 @@ sync_secret() {
     printf '%s' "$value" | gcloud secrets versions add "$secret" --data-file - \
       --project "$GCP_PROJECT_ID" --quiet > /dev/null
   fi
-  gcloud secrets add-iam-policy-binding "$secret" --project "$GCP_PROJECT_ID" \
-    --member "$member" --role roles/secretmanager.secretAccessor --quiet > /dev/null
+  grant_secret "$secret" "$member"
+}
+grant_secret() {
+  gcloud secrets add-iam-policy-binding "$1" --project "$GCP_PROJECT_ID" \
+    --member "$2" --role roles/secretmanager.secretAccessor --quiet > /dev/null
 }
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
-sync_secret DATABASE_URL DATABASE_URL
+# Prod database URLs live only in Secret Manager: .env's point local dev at its own Neon branch.
+for secret in DATABASE_URL DATABASE_URL_UNPOOLED; do
+  gcloud secrets describe "$secret" --project "$GCP_PROJECT_ID" &> /dev/null || {
+    echo "Error: secret '$secret' is missing; create it from Neon's main branch (README)." >&2
+    exit 1
+  }
+done
+grant_secret DATABASE_URL "serviceAccount:${SERVICE_ACCOUNT}"
 # Only drizzle-kit on the deploying machine uses the direct URL; the runtime never reads it.
-sync_secret DATABASE_URL_UNPOOLED DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
+grant_secret DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
 
 # Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
 # image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
