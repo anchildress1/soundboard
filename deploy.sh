@@ -155,16 +155,14 @@ grant_secret() {
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
-# Prod database URLs live only in Secret Manager: .env's point local dev at its own Neon branch.
-for secret in DATABASE_URL DATABASE_URL_UNPOOLED; do
-  gcloud secrets describe "$secret" --project "$GCP_PROJECT_ID" &> /dev/null || {
-    echo "Error: secret '$secret' is missing; create it from Neon's main branch (README)." >&2
-    exit 1
-  }
-done
+# The prod database URL lives only in Secret Manager: .env's points local dev at its own Neon branch.
+gcloud secrets describe DATABASE_URL --project "$GCP_PROJECT_ID" &> /dev/null || {
+  echo "Error: secret 'DATABASE_URL' is missing; create it from Neon's main branch (README)." >&2
+  exit 1
+}
 grant_secret DATABASE_URL "serviceAccount:${SERVICE_ACCOUNT}"
-# Only drizzle-kit on the deploying machine uses the direct URL; the runtime never reads it.
-grant_secret DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
+# drizzle-kit on the deploying machine reads it too, for migrations.
+grant_secret DATABASE_URL "${DEPLOYER_TYPE}:${DEPLOYER}"
 
 # Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
 # image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
@@ -312,11 +310,11 @@ else
 fi
 
 # Migrate before the new revision takes traffic. Neon's pooler can break migrations, so drizzle-kit
-# reads the direct URL from Secret Manager; it is never echoed or written to disk.
+# gets the direct URL: the same string without "-pooler" in the host. Never echoed or written to disk.
 # A separate assignment so set -e stops the deploy when the secret read fails.
-migrate_url="$(gcloud secrets versions access latest --secret DATABASE_URL_UNPOOLED \
+migrate_url="$(gcloud secrets versions access latest --secret DATABASE_URL \
   --project "$GCP_PROJECT_ID")"
-DATABASE_URL_UNPOOLED="$migrate_url" pnpm exec drizzle-kit migrate
+DATABASE_URL_UNPOOLED="${migrate_url/-pooler./.}" pnpm exec drizzle-kit migrate
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT

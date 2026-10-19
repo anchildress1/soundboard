@@ -27,7 +27,7 @@ description: 'Task list for Google sign-in and connections'
 - [x] T002 [P] 👤 You apply: add env `SIGNUP_MODE` (`invite|open`), `KMS_KEY`, `DATABASE_URL` and `DATABASE_URL_UNPOOLED`, and remove `ALLOWLIST_EMAILS` and `DEMO_EMAILS`, in .env.example, service.yaml and playwright.config.ts
 - [x] T003 [P] In vite.config.ts under `E2E_FAKES=1`: alias `@google-cloud/kms` to `tests/e2e/fakes/kms.ts` and `$lib/server/core/db` to `tests/e2e/fakes/db.ts`; drop the Firestore alias; keep Storage and Secret Manager. In vitest.config.ts, alias `$lib/server/core/db` to `tests/helpers/db.ts` so unit tests hit PGlite without mocking an internal module
 - [x] T004 [P] Create drizzle.config.ts: `dialect: 'postgresql'`, schema `src/lib/server/core/schema.ts`, out `drizzle/`, credentials from `DATABASE_URL_UNPOOLED` (direct connection; migrations fail through the pooler)
-- [ ] T005 👤 Neon project `soundboard` (`withered-river-18454408`, `aws-us-east-2`) exists. Put its pooled connection string in Secret Manager as `DATABASE_URL` and the direct one as `DATABASE_URL_UNPOOLED`, then time a claim `UPDATE … RETURNING` from local and from Cloud Run, cold and warm; record the numbers under R12 in specs/001-google-sign-in/research.md
+- [ ] T005 👤 Neon project `soundboard` (`withered-river-18454408`, `aws-us-east-2`) exists. Put its pooled connection string in Secret Manager as `DATABASE_URL`, then time a claim `UPDATE … RETURNING` from local and from Cloud Run, cold and warm; record the numbers under R12 in specs/001-google-sign-in/research.md
 
 ---
 

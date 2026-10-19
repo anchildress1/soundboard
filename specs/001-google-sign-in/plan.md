@@ -31,7 +31,7 @@ Make the app invite-only behind Google sign-in. One consent screen grants identi
 
 **Storage**:
 
-- Neon Postgres, `aws-us-east-2`: tables in [data-model](data-model.md); SQL migrations in `drizzle/`. `DATABASE_URL` (pooled, app traffic) and `DATABASE_URL_UNPOOLED` (direct, migrations only) from Secret Manager.
+- Neon Postgres, `aws-us-east-2`: tables in [data-model](data-model.md); SQL migrations in `drizzle/`. `DATABASE_URL` (pooled, app traffic) from Secret Manager; migrations use the direct URL derived from it (`-pooler` dropped from the host).
 - One new KMS key ring and key, `soundboard / refresh-tokens`, in us-central1.
 
 **Testing**: Vitest 5 with `@vitest/coverage-v8` (85/85/85/80 floors), Playwright 1.63 (desktop Chrome, Pixel 7), and E2E fakes aliased by `E2E_FAKES=1`. Unit tests and the E2E build run on PGlite with the real migrations (`tests/helpers/db.ts`, `tests/e2e/fakes/db.ts`); a fake KMS goes in `tests/e2e/fakes/kms.ts`.
@@ -167,7 +167,7 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 
 - **Approved:** `package.json` / `pnpm-lock.yaml` add `@google-cloud/kms@6.2.1` and the R12 packages, and drop `@google-cloud/firestore`; `drizzle.config.ts` for `drizzle-kit`; `vite.config.ts` aliases KMS and the database client to the E2E fakes and drops the Firestore alias; `vitest.config.ts` aliases the database client to `tests/helpers/db.ts`.
 - **You apply** (I draft the diff):
-  - `deploy.sh`: KMS key ring and key, `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key for the runtime service account, the `DATABASE_URL` and `DATABASE_URL_UNPOOLED` secrets, `drizzle-kit migrate` over the unpooled URL before traffic moves, `SIGNUP_MODE` and `KMS_KEY`; drop the Firestore setup and its IAM role; drop `ALLOWLIST_EMAILS`, `DEMO_EMAILS` and the `yt-refresh-*` secret creation
+  - `deploy.sh`: KMS key ring and key, `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key for the runtime service account, the `DATABASE_URL` secret, `drizzle-kit migrate` over the direct URL derived from it before traffic moves, `SIGNUP_MODE` and `KMS_KEY`; drop the Firestore setup and its IAM role; drop `ALLOWLIST_EMAILS`, `DEMO_EMAILS` and the `yt-refresh-*` secret creation
   - `service.yaml`, `.env.example`, `playwright.config.ts`: the same env changes, plus `DATABASE_URL` and `DATABASE_URL_UNPOOLED`
 
 ## Complexity Tracking

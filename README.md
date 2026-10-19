@@ -144,9 +144,7 @@ make dev
 
 ### Operating it
 
-- **Production database:** its URLs live only in Secret Manager, never in `.env`. Create them once from Neon's `main` branch; `deploy.sh` fails until both exist. Each command reads the URL from stdin: paste it, then press Ctrl-D.
-  - `gcloud secrets create DATABASE_URL --replication-policy automatic --data-file=-` (pooled URL)
-  - `gcloud secrets create DATABASE_URL_UNPOOLED --replication-policy automatic --data-file=-` (direct URL)
+- **Production database:** its pooled URL lives only in Secret Manager, never in `.env`; deploys derive the direct URL from it for migrations. Create it once from Neon's `main` branch (paste the URL, then press Ctrl-D): `gcloud secrets create DATABASE_URL --replication-policy automatic --data-file=-`. `deploy.sh` fails until it exists.
 - **Invites:** while `SIGNUP_MODE=invite`, only invited emails can sign in. Manage them with `node --env-file=.env scripts/invite.ts add <email> [--artist flr]`, `revoke <email>`, `reactivate <email>`, or `list`. That edits the dev database in `.env`; for production, prefix the command with `DATABASE_URL="$(gcloud secrets versions access latest --secret DATABASE_URL)"`. `--artist flr` links the account to Nathan's artist profile. Revoking signs the user out on their next request.
 - **Connections:** signing in also connects the user's own YouTube channel. The _Connections_ page shows its status and offers Reconnect and Disconnect; a missing or revoked grant blocks approval until it's reconnected. Refresh tokens are stored encrypted with the Cloud KMS key.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
