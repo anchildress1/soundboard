@@ -9,9 +9,11 @@ type Status = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
 type Notice = 'missing_scopes' | 'no_channel' | 'mismatch' | 'wrong-account' | 'failed';
 
 const setup = (
-  youtube: { status: Status; channelTitle: string | null } | null,
+  youtube: { status: Status; channelTitle: string | null; channelId?: string | null } | null,
   notice: Notice | null = null,
 ) => render(Page, { props: { data: { youtube, notice } } as never });
+
+const CHANNEL_URL = 'https://www.youtube.com/channel/UCflr';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -43,9 +45,23 @@ describe('connections page', () => {
     expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
   });
 
-  it('names no channel when the title is unknown', () => {
-    setup({ status: 'connected', channelTitle: null });
-    expect(screen.getByText('Connected to your channel.')).toBeInTheDocument();
+  it('links the connected channel to YouTube in a new tab', () => {
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots', channelId: 'UCflr' });
+    const link = screen.getByRole('link', { name: 'Flies Like Robots' });
+    expect(link).toHaveAttribute('href', CHANNEL_URL);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('links an untitled channel as "your channel"', () => {
+    setup({ status: 'connected', channelTitle: null, channelId: 'UCflr' });
+    expect(screen.getByRole('link', { name: 'your channel' })).toHaveAttribute('href', CHANNEL_URL);
+  });
+
+  it('names the channel without a link when its ID is unknown', () => {
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots', channelId: null });
+    expect(screen.getByText('Connected to Flies Like Robots.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).toBeNull();
   });
 
   it.each<[Status, string]>([

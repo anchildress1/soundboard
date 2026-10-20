@@ -11,7 +11,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const connection = await getConnection(locals.user.uid);
   const notice = url.searchParams.get('connect');
   return {
-    youtube: connection && { status: connection.status, channelTitle: connection.channelTitle },
+    youtube: connection && {
+      status: connection.status,
+      channelTitle: connection.channelTitle,
+      channelId: connection.channelId,
+    },
     notice: NOTICES.find((n) => n === notice) ?? null,
   };
 };

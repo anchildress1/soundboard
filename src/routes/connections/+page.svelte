@@ -50,7 +50,14 @@
   <section class="row" aria-labelledby="youtube">
     <h3 id="youtube">YouTube</h3>
     {#if data.youtube?.status === 'connected'}
-      <p>Connected to {data.youtube.channelTitle ?? 'your channel'}.</p>
+      {@const name = data.youtube.channelTitle ?? 'your channel'}
+      <p>
+        Connected to {#if data.youtube.channelId}<a
+            href="https://www.youtube.com/channel/{data.youtube.channelId}"
+            target="_blank"
+            rel="noopener noreferrer">{name}</a
+          >{:else}{name}{/if}.
+      </p>
       <button class="btn ghost small" type="button" disabled={busy} onclick={disconnect}
         >Disconnect</button
       >

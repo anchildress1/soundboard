@@ -43,10 +43,14 @@ beforeEach(async () => {
 });
 
 describe('/connections load', () => {
-  it("returns the caller's connected channel, without token or channel ID", async () => {
+  it("returns the caller's connected channel and its channel ID, without the token", async () => {
     const data = await run(USER_A);
     expect(data).toEqual({
-      youtube: { status: 'connected', channelTitle: 'Flies Like Robots' },
+      youtube: {
+        status: 'connected',
+        channelTitle: 'Flies Like Robots',
+        channelId: expect.stringMatching(/^UC/),
+      },
       notice: null,
     });
     expect(JSON.stringify(data)).not.toContain('e2e-kms');
