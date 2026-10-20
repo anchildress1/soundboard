@@ -54,6 +54,17 @@ const connected = (overrides: Partial<Connected> = {}): Connected => ({
 });
 
 /** A row the types forbid, to prove the table refuses it too. */
+type Failed = Exclude<ConnectionRow, Connected>;
+
+const failed = (overrides: Partial<Failed> = {}): Failed => ({
+  status: 'no_channel',
+  channelId: null,
+  channelTitle: null,
+  scopes: ['openid'],
+  tokenCiphertext: null,
+  ...overrides,
+});
+
 const unchecked = (overrides: Record<string, unknown>) =>
   ({ ...connected(), ...overrides }) as ConnectionRow;
 
@@ -94,21 +105,24 @@ describe('putConnection / getConnection', () => {
   });
 
   it('replaces the whole row on reconnect', async () => {
+    await putConnection(UID, failed());
     await putConnection(UID, connected());
-    await putConnection(UID, {
-      status: 'no_channel',
-      channelId: null,
-      channelTitle: null,
-      scopes: ['openid'],
-      tokenCiphertext: null,
-    });
+    expect(await getConnection(UID)).toMatchObject(connected());
+  });
+
+  it('replaces a failed row with another failure', async () => {
+    await putConnection(UID, failed());
+    await putConnection(UID, failed({ status: 'missing_scopes', scopes: ['openid', 'email'] }));
     expect(await getConnection(UID)).toMatchObject({
-      status: 'no_channel',
-      channelId: null,
-      channelTitle: null,
-      scopes: ['openid'],
-      tokenCiphertext: null,
+      status: 'missing_scopes',
+      scopes: ['openid', 'email'],
     });
+  });
+
+  it('never replaces a connected row with a failure', async () => {
+    await putConnection(UID, connected());
+    await putConnection(UID, failed());
+    expect(await getConnection(UID)).toMatchObject(connected());
   });
 
   it('returns null for a user with no connection', async () => {

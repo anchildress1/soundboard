@@ -45,12 +45,11 @@ export async function getConnection(
   return (row as Connection | undefined) ?? null;
 }
 
-/** Writes the whole connection; `preserveConnected` protects a usable grant from a failed attempt. */
-export async function putConnection(
-  uid: string,
-  row: ConnectionRow,
-  preserveConnected = false,
-): Promise<void> {
+/**
+ * Writes the user's whole connection in one upsert. A failed status never replaces a `connected`
+ * row, even one a concurrent connect wrote after this caller read it.
+ */
+export async function putConnection(uid: string, row: ConnectionRow): Promise<void> {
   const values = { ...row, updatedAt: new Date() };
   await db()
     .insert(connections)
@@ -58,7 +57,7 @@ export async function putConnection(
     .onConflictDoUpdate({
       target: [connections.uid, connections.platform],
       set: values,
-      setWhere: preserveConnected ? ne(connections.status, 'connected') : undefined,
+      setWhere: row.status === 'connected' ? undefined : ne(connections.status, 'connected'),
     });
 }
 
@@ -189,19 +188,13 @@ export async function connectGrant(
   const stored = await getConnection(uid);
   const kept = stored?.status === 'connected';
   const fail = async (status: 'missing_scopes' | 'no_channel') => {
-    if (!kept) {
-      await putConnection(
-        uid,
-        {
-          status,
-          channelId: null,
-          channelTitle: null,
-          scopes: grant.scopes,
-          tokenCiphertext: null,
-        },
-        true,
-      );
-    }
+    await putConnection(uid, {
+      status,
+      channelId: null,
+      channelTitle: null,
+      scopes: grant.scopes,
+      tokenCiphertext: null,
+    });
     return status;
   };
 
