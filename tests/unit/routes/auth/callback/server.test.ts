@@ -380,6 +380,63 @@ describe('GET /auth/callback: evaluating YouTube on sign-in', () => {
     expect(h.encrypt).not.toHaveBeenCalled();
   });
 
+  it.each(['missing', 'revoked'] as const)(
+    'keeps a grant connected while an initially %s callback waits for its channel',
+    async (initial) => {
+      if (initial === 'revoked') {
+        await seed({
+          connections: [
+            {
+              uid: USER_B.uid,
+              platform: 'youtube',
+              status: 'revoked',
+              scopes: [],
+              updatedAt: new Date(0),
+            },
+          ],
+        });
+      }
+      const waiting = Promise.withResolvers<void>();
+      const channelResponse = Promise.withResolvers<Response>();
+      fetchMock.mockImplementationOnce(() => {
+        waiting.resolve();
+        return channelResponse.promise;
+      });
+      google(USER_B.uid, USER_B.email);
+      const callback = call({ cookie: sign(state()) });
+      await waiting.promise;
+      await db()
+        .insert(connections)
+        .values({
+          uid: USER_B.uid,
+          platform: 'youtube',
+          status: 'connected',
+          channelId: CHANNEL.id,
+          channelTitle: CHANNEL.title,
+          scopes: FULL,
+          tokenCiphertext: 'new-grant-ciphertext',
+          updatedAt: new Date(0),
+        })
+        .onConflictDoUpdate({
+          target: [connections.uid, connections.platform],
+          set: {
+            status: 'connected',
+            channelId: CHANNEL.id,
+            channelTitle: CHANNEL.title,
+            scopes: FULL,
+            tokenCiphertext: 'new-grant-ciphertext',
+          },
+        });
+      const connected = await connectionOf(USER_B.uid);
+      channelResponse.resolve(Response.json({ items: [] }));
+
+      expect(redirectTo((await callback).thrown)).toEqual([303, '/']);
+      expect(await connectionOf(USER_B.uid)).toEqual(connected);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(h.encrypt).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     ['missing scopes', () => google(USER_A.uid, USER_A.email, { scopes: ['openid', 'email'] })],
     ['no channel', () => (channel(null), google(USER_A.uid, USER_A.email))],

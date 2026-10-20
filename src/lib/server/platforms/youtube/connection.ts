@@ -1,5 +1,5 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db, type Database, type Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
@@ -45,13 +45,21 @@ export async function getConnection(
   return (row as Connection | undefined) ?? null;
 }
 
-/** Writes the user's whole connection in one upsert, so a reconnect never leaves a mixed row. */
-export async function putConnection(uid: string, row: ConnectionRow): Promise<void> {
+/** Writes the whole connection; `preserveConnected` protects a usable grant from a failed attempt. */
+export async function putConnection(
+  uid: string,
+  row: ConnectionRow,
+  preserveConnected = false,
+): Promise<void> {
   const values = { ...row, updatedAt: new Date() };
   await db()
     .insert(connections)
     .values({ uid, platform: PLATFORM, ...values })
-    .onConflictDoUpdate({ target: [connections.uid, connections.platform], set: values });
+    .onConflictDoUpdate({
+      target: [connections.uid, connections.platform],
+      set: values,
+      setWhere: preserveConnected ? ne(connections.status, 'connected') : undefined,
+    });
 }
 
 export async function deleteConnection(uid: string): Promise<void> {
@@ -182,13 +190,17 @@ export async function connectGrant(
   const kept = stored?.status === 'connected';
   const fail = async (status: 'missing_scopes' | 'no_channel') => {
     if (!kept) {
-      await putConnection(uid, {
-        status,
-        channelId: null,
-        channelTitle: null,
-        scopes: grant.scopes,
-        tokenCiphertext: null,
-      });
+      await putConnection(
+        uid,
+        {
+          status,
+          channelId: null,
+          channelTitle: null,
+          scopes: grant.scopes,
+          tokenCiphertext: null,
+        },
+        true,
+      );
     }
     return status;
   };
