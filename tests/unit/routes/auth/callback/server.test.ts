@@ -532,6 +532,31 @@ describe('GET /auth/callback: connect', () => {
     });
   });
 
+  it('lands on Connections with a notice when KMS fails, keeping the stored connection', async () => {
+    const before = await connectionOf(USER_A.uid);
+    h.encrypt.mockRejectedValue(new Error('PERMISSION_DENIED'));
+    google(USER_A.uid, USER_A.email);
+    const { thrown } = await call({ cookie: connectState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=failed']);
+    expect(await connectionOf(USER_A.uid)).toEqual(before);
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'PERMISSION_DENIED' }),
+      { tags: { component: 'connect' } },
+    );
+  });
+
+  it('lands on Connections with a notice when YouTube fails, writing nothing', async () => {
+    fetchMock.mockResolvedValue(new Response('boom', { status: 500 }));
+    google(USER_B.uid, USER_B.email);
+    const { thrown } = await call({ cookie: connectState(USER_B), user: USER_B });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=failed']);
+    expect(await connectionOf(USER_B.uid)).toBeUndefined();
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('channels.list 500') }),
+      { tags: { component: 'connect' } },
+    );
+  });
+
   it('sends an unverified grant back to sign in again', async () => {
     google(USER_A.uid, USER_A.email, { verified: false });
     const { thrown } = await call({ cookie: connectState(), user: USER_A });

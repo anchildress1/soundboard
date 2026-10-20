@@ -64,7 +64,7 @@ describe('/connections load', () => {
     expect((await run(USER_B)).youtube).toBeNull();
   });
 
-  it.each(['missing_scopes', 'no_channel', 'mismatch', 'wrong-account'] as const)(
+  it.each(['missing_scopes', 'no_channel', 'mismatch', 'wrong-account', 'failed'] as const)(
     'passes the callback outcome %s through',
     async (notice) => {
       expect((await run(USER_A, `?connect=${notice}`)).notice).toBe(notice);

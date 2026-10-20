@@ -6,7 +6,7 @@ const nav = vi.hoisted(() => ({ invalidateAll: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 
 type Status = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
-type Notice = 'missing_scopes' | 'no_channel' | 'mismatch' | 'wrong-account';
+type Notice = 'missing_scopes' | 'no_channel' | 'mismatch' | 'wrong-account' | 'failed';
 
 const setup = (
   youtube: { status: Status; channelTitle: string | null } | null,
@@ -70,6 +70,7 @@ describe('connections page', () => {
     ['no_channel', 'That Google account has no YouTube channel. Create one, then reconnect.'],
     ['mismatch', 'That connection attempt expired or started in another session. Try again.'],
     ['wrong-account', 'Connect YouTube with the Google account you signed in with.'],
+    ['failed', "Couldn't connect YouTube. Try again."],
   ])('explains the %s callback outcome', (notice, line) => {
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' }, notice);
     expect(screen.getByRole('status')).toHaveTextContent(line);

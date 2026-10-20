@@ -3,7 +3,7 @@ import { getConnection } from '$lib/server/platforms/youtube';
 import type { PageServerLoad } from './$types';
 
 /** Outcomes the connect callback names in `?connect=`; anything else shows nothing. */
-const NOTICES = ['missing_scopes', 'no_channel', 'mismatch', 'wrong-account'] as const;
+const NOTICES = ['missing_scopes', 'no_channel', 'mismatch', 'wrong-account', 'failed'] as const;
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   // Narrows locals.user; the gate already sends signed-out page loads home.

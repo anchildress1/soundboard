@@ -13,6 +13,7 @@
     no_channel: 'That Google account has no YouTube channel. Create one, then reconnect.',
     mismatch: 'That connection attempt expired or started in another session. Try again.',
     'wrong-account': 'Connect YouTube with the Google account you signed in with.',
+    failed: "Couldn't connect YouTube. Try again.",
   };
 
   const FIXES = {

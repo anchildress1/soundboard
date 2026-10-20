@@ -62,7 +62,14 @@ async function connect(
   const grant = await exchangeCode(url.origin, code);
   if (!grant) redirect(303, '/?signin=expired');
   if (grant.sub !== uid) redirect(303, '/connections?connect=wrong-account');
-  const outcome = await connectGrant(uid, grant, 'connect');
+  let outcome: ConnectOutcome | 'failed';
+  try {
+    outcome = await connectGrant(uid, grant, 'connect');
+  } catch (error) {
+    // A YouTube or KMS failure fails before any write, so a stored connection stays as it was.
+    captureException(error, { tags: { component: 'connect' } });
+    outcome = 'failed';
+  }
   redirect(303, outcome === 'connected' ? '/connections' : `/connections?connect=${outcome}`);
 }
 

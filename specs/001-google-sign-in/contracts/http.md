@@ -40,6 +40,7 @@ The auth gate lives in `hooks.server.ts` (research R11). "Session" means a valid
 | Connect, `uid` or `sid` differs from state, or no session | 303 `/connections?connect=mismatch`; no change (FR-026)                     |
 | Connect, ID token `sub` ≠ session `uid`                   | 303 `/connections?connect=wrong-account`; no change (FR-023)                |
 | Connect, valid                                            | Evaluate YouTube → 303 `/connections`, or `/connections?connect=<outcome>`  |
+| Connect, YouTube or KMS call fails                        | 303 `/connections?connect=failed`, reported to Sentry; no change            |
 
 **Evaluating YouTube (FR-027):**
 
