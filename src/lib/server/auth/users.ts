@@ -11,18 +11,18 @@ export async function getUser(uid: string): Promise<User | null> {
 }
 
 /**
- * Refreshes an existing user's email and name, returning its current row or null if absent.
+ * Refreshes an existing user's email and name from their latest ID token. Never inserts (only
+ * `redeemInvite` creates users) and never writes `accessGeneration`, so a sign-in can't revive a
+ * revoked session.
  */
 export async function updateProfile(
   uid: string,
   profile: { email: string; name: string | null },
-): Promise<User | null> {
-  const [user] = await db()
+): Promise<void> {
+  await db()
     .update(users)
     .set({ email: profile.email, name: profile.name })
-    .where(eq(users.uid, uid))
-    .returning();
-  return user ?? null;
+    .where(eq(users.uid, uid));
 }
 
 const normalize = (email: string) => email.trim().toLowerCase();

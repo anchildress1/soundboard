@@ -208,20 +208,22 @@ describe('getUser', () => {
 describe('updateProfile', () => {
   it('updates email and name and leaves accessGeneration untouched', async () => {
     await seed({ users: [{ uid: NATHAN, email: 'old@example.com', accessGeneration: 3 }] });
-    const user = await updateProfile(NATHAN, { email: 'new@example.com', name: 'Nathan' });
-    expect(user).toMatchObject({ email: 'new@example.com', name: 'Nathan', accessGeneration: 3 });
-    expect(await getUser(NATHAN)).toMatchObject({ accessGeneration: 3 });
+    await updateProfile(NATHAN, { email: 'new@example.com', name: 'Nathan' });
+    expect(await getUser(NATHAN)).toMatchObject({
+      email: 'new@example.com',
+      name: 'Nathan',
+      accessGeneration: 3,
+    });
   });
 
   it('clears a name the token no longer carries', async () => {
     await seed({ users: [{ uid: NATHAN, email: 'n@example.com', name: 'Nathan' }] });
-    expect(await updateProfile(NATHAN, { email: 'n@example.com', name: null })).toMatchObject({
-      name: null,
-    });
+    await updateProfile(NATHAN, { email: 'n@example.com', name: null });
+    expect(await getUser(NATHAN)).toMatchObject({ name: null });
   });
 
   it('never creates a user', async () => {
-    expect(await updateProfile('nobody', { email: 'x@example.com', name: null })).toBeNull();
+    await updateProfile('nobody', { email: 'x@example.com', name: null });
     expect(await allUsers()).toEqual([]);
   });
 });
