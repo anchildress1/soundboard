@@ -9,21 +9,16 @@
   import Label from '$lib/components/Label.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
   import Short from '$lib/components/Short.svelte';
+  import UploadRecovery from '$lib/components/UploadRecovery.svelte';
   import Track from '$lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
   import { drive } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
   import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
+  import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
   import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
-  import {
-    DRIVEN_STATES,
-    SHORT_SOURCE_STATES,
-    type JobView,
-    type PickFields,
-    type Wait,
-  } from '$lib/types';
+  import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -51,7 +46,7 @@
   // svelte-ignore state_referenced_locally
   let shortMessage = $state(data.short?.job.error ?? '');
   let shortErrors = $state<FieldErrors>({});
-  let drivingShort = false;
+  let drivingShort: string | null = null;
 
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
@@ -72,17 +67,7 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
-  // A publish that won't move on by itself soon: lost access, an unknown upload outcome, or a
-  // spent daily limit. Each can be discarded.
-  const PAUSES: (Wait | undefined)[] = [
-    'reconnect YouTube',
-    'upload outcome unknown',
-    'Daily upload limit reached. Try tomorrow.',
-  ];
-  const paused = $derived(
-    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') && PAUSES.includes(view.wait),
-  );
-  let pastedUrl = $state('');
+  const paused = $derived(publishPaused(view));
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
 
   // Reading `view` reruns this whenever a new view lands.
@@ -126,22 +111,25 @@
   };
 
   const runShort = async () => {
-    if (drivingShort || !shortView) return;
-    drivingShort = true;
+    if (!shortView || drivingShort === shortView.job.id) return;
     const id = shortView.job.id;
+    drivingShort = id;
     try {
       await drive(shortView, {
         step: () => step(id, data.trace),
         stopped: () => stopped || shortView?.job.id !== id,
         onView: (next) => {
+          if (stopped || shortView?.job.id !== id) return;
           showShort(next);
           shortMessage = next.job.error ?? '';
         },
-        onError: (text) => (shortMessage = text),
+        onError: (text) => {
+          if (!stopped && shortView?.job.id === id) shortMessage = text;
+        },
         signedOut,
       });
     } finally {
-      drivingShort = false;
+      if (drivingShort === id) drivingShort = null;
     }
   };
 
@@ -331,6 +319,7 @@
               onrerun={() => actShort('rerun')}
               ondiscard={() => actShort('discard')}
               onretry={() => actShort('retry')}
+              onconfirm={(url) => actShort('confirm-upload', { url })}
             />
           {:else}
             <section class="placeholder make" aria-labelledby="make-short-heading">
@@ -372,50 +361,7 @@
       </section>
     {/if}
 
-    {#if paused && view.wait === 'reconnect YouTube'}
-      <section class="paused" aria-labelledby="paused-title">
-        <h2 id="paused-title">Upload paused</h2>
-        <p>
-          YouTube access is lost. <a href={resolve('/connections')}>Reconnect on Connections</a>
-          to resume, or discard the job.
-        </p>
-      </section>
-    {:else if paused && view.wait === 'upload outcome unknown' && job.destination}
-      <section class="paused" aria-labelledby="paused-title">
-        <h2 id="paused-title">Upload outcome unknown</h2>
-        <p>
-          YouTube lost the upload session after its last bytes may have gone out, so the video may
-          be there. Check your uploads; if it is, paste its link. Soundboard never uploads it again
-          on its own.
-        </p>
-        <a
-          href="https://studio.youtube.com/channel/{job.destination.channelId}/videos/upload"
-          target="_blank"
-          rel="noopener">Open YouTube Studio uploads</a
-        >
-        <form
-          onsubmit={(event) => {
-            event.preventDefault();
-            void act('confirm-upload', { url: pastedUrl });
-          }}
-        >
-          <div class="field">
-            <label for="pasted-url">Video link</label>
-            <input
-              id="pasted-url"
-              type="url"
-              required
-              placeholder="https://youtu.be/…"
-              bind:value={pastedUrl}
-              disabled={busy}
-            />
-          </div>
-          <button class="btn primary" type="submit" disabled={busy || !pastedUrl.trim()}
-            >Confirm video</button
-          >
-        </form>
-      </section>
-    {/if}
+    <UploadRecovery {view} {busy} onconfirm={(url) => act('confirm-upload', { url })} />
 
     {#if job.state === 'FAILED'}
       <div class="actions">
@@ -553,38 +499,6 @@
     display: flex;
     gap: 10px;
     justify-content: flex-end;
-  }
-
-  .paused {
-    display: grid;
-    gap: 10px;
-    justify-items: start;
-    padding: 12px 14px;
-    border: 1px solid var(--yellow);
-    border-left-width: 4px;
-    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
-  }
-
-  .paused h2 {
-    color: var(--yellow);
-  }
-
-  .paused p {
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  .paused a {
-    color: var(--ink);
-  }
-
-  .paused form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-    gap: 10px;
-    width: 100%;
   }
 
   .toast {

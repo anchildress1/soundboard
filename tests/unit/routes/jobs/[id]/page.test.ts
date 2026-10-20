@@ -938,6 +938,153 @@ describe('job page: Short', () => {
 });
 
 describe('job page: Short actions', () => {
+  const publishing = (wait?: JobView['wait']) =>
+    shortView('PUBLISHING', {}, { wait }, { destination: CONNECTED });
+
+  it('confirms an uncertain Short upload using only the Short job', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === '/api/jobs/s1/confirm-upload') {
+        return json(shortView('VERIFIED', {}, {}, { videoId: 'short-video' }));
+      }
+      return hang();
+    });
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    expect(
+      within(panel).getByRole('link', { name: 'Open YouTube Studio uploads' }),
+    ).toHaveAttribute('href', 'https://studio.youtube.com/channel/UCflr/videos/upload');
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeDisabled();
+    const url = 'https://youtu.be/short-video';
+    await fireEvent.input(within(panel).getByLabelText('Video link'), { target: { value: url } });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    await waitFor(() => expect(tab('Short')).toHaveTextContent('Done'));
+    const call = fetchMock.mock.calls.find(([p]) => String(p) === '/api/jobs/s1/confirm-upload')!;
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ url });
+    expect(paths()).not.toContain('/api/jobs/j1/confirm-upload');
+    expect(
+      within(youtubePanel()).getByRole('button', { name: APPROVE, hidden: true }),
+    ).toBeEnabled();
+    expect(
+      within(shortPanel()).queryByRole('region', { name: 'Upload outcome unknown' }),
+    ).toBeNull();
+  });
+
+  it('keeps a rejected Short link editable and shows the error only on the Short', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/confirm-upload') ? json({ error: 'Wrong channel.' }, 422) : hang(),
+    );
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    await fireEvent.input(within(panel).getByLabelText('Video link'), {
+      target: { value: 'https://youtu.be/other-video' },
+    });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    expect(await within(shortPanel()).findByText('Wrong channel.')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeEnabled();
+    expect(within(youtubePanel()).queryByText('Wrong channel.')).toBeNull();
+  });
+
+  it.each([
+    'upload outcome unknown',
+    'reconnect YouTube',
+    'Daily upload limit reached. Try tomorrow.',
+  ] as const)('discards only the paused Short on %s', async (wait) => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/discard') ? json(shortView('DISCARDED')) : hang(),
+    );
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), { short: publishing(wait) });
+    await fireEvent.click(tab('Short'));
+    const discard = within(shortPanel()).getByRole('button', { name: 'Discard' });
+    expect(discard).toBeEnabled();
+    await fireEvent.click(discard);
+    expect(await within(shortPanel()).findByRole('button', { name: MAKE_SHORT })).toBeEnabled();
+    expect(paths()).toContain('/api/jobs/s1/discard');
+    expect(paths()).not.toContain('/api/jobs/j1/discard');
+    expect(h.goto).not.toHaveBeenCalled();
+  });
+
+  it('keeps Discard disabled while the Short upload is active', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), { short: publishing() });
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(
+      within(shortPanel()).queryByRole('region', { name: 'Upload outcome unknown' }),
+    ).toBeNull();
+  });
+
+  it('ignores a delayed Short poll after discarding it', async () => {
+    const delayed = Promise.withResolvers<Response>();
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === SHORT_STEP_PATH) return delayed.promise;
+      if (String(input) === '/api/jobs/s1/discard') return json(shortView('DISCARDED'));
+      return hang();
+    });
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    await waitFor(() => expect(paths()).toContain(SHORT_STEP_PATH));
+    await fireEvent.click(within(shortPanel()).getByRole('button', { name: 'Discard' }));
+    expect(await within(shortPanel()).findByRole('button', { name: MAKE_SHORT })).toBeEnabled();
+    await fireEvent.click(within(shortPanel()).getByRole('button', { name: MAKE_SHORT }));
+    await waitFor(() => expect(paths()).toContain('/api/jobs/j1/short'));
+    await fireEvent.click(tab('YouTube'));
+    delayed.resolve(json(publishing('upload outcome unknown')));
+    await waitFor(() => expect(tab('Short')).toHaveTextContent('To do'));
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('button', { name: MAKE_SHORT })).toBeInTheDocument();
+  });
+
+  it('disables Short recovery controls while confirmation is pending', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    const input = within(panel).getByLabelText('Video link');
+    const confirm = within(panel).getByRole('button', { name: 'Confirm video' });
+    await fireEvent.input(input, { target: { value: 'https://youtu.be/short-video' } });
+    await fireEvent.click(confirm);
+    await waitFor(() => expect(confirm).toBeDisabled());
+    expect(input).toBeDisabled();
+    expect(within(shortPanel()).getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(paths().filter((path) => path.endsWith('/confirm-upload'))).toEqual([
+      '/api/jobs/s1/confirm-upload',
+    ]);
+  });
+
+  it('keeps simultaneous parent and Short recovery fields independent', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(
+      view(
+        { state: 'PUBLISHING', shortId: 's1', destination: CONNECTED },
+        {
+          pick: PICK,
+          wait: 'upload outcome unknown',
+        },
+      ),
+      { short: publishing('upload outcome unknown') },
+    );
+    const parent = screen.getByRole('region', { name: 'Upload outcome unknown' });
+    const input = within(parent).getByLabelText('Video link');
+    await fireEvent.input(input, { target: { value: 'https://youtu.be/parent-video' } });
+    await fireEvent.click(tab('Short'));
+    const short = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    const shortInput = within(short).getByLabelText('Video link');
+    expect(shortInput).toHaveValue('');
+    expect(shortInput.id).not.toBe(input.id);
+    const ids = Array.from(document.querySelectorAll('[id]'), (element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('re-cuts, then plays the new render', async () => {
     fetchMock
       .mockResolvedValueOnce(json(shortView('RENDER', { reframe: 'crop' })))

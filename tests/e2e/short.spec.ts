@@ -79,6 +79,34 @@ test.describe('destination tabs', () => {
 });
 
 test.describe('Short tab', () => {
+  test('recovers an uncertain Short upload and discards only the Short', async ({
+    page,
+  }, testInfo) => {
+    const id = `e2e-short-paused-${testInfo.project.name}`;
+    await page.goto(`/jobs/${id}`);
+    await tab(page, 'Short').click();
+    const panel = shortPanel(page);
+    const recovery = panel.getByRole('region', { name: 'Upload outcome unknown' });
+    await expect(recovery).toBeVisible();
+    await expect(
+      recovery.getByRole('link', { name: 'Open YouTube Studio uploads' }),
+    ).toHaveAttribute('href', /studio\.youtube\.com\/channel\/.+\/videos\/upload/);
+    await expect(recovery.getByRole('button', { name: 'Confirm video' })).toBeDisabled();
+    await recovery.getByLabel('Video link').fill('https://youtu.be/short-video');
+    await expect(recovery.getByRole('button', { name: 'Confirm video' })).toBeEnabled();
+    const discarded = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith(`/api/jobs/${id}-short/discard`),
+    );
+    await panel.getByRole('button', { name: 'Discard' }).click();
+    expect((await discarded).status()).toBe(200);
+    await expect(panel.getByRole('button', { name: 'Make a Short' })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/jobs/${id}$`));
+    await tab(page, 'YouTube').click();
+    await expect(page.getByRole('button', { name: 'Approve & upload' })).toBeEnabled();
+  });
+
   test('makes a Short and waits on the model for the hook', async ({ page }, testInfo) => {
     await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
     await tab(page, 'Short').click();

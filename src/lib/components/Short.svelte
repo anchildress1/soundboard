@@ -2,11 +2,12 @@
   import { timecode } from '$lib/format';
   import type { FieldErrors } from '$lib/metadata';
   import { cutErrors, lengthBounds, tenth } from '$lib/short';
-  import { jobStatus, modelSeconds } from '$lib/status';
+  import { jobStatus, modelSeconds, publishPaused } from '$lib/status';
   import type { Destination, JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
   import Track from './Track.svelte';
+  import UploadRecovery from './UploadRecovery.svelte';
 
   type Cut = { startSec: number; lengthSec: number; reframe: Reframe };
   type Fields = { title: string; description: string; tags: string[] };
@@ -24,6 +25,7 @@
     onrerun,
     ondiscard,
     onretry,
+    onconfirm,
   }: {
     view: JobView;
     src?: string | null;
@@ -39,6 +41,7 @@
     onrerun: () => void;
     ondiscard: () => void;
     onretry: () => void;
+    onconfirm: (url: string) => void;
   } = $props();
 
   const job = $derived(view.job);
@@ -180,6 +183,7 @@
         {editable}
         {busy}
         {done}
+        discardable={publishPaused(view)}
         {serverErrors}
         destination={job.destination ?? (editable ? approveTo : null)}
         uploaded={job.videoId !== null}
@@ -190,6 +194,7 @@
         {onrerun}
         {ondiscard}
       />
+      <UploadRecovery {view} {busy} {onconfirm} />
     {/key}
   {/if}
   {#if job.state === 'FAILED'}

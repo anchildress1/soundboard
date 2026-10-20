@@ -44,6 +44,16 @@ export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
   return LABELS[view.job.state](view, uploadPct);
 }
 
+/** Whether publishing is paused for owner action and can be discarded. */
+export function publishPaused({ job, wait }: JobView): boolean {
+  return (
+    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') &&
+    (wait === 'reconnect YouTube' ||
+      wait === 'upload outcome unknown' ||
+      wait === 'Daily upload limit reached. Try tomorrow.')
+  );
+}
+
 function runningProgress({ job }: JobView): number {
   if (job.chunkCount === 0) return 4;
   return 6 + Math.round((84 * job.chunkIndex) / job.chunkCount);

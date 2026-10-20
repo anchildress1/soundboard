@@ -87,6 +87,30 @@ const SHORT: Short = {
 const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2, 3, 4].map(chunk) });
 
 const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
+  ...['chromium', 'mobile'].flatMap((project) => {
+    const id = `e2e-short-paused-${project}`;
+    return [
+      { ...reviewed(id), job: job(id, { shortId: `${id}-short` }) },
+      {
+        job: job(`${id}-short`, {
+          parentId: id,
+          short: SHORT,
+          state: 'PUBLISHING',
+          destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
+          finalFields: {
+            title: PICK.title,
+            description: PICK.description,
+            hashtags: PICK.hashtags,
+            tags: PICK.tags,
+          },
+          uploadStartedAt: 1,
+          finalChunkAt: 2,
+        }),
+        pick: PICK,
+        chunks: [],
+      },
+    ];
+  }),
   ...['e2e-tabs', 'e2e-make-chromium', 'e2e-make-mobile'].map(reviewed),
   { ...reviewed('e2e-cut'), job: job('e2e-cut', { shortId: 'e2e-cut-short' }) },
   {

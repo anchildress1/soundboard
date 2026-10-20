@@ -70,6 +70,7 @@ function setup(props: Partial<ComponentProps<typeof Short>> = {}) {
     onrerun: vi.fn(),
     ondiscard: vi.fn(),
     onretry: vi.fn(),
+    onconfirm: vi.fn(),
   };
   const utils = render(Short, {
     view: view(),
