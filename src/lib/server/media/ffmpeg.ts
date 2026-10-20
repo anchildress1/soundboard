@@ -15,6 +15,14 @@ const MEASURE_FILTER = `ebur128=peak=true:framelog=verbose,aformat=sample_fmts=s
 
 /** No banner or progress lines: stderr carries only what the parsers read. */
 const QUIET = ['-hide_banner', '-nostats'] as const;
+// Signed URLs constrain the first request only; playlist demuxers can open their own URLs.
+// MOV external tracks stay disabled by default; private MOV options break other demuxers.
+const SOURCE_INPUT = [
+  '-format_whitelist',
+  'mov,matroska,webm,avi,asf,flv,mpeg,mpegts,ogg',
+  '-protocol_whitelist',
+  'https,tls,tcp',
+] as const;
 const FILTER_GRAPH = '-filter_complex';
 
 type RunResult = { stdout: Buffer; stderr: string; fd3: Buffer };
@@ -144,7 +152,7 @@ export async function probe(url: string, timeoutMs = 60_000): Promise<Probe> {
   const { stdout } = await run(
     'probe',
     'ffprobe',
-    ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', url],
+    ['-v', 'error', ...SOURCE_INPUT, '-print_format', 'json', '-show_format', '-show_streams', url],
     timeoutMs,
   );
   return parseProbe(stdout.toString('utf8'));
@@ -155,7 +163,18 @@ export async function measureFile(url: string, durationSec: number): Promise<Mea
   const { stderr } = await run(
     'measure',
     'ffmpeg',
-    [...QUIET, '-vn', '-i', url, FILTER_GRAPH, `[0:a:0]${MEASURE_FILTER}`, '-f', 'null', '-'],
+    [
+      ...QUIET,
+      '-vn',
+      ...SOURCE_INPUT,
+      '-i',
+      url,
+      FILTER_GRAPH,
+      `[0:a:0]${MEASURE_FILTER}`,
+      '-f',
+      'null',
+      '-',
+    ],
     110_000,
   );
   return parseMeasurements(stderr, 0, durationSec);
@@ -201,6 +220,7 @@ export async function extractWindow(
       startSec.toFixed(3),
       '-t',
       durationSec.toFixed(3),
+      ...SOURCE_INPUT,
       '-i',
       url,
       FILTER_GRAPH,
@@ -273,6 +293,7 @@ export async function loudnessCurve(
       '-t',
       durationSec.toFixed(3),
       '-vn',
+      ...SOURCE_INPUT,
       '-i',
       url,
       FILTER_GRAPH,
@@ -334,6 +355,7 @@ export async function renderShort(
       cut.startSec.toFixed(3),
       '-t',
       cut.lengthSec.toFixed(3),
+      ...SOURCE_INPUT,
       '-i',
       sourceUrl,
       FILTER_GRAPH,

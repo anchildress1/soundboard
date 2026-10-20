@@ -84,6 +84,57 @@ beforeEach(() => {
   spawnMock.mockReset();
 });
 
+describe('source input restrictions', () => {
+  it.each([
+    ['probe', () => probe(OBJECT_URL)],
+    ['measure', () => measureFile(OBJECT_URL, 1)],
+    ['window', () => extractWindow(OBJECT_URL, 0, 1)],
+    ['loudness', () => loudnessCurve(OBJECT_URL, 0, 1)],
+    [
+      'render',
+      () =>
+        renderShort(
+          OBJECT_URL,
+          'out.mp4',
+          { startSec: 0, lengthSec: 1, reframe: 'crop' },
+          RENDER_MS,
+        ),
+    ],
+  ])('restricts %s before opening uploaded bytes', async (_task, invoke) => {
+    nextRun({ stdout: Buffer.from('{}') });
+    await invoke();
+
+    const args = spawnMock.mock.calls[0]![1]!;
+    const inputIndex = args.indexOf(OBJECT_URL);
+    const formatsIndex = args.indexOf('-format_whitelist');
+    const protocolsIndex = args.indexOf('-protocol_whitelist');
+    expect(formatsIndex).toBeGreaterThan(-1);
+    expect(protocolsIndex).toBeGreaterThan(-1);
+    expect(formatsIndex).toBeLessThan(inputIndex);
+    expect(protocolsIndex).toBeLessThan(inputIndex);
+    const formats = args[formatsIndex + 1]!.split(',');
+    expect(formats).toEqual([
+      'mov',
+      'matroska',
+      'webm',
+      'avi',
+      'asf',
+      'flv',
+      'mpeg',
+      'mpegts',
+      'ogg',
+    ]);
+    for (const manifest of ['hls', 'dash', 'concat', 'sdp', 'image2']) {
+      expect(formats).not.toContain(manifest);
+    }
+    expect(args[protocolsIndex + 1]).toBe('https,tls,tcp');
+    // These MOV-only switches cause ffmpeg to reject ordinary WebM input.
+    expect(args).not.toContain('-enable_drefs');
+    expect(args).not.toContain('-use_absolute_path');
+    expect(args.filter((arg) => arg === OBJECT_URL)).toHaveLength(1);
+  });
+});
+
 describe('parseProbe', () => {
   it('reads duration, video size, and audio presence', () => {
     const json = JSON.stringify({
