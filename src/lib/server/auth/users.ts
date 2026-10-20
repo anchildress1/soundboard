@@ -11,9 +11,7 @@ export async function getUser(uid: string): Promise<User | null> {
 }
 
 /**
- * Refreshes an existing user's email and name from their latest ID token. Never inserts (only
- * `redeemInvite` creates users) and never writes `accessGeneration`, so a sign-in can't revive a
- * revoked session. Returns null when the user doesn't exist.
+ * Refreshes an existing user's email and name, returning its current row or null if absent.
  */
 export async function updateProfile(
   uid: string,

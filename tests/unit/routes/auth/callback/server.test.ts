@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { captureException, captureMessage } from '@sentry/sveltekit';
-import { isRedirect } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { isRedirect, type RequestEvent } from '@sveltejs/kit';
+// @ts-expect-error -- SvelteKit publishes no types for its internal request store.
+import { with_request_store } from '@sveltejs/kit/internal/server';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { handle } from '$lib/../hooks.server';
 import { db } from '$lib/server/core/db';
 import { connections, invites, jobs, users } from '$lib/server/core/schema';
 import {
@@ -227,6 +230,65 @@ describe('GET /auth/callback: sign-in', () => {
     const sid = (c: typeof first) => readSession(c.cookies.set.mock.calls[0]![1] as string)!.sid;
     expect(sid(first)).not.toBe(sid(second));
   });
+
+  it.each([1, 4])(
+    'keeps a racing callback at admitted generation %i after revocation',
+    async (gen) => {
+      await seed({
+        invites: [{ email: EMAIL, boundSub: SUB }],
+        users: [{ uid: SUB, email: EMAIL, inviteEmail: EMAIL, accessGeneration: gen }],
+      });
+      // Advance revocation state at the profile write, after admission has returned its snapshot.
+      await db().execute(sql`
+      create function revoke_at_profile() returns trigger language plpgsql as $$
+      begin
+        update invites set active = false where email = old.invite_email;
+        new.access_generation := old.access_generation + 1;
+        return new;
+      end $$
+    `);
+      await db().execute(sql`
+      create trigger revoke_at_profile before update of email, name on users
+      for each row execute function revoke_at_profile();
+    `);
+      try {
+        google(SUB, EMAIL);
+        const { thrown, cookies } = await call({ cookie: sign(state()) });
+        expect(redirectTo(thrown)).toEqual([303, '/']);
+        const cookie = cookies.set.mock.calls[0]![1] as string;
+        expect(readSession(cookie)).toMatchObject({ uid: SUB, gen });
+        expect(await allUsers()).toEqual([
+          expect.objectContaining({ uid: SUB, accessGeneration: gen + 1, name: 'New' }),
+        ]);
+        const [invite] = await db().select().from(invites);
+        expect(invite).toMatchObject({ active: false, boundSub: SUB });
+
+        const event = {
+          url: new URL('http://localhost/api/jobs'),
+          cookies: { get: (name: string) => (name === SESSION_COOKIE ? cookie : undefined) },
+          locals: { user: null },
+          isDataRequest: false,
+        } as unknown as RequestEvent;
+        const resolve = vi.fn(async () => new Response('allowed'));
+        const span = { setAttributes: () => span, setAttribute: () => span, end: () => {} };
+        const response = await with_request_store(
+          {
+            event,
+            state: {
+              tracing: { record_span: ({ fn }: { fn: (s: unknown) => unknown }) => fn(span) },
+            },
+          },
+          () => handle({ event, resolve }),
+        );
+        expect(response.status).toBe(401);
+        expect(event.locals.user).toBeNull();
+        expect(resolve).not.toHaveBeenCalled();
+      } finally {
+        await db().execute(sql`drop trigger revoke_at_profile on users`);
+        await db().execute(sql`drop function revoke_at_profile()`);
+      }
+    },
+  );
 
   it("refreshes a returning user's profile and keeps their generation", async () => {
     await seed({

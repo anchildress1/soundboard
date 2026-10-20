@@ -28,9 +28,9 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
     captureMessage('Sign-in denied', { level: 'info' });
     redirect(303, '/?signin=denied');
   }
-  const user =
-    (await updateProfile(grant.sub, { email: grant.email, name: grant.name })) ?? redeemed;
-  cookies.set(SESSION_COOKIE, sessionCookie(user.uid, user.accessGeneration), {
+  await updateProfile(grant.sub, { email: grant.email, name: grant.name });
+  // A later profile read can carry a revoked generation that this admission never authorized.
+  cookies.set(SESSION_COOKIE, sessionCookie(redeemed.uid, redeemed.accessGeneration), {
     path: '/',
     httpOnly: true,
     secure: url.protocol === 'https:',
@@ -40,7 +40,7 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
   // The session is already set: a YouTube or KMS failure leaves the user signed in, unconnected.
   let outcome: ConnectOutcome | null = null;
   try {
-    outcome = await connectGrant(user.uid, grant, 'sign-in');
+    outcome = await connectGrant(redeemed.uid, grant, 'sign-in');
   } catch (error) {
     captureException(error, { tags: { component: 'sign-in-connect' } });
   }
