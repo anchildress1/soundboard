@@ -4,27 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({ page: { url: new URL('https://soundboard.test/') } }));
 vi.mock('$app/state', () => ({ page: h.page }));
 
-import SignIn from '$lib/components/SignIn.svelte';
+import SignInNotice from '$lib/components/SignInNotice.svelte';
 
 const visit = (query = '') => {
   h.page.url = new URL(`https://soundboard.test/${query}`);
-  return render(SignIn);
+  return render(SignInNotice);
 };
 
 beforeEach(() => {
   h.page.url = new URL('https://soundboard.test/');
 });
 
-describe('SignIn', () => {
-  it('offers one Google sign-in link, loaded as a full page', () => {
-    visit();
-    const links = screen.getAllByRole('link');
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAccessibleName('Sign in with Google');
-    expect(links[0]).toHaveAttribute('href', '/auth/login');
-    expect(links[0]).toHaveAttribute('data-sveltekit-reload');
-  });
-
+describe('SignInNotice', () => {
   it('shows no notice on a plain visit', () => {
     visit();
     expect(screen.queryByRole('status')).toBeNull();

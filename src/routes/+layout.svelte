@@ -56,6 +56,11 @@
         <form method="POST" action="/auth/logout">
           <button class="btn ghost small" type="submit" title={data.user.email}>Sign out</button>
         </form>
+      {:else}
+        <!-- A full page load: the login route redirects off-site to Google. -->
+        <a class="btn primary small" href={resolve('/auth/login')} data-sveltekit-reload
+          >Sign in with Google</a
+        >
       {/if}
     </div>
   </header>

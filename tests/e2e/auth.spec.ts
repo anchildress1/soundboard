@@ -5,7 +5,9 @@ test.describe('signed out', () => {
   test('shows only the sign-in view and sets zero cookies', async ({ page, context }) => {
     const response = await page.goto('/');
     expect(response?.headers()['set-cookie']).toBeUndefined();
-    await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+    await expect(
+      page.getByRole('banner').getByRole('link', { name: 'Sign in with Google' }),
+    ).toBeVisible();
     await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
     await page.waitForLoadState('load');
     expect(await context.cookies()).toEqual([]);

@@ -72,12 +72,9 @@ describe('home page: job list', () => {
 });
 
 describe('home page: signed out', () => {
-  it('shows only the sign-in view, with no upload form or tape', () => {
+  it('leaves sign-in to the header: no links, upload form or tape', () => {
     setup(null);
-    expect(screen.getByRole('link', { name: 'Sign in with Google' })).toHaveAttribute(
-      'href',
-      '/auth/login',
-    );
+    expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByRole('form', { name: 'Start a run' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'The video' })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -85,11 +82,6 @@ describe('home page: signed out', () => {
 });
 
 describe('home page: form', () => {
-  it('offers no sign-in link once signed in', () => {
-    setup();
-    expect(screen.queryByRole('link', { name: 'Sign in with Google' })).toBeNull();
-  });
-
   it('keeps Analyze disabled until a file and a title are given', async () => {
     const { container } = setup();
     expect(analyze()).toBeDisabled();

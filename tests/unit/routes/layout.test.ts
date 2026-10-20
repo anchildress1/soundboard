@@ -83,9 +83,12 @@ describe('layout', () => {
     expect(screen.queryByText(/videos ·/)).toBeNull();
   });
 
-  it('leaves sign-in to the page when signed out, with no account controls', () => {
+  it('offers Google sign-in in the header when signed out, with no account controls', () => {
     setup();
-    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
+    const signIn = screen.getByRole('link', { name: 'Sign in with Google' });
+    expect(signIn).toHaveAttribute('href', '/auth/login');
+    expect(signIn).toHaveAttribute('data-sveltekit-reload');
+    expect(signIn.closest('header')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     expect(screen.queryByRole('link', { name: BRAND_GUIDE })).toBeNull();
   });
@@ -98,7 +101,7 @@ describe('layout', () => {
     expect(signOut).toHaveClass('btn');
     expect(signOut.closest('form')).toHaveAttribute('action', '/auth/logout');
     expect(signOut.closest('form')).toHaveAttribute('method', 'POST');
-    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
     expect(screen.queryByText(/Connect channel/)).toBeNull();
     expect(screen.queryByRole('link', { name: BRAND_GUIDE })).toBeNull();
   });
@@ -109,7 +112,7 @@ describe('layout', () => {
     expect(brand).toHaveAttribute('href', '/brand');
     expect(brand.closest('header')).not.toBeNull();
     expect(screen.queryByRole('link', { name: /Connect (YouTube|channel)/ })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
   });
 
   it.each([

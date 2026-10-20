@@ -6,7 +6,7 @@
   import Heard from '$lib/components/Heard.svelte';
   import JobList from '$lib/components/JobList.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
-  import SignIn from '$lib/components/SignIn.svelte';
+  import SignInNotice from '$lib/components/SignInNotice.svelte';
   import { setPending } from '$lib/pending';
   import { TITLE_MAX } from '$lib/metadata';
   import type { PageData } from './$types';
@@ -109,7 +109,7 @@
     </div>
   </main>
 {:else}
-  <SignIn />
+  <SignInNotice />
 {/if}
 
 <style>

@@ -260,7 +260,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
 - **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
-- **Signed out:** the home page is a sign-in view: the frame, the wordmark, and one "Sign in with Google" button. Nothing else.
+- **Signed out:** the home page is a sign-in view: the frame, the wordmark, and one "Sign in with Google" button in the header. Nothing else.
 - **Signed-in home:** own jobs, newest first, with title, state and a continuation link; no other user's work.
 - **Header:** one aligned row: the user's channel handle and video and subscriber counts, Connections, Brand guide (artist-linked user only), and Sign out. A "not invited" or "sign-in expired" notice shows under the header on the sign-in view.
 - **Connections:** one row per platform with Connected as … / Not connected and Connect, Reconnect, Disconnect. YouTube only for now.
