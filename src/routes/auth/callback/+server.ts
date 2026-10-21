@@ -56,7 +56,7 @@ async function connect(
   state: OAuthState,
   user: App.Locals['user'],
 ): Promise<never> {
-  if (!user || user.uid !== state.uid || user.sid !== state.sid)
+  if (user?.uid !== state.uid || user.sid !== state.sid)
     redirect(303, '/connections?connect=mismatch');
   const { uid } = user;
   const grant = await exchangeCode(url.origin, code);

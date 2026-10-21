@@ -162,6 +162,7 @@ export function tagPool(fix: { artist: boolean; tagCandidates: TagCandidate[] })
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
+  const artistTag = ctx.artist ? ` Include "${ARTIST_NAME}".` : '';
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     "audienceTopVideos are the most-viewed music videos in this genre, ranked by views. They are the evidence for what reaches listeners: model the title format and the description's structure and length on them.",
@@ -174,7 +175,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     ctx.artist ? ARTIST_CREDITS : '',
     'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
-    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${ctx.artist ? ` Include "${ARTIST_NAME}".` : ''} Never the song title. Never invent one.`,
+    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${artistTag} Never the song title. Never invent one.`,
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',

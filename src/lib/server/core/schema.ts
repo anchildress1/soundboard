@@ -15,6 +15,7 @@ import {
 import { JOB_STATES } from '../../types';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
+const quotedStates = JOB_STATES.map((state) => `'${state}'`).join(', ');
 
 export const invites = pgTable('invites', {
   email: text('email').primaryKey(),
@@ -89,10 +90,7 @@ export const jobs = pgTable(
     data: jsonb('data').notNull(),
   },
   (t) => [
-    check(
-      'jobs_state_check',
-      sql`${t.state} in (${sql.raw(JOB_STATES.map((state) => `'${state}'`).join(', '))})`,
-    ),
+    check('jobs_state_check', sql`${t.state} in (${sql.raw(quotedStates)})`),
     index('jobs_owner_list_idx')
       .on(t.ownerUid, t.createdAt.desc())
       .where(sql`${t.parentId} is null`),
