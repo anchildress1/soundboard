@@ -28,6 +28,7 @@ import {
   type JobDoc,
 } from '$lib/server/jobs/jobs';
 import { artistJob, listFacts, recentFeedback, recordPublish } from '$lib/server/artist/memory';
+import type { Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
 import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { hookStep, renderStep } from './short';
@@ -56,7 +57,13 @@ const RECENT_COUNT = 3;
 
 type Patch = JobPatch;
 /** A step's job patch, plus output to store only if the claim is still valid at release. */
-type StepOutput = Patch & { pick?: Pick; chunk?: Chunk; wait?: Wait };
+/** `alsoWrite` runs inside the release, so it lands only while the step still holds the job. */
+type StepOutput = Patch & {
+  pick?: Pick;
+  chunk?: Chunk;
+  wait?: Wait;
+  alsoWrite?: (tx: Tx) => Promise<void>;
+};
 
 /** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
 class StepFailure extends Error {
@@ -305,9 +312,9 @@ async function sendChunk(
 }
 
 /** Verified uploads on artist jobs join the artist's memory; no one else's do. */
-async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
-  if (!job.finalFields || !(await artistJob(job))) return;
-  await recordPublish({
+async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<void> {
+  if (!job.finalFields || !(await artistJob(job, tx))) return;
+  await recordPublish(tx, {
     videoId,
     url: `https://youtu.be/${videoId}`,
     jobId: job.id,
@@ -339,8 +346,10 @@ async function verified(job: JobDoc, videoId: string, video: ReadBack | null): P
     return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
   }
   if (video?.status === 'accepted') {
-    await recordVerified(job, videoId);
-    return ok({ state: 'VERIFIED' });
+    return {
+      ...ok({ state: 'VERIFIED' }),
+      alsoWrite: (tx) => recordVerified(tx, job, videoId),
+    };
   }
   if (video?.uploadStatus) {
     captureMessage('Unknown YouTube uploadStatus', {
@@ -444,8 +453,8 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   }
 
   const output = await runHandler(job, handler);
-  const { pick: newPick, chunk, wait: woke, ...patch } = output;
-  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
+  const { pick: newPick, chunk, wait: woke, alsoWrite, ...patch } = output;
+  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk, alsoWrite }))) {
     captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },

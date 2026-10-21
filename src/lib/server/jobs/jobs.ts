@@ -194,7 +194,7 @@ export async function releaseJob(
   token: string,
   claimedState: JobState,
   patch: JobPatch = {},
-  writes: { pick?: Pick; chunk?: Chunk } = {},
+  writes: { pick?: Pick; chunk?: Chunk; alsoWrite?: (tx: Tx) => Promise<void> } = {},
 ): Promise<boolean> {
   const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
   return db().transaction(async (tx) => {
@@ -214,6 +214,7 @@ export async function releaseJob(
     // Step output lands in the same transaction, so a worker that lost its claim persists nothing.
     if (writes.pick) await putPick(tx, id, { ...writes.pick, skipped: false });
     if (writes.chunk) await putChunk(tx, id, writes.chunk);
+    if (writes.alsoWrite) await writes.alsoWrite(tx);
     return true;
   });
 }

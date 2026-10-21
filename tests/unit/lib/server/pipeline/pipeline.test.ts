@@ -32,7 +32,7 @@ import { captureException, captureMessage } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
-import { retry } from '$lib/server/jobs/actions';
+import { discard, retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
@@ -1427,6 +1427,16 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     await runStep(await claimed({ artistId: null }));
     expect((await saved()).state).toBe('VERIFIED');
     expect(await artistRowCount()).toBe(0);
+  });
+
+  it('records no publish when the job is discarded while the read-back is in flight', async () => {
+    on(/com\/youtube\/v3\/videos\?/, async () => {
+      await discard((await getJob('j1'))!);
+      return json({ items: [{ id: 'vid1', status: { uploadStatus: 'processed' } }] });
+    });
+    await runStep(await claimed());
+    expect((await saved()).state).toBe('DISCARDED');
+    expect(await publishes()).toEqual([]);
   });
 
   it("records no publish once Nathan's job owner is unlinked", async () => {

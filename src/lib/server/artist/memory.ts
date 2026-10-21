@@ -105,15 +105,18 @@ export async function recentFeedback(limit = 20): Promise<Feedback[]> {
   return rows.map((r) => r.data as Feedback);
 }
 
-export async function recordPublish(record: {
-  videoId: string;
-  url: string;
-  jobId: string;
-  fields: PickFields;
-  status: 'VERIFIED';
-  at: number;
-}): Promise<void> {
-  await db()
+export async function recordPublish(
+  tx: Tx,
+  record: {
+    videoId: string;
+    url: string;
+    jobId: string;
+    fields: PickFields;
+    status: 'VERIFIED';
+    at: number;
+  },
+): Promise<void> {
+  await tx
     .insert(artistMemory)
     .values({ artistId: ARTIST_ID, kind: 'publish', key: record.videoId, data: record })
     .onConflictDoUpdate({

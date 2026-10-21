@@ -230,16 +230,18 @@ describe('recordPublish', () => {
     fields,
   };
 
+  const publish = (r: typeof record) => db().transaction((tx) => recordPublish(tx, r));
+
   it('stores the publish under its video id', async () => {
-    await recordPublish(record);
+    await publish(record);
     expect(await db().select().from(artistMemory)).toEqual([
       { id: expect.any(Number), artistId: 'flr', kind: 'publish', key: 'vid1', data: record },
     ]);
   });
 
   it('replaces an earlier record of the same video', async () => {
-    await recordPublish(record);
-    await recordPublish({ ...record, at: 9 });
+    await publish(record);
+    await publish({ ...record, at: 9 });
     const rows = await db().select().from(artistMemory).where(memoryOf('publish'));
     expect(rows.map((r) => (r.data as typeof record).at)).toEqual([9]);
   });
