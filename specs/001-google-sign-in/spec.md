@@ -163,8 +163,8 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 - **FR-003**: The sign-in page MUST offer "Sign in with Google" as its only action and MUST show no app data.
 - **FR-004**: Sign-in MUST request identity plus YouTube upload and read access on one Google consent screen, with a long-lived grant.
 - **FR-005**: While invite gating is enabled, only accounts with an active invitation MUST get a session. First redemption MUST atomically bind a normalized invited email to the verified Google account ID; another ID MUST NOT redeem it. Others MUST see a "not invited" notice and MUST leave no stored session, user record or token behind.
-- **FR-006**: Access MUST be re-checked on every authenticated request using the user ID and current access generation. Revoking an invite MUST invalidate its existing sessions on the next request and advance that generation; reactivation MUST NOT revive old sessions. A bound user's later email change MUST NOT alter ownership or transfer invitation or artist access.
-- **FR-007**: The invite list MUST be switchable to open signup by one setting, with no code change.
+- **FR-006**: Access MUST be re-checked on every authenticated request using the user ID and the user's active flag. Revoking an invite MUST invalidate its existing sessions on the next request; reactivation lets unexpired sessions back in. A bound user's later email change MUST NOT alter ownership or transfer invitation or artist access.
+- **FR-007**: The invite list MUST be switchable to open signup by one setting, with no code change. Accounts that sign up while it's open join the invite list and keep access until revoked.
 - **FR-008**: A user MUST be identified by their stable Google account ID. Email is for display and invites only.
 - **FR-009**: A session MUST last a fixed 30 days from sign-in, unless the user signs out or loses access sooner. Activity MUST NOT extend it.
 - **FR-010**: An expired, tampered or malformed session MUST be treated as signed out.
@@ -191,9 +191,8 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 
 ### Key Entities
 
-- **User**: one person, keyed by Google account ID. Holds email, display name, sign-in time and an optional link to an artist profile.
-- **Invite**: a normalized invited email, active status, optional artist profile link and Google account ID bound on first redemption. Seeded with Nathan (linked to the FLR profile) and Ashley; revocation advances the bound user's access generation.
-- **Session**: a signed browser credential naming the user, their access generation and a fixed expiry 30 days after sign-in. Holds no role; access is re-checked against current user and invitation state on each request.
+- **User**: one invited person: a normalized invited email, active status, optional artist profile link, and the Google account ID bound on first sign-in. Seeded with Nathan (linked to the FLR profile) and Ashley.
+- **Session**: a signed browser credential naming the user and a fixed expiry 30 days after sign-in. Holds no role; access is re-checked against current user and invitation state on each request.
 - **Connection**: one user's link to one platform account (YouTube now). Holds the platform, the platform account ID and name, the grant's status and the encrypted grant.
 - **Job**: owned by a user ID instead of the `nathan` / `demo` / `visitor` owner labels. Approval records the destination channel ID and name alongside the approved fields; the destination becomes immutable when resumable upload initiation starts.
 
@@ -217,7 +216,7 @@ The signed-in home page lists only the user's jobs, newest first, with song titl
 ## Assumptions
 
 - Google is the only sign-in provider. The Connections page structure allows more platforms later, but none are built here.
-- Signed session cookies stay; a per-user access generation supports revocation without a server-side session store.
+- Signed session cookies stay; the per-request user read checks the active flag, so revocation needs no server-side session store.
 - The "sign-in page" is the home route's signed-out view, not a separate URL.
 - Pre-beta, so nothing is migrated. Nathan signs in with an invite linked to `flr`; his artist memory restarts from the seed facts, the brand guide is proposed again, and old jobs and stored grants are left behind.
 - The app's OAuth consent screen stays "In production" and unverified. Google's unverified-app screen and user cap apply until verification, which is outside this spec.

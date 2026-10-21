@@ -1,5 +1,5 @@
 {
-  "id": "604cca31-1a88-4274-b8d8-1d40acff89ea",
+  "id": "99774c87-f580-4900-82dc-a1cac59c764c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -141,57 +141,6 @@
           "value": "(\"connections\".\"status\" = 'connected') = (\"connections\".\"token_ciphertext\" is not null) and (\"connections\".\"status\" <> 'connected' or \"connections\".\"channel_id\" is not null)"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.invites": {
-      "name": "invites",
-      "schema": "",
-      "columns": {
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "artist_id": {
-          "name": "artist_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bound_sub": {
-          "name": "bound_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "invites_bound_sub_unique": {
-          "name": "invites_bound_sub_unique",
-          "nullsNotDistinct": false,
-          "columns": ["bound_sub"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.jobs": {
@@ -363,26 +312,14 @@
       "name": "users",
       "schema": "",
       "columns": {
-        "uid": {
-          "name": "uid",
+        "email": {
+          "name": "email",
           "type": "text",
           "primaryKey": true,
           "notNull": true
         },
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "invite_email": {
-          "name": "invite_email",
+        "uid": {
+          "name": "uid",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -393,12 +330,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "access_generation": {
-          "name": "access_generation",
-          "type": "integer",
+        "active": {
+          "name": "active",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": 1
+          "default": true
         },
         "created_at": {
           "name": "created_at",
@@ -409,19 +346,15 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "users_invite_email_invites_email_fk": {
-          "name": "users_invite_email_invites_email_fk",
-          "tableFrom": "users",
-          "tableTo": "invites",
-          "columnsFrom": ["invite_email"],
-          "columnsTo": ["email"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_uid_unique": {
+          "name": "users_uid_unique",
+          "nullsNotDistinct": false,
+          "columns": ["uid"]
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

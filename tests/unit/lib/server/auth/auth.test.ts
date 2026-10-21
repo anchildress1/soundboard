@@ -99,47 +99,53 @@ describe('sign / unsign', () => {
 });
 
 describe('sessionCookie / readSession', () => {
-  it('round-trips the uid and generation with a fixed 30-day expiry', () => {
-    const session = readSession(sessionCookie(UID, 3, NOW), NOW + 1000);
+  it('round-trips the uid with a fixed 30-day expiry', () => {
+    const session = readSession(sessionCookie(UID, NOW), NOW + 1000);
     expect(session).toEqual({
       uid: UID,
       sid: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
-      gen: 3,
       exp: NOW + SESSION_TTL_SEC * 1000,
     });
   });
 
   it('gives every sign-in its own sid', () => {
-    const a = readSession(sessionCookie(UID, 1, NOW), NOW);
-    const b = readSession(sessionCookie(UID, 1, NOW), NOW);
+    const a = readSession(sessionCookie(UID, NOW), NOW);
+    const b = readSession(sessionCookie(UID, NOW), NOW);
     expect(a!.sid).not.toBe(b!.sid);
   });
 
   it('rejects a tampered session', () => {
-    const [, mac] = sessionCookie(UID, 1, NOW).split('.');
+    const [, mac] = sessionCookie(UID, NOW).split('.');
     const forged = Buffer.from(
-      JSON.stringify({ uid: 'someone-else', sid: 's', gen: 1, exp: NOW + 1000 }),
+      JSON.stringify({ uid: 'someone-else', sid: 's', exp: NOW + 1000 }),
     ).toString('base64url');
     expect(readSession(`${forged}.${mac}`, NOW)).toBeNull();
   });
 
   it('expires at exp, never sliding', () => {
-    const cookie = sessionCookie(UID, 1, NOW);
+    const cookie = sessionCookie(UID, NOW);
     expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000 - 1)).not.toBeNull();
     expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000)).toBeNull();
   });
 
   it.each([
-    ['no uid', { sid: 's', gen: 1, exp: NOW + 1000 }],
-    ['an empty uid', { uid: '', sid: 's', gen: 1, exp: NOW + 1000 }],
-    ['a numeric uid', { uid: 42, sid: 's', gen: 1, exp: NOW + 1000 }],
+    ['no uid', { sid: 's', exp: NOW + 1000 }],
+    ['an empty uid', { uid: '', sid: 's', exp: NOW + 1000 }],
+    ['a numeric uid', { uid: 42, sid: 's', exp: NOW + 1000 }],
     ['the old email-only shape', { email: NATHAN_EMAIL, exp: NOW + 1000 }],
-    ['no sid', { uid: UID, gen: 1, exp: NOW + 1000 }],
-    ['no generation', { uid: UID, sid: 's', exp: NOW + 1000 }],
-    ['no expiry', { uid: UID, sid: 's', gen: 1 }],
+    ['no sid', { uid: UID, exp: NOW + 1000 }],
+    ['no expiry', { uid: UID, sid: 's' }],
     ['null', null],
   ])('rejects a payload with %s', (_label, payload) => {
     expect(readSession(sign(payload), NOW)).toBeNull();
+  });
+
+  it('ignores an extra field such as a legacy generation', () => {
+    expect(readSession(sign({ uid: UID, sid: 's', gen: 1, exp: NOW + 1000 }), NOW)).toEqual({
+      uid: UID,
+      sid: 's',
+      exp: NOW + 1000,
+    });
   });
 
   it('rejects missing and garbage cookies', () => {
@@ -148,8 +154,8 @@ describe('sessionCookie / readSession', () => {
   });
 
   it('uses the current time by default', () => {
-    expect(readSession(sessionCookie(UID, 1))).not.toBeNull();
-    expect(readSession(sign({ uid: UID, sid: 's', gen: 1, exp: 1 }))).toBeNull();
+    expect(readSession(sessionCookie(UID))).not.toBeNull();
+    expect(readSession(sign({ uid: UID, sid: 's', exp: 1 }))).toBeNull();
   });
 });
 
@@ -260,7 +266,6 @@ describe('exchangeCode', () => {
     expect(await exchangeCode(ORIGIN, 'code-1')).toEqual({
       sub: UID,
       email: NATHAN_EMAIL,
-      name: 'Nathan',
       scopes: ['openid', 'email', 'https://www.googleapis.com/auth/youtube.upload'],
       refreshToken: 'rt',
       accessToken: 'at',
@@ -269,12 +274,11 @@ describe('exchangeCode', () => {
     expect(oauth.verifyIdToken).toHaveBeenCalledWith({ idToken: 'idt', audience: 'cid' });
   });
 
-  it('returns no refresh token, name or scopes when Google sends none', async () => {
+  it('returns no refresh token or scopes when Google sends none', async () => {
     oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
     oauth.verifyIdToken.mockResolvedValueOnce(ticket(VERIFIED));
     expect(await exchangeCode(ORIGIN, 'c')).toMatchObject({
       refreshToken: null,
-      name: null,
       scopes: [],
     });
   });

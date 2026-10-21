@@ -167,14 +167,7 @@ const broken = BROKEN_STATUSES.map((status) => ({
 
 /** Every row the E2E database starts with, in `seed()` order. */
 export const SEED: Seed = {
-  invites: [
-    ...USERS.invites,
-    ...broken.map((u) => ({ email: u.email, artistId: null, boundSub: u.uid })),
-  ],
-  users: [
-    ...USERS.users,
-    ...broken.map(({ uid, email }) => ({ uid, email, inviteEmail: email, accessGeneration: 1 })),
-  ],
+  users: [...USERS.users, ...broken.map(({ uid, email }) => ({ uid, email }))],
   connections: [
     ...USERS.connections,
     ...broken.map(({ uid, status }) => ({

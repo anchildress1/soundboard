@@ -1,4 +1,4 @@
-// Manages invites against DATABASE_URL (the unpooled URL works too):
+// Manages the users allowlist against DATABASE_URL (the unpooled URL works too):
 //   node --env-file=.env scripts/invite.ts add <email> [--artist flr]
 //   node --env-file=.env scripts/invite.ts revoke <email>
 //   node --env-file=.env scripts/invite.ts reactivate <email>
@@ -15,64 +15,41 @@ export type Invite = {
   email: string;
   active: boolean;
   artist_id: string | null;
-  bound_sub: string | null;
+  uid: string | null;
 };
 
 export const USAGE =
   'Usage: node scripts/invite.ts add <email> [--artist <id>] | revoke <email> | reactivate <email> | list';
 
-// Sign-in matches invites on the lowercased, trimmed email.
+// Sign-in matches on the lowercased, trimmed email.
 const normalize = (email: string) => email.trim().toLowerCase();
 
 export async function add(db: Queryable, email: string, artistId: string | null): Promise<void> {
-  await db.query('insert into invites (email, artist_id) values ($1, $2)', [
+  await db.query('insert into users (email, artist_id) values ($1, $2)', [
     normalize(email),
     artistId,
   ]);
 }
 
 /**
- * Deactivates the invite and signs its bound user out everywhere, in one transaction. Returns the
- * bound user's uid, or null when nobody signed in with the invite.
+ * Sets the account's `active` flag; deactivating signs it out on its next request. Returns
+ * whether it ever signed in. Throws for an unknown email.
  */
-export async function revoke(db: Queryable, email: string): Promise<string | null> {
-  await db.query('begin');
-  try {
-    const { rows } = await db.query(
-      'update invites set active = false where email = $1 returning bound_sub',
-      [normalize(email)],
-    );
-    const invite = rows[0] as Pick<Invite, 'bound_sub'> | undefined;
-    if (!invite) throw new Error(`No invite for ${email}`);
-    await db.query('update users set access_generation = access_generation + 1 where uid = $1', [
-      invite.bound_sub,
-    ]);
-    await db.query('commit');
-    return invite.bound_sub;
-  } catch (error) {
-    // A failed rollback must not hide why the revoke failed.
-    await db.query('rollback').catch((rollback: unknown) => {
-      const why = error instanceof Error ? error.message : String(error);
-      const also = rollback instanceof Error ? rollback.message : String(rollback);
-      throw new Error(`${why} (rollback also failed: ${also})`, { cause: error });
-    });
-    throw error;
-  }
+async function setActive(db: Queryable, email: string, active: boolean): Promise<boolean> {
+  const { rows } = await db.query('update users set active = $2 where email = $1 returning uid', [
+    normalize(email),
+    active,
+  ]);
+  const user = rows[0] as Pick<Invite, 'uid'> | undefined;
+  if (!user) throw new Error(`No invite for ${email}`);
+  return user.uid !== null;
 }
 
-/** Lets the account sign in again. Old sessions stay dead: the generation never goes back. */
-export async function reactivate(db: Queryable, email: string): Promise<void> {
-  const { rows } = await db.query(
-    'update invites set active = true where email = $1 returning email',
-    [normalize(email)],
-  );
-  if (rows.length === 0) throw new Error(`No invite for ${email}`);
-}
+export const revoke = (db: Queryable, email: string) => setActive(db, email, false);
+export const reactivate = (db: Queryable, email: string) => setActive(db, email, true);
 
 export async function list(db: Queryable): Promise<Invite[]> {
-  const { rows } = await db.query(
-    'select email, active, artist_id, bound_sub from invites order by email',
-  );
+  const { rows } = await db.query('select email, active, artist_id, uid from users order by email');
   return rows as Invite[];
 }
 
@@ -101,17 +78,15 @@ export async function run(args: string[], db: Queryable): Promise<string> {
     case 'list':
       return (await list(db))
         .map((r) =>
-          [r.email, r.active ? 'active' : 'revoked', r.artist_id ?? '-', r.bound_sub ?? '-'].join(
-            '\t',
-          ),
+          [r.email, r.active ? 'active' : 'revoked', r.artist_id ?? '-', r.uid ?? '-'].join('\t'),
         )
         .join('\n');
     case 'add':
       await add(db, command.email, command.artistId);
       return `Invited ${normalize(command.email)}`;
     case 'revoke': {
-      const bound = await revoke(db, command.email);
-      return `Revoked ${normalize(command.email)}${bound ? '' : ' (never signed in)'}`;
+      const signedIn = await revoke(db, command.email);
+      return `Revoked ${normalize(command.email)}${signedIn ? '' : ' (never signed in)'}`;
     }
     case 'reactivate':
       await reactivate(db, command.email);

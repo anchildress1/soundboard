@@ -8,7 +8,7 @@
 
 Make the app invite-only behind Google sign-in. One consent screen grants identity plus YouTube.
 
-- **Users:** keyed by the Google `sub` (the account's permanent ID). Sessions stay signed `{uid, sid, gen, exp}` cookies with a fixed 30 days, so concurrency needs no session store.
+- **Users:** keyed by the Google `sub` (the account's permanent ID). Sessions stay signed `{uid, sid, exp}` cookies with a fixed 30 days, so concurrency needs no session store.
 - **Database:** Neon Postgres through Drizzle replaces Firestore (research R12); tests run on PGlite.
 - **Tokens:** each user's YouTube refresh token is KMS-encrypted on their `connections` row.
 - **Jobs:** each job gets an `ownerUid`, plus a destination channel that's pinned at approval.
@@ -97,8 +97,8 @@ src/
 │   ├── core/schema.ts      (new)      # Drizzle tables (data-model)
 │   ├── core/db.ts          (new)      # Drizzle over a pg Pool; replaces Firestore in core/clients.ts
 │   ├── core/kms.ts         (new)      # encrypt/decrypt
-│   ├── auth/auth.ts                   # session {uid,sid,gen,exp}, OAuth state {purpose,uid,sid}, prompts
-│   ├── auth/users.ts       (new)      # getUser, redeemInvite (transaction), updateProfile (never writes gen)
+│   ├── auth/auth.ts                   # session {uid,sid,exp}, OAuth state {purpose,uid,sid}, prompts
+│   ├── auth/users.ts       (new)      # getUser, admit
 │   ├── jobs/jobs.ts                   # ownerUid, parentId, destination, upload markers; listJobs(uid); releaseJob keeps videoId
 │   ├── jobs/create.ts                 # drop samples, visitor runs, ownerFor
 │   ├── jobs/actions.ts                # approve pins destination; discard in PUBLISHING/CLAIMED_COMPLETE
@@ -128,7 +128,7 @@ scripts/
 tests/
 ├── unit/…                          # mirrors src/
 ├── helpers/db.ts (new)              # fresh PGlite per file, migrations applied; fake-firestore.ts removed
-├── e2e/fakes/{kms.ts, db.ts (new), fixtures.ts (users, invites, connections)}; firestore.ts removed
+├── e2e/fakes/{kms.ts, db.ts (new), fixtures.ts (users, connections)}; firestore.ts removed
 └── e2e/{auth,isolation,connections}.spec.ts
 drizzle/ (generated migrations), drizzle.config.ts (new)
 deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
@@ -139,7 +139,7 @@ deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 ## Key Decisions
 
 - **Gate placement:** one handle in `hooks.server.ts` covers pages and `+server.ts`. There's no wildcard API exemption (FR-002).
-- **Revocation without a session store:** each user has an `accessGeneration` counter, compared on every request (FR-006). That's the gate's only read.
+- **Revocation without a session store:** the gate reads the user's `active` flag on every request (FR-006). That's its only read.
 - **Browser sessions:** a random `sid` per sign-in, bound into the OAuth state, so stale connect callbacks fail after sign-out and back in (FR-026).
 - **Database:** Neon Postgres via Drizzle and `pg` (R12). Step claims are one `UPDATE … RETURNING` setting a fresh random `claim_token` and three-minute expiry. Result writes and release atomically require that token; superseded requests cannot write or clear the current claim. Job documents keep their shape in a `data` jsonb column.
 - **Refresh tokens:** KMS-encrypted on the `connections` row, so the connection and its token are one atomic upsert (R7). Cleared on `revoked`.

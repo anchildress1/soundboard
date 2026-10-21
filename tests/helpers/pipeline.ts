@@ -201,14 +201,7 @@ export const REFRESH_A = 'refresh-a';
 
 /** A and B as invited, signed-up users; A's YouTube grant is connected. */
 export const USERS = {
-  invites: [USER_A, USER_B].map((u) => ({ email: u.email, artistId: u.artistId, boundSub: u.uid })),
-  users: [USER_A, USER_B].map(({ uid, email, artistId }) => ({
-    uid,
-    email,
-    artistId,
-    inviteEmail: email,
-    accessGeneration: 1,
-  })),
+  users: [USER_A, USER_B].map(({ uid, email, artistId }) => ({ uid, email, artistId })),
   connections: [
     {
       uid: USER_A.uid,

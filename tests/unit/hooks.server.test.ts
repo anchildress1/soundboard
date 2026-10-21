@@ -170,7 +170,7 @@ describe('replaceTraceMeta', () => {
 describe('handle', () => {
   it('lets only the app itself frame its pages', async () => {
     const { resolve } = renderer();
-    const response = await run(event(sessionCookie(USER_A.uid, 1)), resolve);
+    const response = await run(event(sessionCookie(USER_A.uid)), resolve);
     expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
@@ -185,43 +185,60 @@ describe('handle', () => {
     expect(response.headers.get('set-cookie')).toBeNull();
   });
 
-  it('resolves the user from a signed session at their access generation', async () => {
+  it('resolves the active user from a signed session', async () => {
     const { resolve, seen } = renderer();
-    const cookie = sessionCookie(USER_A.uid, 1);
+    const cookie = sessionCookie(USER_A.uid);
     await run(event(cookie), resolve);
     expect(seen.locals?.user).toEqual(signedIn(USER_A, cookie));
   });
 
   it('resolves an unlinked user with a null artist', async () => {
     const { resolve, seen } = renderer();
-    const cookie = sessionCookie(USER_B.uid, 1);
+    const cookie = sessionCookie(USER_B.uid);
     await run(event(cookie), resolve);
     expect(seen.locals?.user).toEqual(signedIn(USER_B, cookie));
   });
 
-  it('signs out a session from before the access generation was bumped', async () => {
-    await db().update(users).set({ accessGeneration: 2 }).where(eq(users.uid, USER_A.uid));
+  it('signs out a session whose user was deactivated', async () => {
+    await db().update(users).set({ active: false }).where(eq(users.uid, USER_A.uid));
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie(USER_A.uid, 1), {}, '/'), resolve);
+    await run(event(sessionCookie(USER_A.uid), {}, '/'), resolve);
+    expect(seen.locals?.user).toBeNull();
+  });
+
+  it('reads email and artist from the row, not the cookie', async () => {
+    await db()
+      .update(users)
+      .set({ email: 'moved@example.com', artistId: null })
+      .where(eq(users.uid, USER_A.uid));
+    const { resolve, seen } = renderer();
+    const cookie = sessionCookie(USER_A.uid);
+    await run(event(cookie), resolve);
+    expect(seen.locals?.user).toMatchObject({ email: 'moved@example.com', artistId: null });
+  });
+
+  it('signs out an expired session even while the user is active', async () => {
+    const { resolve, seen } = renderer();
+    await run(event(sessionCookie(USER_A.uid, 0), {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it('signs out a session whose user no longer exists', async () => {
     const { resolve, seen } = renderer();
-    await run(event(sessionCookie('uid-gone', 1), {}, '/'), resolve);
+    await run(event(sessionCookie('uid-gone'), {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it('drops a tampered cookie', async () => {
     const { resolve, seen } = renderer();
-    const forged = sessionCookie(USER_A.uid, 1).replace(/\.[^.]+$/, '.forged');
+    const forged = sessionCookie(USER_A.uid).replace(/\.[^.]+$/, '.forged');
     await run(event(forged, {}, '/'), resolve);
     expect(seen.locals?.user).toBeNull();
   });
 
   it("renders the job's trace into the page when the job page set one", async () => {
     const { resolve } = renderer();
-    const ev = event(sessionCookie(USER_A.uid, 1), {
+    const ev = event(sessionCookie(USER_A.uid), {
       jobTrace: { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE },
     });
     const html = await (await run(ev, resolve)).text();
@@ -232,7 +249,7 @@ describe('handle', () => {
 
   it("reports a malformed job trace tagged with the page's job", async () => {
     const { resolve } = renderer();
-    const ev = event(sessionCookie(USER_A.uid, 1), {
+    const ev = event(sessionCookie(USER_A.uid), {
       jobTrace: { sentryTrace: 'bad', baggage: JOB_BAGGAGE },
     });
     ev.params = { id: 'j1' };
@@ -252,7 +269,7 @@ describe('handle', () => {
 
   it('skips chunks without a <head>', async () => {
     const { resolve } = renderer('<div>partial</div>');
-    const ev = event(sessionCookie(USER_A.uid, 1), {
+    const ev = event(sessionCookie(USER_A.uid), {
       jobTrace: { sentryTrace: JOB_TRACE, baggage: JOB_BAGGAGE },
     });
     expect(await (await run(ev, resolve)).text()).toBe('<div>partial</div>');
@@ -343,57 +360,52 @@ describe('gate', () => {
 
   it('lets a signed-in client navigation through without the signed-out bounce', async () => {
     const { resolve, seen } = renderer();
-    const cookie = sessionCookie(USER_B.uid, 1);
+    const cookie = sessionCookie(USER_B.uid);
     await run(event(cookie, {}, '/jobs/x', true), resolve);
     expect(seen.resolved).toBe(1);
   });
 
   it.each(PATHS)('lets a signed-in request reach %s', async (path) => {
     const { resolve, seen } = renderer();
-    const cookie = sessionCookie(USER_B.uid, 1);
+    const cookie = sessionCookie(USER_B.uid);
     await run(event(cookie, {}, path), resolve);
     expect(seen.resolved).toBe(1);
     expect(seen.locals?.user).toEqual(signedIn(USER_B, cookie));
   });
 
-  it('gates a revoked session like no session', async () => {
-    await db().update(users).set({ accessGeneration: 2 }).where(eq(users.uid, USER_A.uid));
+  it('gates a deactivated session like no session', async () => {
+    await db().update(users).set({ active: false }).where(eq(users.uid, USER_A.uid));
     const { resolve } = renderer();
-    const response = await run(event(sessionCookie(USER_A.uid, 1), {}, '/api/jobs'), resolve);
+    const response = await run(event(sessionCookie(USER_A.uid), {}, '/api/jobs'), resolve);
     expect(response.status).toBe(401);
   });
 });
 
-describe('access generation', () => {
+describe('revoke and reactivate', () => {
   const signedInAs = async (cookie: string) => {
     const { resolve, seen } = renderer();
     await run(event(cookie, {}, '/'), resolve);
     return seen.locals?.user ?? null;
   };
 
-  it('signs a user out on the next request once their invite is revoked', async () => {
-    const cookie = sessionCookie(USER_A.uid, 1);
+  it('signs a user out on the next request once they are revoked', async () => {
+    const cookie = sessionCookie(USER_A.uid);
     expect(await signedInAs(cookie)).toEqual(signedIn(USER_A, cookie));
     await revoke(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
   });
 
-  it('keeps other users signed in when one invite is revoked', async () => {
+  it('keeps other users signed in when one is revoked', async () => {
     await revoke(client(), USER_A.email);
-    const cookie = sessionCookie(USER_B.uid, 1);
+    const cookie = sessionCookie(USER_B.uid);
     expect(await signedInAs(cookie)).toEqual(signedIn(USER_B, cookie));
   });
 
-  it('never revives an old cookie when the invite is reactivated', async () => {
-    const cookie = sessionCookie(USER_A.uid, 1);
+  it('revives an unexpired cookie once the user is reactivated', async () => {
+    const cookie = sessionCookie(USER_A.uid);
     await revoke(client(), USER_A.email);
-    await reactivate(client(), USER_A.email);
     expect(await signedInAs(cookie)).toBeNull();
-    const fresh = sessionCookie(USER_A.uid, 2);
-    expect(await signedInAs(fresh)).toEqual(signedIn(USER_A, fresh));
-  });
-
-  it('rejects a cookie from a future generation', async () => {
-    expect(await signedInAs(sessionCookie(USER_A.uid, 2))).toBeNull();
+    await reactivate(client(), USER_A.email);
+    expect(await signedInAs(cookie)).toEqual(signedIn(USER_A, cookie));
   });
 });

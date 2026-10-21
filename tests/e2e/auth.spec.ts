@@ -61,11 +61,11 @@ test('a session that stops validating mid-run sends the job page home', async ({
   const first = page.waitForResponse((r) => r.url().endsWith(`${job}/step`));
   await page.goto(job);
   expect((await first).status()).toBe(200);
-  // A cookie from an older access generation, as after a revoke: present, but no longer valid.
+  // Validly signed, but for a uid with no active user row, as after a deactivation.
   await page
     .context()
     .addCookies([
-      { name: 'sb_session', value: sessionCookie(USER_A, 0), url: 'http://localhost:4173' },
+      { name: 'sb_session', value: sessionCookie('uid-gone'), url: 'http://localhost:4173' },
     ]);
   const refused = await page.waitForResponse((r) => r.url().endsWith(`${job}/step`));
   expect(refused.status()).toBe(401);

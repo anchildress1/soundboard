@@ -3,12 +3,12 @@ import { captureException, captureMessage } from '@sentry/sveltekit';
 import { isRedirect, type RequestEvent } from '@sveltejs/kit';
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { handle } from '$lib/../hooks.server';
 import { db } from '$lib/server/core/db';
-import { connections, invites, jobs, users } from '$lib/server/core/schema';
+import { connections, jobs, users } from '$lib/server/core/schema';
 import {
   newOAuthState,
   OAUTH_COOKIE,
@@ -104,6 +104,8 @@ const channel = (item: typeof CHANNEL | null) =>
 const redirectTo = (thrown: unknown) =>
   isRedirect(thrown) ? [thrown.status, thrown.location] : thrown;
 const allUsers = () => db().select().from(users);
+/** The seeded row for EMAIL, still waiting for its first sign-in. */
+const unbound = () => [expect.objectContaining({ email: EMAIL, uid: null })];
 const allConnections = () => db().select().from(connections);
 const connectionOf = async (uid: string) =>
   (await db().select().from(connections).where(eq(connections.uid, uid)))[0];
@@ -154,7 +156,7 @@ describe('GET /auth/callback: state checks', () => {
   });
 
   it('sends a cancelled consent back to sign in again, writing nothing', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     const { thrown, cookies } = await call({
       cookie: sign(state()),
       query: '?error=access_denied&state=nonce-1',
@@ -162,7 +164,7 @@ describe('GET /auth/callback: state checks', () => {
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.set).not.toHaveBeenCalled();
     expect(h.getToken).not.toHaveBeenCalled();
-    expect(await allUsers()).toEqual([]);
+    expect(await allUsers()).toEqual(unbound());
     expect(await allConnections()).toEqual([]);
   });
 
@@ -173,7 +175,7 @@ describe('GET /auth/callback: state checks', () => {
   });
 
   it('consumes the state on first read, so the same callback cannot run twice', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     google(SUB, EMAIL);
     const { cookies } = await call({ cookie: sign(state()) });
     expect(cookies.delete).toHaveBeenCalledWith(OAUTH_COOKIE, { path: '/auth' });
@@ -184,8 +186,8 @@ describe('GET /auth/callback: state checks', () => {
 });
 
 describe('GET /auth/callback: sign-in', () => {
-  it("redeems the invite, sets a session at the new user's generation, and connects YouTube", async () => {
-    await seed({ invites: [{ email: EMAIL, artistId: null }] });
+  it('binds the unbound row to the Google account, sets a session, and connects YouTube', async () => {
+    await seed({ users: [{ email: EMAIL }] });
     google(SUB, EMAIL);
     const { thrown, cookies } = await call({
       cookie: sign(state()),
@@ -202,12 +204,10 @@ describe('GET /auth/callback: sign-in', () => {
       sameSite: 'lax',
       maxAge: SESSION_TTL_SEC,
     });
-    expect(readSession(value as string)).toMatchObject({ uid: SUB, gen: 1 });
+    expect(readSession(value as string)).toMatchObject({ uid: SUB });
     expect(await allUsers()).toEqual([
-      expect.objectContaining({ uid: SUB, email: EMAIL, name: 'New', inviteEmail: EMAIL }),
+      expect.objectContaining({ uid: SUB, email: EMAIL, artistId: null, active: true }),
     ]);
-    const [invite] = await db().select().from(invites);
-    expect(invite!.boundSub).toBe(SUB);
 
     expect(await connectionOf(SUB)).toMatchObject({
       status: 'connected',
@@ -231,113 +231,83 @@ describe('GET /auth/callback: sign-in', () => {
     expect(sid(first)).not.toBe(sid(second));
   });
 
-  it.each([1, 4])(
-    'keeps a racing callback at admitted generation %i after revocation',
-    async (gen) => {
-      await seed({
-        invites: [{ email: EMAIL, boundSub: SUB }],
-        users: [{ uid: SUB, email: EMAIL, inviteEmail: EMAIL, accessGeneration: gen }],
-      });
-      // Advance revocation state at the profile write, after admission has returned its snapshot.
-      await db().execute(sql`
-      create function revoke_at_profile() returns trigger language plpgsql as $$
-      begin
-        update invites set active = false where email = old.invite_email;
-        new.access_generation := old.access_generation + 1;
-        return new;
-      end $$
-    `);
-      await db().execute(sql`
-      create trigger revoke_at_profile before update of email, name on users
-      for each row execute function revoke_at_profile();
-    `);
-      try {
-        google(SUB, EMAIL);
-        const { thrown, cookies } = await call({ cookie: sign(state()) });
-        expect(redirectTo(thrown)).toEqual([303, '/']);
-        const cookie = cookies.set.mock.calls[0]![1] as string;
-        expect(readSession(cookie)).toMatchObject({ uid: SUB, gen });
-        expect(await allUsers()).toEqual([
-          expect.objectContaining({ uid: SUB, accessGeneration: gen + 1, name: 'New' }),
-        ]);
-        const [invite] = await db().select().from(invites);
-        expect(invite).toMatchObject({ active: false, boundSub: SUB });
-
-        const event = {
-          url: new URL('http://localhost/api/jobs'),
-          cookies: { get: (name: string) => (name === SESSION_COOKIE ? cookie : undefined) },
-          locals: { user: null },
-          isDataRequest: false,
-        } as unknown as RequestEvent;
-        const resolve = vi.fn(async () => new Response('allowed'));
-        const span = { setAttributes: () => span, setAttribute: () => span, end: () => {} };
-        const response = await with_request_store(
-          {
-            event,
-            state: {
-              tracing: { record_span: ({ fn }: { fn: (s: unknown) => unknown }) => fn(span) },
-            },
-          },
-          () => handle({ event, resolve }),
-        );
-        expect(response.status).toBe(401);
-        expect(event.locals.user).toBeNull();
-        expect(resolve).not.toHaveBeenCalled();
-      } finally {
-        await db().execute(sql`drop trigger revoke_at_profile on users`);
-        await db().execute(sql`drop function revoke_at_profile()`);
-      }
-    },
-  );
-
-  it("refreshes a returning user's profile and keeps their generation", async () => {
-    await seed({
-      invites: [{ email: EMAIL, artistId: 'flr', boundSub: SUB }],
-      users: [{ uid: SUB, email: EMAIL, inviteEmail: EMAIL, artistId: 'flr', accessGeneration: 4 }],
-    });
+  it('admits a returning user by uid after a Google email change, leaving the row as is', async () => {
+    await seed({ users: [{ email: EMAIL, uid: SUB, artistId: 'flr' }] });
+    const before = await allUsers();
     google(SUB, 'changed@example.com');
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/']);
+    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toMatchObject({ uid: SUB });
+    expect(await allUsers()).toEqual(before);
+  });
+
+  it('ends the session on its next request once the user is deactivated', async () => {
+    await seed({ users: [{ email: EMAIL }] });
+    google(SUB, EMAIL);
     const { cookies } = await call({ cookie: sign(state()) });
-    expect(readSession(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
-      uid: SUB,
-      gen: 4,
-    });
-    const [user] = await db().select().from(users).where(eq(users.uid, SUB));
-    expect(user).toMatchObject({ email: 'changed@example.com', name: 'New', accessGeneration: 4 });
+    const cookie = cookies.set.mock.calls[0]![1] as string;
+    const request = async () => {
+      const event = {
+        url: new URL('http://localhost/api/jobs'),
+        cookies: { get: (name: string) => (name === SESSION_COOKIE ? cookie : undefined) },
+        locals: { user: null },
+        isDataRequest: false,
+      } as unknown as RequestEvent;
+      const resolve = vi.fn(async () => new Response('allowed'));
+      const span = { setAttributes: () => span, setAttribute: () => span, end: () => {} };
+      const response = await with_request_store(
+        {
+          event,
+          state: {
+            tracing: { record_span: ({ fn }: { fn: (s: unknown) => unknown }) => fn(span) },
+          },
+        },
+        () => handle({ event, resolve }),
+      );
+      return { response, event, resolve };
+    };
+    expect((await request()).response.status).toBe(200);
+
+    await db().update(users).set({ active: false }).where(eq(users.uid, SUB));
+    const { response, event, resolve } = await request();
+    expect(response.status).toBe(401);
+    expect(event.locals.user).toBeNull();
+    expect(resolve).not.toHaveBeenCalled();
   });
 
   it('sends an unverified Google email back to sign in again, writing nothing', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     google(SUB, EMAIL, { verified: false });
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.set).not.toHaveBeenCalled();
-    expect(await allUsers()).toEqual([]);
+    expect(await allUsers()).toEqual(unbound());
   });
 
   it('sends a used or expired code back to sign in again, writing nothing', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     h.getToken.mockRejectedValue(
       Object.assign(new Error('Bad Request'), { response: { data: { error: 'invalid_grant' } } }),
     );
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
     expect(cookies.set).not.toHaveBeenCalled();
-    expect(await allUsers()).toEqual([]);
+    expect(await allUsers()).toEqual(unbound());
     expect(await allConnections()).toEqual([]);
   });
 
   it('fails loudly when the ID token fails verification, writing nothing', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     google(SUB, EMAIL);
     h.verifyIdToken.mockRejectedValue(new Error('Wrong recipient'));
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect((thrown as Error).message).toBe('Wrong recipient');
     expect(cookies.set).not.toHaveBeenCalled();
-    expect(await allUsers()).toEqual([]);
+    expect(await allUsers()).toEqual(unbound());
   });
 
   it('fails loudly when the code exchange fails for another reason', async () => {
-    await seed({ invites: [{ email: EMAIL }] });
+    await seed({ users: [{ email: EMAIL }] });
     h.getToken.mockRejectedValue(new Error('ECONNRESET'));
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect((thrown as Error).message).toBe('ECONNRESET');
@@ -538,24 +508,35 @@ describe('GET /auth/callback: denied sign-in', () => {
     expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('stranger');
   });
 
-  it('denies an invite already bound to another account', async () => {
-    await seed({ invites: [{ email: EMAIL, boundSub: 'sub-other' }] });
+  it('denies an email already bound to another account', async () => {
+    await seed({ users: [{ email: EMAIL, uid: 'sub-other' }] });
     google(SUB, EMAIL);
     const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=denied']);
     expect(cookies.set).not.toHaveBeenCalled();
-    expect(await allUsers()).toEqual([]);
+    expect(await allUsers()).toEqual([expect.objectContaining({ email: EMAIL, uid: 'sub-other' })]);
     expect(await allConnections()).toEqual([]);
-    const [invite] = await db().select().from(invites);
-    expect(invite!.boundSub).toBe('sub-other');
   });
 
-  it('denies a revoked invite', async () => {
-    await seed({ invites: [{ email: EMAIL, active: false }] });
+  it('denies a deactivated account at its first sign-in, leaving it unbound', async () => {
+    await seed({ users: [{ email: EMAIL, active: false }] });
     google(SUB, EMAIL);
-    const { thrown } = await call({ cookie: sign(state()) });
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=denied']);
-    expect(await allUsers()).toEqual([]);
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual(unbound());
+  });
+
+  it('denies a revoked user signing in again', async () => {
+    await seed({ users: [{ email: EMAIL, uid: SUB, active: false }] });
+    google(SUB, EMAIL);
+    const { thrown, cookies } = await call({ cookie: sign(state()) });
+    expect(redirectTo(thrown)).toEqual([303, '/?signin=denied']);
+    expect(cookies.set).not.toHaveBeenCalled();
+    expect(await allUsers()).toEqual([
+      expect.objectContaining({ email: EMAIL, uid: SUB, active: false }),
+    ]);
+    expect(await allConnections()).toEqual([]);
   });
 
   it('keeps jobs and artist link when a bound user signs in with a changed email', async () => {
@@ -566,7 +547,7 @@ describe('GET /auth/callback: denied sign-in', () => {
     const { thrown } = await call({ cookie: sign(state()) });
     expect(redirectTo(thrown)).toEqual([303, '/']);
     const [user] = await db().select().from(users).where(eq(users.uid, USER_A.uid));
-    expect(user).toMatchObject({ email: 'renamed@example.com', artistId: 'flr' });
+    expect(user).toMatchObject({ email: USER_A.email, artistId: 'flr' });
     const [job] = await db().select().from(jobs).where(eq(jobs.id, 'job-a'));
     expect(job).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr' });
   });

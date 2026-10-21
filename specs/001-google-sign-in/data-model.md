@@ -6,19 +6,19 @@ Nothing is carried over from Firestore (pre-beta). The FLR artist memory starts 
 
 ## `users`
 
-| Column              | Type                                 | Rule                                                                               |
-| ------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `uid`               | text, primary key                    | The Google `sub`                                                                   |
-| `email`             | text, not null                       | From the latest verified ID token; display only                                    |
-| `name`              | text                                 | From the ID token                                                                  |
-| `invite_email`      | text → `invites.email`               | The invite this user redeemed; null in open signup                                 |
-| `artist_id`         | text                                 | `'flr'` for Nathan until spec 002; copied from the invite at first redemption      |
-| `access_generation` | integer, not null, default 1         | Revoking the invite increments it. Sessions carrying an older value are signed out |
-| `created_at`        | timestamptz, not null, default now() |                                                                                    |
+The allowlist and the accounts are one table: the operator adds an email by hand, and its first Google sign-in binds the account.
 
-- Inserted only after the invite check passes (FR-005). An uninvited sign-in writes nothing.
-- Sign-in looks up `users` by `uid` first and checks the invite named by its `invite_email`, so an email change keeps access. Only a first sign-in looks the invite up by the token's email.
-- `access_generation` is written only at insert and by revoke. Sign-in upserts never touch it, so re-inviting never revives an old cookie.
+| Column       | Type                                 | Rule                                                                   |
+| ------------ | ------------------------------------ | ---------------------------------------------------------------------- |
+| `email`      | text, primary key                    | Lowercased, trimmed; the invited email, and the display email          |
+| `uid`        | text, unique                         | The Google `sub`. Null until the first sign-in; never rebound (FR-005) |
+| `artist_id`  | text                                 | `'flr'` for Nathan until spec 002                                      |
+| `active`     | boolean, not null, default true      | `false` = revoked: every session fails on its next request (FR-006)    |
+| `created_at` | timestamptz, not null, default now() |                                                                        |
+
+- Sign-in admits an active row bound to the token's `sub`, so an email change keeps access. A first sign-in binds with `UPDATE users SET uid = $sub WHERE email = $email AND active AND (uid IS NULL OR uid = $sub)`; zero rows means denied, and nothing is written.
+- Open signup inserts a row for an unknown email first, then binds it the same way. Those rows stay on the allowlist: switching back to invite mode keeps them signed in until each is revoked.
+- `scripts/invite.ts` adds, revokes (`active = false`), reactivates and lists rows.
 
 ## `connections`
 
@@ -35,19 +35,6 @@ Nothing is carried over from Firestore (pre-beta). The FLR artist memory starts 
 - One per user (FR-014); a `connected` row always names a channel, always on the user's own Google account. Reconnect upserts the row in one statement, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
 - `revoked` is set when Google returns `invalid_grant` or YouTube refuses the access token (401) during publish, verify, or confirm-upload, and the ciphertext is cleared in the same `UPDATE`. A dead token is never kept.
 - Disconnect: revoke at Google, then delete the row.
-
-## `invites`
-
-| Column       | Type                                 | Rule                                                                       |
-| ------------ | ------------------------------------ | -------------------------------------------------------------------------- |
-| `email`      | text, primary key                    | Lowercased, trimmed                                                        |
-| `active`     | boolean, not null, default true      | `false` = revoked                                                          |
-| `artist_id`  | text                                 | Copied to the user on first redemption                                     |
-| `bound_sub`  | text, unique                         | Set on first redemption. Only this `sub` may redeem it afterwards (FR-005) |
-| `created_at` | timestamptz, not null, default now() |                                                                            |
-
-- Revoke and reinvite run through `scripts/invite.ts`. Revoking sets `active = false` and increments the bound user's `access_generation` in one transaction (FR-006).
-- First redemption binds with `UPDATE invites SET bound_sub = $sub WHERE email = $email AND active AND (bound_sub IS NULL OR bound_sub = $sub)`; zero rows means denied.
 
 ## `jobs`
 
@@ -121,9 +108,9 @@ stateDiagram-v2
 
 ## Session cookie `sb_session`
 
-- Payload `{uid, sid, gen, exp}`, HMAC-signed with `SESSION_SECRET` (existing `sign` / `unsign`). `sid` is a random ID per sign-in, so each browser session is distinct.
+- Payload `{uid, sid, exp}`, HMAC-signed with `SESSION_SECRET` (existing `sign` / `unsign`). `sid` is a random ID per sign-in, so each browser session is distinct.
 - `exp` is the sign-in time plus 30 days, fixed.
-- Valid only when the signature checks out, `exp > now`, the `users` row exists and `gen === access_generation`. One query; revocation works through the generation bump, so no invite read per request.
+- Valid only when the signature checks out, `exp > now`, and an active `users` row is bound to `uid`. One query per request.
 - A payload without `uid` fails the check.
 
 ## OAuth state cookie `sb_oauth`

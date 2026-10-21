@@ -17,21 +17,15 @@ import { JOB_STATES } from '../../types';
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const quotedStates = JOB_STATES.map((state) => `'${state}'`).join(', ');
 
-export const invites = pgTable('invites', {
-  email: text('email').primaryKey(),
-  active: boolean('active').notNull().default(true),
-  artistId: text('artist_id'),
-  boundSub: text('bound_sub').unique(),
-  createdAt: at('created_at').notNull().defaultNow(),
-});
-
+/**
+ * The allowlist and the accounts in one table: add a lowercased email by hand; its first Google
+ * sign-in binds `uid`. `active = false` signs the account out on its next request.
+ */
 export const users = pgTable('users', {
-  uid: text('uid').primaryKey(),
-  email: text('email').notNull(),
-  name: text('name'),
-  inviteEmail: text('invite_email').references(() => invites.email),
+  email: text('email').primaryKey(),
+  uid: text('uid').unique(),
   artistId: text('artist_id'),
-  accessGeneration: integer('access_generation').notNull().default(1),
+  active: boolean('active').notNull().default(true),
   createdAt: at('created_at').notNull().defaultNow(),
 });
 

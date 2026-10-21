@@ -3,17 +3,15 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '$lib/server/core/db';
-import { invites, users } from '$lib/server/core/schema';
+import { users } from '$lib/server/core/schema';
 import { add, list, reactivate, revoke, run, USAGE } from '../../../scripts/invite';
 import { client, seed, truncate } from '../../helpers/db';
 import { USER_A, USER_B, USERS } from '../../helpers/pipeline';
 
-const inviteOf = async (email: string) =>
-  (await db().select().from(invites).where(eq(invites.email, email)))[0];
-const generationOf = async (uid: string) =>
-  (await db().select().from(users).where(eq(users.uid, uid)))[0]!.accessGeneration;
+const userOf = async (email: string) =>
+  (await db().select().from(users).where(eq(users.email, email)))[0];
 
 beforeEach(async () => {
   await truncate();
@@ -21,110 +19,69 @@ beforeEach(async () => {
 });
 
 describe('add', () => {
-  it('invites a normalized email, unbound and active', async () => {
+  it('adds a normalized email, unbound and active', async () => {
     await add(client(), '  New@Example.COM ', null);
-    expect(await inviteOf('new@example.com')).toMatchObject({
+    expect(await userOf('new@example.com')).toMatchObject({
       active: true,
       artistId: null,
-      boundSub: null,
+      uid: null,
     });
   });
 
-  it('links the invite to an artist', async () => {
+  it('links the user to an artist', async () => {
     await add(client(), 'nathan@example.com', 'flr');
-    expect((await inviteOf('nathan@example.com'))!.artistId).toBe('flr');
+    expect((await userOf('nathan@example.com'))!.artistId).toBe('flr');
   });
 
-  it('refuses a duplicate invite', async () => {
-    await expect(add(client(), USER_A.email, null)).rejects.toThrow();
+  it('refuses a duplicate email, in any case', async () => {
+    await expect(add(client(), USER_A.email.toUpperCase(), null)).rejects.toThrow();
   });
 });
 
 describe('revoke', () => {
-  it("deactivates the invite and bumps only the bound user's generation", async () => {
+  it('deactivates only that account, matching the email in any case', async () => {
     await revoke(client(), USER_A.email.toUpperCase());
-    expect((await inviteOf(USER_A.email))!.active).toBe(false);
-    expect(await generationOf(USER_A.uid)).toBe(2);
-    expect(await generationOf(USER_B.uid)).toBe(1);
+    expect((await userOf(USER_A.email))!.active).toBe(false);
+    expect((await userOf(USER_B.email))!.active).toBe(true);
   });
 
-  it('revokes an unbound invite without touching any user', async () => {
-    await add(client(), 'new@example.com', null);
-    await revoke(client(), 'new@example.com');
-    expect((await inviteOf('new@example.com'))!.active).toBe(false);
-    expect([await generationOf(USER_A.uid), await generationOf(USER_B.uid)]).toEqual([1, 1]);
+  it('keeps the bound uid and artist link', async () => {
+    await revoke(client(), USER_A.email);
+    expect(await userOf(USER_A.email)).toMatchObject({ uid: USER_A.uid, artistId: 'flr' });
   });
 
-  it('throws for an unknown email and leaves the transaction closed', async () => {
+  it('is idempotent on an already revoked account', async () => {
+    await revoke(client(), USER_A.email);
+    expect(await revoke(client(), USER_A.email)).toBe(true);
+    expect((await userOf(USER_A.email))!.active).toBe(false);
+  });
+
+  it('throws for an unknown email, writing nothing', async () => {
+    const before = await list(client());
     await expect(revoke(client(), 'nobody@example.com')).rejects.toThrow(
       'No invite for nobody@example.com',
     );
-    await revoke(client(), USER_B.email);
-    expect(await generationOf(USER_B.uid)).toBe(2);
+    expect(await list(client())).toEqual(before);
   });
 
-  /** Fails every query `fails` matches; returns how many it failed. */
-  async function failing(fails: (text: string) => boolean, body: () => Promise<void>) {
-    const pg = client();
-    const query = pg.query.bind(pg);
-    let rejected = 0;
-    const texts: string[] = [];
-    const spy = vi.spyOn(pg, 'query').mockImplementation(((text: string, params?: unknown[]) => {
-      texts.push(text);
-      if (!fails(text)) return query(text, params);
-      rejected += 1;
-      return Promise.reject(new Error(`lost connection on ${text.split(' ')[0]}`));
-    }) as typeof pg.query);
-    try {
-      await body();
-    } finally {
-      spy.mockRestore();
-    }
-    return { rejected, texts };
-  }
-
-  it('rolls back the deactivation when the generation bump fails', async () => {
-    const { rejected, texts } = await failing(
-      (text) => text.startsWith('update users'),
-      () => expect(revoke(client(), USER_A.email)).rejects.toThrow('lost connection on update'),
-    );
-    expect(rejected).toBe(1);
-    expect(texts.at(-1)).toBe('rollback');
-    expect((await inviteOf(USER_A.email))!.active).toBe(true);
-    expect(await generationOf(USER_A.uid)).toBe(1);
-  });
-
-  it('keeps the original error when the rollback fails too', async () => {
-    let error: Error | undefined;
-    const { rejected } = await failing(
-      (text) => text.startsWith('update users') || text === 'rollback',
-      async () => {
-        await revoke(client(), USER_A.email).catch((e: unknown) => {
-          error = e as Error;
-        });
-      },
-    );
-    expect(rejected).toBe(2);
-    expect(error!.message).toBe(
-      'lost connection on update (rollback also failed: lost connection on rollback)',
-    );
-    expect((error!.cause as Error).message).toBe('lost connection on update');
-    await client().query('rollback');
-  });
-
-  it('returns the bound user, or null for an invite nobody used', async () => {
-    expect(await revoke(client(), USER_A.email)).toBe(USER_A.uid);
+  it('returns whether the account ever signed in', async () => {
+    expect(await revoke(client(), USER_A.email)).toBe(true);
     await add(client(), 'new@example.com', null);
-    expect(await revoke(client(), 'new@example.com')).toBeNull();
+    expect(await revoke(client(), 'new@example.com')).toBe(false);
   });
 });
 
 describe('reactivate', () => {
-  it('reactivates the invite without lowering the generation', async () => {
+  it('reactivates the account, keeping its uid', async () => {
     await revoke(client(), USER_A.email);
-    await reactivate(client(), USER_A.email);
-    expect((await inviteOf(USER_A.email))!.active).toBe(true);
-    expect(await generationOf(USER_A.uid)).toBe(2);
+    expect(await reactivate(client(), USER_A.email)).toBe(true);
+    expect(await userOf(USER_A.email)).toMatchObject({ active: true, uid: USER_A.uid });
+  });
+
+  it('returns false for an account that never signed in', async () => {
+    await add(client(), 'new@example.com', null);
+    await revoke(client(), 'new@example.com');
+    expect(await reactivate(client(), 'new@example.com')).toBe(false);
   });
 
   it('throws for an unknown email', async () => {
@@ -133,15 +90,17 @@ describe('reactivate', () => {
 });
 
 describe('list', () => {
-  it('lists every invite by email', async () => {
+  it('lists every user by email', async () => {
     await revoke(client(), USER_B.email);
+    await add(client(), 'c@example.com', null);
     expect(await list(client())).toEqual([
-      { email: USER_A.email, active: true, artist_id: 'flr', bound_sub: USER_A.uid },
-      { email: USER_B.email, active: false, artist_id: null, bound_sub: USER_B.uid },
+      { email: USER_A.email, active: true, artist_id: 'flr', uid: USER_A.uid },
+      { email: USER_B.email, active: false, artist_id: null, uid: USER_B.uid },
+      { email: 'c@example.com', active: true, artist_id: null, uid: null },
     ]);
   });
 
-  it('lists nothing when there are no invites', async () => {
+  it('lists nothing when there are no users', async () => {
     await truncate();
     expect(await list(client())).toEqual([]);
   });
@@ -153,7 +112,7 @@ describe('run', () => {
     expect(await run(['add', 'y@example.com', '--artist', 'flr'], client())).toBe(
       'Invited y@example.com',
     );
-    expect((await inviteOf('y@example.com'))!.artistId).toBe('flr');
+    expect((await userOf('y@example.com'))!.artistId).toBe('flr');
   });
 
   it('revokes and reactivates', async () => {
@@ -161,19 +120,21 @@ describe('run', () => {
     expect(await run(['reactivate', USER_A.email], client())).toBe(`Reactivated ${USER_A.email}`);
   });
 
-  it('says when a revoked invite was never used to sign in', async () => {
+  it('says when a revoked account never signed in', async () => {
     await add(client(), 'new@example.com', null);
     expect(await run(['revoke', 'new@example.com'], client())).toBe(
       'Revoked new@example.com (never signed in)',
     );
   });
 
-  it('prints one tab-separated line per invite', async () => {
+  it('prints one tab-separated line per user, with - for an unset artist or uid', async () => {
     await run(['revoke', USER_B.email], client());
+    await add(client(), 'c@example.com', null);
     expect(await run(['list'], client())).toBe(
       [
         [USER_A.email, 'active', 'flr', USER_A.uid].join('\t'),
         [USER_B.email, 'revoked', '-', USER_B.uid].join('\t'),
+        ['c@example.com', 'active', '-', '-'].join('\t'),
       ].join('\n'),
     );
   });

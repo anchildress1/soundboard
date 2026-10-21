@@ -79,7 +79,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   oauth.options.length = 0;
   kms.decrypt.mockResolvedValue([{ plaintext: Buffer.from('1//refresh') }]);
-  await db().execute(sql`truncate users, invites cascade`);
+  await db().execute(sql`truncate users cascade`);
   await seed({
     users: [
       { uid: UID, email: 'a@example.com' },

@@ -13,7 +13,7 @@ export const OAUTH_TTL_SEC = 10 * 60;
 export const SCOPES = ['openid', 'email', ...YOUTUBE_SCOPES];
 
 /** `sid` is random per sign-in, so each browser session is distinct; `exp` never slides. */
-export type Session = { uid: string; sid: string; gen: number; exp: number };
+export type Session = { uid: string; sid: string; exp: number };
 
 const mac = (value: string) =>
   createHmac('sha256', required('SESSION_SECRET')).update(value).digest('base64url');
@@ -40,22 +40,22 @@ export function unsign<T>(token: string | undefined): T | null {
 
 const randomId = () => randomBytes(16).toString('base64url');
 
-/** A new session for `uid` at access generation `gen`, signed for the cookie. */
-export function sessionCookie(uid: string, gen: number, now = Date.now()): string {
-  const session: Session = { uid, sid: randomId(), gen, exp: now + SESSION_TTL_SEC * 1000 };
+/** A new session for `uid`, signed for the cookie. */
+export function sessionCookie(uid: string, now = Date.now()): string {
+  const session: Session = { uid, sid: randomId(), exp: now + SESSION_TTL_SEC * 1000 };
   return sign(session);
 }
 
 /**
  * The signed session, or null for a bad signature, an expired one, or a malformed payload. Whether
- * the user still exists at that generation is the caller's check.
+ * the user is still active is the caller's check.
  */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
   const data = unsign<Partial<Session>>(cookie);
   if (!data || typeof data.uid !== 'string' || !data.uid) return null;
   if (typeof data.exp !== 'number' || data.exp <= now) return null;
-  if (typeof data.sid !== 'string' || typeof data.gen !== 'number') return null;
-  return { uid: data.uid, sid: data.sid, gen: data.gen, exp: data.exp };
+  if (typeof data.sid !== 'string') return null;
+  return { uid: data.uid, sid: data.sid, exp: data.exp };
 }
 
 /** On `connect`, `uid` and `sid` name the session that started it, so a stale callback fails. */
@@ -117,7 +117,6 @@ export function authUrl(origin: string, state: OAuthState, loginHint?: string): 
 export type Grant = {
   sub: string;
   email: string;
-  name: string | null;
   scopes: string[];
   refreshToken: string | null;
   accessToken: string;
@@ -146,7 +145,6 @@ export async function exchangeCode(origin: string, code: string): Promise<Grant 
   return {
     sub: payload.sub,
     email: payload.email.toLowerCase(),
-    name: payload.name ?? null,
     scopes: tokens.scope?.split(' ').filter(Boolean) ?? [],
     refreshToken: tokens.refresh_token ?? null,
     accessToken: tokens.access_token,

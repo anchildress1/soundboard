@@ -45,12 +45,12 @@ const jobTraceMeta: Handle = ({ event, resolve }) =>
     },
   });
 
-/** A session counts only while its user exists at the same access generation; revoking bumps it. */
+/** A session counts only while its user is active, so deactivating signs them out everywhere. */
 const session: Handle = async ({ event, resolve }) => {
   const signed = readSession(event.cookies.get(SESSION_COOKIE));
   const user = signed ? await getUser(signed.uid) : null;
   event.locals.user =
-    user && signed?.gen === user.accessGeneration
+    user && signed
       ? { uid: user.uid, sid: signed.sid, email: user.email, artistId: user.artistId }
       : null;
   return resolve(event);

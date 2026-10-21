@@ -20,15 +20,6 @@ CREATE TABLE "connections" (
 	CONSTRAINT "connections_shape_check" CHECK (("connections"."status" = 'connected') = ("connections"."token_ciphertext" is not null) and ("connections"."status" <> 'connected' or "connections"."channel_id" is not null))
 );
 --> statement-breakpoint
-CREATE TABLE "invites" (
-	"email" text PRIMARY KEY NOT NULL,
-	"active" boolean DEFAULT true NOT NULL,
-	"artist_id" text,
-	"bound_sub" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "invites_bound_sub_unique" UNIQUE("bound_sub")
-);
---> statement-breakpoint
 CREATE TABLE "jobs" (
 	"id" text PRIMARY KEY NOT NULL,
 	"owner_uid" text NOT NULL,
@@ -51,17 +42,15 @@ CREATE TABLE "jobs" (
 );
 --> statement-breakpoint
 CREATE TABLE "users" (
-	"uid" text PRIMARY KEY NOT NULL,
-	"email" text NOT NULL,
-	"name" text,
-	"invite_email" text,
+	"email" text PRIMARY KEY NOT NULL,
+	"uid" text,
 	"artist_id" text,
-	"access_generation" integer DEFAULT 1 NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "users_uid_unique" UNIQUE("uid")
 );
 --> statement-breakpoint
 ALTER TABLE "connections" ADD CONSTRAINT "connections_uid_users_uid_fk" FOREIGN KEY ("uid") REFERENCES "public"."users"("uid") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "jobs" ADD CONSTRAINT "jobs_owner_uid_users_uid_fk" FOREIGN KEY ("owner_uid") REFERENCES "public"."users"("uid") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "jobs" ADD CONSTRAINT "jobs_parent_id_jobs_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."jobs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_invite_email_invites_email_fk" FOREIGN KEY ("invite_email") REFERENCES "public"."invites"("email") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "jobs_owner_list_idx" ON "jobs" USING btree ("owner_uid","created_at" DESC NULLS LAST) WHERE "jobs"."parent_id" is null;

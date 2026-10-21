@@ -19,8 +19,8 @@ Audience: AI coding agents. Directives only.
 ## Data and access
 
 - `VERIFIED` only after `videos.list` returns the upload. Insert response → `CLAIMED_COMPLETE`.
-- A user is their Google `sub` (`users.uid`). Email is display and invite lookup only.
-- Sign-in needs an active invite while `SIGNUP_MODE=invite`. First redemption binds the invite to the `sub`; NEVER rebind it.
+- A user is their Google `sub` (`users.uid`). Email is the allowlist key and display only.
+- `users` is the allowlist: the operator adds emails by hand. Sign-in needs an active row while `SIGNUP_MODE=invite`. First sign-in binds `uid`; NEVER rebind it. `SIGNUP_MODE=open` adds a permanent active row per new account.
 - Load a job by a request-supplied ID only through `authorizedJob` (owner check); list jobs only through `listJobs(uid)`. Another user's job → 404, never 403.
 - Only a user with `artistId` reads or writes `artist_memory` rows or opens `/brand`.
 - Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.

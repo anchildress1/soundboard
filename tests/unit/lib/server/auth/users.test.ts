@@ -1,229 +1,214 @@
 // @vitest-environment node
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getUser, redeemInvite, updateProfile } from '$lib/server/auth/users';
+import { admit, getUser } from '$lib/server/auth/users';
 import { db } from '$lib/server/core/db';
-import { invites, users } from '$lib/server/core/schema';
-import { seed } from '../../../../helpers/db';
+import { users } from '$lib/server/core/schema';
+import { client, seed } from '../../../../helpers/db';
 
 const NATHAN = 'sub-nathan';
 const OTHER = 'sub-other';
 
-const invite = async (email: string) =>
-  (
-    await db()
-      .select()
-      .from(invites)
-      .where(sql`${invites.email} = ${email}`)
-  )[0];
+const userOf = async (email: string) =>
+  (await db().select().from(users).where(eq(users.email, email)))[0];
 const allUsers = () => db().select().from(users);
 
 beforeEach(async () => {
   vi.stubEnv('SIGNUP_MODE', 'invite');
-  await db().execute(sql`truncate users, invites cascade`);
+  await db().execute(sql`truncate users cascade`);
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('redeemInvite (invite mode)', () => {
-  it('binds a first redemption by normalized email and copies the artist link', async () => {
-    await seed({ invites: [{ email: 'nathan@example.com', artistId: 'flr' }] });
-    const user = await redeemInvite(NATHAN, '  Nathan@Example.COM ');
-    expect(user).toMatchObject({
+describe('admit (invite mode)', () => {
+  it('binds a first sign-in by normalized email and keeps the artist link', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', artistId: 'flr' }] });
+    expect(await admit(NATHAN, '  Nathan@Example.COM ')).toMatchObject({
       uid: NATHAN,
-      email: '  Nathan@Example.COM ',
-      inviteEmail: 'nathan@example.com',
+      email: 'nathan@example.com',
       artistId: 'flr',
-      accessGeneration: 1,
+      active: true,
     });
-    expect((await invite('nathan@example.com'))!.boundSub).toBe(NATHAN);
+    expect((await userOf('nathan@example.com'))!.uid).toBe(NATHAN);
   });
 
-  it('admits a returning user whose Google email changed, by the invite they redeemed', async () => {
-    await seed({
-      invites: [{ email: 'nathan@example.com', artistId: 'flr', boundSub: NATHAN }],
-      users: [
-        {
-          uid: NATHAN,
-          email: 'nathan@example.com',
-          inviteEmail: 'nathan@example.com',
-          artistId: 'flr',
-        },
-      ],
+  it('admits a returning user whose Google email changed, by uid', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, artistId: 'flr' }] });
+    expect(await admit(NATHAN, 'nathan@new.example')).toMatchObject({
+      uid: NATHAN,
+      email: 'nathan@example.com',
+      artistId: 'flr',
     });
-    const user = await redeemInvite(NATHAN, 'nathan@new.example');
-    expect(user).toMatchObject({ uid: NATHAN, inviteEmail: 'nathan@example.com', artistId: 'flr' });
     expect(await allUsers()).toHaveLength(1);
   });
 
-  it('keeps a returning user on their own artist link after the invite changes', async () => {
+  it('denies another account on a bound email and writes nothing', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN }] });
+    expect(await admit(OTHER, 'nathan@example.com')).toBe('denied');
+    expect((await userOf('nathan@example.com'))!.uid).toBe(NATHAN);
+  });
+
+  it('denies a deactivated email and leaves it unbound', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', active: false }] });
+    expect(await admit(NATHAN, 'nathan@example.com')).toBe('denied');
+    expect((await userOf('nathan@example.com'))!.uid).toBeNull();
+  });
+
+  it('denies a returning user once deactivated', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, active: false }] });
+    expect(await admit(NATHAN, 'nathan@example.com')).toBe('denied');
+  });
+
+  it('admits a returning user again once reactivated', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, active: false }] });
+    await db().update(users).set({ active: true }).where(eq(users.uid, NATHAN));
+    expect(await admit(NATHAN, 'nathan@example.com')).toMatchObject({ uid: NATHAN });
+  });
+
+  it("denies a deactivated user who signs in with another active row's email", async () => {
     await seed({
-      invites: [{ email: 'nathan@example.com', artistId: 'other', boundSub: NATHAN }],
       users: [
-        { uid: NATHAN, email: 'n@example.com', inviteEmail: 'nathan@example.com', artistId: 'flr' },
-      ],
-    });
-    expect(await redeemInvite(NATHAN, 'n@example.com')).toMatchObject({ artistId: 'flr' });
-  });
-
-  it('denies a foreign sub on a bound invite and writes nothing', async () => {
-    await seed({ invites: [{ email: 'nathan@example.com', artistId: 'flr', boundSub: NATHAN }] });
-    expect(await redeemInvite(OTHER, 'nathan@example.com')).toBe('denied');
-    expect(await allUsers()).toEqual([]);
-    expect((await invite('nathan@example.com'))!.boundSub).toBe(NATHAN);
-  });
-
-  it('denies an inactive invite and leaves it unbound', async () => {
-    await seed({ invites: [{ email: 'nathan@example.com', active: false }] });
-    expect(await redeemInvite(NATHAN, 'nathan@example.com')).toBe('denied');
-    expect(await allUsers()).toEqual([]);
-    expect((await invite('nathan@example.com'))!.boundSub).toBeNull();
-  });
-
-  it('denies an email with no invite', async () => {
-    expect(await redeemInvite(NATHAN, 'stranger@example.com')).toBe('denied');
-    expect(await allUsers()).toEqual([]);
-  });
-
-  it('denies a returning user once their invite is revoked', async () => {
-    await seed({
-      invites: [{ email: 'nathan@example.com', active: false, boundSub: NATHAN }],
-      users: [{ uid: NATHAN, email: 'nathan@example.com', inviteEmail: 'nathan@example.com' }],
-    });
-    expect(await redeemInvite(NATHAN, 'nathan@example.com')).toBe('denied');
-  });
-
-  it("denies a returning user by their own invite, not another invite for the token's email", async () => {
-    await seed({
-      invites: [
-        { email: 'old@example.com', active: false, boundSub: NATHAN },
+        { email: 'old@example.com', uid: NATHAN, active: false },
         { email: 'new@example.com' },
       ],
-      users: [{ uid: NATHAN, email: 'old@example.com', inviteEmail: 'old@example.com' }],
     });
-    expect(await redeemInvite(NATHAN, 'new@example.com')).toBe('denied');
-    expect((await invite('new@example.com'))!.boundSub).toBeNull();
+    expect(await admit(NATHAN, 'new@example.com')).toBe('denied');
+    expect((await userOf('new@example.com'))!.uid).toBeNull();
   });
 
-  it('denies a user created under open signup once invites are back on', async () => {
-    await seed({
-      invites: [{ email: 'open@example.com' }],
-      users: [{ uid: OTHER, email: 'open@example.com', inviteEmail: null }],
-    });
-    expect(await redeemInvite(OTHER, 'open@example.com')).toBe('denied');
-    expect((await invite('open@example.com'))!.boundSub).toBeNull();
-  });
-
-  it('throws on an unknown SIGNUP_MODE before touching the database', async () => {
-    vi.stubEnv('SIGNUP_MODE', 'everyone');
-    await seed({ invites: [{ email: 'nathan@example.com' }] });
-    await expect(redeemInvite(NATHAN, 'nathan@example.com')).rejects.toThrow(/SIGNUP_MODE/);
+  it('denies an email with no row and writes nothing', async () => {
+    expect(await admit(NATHAN, 'stranger@example.com')).toBe('denied');
     expect(await allUsers()).toEqual([]);
+  });
+
+  it('throws on an unknown SIGNUP_MODE before writing', async () => {
+    vi.stubEnv('SIGNUP_MODE', 'everyone');
+    await seed({ users: [{ email: 'nathan@example.com' }] });
+    await expect(admit(NATHAN, 'nathan@example.com')).rejects.toThrow(/SIGNUP_MODE/);
+    expect((await userOf('nathan@example.com'))!.uid).toBeNull();
   });
 });
 
-describe('redeemInvite (open mode)', () => {
+describe('admit (open mode)', () => {
   beforeEach(() => {
     vi.stubEnv('SIGNUP_MODE', 'open');
   });
 
-  it('creates an uninvited user with no invite and no artist link', async () => {
-    expect(await redeemInvite(OTHER, 'Anyone@Example.com')).toMatchObject({
+  it('creates and binds a row for an unknown email, with no artist link', async () => {
+    expect(await admit(OTHER, 'Anyone@Example.com')).toMatchObject({
       uid: OTHER,
-      email: 'Anyone@Example.com',
-      inviteEmail: null,
+      email: 'anyone@example.com',
       artistId: null,
-      accessGeneration: 1,
+      active: true,
     });
+    expect(await allUsers()).toHaveLength(1);
   });
 
-  it('ignores invites, binding none', async () => {
-    await seed({ invites: [{ email: 'anyone@example.com', artistId: 'flr' }] });
-    expect(await redeemInvite(OTHER, 'anyone@example.com')).toMatchObject({ artistId: null });
-    expect((await invite('anyone@example.com'))!.boundSub).toBeNull();
+  it('binds an existing unbound row, keeping its artist link', async () => {
+    await seed({ users: [{ email: 'anyone@example.com', artistId: 'flr' }] });
+    expect(await admit(OTHER, 'anyone@example.com')).toMatchObject({ uid: OTHER, artistId: 'flr' });
+    expect(await allUsers()).toHaveLength(1);
   });
 
-  it('returns an existing user unchanged', async () => {
-    await seed({ users: [{ uid: OTHER, email: 'a@example.com', accessGeneration: 4 }] });
-    expect(await redeemInvite(OTHER, 'b@example.com')).toMatchObject({
-      email: 'a@example.com',
-      accessGeneration: 4,
-    });
+  it('still denies a deactivated email, leaving it unbound', async () => {
+    await seed({ users: [{ email: 'anyone@example.com', active: false }] });
+    expect(await admit(OTHER, 'anyone@example.com')).toBe('denied');
+    expect(await userOf('anyone@example.com')).toMatchObject({ uid: null, active: false });
+  });
+
+  it('still denies another account on a bound email', async () => {
+    await seed({ users: [{ email: 'anyone@example.com', uid: NATHAN }] });
+    expect(await admit(OTHER, 'anyone@example.com')).toBe('denied');
+    expect((await userOf('anyone@example.com'))!.uid).toBe(NATHAN);
+  });
+
+  it('returns a bound user unchanged', async () => {
+    await seed({ users: [{ email: 'a@example.com', uid: OTHER }] });
+    expect(await admit(OTHER, 'b@example.com')).toMatchObject({ email: 'a@example.com' });
     expect(await allUsers()).toHaveLength(1);
   });
 });
 
-describe('redeemInvite: concurrent first sign-ins of one account', () => {
-  // Lands another sign-in's insert of the same account between this one's read and its insert.
-  const raceFirstSignIn = async () => {
+describe('admit: concurrent first sign-ins of one account', () => {
+  // Counts the rows each bind updates, so the test proves both sign-ins took the bind path.
+  beforeEach(async () => {
+    await db().execute(sql`create temp table binds (uid text)`);
     await db().execute(
-      sql.raw(`create or replace function race_users() returns trigger language plpgsql as $$ begin
-        if pg_trigger_depth() = 1 then
-          insert into users (uid, email, invite_email, artist_id, access_generation)
-          values (new.uid, new.email, new.invite_email, new.artist_id, 1);
-        end if;
+      sql.raw(`create or replace function count_binds() returns trigger language plpgsql as $$ begin
+        insert into binds values (new.uid);
         return new;
       end $$`),
     );
     await db().execute(
-      sql`create trigger race_users before insert on users for each row execute function race_users()`,
+      sql`create trigger count_binds after update on users for each row execute function count_binds()`,
     );
-  };
+  });
 
   afterEach(async () => {
-    await db().execute(sql`drop trigger if exists race_users on users`);
+    await db().execute(sql`drop trigger if exists count_binds on users`);
+    await db().execute(sql`drop table if exists binds`);
   });
 
-  it('returns the user the other sign-in created, in open mode', async () => {
+  const binds = async () => (await client().query('select uid from binds')).rows;
+
+  it('admits both, in invite mode', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', artistId: 'flr' }] });
+    const results = await Promise.all([
+      admit(NATHAN, 'nathan@example.com'),
+      admit(NATHAN, 'nathan@example.com'),
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ uid: NATHAN, artistId: 'flr' }),
+      expect.objectContaining({ uid: NATHAN, artistId: 'flr' }),
+    ]);
+    expect(await binds()).toEqual([{ uid: NATHAN }, { uid: NATHAN }]);
+    expect(await allUsers()).toHaveLength(1);
+  });
+
+  it('admits both, in open mode', async () => {
     vi.stubEnv('SIGNUP_MODE', 'open');
-    await raceFirstSignIn();
-    expect(await redeemInvite(OTHER, 'anyone@example.com')).toMatchObject({ uid: OTHER });
+    const results = await Promise.all([
+      admit(OTHER, 'anyone@example.com'),
+      admit(OTHER, 'anyone@example.com'),
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ uid: OTHER }),
+      expect.objectContaining({ uid: OTHER }),
+    ]);
+    expect(await binds()).toHaveLength(2);
     expect(await allUsers()).toHaveLength(1);
   });
 
-  it('returns the user the other sign-in created, in invite mode', async () => {
-    await seed({ invites: [{ email: 'nathan@example.com', artistId: 'flr' }] });
-    await raceFirstSignIn();
-    expect(await redeemInvite(NATHAN, 'nathan@example.com')).toMatchObject({
-      uid: NATHAN,
-      artistId: 'flr',
-    });
-    expect(await allUsers()).toHaveLength(1);
+  it('admits only the first of two different accounts racing for one email', async () => {
+    await seed({ users: [{ email: 'nathan@example.com' }] });
+    const results = await Promise.all([
+      admit(NATHAN, 'nathan@example.com'),
+      admit(OTHER, 'nathan@example.com'),
+    ]);
+    expect(results).toEqual([expect.objectContaining({ uid: NATHAN }), 'denied']);
+    expect((await userOf('nathan@example.com'))!.uid).toBe(NATHAN);
   });
 });
 
 describe('getUser', () => {
-  it('returns the user by uid', async () => {
-    await seed({ users: [{ uid: NATHAN, email: 'nathan@example.com', name: 'Nathan' }] });
-    expect(await getUser(NATHAN)).toMatchObject({ uid: NATHAN, name: 'Nathan' });
-  });
-
-  it('returns null for an unknown uid', async () => {
-    expect(await getUser('nobody')).toBeNull();
-  });
-});
-
-describe('updateProfile', () => {
-  it('updates email and name and leaves accessGeneration untouched', async () => {
-    await seed({ users: [{ uid: NATHAN, email: 'old@example.com', accessGeneration: 3 }] });
-    await updateProfile(NATHAN, { email: 'new@example.com', name: 'Nathan' });
+  it('returns the active user bound to the uid', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, artistId: 'flr' }] });
     expect(await getUser(NATHAN)).toMatchObject({
-      email: 'new@example.com',
-      name: 'Nathan',
-      accessGeneration: 3,
+      uid: NATHAN,
+      email: 'nathan@example.com',
+      artistId: 'flr',
     });
   });
 
-  it('clears a name the token no longer carries', async () => {
-    await seed({ users: [{ uid: NATHAN, email: 'n@example.com', name: 'Nathan' }] });
-    await updateProfile(NATHAN, { email: 'n@example.com', name: null });
-    expect(await getUser(NATHAN)).toMatchObject({ name: null });
+  it('returns null for a deactivated user', async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, active: false }] });
+    expect(await getUser(NATHAN)).toBeNull();
   });
 
-  it('never creates a user', async () => {
-    await updateProfile('nobody', { email: 'x@example.com', name: null });
-    expect(await allUsers()).toEqual([]);
+  it('returns null for an unknown uid', async () => {
+    await seed({ users: [{ email: 'nathan@example.com' }] });
+    expect(await getUser('nobody')).toBeNull();
   });
 });
