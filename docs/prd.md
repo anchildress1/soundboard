@@ -230,18 +230,13 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 
 ### Postgres
 
-| Table                     | Holds                                                                                                                                                                                  |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`                   | Google account ID (`uid`), email, display name, invite, artist profile link, access generation                                                                                         |
-| `invites`                 | normalized invited email, active status, bound Google account ID, artist profile link                                                                                                  |
-| `connections`             | one row per user and platform: grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                  |
-| `jobs`                    | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON |
-| `job_chunks`, `job_picks` | step results                                                                                                                                                                           |
-| `job_feedback`            | feedback on jobs not tied to an artist profile; it stays on the job                                                                                                                    |
-| `artist_facts`            | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy.  |
-| `artist_feedback`         | EDITED · SKIPPED · ACCEPTED                                                                                                                                                            |
-| `artist_publishes`        | video ID, URL, final metadata, status                                                                                                                                                  |
-| `artist_brand`            | the brand guide's proposal and approved version                                                                                                                                        |
+| Table           | Holds                                                                                                                                                                                                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`         | Google account ID (`uid`), email, display name, invite, artist profile link, access generation                                                                                                                                                                                                              |
+| `invites`       | normalized invited email, active status, bound Google account ID, artist profile link                                                                                                                                                                                                                       |
+| `connections`   | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                                            |
+| `jobs`          | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile                   |
+| `artist_memory` | per artist, by kind: facts (FACT · INFERENCE · APPROVED; seeds: name and Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), publishes (video ID, URL, final metadata, status), and the brand guide's proposal and approved version |
 
 ## UX
 

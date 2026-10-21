@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistFeedback, jobFeedback } from '$lib/server/core/schema';
+import { artistMemory, jobs } from '$lib/server/core/schema';
 import { listPicks } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/rerun/+server';
 import type { JobView } from '$lib/types';
@@ -18,14 +19,18 @@ const rerun = async (id: string, user: typeof USER_A | typeof USER_B = USER_B) =
 async function put(patch: Parameters<typeof seedJob>[0] = {}, withPick = true) {
   await seedJob({ state: 'REVIEW', consecutiveFailures: 1, error: 'old', ...patch });
   if (withPick) {
-    await seed({
-      jobPicks: [{ jobId: 'j1', version: 1, data: { version: 1, title: 'First', skipped: false } }],
-    });
+    await db()
+      .update(jobs)
+      .set({ picks: [{ version: 1, title: 'First', skipped: false }] })
+      .where(eq(jobs.id, 'j1'));
   }
 }
 
-const jobRows = () => db().select().from(jobFeedback);
-const artistRows = () => db().select().from(artistFeedback);
+const jobRows = async () =>
+  (await db().select({ feedback: jobs.feedback }).from(jobs)).flatMap(
+    (r) => r.feedback as unknown[],
+  );
+const artistRows = () => db().select().from(artistMemory).where(eq(artistMemory.kind, 'feedback'));
 
 beforeEach(async () => {
   resetClients();

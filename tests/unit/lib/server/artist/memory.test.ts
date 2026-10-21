@@ -1,19 +1,13 @@
 // @vitest-environment node
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '$lib/server/core/db';
-import {
-  artistFacts,
-  artistFeedback,
-  artistPublishes,
-  jobFeedback,
-  jobs,
-  users,
-} from '$lib/server/core/schema';
+import { artistMemory, jobs, users } from '$lib/server/core/schema';
 import {
   approvalFeedback,
   artistJob,
   listFacts,
+  memoryOf,
   recentFeedback,
   writeFeedback,
   recordPublish,
@@ -46,10 +40,19 @@ const entry = (at: number, kind: Feedback['kind'] = 'ACCEPTED'): Feedback => ({
   pickVersion: 1,
 });
 
-const facts = () => db().select().from(artistFacts);
-const artistRows = () => db().select().from(artistFeedback);
-const jobRows = () => db().select().from(jobFeedback);
-const fact = (key: string) => and(eq(artistFacts.artistId, 'flr'), eq(artistFacts.key, key));
+const facts = () => db().select().from(artistMemory).where(memoryOf('fact'));
+const artistRows = () =>
+  db()
+    .select()
+    .from(artistMemory)
+    .where(eq(artistMemory.kind, 'feedback'))
+    .orderBy(asc(artistMemory.id));
+/** Every job's feedback entries, tagged with the job that holds them. */
+const jobRows = async () =>
+  (await db().select({ jobId: jobs.id, feedback: jobs.feedback }).from(jobs)).flatMap(
+    ({ jobId, feedback }) => (feedback as Feedback[]).map((data) => ({ jobId, data })),
+  );
+const fact = (key: string) => and(memoryOf('fact'), eq(artistMemory.key, key));
 
 beforeEach(async () => {
   await truncate();
@@ -111,8 +114,8 @@ describe('listFacts', () => {
 
   it('reads stored facts instead of reseeding', async () => {
     await listFacts();
-    await db().update(artistFacts).set({ data: RICHMOND }).where(fact('home'));
-    await db().delete(artistFacts).where(fact('mr-kill'));
+    await db().update(artistMemory).set({ data: RICHMOND }).where(fact('home'));
+    await db().delete(artistMemory).where(fact('mr-kill'));
     const read = await listFacts();
     expect(read).toHaveLength(SEED_FACTS.length - 1);
     expect(read.find((f) => f.key === 'home')?.value).toBe('Richmond');
@@ -120,13 +123,15 @@ describe('listFacts', () => {
   });
 
   it('reads stored facts without reseeding a partial table', async () => {
-    await seed({ artistFacts: [{ artistId: 'flr', key: 'home', data: RICHMOND }] });
+    await seed({ artistMemory: [{ artistId: 'flr', kind: 'fact', key: 'home', data: RICHMOND }] });
     expect(await listFacts()).toEqual([RICHMOND]);
     expect(await facts()).toHaveLength(1);
   });
 
   it("ignores another artist's facts", async () => {
-    await seed({ artistFacts: [{ artistId: 'other', key: 'home', data: RICHMOND }] });
+    await seed({
+      artistMemory: [{ artistId: 'other', kind: 'fact', key: 'home', data: RICHMOND }],
+    });
     expect(await listFacts()).toEqual(SEED_FACTS);
   });
 
@@ -142,9 +147,11 @@ describe('writeFeedback', () => {
   it("routes feedback on the artist's jobs to the artist's memory", async () => {
     await recordFeedback([entry(1), entry(2, 'EDITED')], NATHANS);
     const rows = await artistRows();
-    expect(rows.map((r) => [r.artistId, r.at.getTime(), (r.data as Feedback).kind])).toEqual([
-      ['flr', 1, 'ACCEPTED'],
-      ['flr', 2, 'EDITED'],
+    expect(
+      rows.map((r) => [r.artistId, r.key, (r.data as Feedback).at, (r.data as Feedback).kind]),
+    ).toEqual([
+      ['flr', null, 1, 'ACCEPTED'],
+      ['flr', null, 2, 'EDITED'],
     ]);
     expect(await jobRows()).toHaveLength(0);
   });
@@ -183,15 +190,21 @@ describe('writeFeedback', () => {
 });
 
 describe('recentFeedback', () => {
-  it('returns newest first, limited', async () => {
+  it('returns newest written first, limited, whatever the entries say about time', async () => {
     await recordFeedback([entry(10), entry(30), entry(20)], NATHANS);
-    expect((await recentFeedback()).map((f) => f.at)).toEqual([30, 20, 10]);
-    expect((await recentFeedback(2)).map((f) => f.at)).toEqual([30, 20]);
+    expect((await recentFeedback()).map((f) => f.at)).toEqual([20, 30, 10]);
+    expect((await recentFeedback(2)).map((f) => f.at)).toEqual([20, 30]);
+  });
+
+  it('puts a later write ahead of an earlier one', async () => {
+    await recordFeedback([entry(30)], NATHANS);
+    await recordFeedback([entry(10)], NATHANS);
+    expect((await recentFeedback()).map((f) => f.at)).toEqual([10, 30]);
   });
 
   it('ignores feedback kept on jobs and other artists', async () => {
     await recordFeedback([entry(5)], UNLINKED);
-    await seed({ artistFeedback: [{ artistId: 'other', at: new Date(6), data: entry(6) }] });
+    await seed({ artistMemory: [{ artistId: 'other', kind: 'feedback', data: entry(6) }] });
     expect(await recentFeedback()).toEqual([]);
   });
 
@@ -219,16 +232,37 @@ describe('recordPublish', () => {
 
   it('stores the publish under its video id', async () => {
     await recordPublish(record);
-    expect(await db().select().from(artistPublishes)).toEqual([
-      { artistId: 'flr', videoId: 'vid1', data: record },
+    expect(await db().select().from(artistMemory)).toEqual([
+      { id: expect.any(Number), artistId: 'flr', kind: 'publish', key: 'vid1', data: record },
     ]);
   });
 
   it('replaces an earlier record of the same video', async () => {
     await recordPublish(record);
     await recordPublish({ ...record, at: 9 });
-    const rows = await db().select().from(artistPublishes);
+    const rows = await db().select().from(artistMemory).where(memoryOf('publish'));
     expect(rows.map((r) => (r.data as typeof record).at)).toEqual([9]);
+  });
+});
+
+describe('artist_memory', () => {
+  const insert = (kind: 'fact' | 'feedback', key: string | null) =>
+    db().insert(artistMemory).values({ artistId: 'flr', kind, key, data: {} });
+
+  it.each([
+    ['a keyed feedback row', 'feedback', 'k'],
+    ['an unkeyed fact row', 'fact', null],
+  ] as const)('refuses %s', async (_label, kind, key) => {
+    await expect(insert(kind, key)).rejects.toMatchObject({
+      cause: { message: expect.stringContaining('artist_memory_kind_check') },
+    });
+    expect(await db().select().from(artistMemory)).toEqual([]);
+  });
+
+  it('accepts an unkeyed feedback row and a keyed fact row', async () => {
+    await insert('feedback', null);
+    await insert('fact', 'k');
+    expect(await db().select().from(artistMemory)).toHaveLength(2);
   });
 });
 

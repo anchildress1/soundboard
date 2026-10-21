@@ -29,11 +29,10 @@ export type ConnectionRow =
       tokenCiphertext: null;
     };
 
-export type Connection = ConnectionRow & Pick<Stored, 'uid' | 'platform' | 'updatedAt'>;
+export type Connection = ConnectionRow & Pick<Stored, 'uid' | 'updatedAt'>;
 export type ConnectionStatus = Connection['status'];
 
-const PLATFORM = 'youtube';
-const mine = (uid: string) => and(eq(connections.uid, uid), eq(connections.platform, PLATFORM));
+const mine = (uid: string) => eq(connections.uid, uid);
 
 /** The user's YouTube connection; pass `q` to read it inside the caller's transaction. */
 export async function getConnection(
@@ -53,9 +52,9 @@ export async function putConnection(uid: string, row: ConnectionRow): Promise<vo
   const values = { ...row, updatedAt: new Date() };
   await db()
     .insert(connections)
-    .values({ uid, platform: PLATFORM, ...values })
+    .values({ uid, ...values })
     .onConflictDoUpdate({
-      target: [connections.uid, connections.platform],
+      target: connections.uid,
       set: values,
       setWhere: row.status === 'connected' ? undefined : ne(connections.status, 'connected'),
     });

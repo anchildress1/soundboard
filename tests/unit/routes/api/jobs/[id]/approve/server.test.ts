@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistFeedback, jobFeedback } from '$lib/server/core/schema';
+import { artistMemory, jobs } from '$lib/server/core/schema';
 import { getJob, type JobDoc } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/approve/+server';
 import type { JobView } from '$lib/types';
@@ -49,12 +50,11 @@ async function put(id: string, patch: Partial<JobDoc> = {}) {
     pickVersion: 1,
     ...patch,
   });
-  await seed({
-    jobPicks: [
-      {
-        jobId: id,
-        version: 1,
-        data: {
+  await db()
+    .update(jobs)
+    .set({
+      picks: [
+        {
           version: 1,
           title: 'PeekaBoo',
           description: 'Night drive. #synthwave',
@@ -67,10 +67,17 @@ async function put(id: string, patch: Partial<JobDoc> = {}) {
           modelMs: 1,
           skipped: false,
         },
-      },
-    ],
-  });
+      ],
+    })
+    .where(eq(jobs.id, id));
 }
+
+const jobFeedback = async () =>
+  (await db().select({ feedback: jobs.feedback }).from(jobs)).flatMap(
+    (r) => r.feedback as unknown[],
+  );
+const artistFeedback = () =>
+  db().select().from(artistMemory).where(eq(artistMemory.kind, 'feedback'));
 
 const job = async (id: string) => (await getJob(id))!;
 const fields = {
@@ -104,8 +111,8 @@ describe('POST /api/jobs/[id]/approve', () => {
       hashtags: [SYNTHWAVE, '#RetroWave'],
       tags: ['synthwave', 'outrun'],
     });
-    expect((await db().select().from(artistFeedback)).length).toBeGreaterThan(0);
-    expect(await db().select().from(jobFeedback)).toEqual([]);
+    expect((await artistFeedback()).length).toBeGreaterThan(0);
+    expect(await jobFeedback()).toEqual([]);
   });
 
   it('409s a user without a YouTube connection and records nothing', async () => {
@@ -114,7 +121,7 @@ describe('POST /api/jobs/[id]/approve', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: 'Reconnect YouTube to approve.' });
     expect((await job('b')).state).toBe('REVIEW');
-    expect(await db().select().from(jobFeedback)).toEqual([]);
+    expect(await jobFeedback()).toEqual([]);
   });
 
   it('409s an approval for a channel other than the connected one', async () => {
@@ -199,7 +206,7 @@ describe('POST /api/jobs/[id]/approve', () => {
     const error = await approve('j', fields, USER_B).catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
     expect((await job('j')).state).toBe('REVIEW');
-    expect(await db().select().from(artistFeedback)).toEqual([]);
+    expect(await artistFeedback()).toEqual([]);
   });
 
   it('answers with the loaded job if it disappears mid-request', async () => {

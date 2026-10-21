@@ -6,9 +6,9 @@ import {
   integer,
   jsonb,
   pgTable,
-  primaryKey,
   text,
   timestamp,
+  unique,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 // Relative, not $lib: drizzle-kit loads this file outside Vite's aliases.
@@ -35,13 +35,13 @@ export const users = pgTable('users', {
   createdAt: at('created_at').notNull().defaultNow(),
 });
 
+// One YouTube connection per user.
 export const connections = pgTable(
   'connections',
   {
     uid: text('uid')
-      .notNull()
+      .primaryKey()
       .references(() => users.uid, { onDelete: 'cascade' }),
-    platform: text('platform').notNull(),
     status: text('status', {
       enum: ['connected', 'missing_scopes', 'no_channel', 'revoked'],
     }).notNull(),
@@ -52,19 +52,14 @@ export const connections = pgTable(
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.uid, t.platform] }),
-    check('connections_platform_check', sql`${t.platform} = 'youtube'`),
     check(
       'connections_status_check',
       sql`${t.status} in ('connected', 'missing_scopes', 'no_channel', 'revoked')`,
     ),
+    // Only a connected row holds a token, and it always names a channel.
     check(
-      'connections_token_check',
-      sql`${t.status} = 'connected' or ${t.tokenCiphertext} is null`,
-    ),
-    check(
-      'connections_connected_check',
-      sql`${t.status} <> 'connected' or (${t.tokenCiphertext} is not null and ${t.channelId} is not null)`,
+      'connections_shape_check',
+      sql`(${t.status} = 'connected') = (${t.tokenCiphertext} is not null) and (${t.status} <> 'connected' or ${t.channelId} is not null)`,
     ),
   ],
 );
@@ -88,6 +83,11 @@ export const jobs = pgTable(
     finalChunkAt: at('final_chunk_at'),
     videoId: text('video_id'),
     data: jsonb('data').notNull(),
+    // Pick v is at index v - 1; chunk i at index i.
+    picks: jsonb('picks').notNull().default([]),
+    chunks: jsonb('chunks').notNull().default([]),
+    // Feedback on a job not tied to an artist; artist jobs write it to artist_memory.
+    feedback: jsonb('feedback').notNull().default([]),
   },
   (t) => [
     check('jobs_state_check', sql`${t.state} in (${sql.raw(quotedStates)})`),
@@ -97,74 +97,24 @@ export const jobs = pgTable(
   ],
 );
 
-const jobId = () =>
-  text('job_id')
-    .notNull()
-    .references(() => jobs.id, { onDelete: 'cascade' });
-
-export const jobPicks = pgTable(
-  'job_picks',
-  { jobId: jobId(), version: integer('version').notNull(), data: jsonb('data').notNull() },
-  (t) => [primaryKey({ columns: [t.jobId, t.version] })],
-);
-
-export const jobChunks = pgTable(
-  'job_chunks',
-  { jobId: jobId(), index: integer('index').notNull(), data: jsonb('data').notNull() },
-  (t) => [primaryKey({ columns: [t.jobId, t.index] })],
-);
-
-// Feedback rows have no natural key.
-export const jobFeedback = pgTable(
-  'job_feedback',
-  {
-    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-    jobId: jobId(),
-    data: jsonb('data').notNull(),
-  },
-  (t) => [index('job_feedback_job_idx').on(t.jobId)],
-);
-
-export const artistFacts = pgTable(
-  'artist_facts',
-  {
-    artistId: text('artist_id').notNull(),
-    key: text('key').notNull(),
-    data: jsonb('data').notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.artistId, t.key] })],
-);
-
-export const artistFeedback = pgTable(
-  'artist_feedback',
+/**
+ * Everything kept per artist. Facts, publishes and brand slots are keyed (fact key, video ID,
+ * `proposal`/`approved`); feedback rows have no key and read newest-first by `id`.
+ */
+export const artistMemory = pgTable(
+  'artist_memory',
   {
     id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
     artistId: text('artist_id').notNull(),
-    at: at('at').notNull(),
-    data: jsonb('data').notNull(),
-  },
-  (t) => [index('artist_feedback_recent_idx').on(t.artistId, t.at.desc())],
-);
-
-export const artistPublishes = pgTable(
-  'artist_publishes',
-  {
-    artistId: text('artist_id').notNull(),
-    videoId: text('video_id').notNull(),
-    data: jsonb('data').notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.artistId, t.videoId] })],
-);
-
-export const artistBrand = pgTable(
-  'artist_brand',
-  {
-    artistId: text('artist_id').notNull(),
-    slot: text('slot', { enum: ['proposal', 'approved'] }).notNull(),
+    kind: text('kind', { enum: ['fact', 'feedback', 'publish', 'brand'] }).notNull(),
+    key: text('key'),
     data: jsonb('data').notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.artistId, t.slot] }),
-    check('artist_brand_slot_check', sql`${t.slot} in ('proposal', 'approved')`),
+    unique('artist_memory_key').on(t.artistId, t.kind, t.key),
+    check(
+      'artist_memory_kind_check',
+      sql`${t.kind} in ('fact', 'feedback', 'publish', 'brand') and (${t.key} is null) = (${t.kind} = 'feedback')`,
+    ),
   ],
 );

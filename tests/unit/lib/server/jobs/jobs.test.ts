@@ -2,7 +2,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '$lib/server/core/db';
-import { jobPicks, jobs } from '$lib/server/core/schema';
+import { jobs } from '$lib/server/core/schema';
 import {
   claimJob,
   createJob,
@@ -75,10 +75,12 @@ const pick = (version: number): Pick => ({
 
 const patch = (id: string, fields: JobPatch) =>
   db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, id));
-const seedPicks = (jobId: string, ...versions: number[]) =>
-  seed({
-    jobPicks: versions.map((v) => ({ jobId, version: v, data: { ...pick(v), skipped: false } })),
-  });
+/** Stores picks 1..`count`, version v at index v - 1. */
+const seedPicks = (jobId: string, count: number) =>
+  db()
+    .update(jobs)
+    .set({ picks: Array.from({ length: count }, (_, i) => ({ ...pick(i + 1), skipped: false })) })
+    .where(eq(jobs.id, jobId));
 const claimRow = async (id: string) =>
   (
     await db()
@@ -253,6 +255,40 @@ describe('claimJob / releaseJob', () => {
     expect(await listChunks('j')).toEqual([chunk(0)]);
   });
 
+  it('overwrites a retried chunk and pick instead of adding another', async () => {
+    await createJob(input, 'j');
+    const first = (await claimJob('j'))!;
+    await releaseJob('j', first.token, 'AWAITING_UPLOAD', {}, { pick: pick(1), chunk: chunk(0) });
+    const retry = (await claimJob('j'))!;
+    const redone = { ...chunk(0), summary: 'redone' };
+    await releaseJob(
+      'j',
+      retry.token,
+      'AWAITING_UPLOAD',
+      {},
+      {
+        pick: { ...pick(1), title: 'Redone' },
+        chunk: redone,
+      },
+    );
+    expect(await listChunks('j')).toEqual([redone]);
+    expect(await listPicks('j')).toEqual([{ ...pick(1), title: 'Redone', skipped: false }]);
+  });
+
+  it('refuses a chunk or pick that would leave a gap, saving nothing', async () => {
+    await createJob(input, 'j');
+    const { token } = (await claimJob('j'))!;
+    await expect(
+      releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' }, { chunk: chunk(1) }),
+    ).rejects.toThrow('No chunks slot 1 on job j');
+    await expect(
+      releaseJob('j', token, 'AWAITING_UPLOAD', { state: 'PICK' }, { pick: pick(2) }),
+    ).rejects.toThrow('No picks slot 1 on job j');
+    expect((await getJob('j'))?.state).toBe('AWAITING_UPLOAD');
+    expect(await listChunks('j')).toEqual([]);
+    expect(await listPicks('j')).toEqual([]);
+  });
+
   it('drops the patch but frees the job when an action moved it during the step', async () => {
     await createJob(input, 'j');
     const { token } = (await claimJob('j'))!;
@@ -371,27 +407,28 @@ describe('transitionJob', () => {
 describe('chunks and picks', () => {
   it('lists chunks in index order', async () => {
     await createJob(input, 'j');
-    await seed({
-      jobChunks: [1, 0, 10].map((i) => ({ jobId: 'j', index: i, data: chunk(i) })),
-    });
-    expect((await listChunks('j')).map((c) => c.index)).toEqual([0, 1, 10]);
+    await db()
+      .update(jobs)
+      .set({ chunks: [0, 1, 2].map(chunk) })
+      .where(eq(jobs.id, 'j'));
+    expect((await listChunks('j')).map((c) => c.index)).toEqual([0, 1, 2]);
   });
 
   it('tracks pick versions and skips', async () => {
     await createJob(input, 'j');
     await patch('j', { state: 'REVIEW' });
     expect(await latestPick('j')).toBeNull();
-    await seedPicks('j', 2, 10, 1);
-    expect(await skipAndRepick('j', 10)).toBe(true);
+    await seedPicks('j', 3);
+    expect(await skipAndRepick('j', 3)).toBe(true);
     expect((await getJob('j'))?.state).toBe('PICK');
     expect(await skipAndRepick('j', 2)).toBe(false);
     const picks = await listPicks('j');
     expect(picks.map((p) => [p.version, p.skipped])).toEqual([
       [1, false],
       [2, false],
-      [10, true],
+      [3, true],
     ]);
-    expect((await latestPick('j'))?.version).toBe(10);
+    expect((await latestPick('j'))?.version).toBe(3);
   });
 });
 
@@ -462,7 +499,7 @@ describe('createShort', () => {
       pickVersion: 3,
       ...fields,
     });
-    await seedPicks('p', 2, 3);
+    await seedPicks('p', 3);
     return (await getJob('p'))!;
   }
 
@@ -553,7 +590,9 @@ describe('createShort', () => {
     const gone = await parent({ pickVersion: 9 });
     expect(await createShort(gone, SHORT_SOURCE_STATES, 's2')).toEqual({ noPick: true });
     expect((await exists('s1')) || (await exists('s2'))).toBe(false);
-    expect(await db().select().from(jobPicks).where(eq(jobPicks.jobId, 's2'))).toEqual([]);
+    expect(await db().select({ picks: jobs.picks }).from(jobs).where(eq(jobs.id, 's2'))).toEqual(
+      [],
+    );
   });
 
   it('keeps a filename without an extension readable', async () => {

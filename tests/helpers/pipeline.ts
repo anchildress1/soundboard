@@ -212,7 +212,6 @@ export const USERS = {
   connections: [
     {
       uid: USER_A.uid,
-      platform: 'youtube',
       status: 'connected' as const,
       channelId: CHANNEL_A,
       channelTitle: 'Flies Like Robots',

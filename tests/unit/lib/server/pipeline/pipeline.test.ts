@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { seed, truncate } from '../../../../helpers/db';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import {
@@ -31,17 +31,7 @@ import {
 import { captureException, captureMessage } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import {
-  artistBrand,
-  artistFacts,
-  artistFeedback,
-  artistPublishes,
-  connections,
-  jobChunks,
-  jobPicks,
-  jobs,
-  users,
-} from '$lib/server/core/schema';
+import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
 import { retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
@@ -121,32 +111,31 @@ const patchJob = (fields: JobPatch) =>
   db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
 const claimToken = async () =>
   (await db().select({ token: jobs.claimToken }).from(jobs).where(eq(jobs.id, 'j1')))[0]!.token;
-const chunkAt = async (index: number) =>
+const arrays = async () =>
   (
     await db()
-      .select({ data: jobChunks.data })
-      .from(jobChunks)
-      .where(and(eq(jobChunks.jobId, 'j1'), eq(jobChunks.index, index)))
-  )[0]?.data as Record<string, unknown> | undefined;
-const pickAt = async (version: number) =>
-  (
-    await db()
-      .select({ data: jobPicks.data })
-      .from(jobPicks)
-      .where(and(eq(jobPicks.jobId, 'j1'), eq(jobPicks.version, version)))
-  )[0]?.data as Record<string, unknown> | undefined;
+      .select({ picks: jobs.picks, chunks: jobs.chunks })
+      .from(jobs)
+      .where(eq(jobs.id, 'j1'))
+  )[0]! as {
+    picks: Record<string, unknown>[];
+    chunks: Record<string, unknown>[];
+  };
+/** Chunk i is stored at index i. */
+const chunkAt = async (index: number) => (await arrays()).chunks[index];
+/** Pick v is stored at index v - 1. */
+const pickAt = async (version: number) => (await arrays()).picks[version - 1];
+const setChunks = (id: string, chunks: unknown[]) =>
+  db().update(jobs).set({ chunks }).where(eq(jobs.id, id));
+const artistRows = (kind: (typeof artistMemory.kind.enumValues)[number]) =>
+  db().select().from(artistMemory).where(eq(artistMemory.kind, kind));
 const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
 const revokeA = () =>
   db()
     .update(connections)
     .set({ status: 'revoked', tokenCiphertext: null })
     .where(eq(connections.uid, USER_A.uid));
-const artistRowCount = async () =>
-  (
-    await Promise.all(
-      [artistFacts, artistFeedback, artistPublishes, artistBrand].map((t) => db().select().from(t)),
-    )
-  ).flat().length;
+const artistRowCount = async () => (await db().select().from(artistMemory)).length;
 const FIELDS = {
   title: 'PeekaBoo',
   description: 'd #synthwave',
@@ -392,7 +381,9 @@ describe('runStep: ANALYZE', () => {
   });
 
   it('moves to PICK after the last chunk, cutting the short tail window', async () => {
-    await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 1 }));
+    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 1 });
+    await setChunks('j1', [{ index: 0 }]);
+    await runStep(job);
     expect(await saved()).toMatchObject({ state: 'PICK', chunkIndex: 2 });
     expect(await chunkAt(1)).toMatchObject({
       index: 1,
@@ -407,7 +398,7 @@ describe('runStep: ANALYZE', () => {
   /** Second window of three, with the first already analyzed. */
   const analyzing = async () => {
     const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 });
-    await seed({ jobChunks: [{ jobId: 'j1', index: 0, data: { index: 0 } }] });
+    await setChunks('j1', [{ index: 0 }]);
     return job;
   };
 
@@ -514,9 +505,7 @@ const context = () => {
 /** The PICK step's job, with its two analyzed chunks; the chunks need the job row first. */
 async function pickJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
   const job = await put({ state: 'PICK', ...patch });
-  await seed({
-    jobChunks: [0, 1].map((index) => ({ jobId: 'j1', index, data: chunkDoc(index) })),
-  });
+  await setChunks('j1', [0, 1].map(chunkDoc));
   return job;
 }
 
@@ -582,7 +571,7 @@ describe('runStep: PICK', () => {
 
 describe("runStep: PICK with Nathan's memory", () => {
   it("keeps Nathan's memory out of an unlinked job and writes none of it", async () => {
-    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
     await runStep(await pickJob());
     expect((await saved()).state).toBe('REVIEW');
     const ctx = context();
@@ -592,7 +581,7 @@ describe("runStep: PICK with Nathan's memory", () => {
   });
 
   it("treats Nathan's job as unlinked once its owner's link is removed", async () => {
-    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
     await approveGuide();
     await unlinkA();
     await runStep(await pickJob(A_JOB));
@@ -607,7 +596,7 @@ describe("runStep: PICK with Nathan's memory", () => {
   });
 
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
-    await seed({ artistFeedback: [{ artistId: 'flr', at: new Date(5), data: NATHAN_FEEDBACK }] });
+    await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
     const job = await pickJob({
       ...A_JOB,
       hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
@@ -621,26 +610,21 @@ describe("runStep: PICK with Nathan's memory", () => {
         top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
       },
     });
-    await seed({
-      jobPicks: [
-        {
-          jobId: 'j1',
-          version: 1,
-          data: {
+    await db()
+      .update(jobs)
+      .set({
+        picks: [
+          {
             ...RAW_PICK,
             title: 'Old Title',
             description: 'An older description.',
             version: 1,
             skipped: true,
           },
-        },
-        {
-          jobId: 'j1',
-          version: 2,
-          data: { ...RAW_PICK, title: 'Second', version: 2, skipped: false, modelMs: 50_000 },
-        },
-      ],
-    });
+          { ...RAW_PICK, title: 'Second', version: 2, skipped: false, modelMs: 50_000 },
+        ],
+      })
+      .where(eq(jobs.id, 'j1'));
     await runStep(job);
     expect((await saved()).state).toBe('REVIEW');
     const third = (await pickAt(3)) as { version: number; modelMs: number };
@@ -664,16 +648,17 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(ctx.skippedVersions).toEqual([
       { title: 'Old Title', description: 'An older description.' },
     ]);
-    expect((await db().select().from(artistFacts)).some((r) => r.key === 'home')).toBe(true);
+    expect((await artistRows('fact')).some((r) => r.key === 'home')).toBe(true);
   });
 
   const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
   const approveGuide = () =>
     seed({
-      artistBrand: [
+      artistMemory: [
         {
           artistId: 'flr',
-          slot: 'approved',
+          kind: 'brand',
+          key: 'approved',
           data: { ...GUIDE, status: 'APPROVED', basedOn: ['v1'], createdAt: 1, approvedAt: 2 },
         },
       ],
@@ -1423,7 +1408,7 @@ describe('runStep: CLAIMED_COMPLETE', () => {
       finalFields: FIELDS,
       ...patch,
     });
-  const publishes = () => db().select().from(artistPublishes);
+  const publishes = () => artistRows('publish');
 
   it('marks VERIFIED on read-back and records the publish for Nathan', async () => {
     expect(await runStep(await claimed())).toEqual({});
@@ -1719,21 +1704,18 @@ describe('runStep: Short', () => {
 
   beforeEach(async () => {
     await put({ id: 'p1', state: 'REVIEW' });
-    await seed({
-      jobChunks: Array.from({ length: 6 }, (_, i) => ({
-        jobId: 'p1',
+    await setChunks(
+      'p1',
+      Array.from({ length: 6 }, (_, i) => ({
         index: i,
-        data: {
-          index: i,
-          startSec: i * 29.5,
-          durationSec: 29.5,
-          measurements: MEASURED,
-          analysis: ANALYSIS,
-          raw: null,
-          modelMs: 1,
-        },
+        startSec: i * 29.5,
+        durationSec: 29.5,
+        measurements: MEASURED,
+        analysis: ANALYSIS,
+        raw: null,
+        modelMs: 1,
       })),
-    });
+    );
     h.objects.set(SOURCE_OBJECT, { size: '9000', contentType: 'video/mp4' });
     h.upload.mockReset();
     h.upload.mockResolvedValue([{}]);

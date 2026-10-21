@@ -14,8 +14,8 @@ import { ActionError } from '$lib/server/core/errors';
 import { required } from '$lib/server/core/env';
 import { and, eq } from 'drizzle-orm';
 import { db, type Database, type Tx } from '$lib/server/core/db';
-import { artistBrand } from '$lib/server/core/schema';
-import { ARTIST_ID } from './memory';
+import { artistMemory } from '$lib/server/core/schema';
+import { ARTIST_ID, memoryOf } from './memory';
 import { chatJson, ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { stripDeep } from '$lib/server/ai/numerics';
 import { isString, isStrings, shape } from '$lib/server/ai/shape';
@@ -132,18 +132,21 @@ export function requireArtist(user: { artistId: string | null } | null): void {
 }
 
 type Slot = 'approved' | 'proposal';
-const slot = (name: Slot) => and(eq(artistBrand.artistId, ARTIST_ID), eq(artistBrand.slot, name));
+const slot = (name: Slot) => and(memoryOf('brand'), eq(artistMemory.key, name));
 
 async function read(name: Slot): Promise<StoredBrand | null> {
-  const [row] = await db().select({ data: artistBrand.data }).from(artistBrand).where(slot(name));
+  const [row] = await db().select({ data: artistMemory.data }).from(artistMemory).where(slot(name));
   return (row?.data as StoredBrand | undefined) ?? null;
 }
 
 async function write(tx: Database | Tx, name: Slot, data: StoredBrand): Promise<void> {
   await tx
-    .insert(artistBrand)
-    .values({ artistId: ARTIST_ID, slot: name, data })
-    .onConflictDoUpdate({ target: [artistBrand.artistId, artistBrand.slot], set: { data } });
+    .insert(artistMemory)
+    .values({ artistId: ARTIST_ID, kind: 'brand', key: name, data })
+    .onConflictDoUpdate({
+      target: [artistMemory.artistId, artistMemory.kind, artistMemory.key],
+      set: { data },
+    });
 }
 
 /** Linked callers only: the approved guide and any pending proposal. */
@@ -235,8 +238,8 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
   if (problem) throw new ActionError(422, problem);
   return db().transaction(async (tx) => {
     const [row] = await tx
-      .select({ data: artistBrand.data })
-      .from(artistBrand)
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
       .where(slot('proposal'))
       .for('update');
     if (!row) throw new ActionError(409, 'There is no proposal to approve.');
@@ -252,12 +255,12 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
       approvedAt: Date.now(),
     };
     await write(tx, 'approved', approved);
-    await tx.delete(artistBrand).where(slot('proposal'));
+    await tx.delete(artistMemory).where(slot('proposal'));
     return approved;
   });
 }
 
 /** Drops the pending proposal; the approved guide, if any, stays. */
 export async function discardBrandProposal(): Promise<void> {
-  await db().delete(artistBrand).where(slot('proposal'));
+  await db().delete(artistMemory).where(slot('proposal'));
 }

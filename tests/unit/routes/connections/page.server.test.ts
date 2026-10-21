@@ -25,7 +25,6 @@ const withStatus = (status: 'missing_scopes' | 'no_channel' | 'revoked') =>
     connections: [
       {
         uid: USER_B.uid,
-        platform: 'youtube',
         status,
         channelId: status === 'revoked' ? 'UCb' : null,
         channelTitle: status === 'revoked' ? 'B channel' : null,

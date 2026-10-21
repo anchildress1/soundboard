@@ -98,7 +98,6 @@ describe('putConnection / getConnection', () => {
     await putConnection(UID, connected());
     expect(await getConnection(UID)).toMatchObject({
       uid: UID,
-      platform: 'youtube',
       ...connected(),
       updatedAt: expect.any(Date),
     });

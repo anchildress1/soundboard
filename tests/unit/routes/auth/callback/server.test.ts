@@ -388,7 +388,6 @@ describe('GET /auth/callback: evaluating YouTube on sign-in', () => {
           connections: [
             {
               uid: USER_B.uid,
-              platform: 'youtube',
               status: 'revoked',
               scopes: [],
               updatedAt: new Date(0),
@@ -409,7 +408,6 @@ describe('GET /auth/callback: evaluating YouTube on sign-in', () => {
         .insert(connections)
         .values({
           uid: USER_B.uid,
-          platform: 'youtube',
           status: 'connected',
           channelId: CHANNEL.id,
           channelTitle: CHANNEL.title,
@@ -418,7 +416,7 @@ describe('GET /auth/callback: evaluating YouTube on sign-in', () => {
           updatedAt: new Date(0),
         })
         .onConflictDoUpdate({
-          target: [connections.uid, connections.platform],
+          target: connections.uid,
           set: {
             status: 'connected',
             channelId: CHANNEL.id,

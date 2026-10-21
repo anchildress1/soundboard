@@ -17,7 +17,8 @@ import {
 } from '$lib/server/artist/brand';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistBrand } from '$lib/server/core/schema';
+import { artistMemory } from '$lib/server/core/schema';
+import { memoryOf } from '$lib/server/artist/memory';
 import { clearStatsCache, type CatalogVideo } from '$lib/server/platforms/youtube/youtube';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { seed, truncate } from '../../../../helpers/db';
@@ -27,16 +28,16 @@ type Slot = 'proposal' | 'approved';
 const read = async (slot: Slot) =>
   (
     await db()
-      .select({ data: artistBrand.data })
-      .from(artistBrand)
-      .where(and(eq(artistBrand.artistId, 'flr'), eq(artistBrand.slot, slot)))
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
+      .where(and(memoryOf('brand'), eq(artistMemory.key, slot)))
   )[0]?.data ?? null;
 const has = async (slot: Slot) => (await read(slot)) !== null;
 const put = async (slot: Slot, data: StoredBrand) => {
   await db()
-    .delete(artistBrand)
-    .where(and(eq(artistBrand.artistId, 'flr'), eq(artistBrand.slot, slot)));
-  await seed({ artistBrand: [{ artistId: 'flr', slot, data }] });
+    .delete(artistMemory)
+    .where(and(memoryOf('brand'), eq(artistMemory.key, slot)));
+  await seed({ artistMemory: [{ artistId: 'flr', kind: 'brand', key: slot, data }] });
 };
 
 const GUIDE = {

@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
-import { db, type Tx } from '$lib/server/core/db';
-import { jobChunks, jobPicks, jobs } from '$lib/server/core/schema';
+import { db, type Database, type Tx } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 
@@ -152,19 +152,34 @@ export async function claimJob(id: string): Promise<{ token: string; job: JobDoc
 
 export type StoredPick = Pick & { skipped: boolean };
 
-async function putPick(tx: Tx, jobId: string, pick: StoredPick): Promise<void> {
-  await tx
-    .insert(jobPicks)
-    .values({ jobId, version: pick.version, data: pick })
-    .onConflictDoUpdate({ target: [jobPicks.jobId, jobPicks.version], set: { data: pick } });
+type ArrayColumn = typeof jobs.picks | typeof jobs.chunks;
+
+/**
+ * Sets `value` at `index` of a jsonb array column, appending when `index` is its length. Throws
+ * rather than leave a gap: past the end, jsonb_set would append at the wrong position.
+ */
+async function putAt(
+  tx: Tx,
+  jobId: string,
+  column: ArrayColumn,
+  index: number,
+  value: unknown,
+): Promise<void> {
+  const written = await tx
+    .update(jobs)
+    .set({
+      [column.name]: sql`jsonb_set(${column}, ${`{${index}}`}::text[], ${JSON.stringify(value)}::jsonb, true)`,
+    })
+    .where(and(eq(jobs.id, jobId), sql`jsonb_array_length(${column}) >= ${index}`))
+    .returning({ id: jobs.id });
+  if (written.length === 0) throw new Error(`No ${column.name} slot ${index} on job ${jobId}`);
 }
 
-async function putChunk(tx: Tx, jobId: string, chunk: Chunk): Promise<void> {
-  await tx
-    .insert(jobChunks)
-    .values({ jobId, index: chunk.index, data: chunk })
-    .onConflictDoUpdate({ target: [jobChunks.jobId, jobChunks.index], set: { data: chunk } });
-}
+const putPick = (tx: Tx, jobId: string, pick: StoredPick) =>
+  putAt(tx, jobId, jobs.picks, pick.version - 1, pick);
+
+const putChunk = (tx: Tx, jobId: string, chunk: Chunk) =>
+  putAt(tx, jobId, jobs.chunks, chunk.index, chunk);
 
 const released = { claimToken: null, claimUntil: null };
 
@@ -237,12 +252,8 @@ export async function transitionJob(
 }
 
 export async function listChunks(id: string): Promise<Chunk[]> {
-  const rows = await db()
-    .select({ data: jobChunks.data })
-    .from(jobChunks)
-    .where(eq(jobChunks.jobId, id))
-    .orderBy(asc(jobChunks.index));
-  return rows.map((r) => r.data as Chunk);
+  const [row] = await db().select({ chunks: jobs.chunks }).from(jobs).where(eq(jobs.id, id));
+  return (row?.chunks as Chunk[] | undefined) ?? [];
 }
 
 /**
@@ -263,41 +274,33 @@ export async function skipAndRepick(
     if (moved.length === 0) return false;
     if (version !== null) {
       await tx
-        .update(jobPicks)
-        .set({ data: sql`${jobPicks.data} || '{"skipped":true}'::jsonb` })
-        .where(and(eq(jobPicks.jobId, id), eq(jobPicks.version, version)));
+        .update(jobs)
+        .set({
+          picks: sql`jsonb_set(${jobs.picks}, ${`{${version - 1},skipped}`}::text[], 'true')`,
+        })
+        .where(eq(jobs.id, id));
     }
     await alsoWrite(tx);
     return true;
   });
 }
 
+async function readPicks(q: Database | Tx, id: string): Promise<StoredPick[]> {
+  const [row] = await q.select({ picks: jobs.picks }).from(jobs).where(eq(jobs.id, id));
+  return (row?.picks as StoredPick[] | undefined) ?? [];
+}
+
 export async function listPicks(id: string): Promise<StoredPick[]> {
-  const rows = await db()
-    .select({ data: jobPicks.data })
-    .from(jobPicks)
-    .where(eq(jobPicks.jobId, id))
-    .orderBy(asc(jobPicks.version));
-  return rows.map((r) => r.data as StoredPick);
+  return readPicks(db(), id);
 }
 
 export async function latestPick(id: string): Promise<StoredPick | null> {
-  const [row] = await db()
-    .select({ data: jobPicks.data })
-    .from(jobPicks)
-    .where(eq(jobPicks.jobId, id))
-    .orderBy(desc(jobPicks.version))
-    .limit(1);
-  return (row?.data as StoredPick | undefined) ?? null;
+  return (await readPicks(db(), id)).at(-1) ?? null;
 }
 
 /** The stored pick of one version, read inside the caller's transaction. */
 export async function pickIn(tx: Tx, id: string, version: number): Promise<StoredPick | null> {
-  const [row] = await tx
-    .select({ data: jobPicks.data })
-    .from(jobPicks)
-    .where(and(eq(jobPicks.jobId, id), eq(jobPicks.version, version)));
-  return (row?.data as StoredPick | undefined) ?? null;
+  return (await readPicks(tx, id))[version - 1] ?? null;
 }
 
 /** Reads and row-locks the job inside the caller's transaction, so concurrent writers queue. */
@@ -406,8 +409,7 @@ export async function createShort(
       current.pickVersion === null ? null : await pickIn(tx, current.id, current.pickVersion);
     if (!stored) return { noPick: true };
     const pick: StoredPick = { ...stored, ...current.finalFields, version: 1, skipped: false };
-    await tx.insert(jobs).values(jobRow(shortDoc(current, id)));
-    await putPick(tx, id, pick);
+    await tx.insert(jobs).values({ ...jobRow(shortDoc(current, id)), picks: [pick] });
     await tx
       .update(jobs)
       .set(jobSet({ shortId: id }))

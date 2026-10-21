@@ -22,8 +22,8 @@ Audience: AI coding agents. Directives only.
 - A user is their Google `sub` (`users.uid`). Email is display and invite lookup only.
 - Sign-in needs an active invite while `SIGNUP_MODE=invite`. First redemption binds the invite to the `sub`; NEVER rebind it.
 - Load a job by a request-supplied ID only through `authorizedJob` (owner check); list jobs only through `listJobs(uid)`. Another user's job → 404, never 403.
-- Only a user with `artistId` reads or writes `artist_*` rows or opens `/brand`.
-- Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to `job_feedback`.
+- Only a user with `artistId` reads or writes `artist_memory` rows or opens `/brand`.
+- Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.
 - One YouTube connection per user, bound to their own Google account. Refresh tokens: KMS ciphertext in `connections.token_ciphertext` only. NEVER log, trace, or return a token or ciphertext.
 - Upload and verify use only the job's approved destination channel and its owner's grant.
 - Short approvals write EDITED feedback only, never ACCEPTED.

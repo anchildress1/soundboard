@@ -42,7 +42,6 @@ const connectB = (status: 'connected' | 'revoked' = 'connected') =>
     connections: [
       {
         uid: USER_B.uid,
-        platform: 'youtube',
         status,
         channelId: 'UCb',
         channelTitle: 'B',

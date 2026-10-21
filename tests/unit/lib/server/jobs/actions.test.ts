@@ -5,7 +5,7 @@ import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jo
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistFeedback, connections, jobFeedback, jobs, users } from '$lib/server/core/schema';
+import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
 import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import type { Hook, JobState, Pick, Short } from '$lib/types';
@@ -64,13 +64,12 @@ async function makeJob(
     id,
   );
   const picks = opts.picks ?? 1;
-  await seed({
-    jobPicks: Array.from({ length: picks }, (_, i) => ({
-      jobId: id,
-      version: i + 1,
-      data: { ...pick(i + 1), skipped: false },
-    })),
-  });
+  await db()
+    .update(jobs)
+    .set({
+      picks: Array.from({ length: picks }, (_, i) => ({ ...pick(i + 1), skipped: false })),
+    })
+    .where(eq(jobs.id, id));
   await patchJob({
     state: opts.state ?? 'REVIEW',
     hashtagCandidates: candidates,
@@ -102,9 +101,17 @@ const input = (over: Partial<Input> = {}): Input => ({
 const inputA = (over: Partial<Input> = {}) => input({ channelId: CHANNEL_A, ...over });
 
 const jobRows = async () =>
-  (await db().select().from(jobFeedback)).map((r) => r.data as Record<string, unknown>);
+  (await db().select({ feedback: jobs.feedback }).from(jobs)).flatMap(
+    (r) => r.feedback as Record<string, unknown>[],
+  );
 const artistRows = async () =>
-  (await db().select().from(artistFeedback)).map((r) => r.data as Record<string, unknown>);
+  (
+    await db()
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
+      .where(eq(artistMemory.kind, 'feedback'))
+      .orderBy(artistMemory.id)
+  ).map((r) => r.data as Record<string, unknown>);
 
 const rejection = async (promise: Promise<unknown>) => {
   const error = await promise.catch((e: unknown) => e);
@@ -130,7 +137,6 @@ beforeEach(async () => {
     connections: [
       {
         uid: USER_B.uid,
-        platform: 'youtube',
         status: 'connected',
         channelId: CHANNEL_B,
         channelTitle: 'B Sides',

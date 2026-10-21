@@ -3,7 +3,7 @@ import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistBrand } from '$lib/server/core/schema';
+import { artistMemory } from '$lib/server/core/schema';
 import { POST } from '$routes/api/brand/discard/+server';
 import { seed, truncate } from '../../../../../helpers/db';
 import { USER_A, USER_B } from '../../../../../helpers/pipeline';
@@ -12,12 +12,14 @@ type Event = Parameters<typeof POST>[0];
 const discard = (user: typeof USER_A | typeof USER_B) =>
   POST({ locals: { user } } as unknown as Event);
 
-const proposals = () => db().select().from(artistBrand);
+const proposals = () => db().select().from(artistMemory);
 
 beforeEach(async () => {
   resetClients();
   await truncate();
-  await seed({ artistBrand: [{ artistId: 'flr', slot: 'proposal', data: { statement: 's' } }] });
+  await seed({
+    artistMemory: [{ artistId: 'flr', kind: 'brand', key: 'proposal', data: { statement: 's' } }],
+  });
 });
 
 describe('POST /api/brand/discard', () => {

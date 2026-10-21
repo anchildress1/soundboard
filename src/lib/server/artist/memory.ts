@@ -1,16 +1,14 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PickFields } from '$lib/types';
 import { db, type Database, type Tx } from '$lib/server/core/db';
-import {
-  artistFacts,
-  artistFeedback,
-  artistPublishes,
-  jobFeedback,
-  users,
-} from '$lib/server/core/schema';
+import { artistMemory, jobs, users } from '$lib/server/core/schema';
 
 export const ARTIST_ID = 'flr';
 export const ARTIST_NAME = 'Flies Like Robots';
+
+/** The artist's memory rows of one kind. */
+export const memoryOf = (kind: (typeof artistMemory.kind.enumValues)[number]) =>
+  and(eq(artistMemory.artistId, ARTIST_ID), eq(artistMemory.kind, kind));
 
 export type FactKind = 'FACT' | 'INFERENCE' | 'APPROVED';
 export type Fact = { key: string; value: string; kind: FactKind; public: boolean };
@@ -54,13 +52,20 @@ export async function artistJob(
 /** Reads Nathan's facts, seeding an empty table on first use. Call only on artist jobs. */
 export async function listFacts(): Promise<Fact[]> {
   const rows = await db()
-    .select({ data: artistFacts.data })
-    .from(artistFacts)
-    .where(eq(artistFacts.artistId, ARTIST_ID));
+    .select({ data: artistMemory.data })
+    .from(artistMemory)
+    .where(memoryOf('fact'));
   if (rows.length > 0) return rows.map((r) => r.data as Fact);
   await db()
-    .insert(artistFacts)
-    .values(SEED_FACTS.map((fact) => ({ artistId: ARTIST_ID, key: fact.key, data: fact })))
+    .insert(artistMemory)
+    .values(
+      SEED_FACTS.map((fact) => ({
+        artistId: ARTIST_ID,
+        kind: 'fact' as const,
+        key: fact.key,
+        data: fact,
+      })),
+    )
     .onConflictDoNothing();
   return SEED_FACTS;
 }
@@ -77,20 +82,25 @@ export async function writeFeedback(
   if (entries.length === 0) return;
   if (await artistJob(job, tx)) {
     await tx
-      .insert(artistFeedback)
-      .values(entries.map((data) => ({ artistId: ARTIST_ID, at: new Date(data.at), data })));
+      .insert(artistMemory)
+      .values(entries.map((data) => ({ artistId: ARTIST_ID, kind: 'feedback' as const, data })));
   } else {
-    await tx.insert(jobFeedback).values(entries.map((data) => ({ jobId: job.id, data })));
+    const kept = await tx
+      .update(jobs)
+      .set({ feedback: sql`${jobs.feedback} || ${JSON.stringify(entries)}::jsonb` })
+      .where(eq(jobs.id, job.id))
+      .returning({ id: jobs.id });
+    if (kept.length === 0) throw new Error(`No job ${job.id} to keep feedback on`);
   }
 }
 
 /** Nathan's latest feedback, newest first. */
 export async function recentFeedback(limit = 20): Promise<Feedback[]> {
   const rows = await db()
-    .select({ data: artistFeedback.data })
-    .from(artistFeedback)
-    .where(eq(artistFeedback.artistId, ARTIST_ID))
-    .orderBy(desc(artistFeedback.at))
+    .select({ data: artistMemory.data })
+    .from(artistMemory)
+    .where(memoryOf('feedback'))
+    .orderBy(desc(artistMemory.id))
     .limit(limit);
   return rows.map((r) => r.data as Feedback);
 }
@@ -104,10 +114,10 @@ export async function recordPublish(record: {
   at: number;
 }): Promise<void> {
   await db()
-    .insert(artistPublishes)
-    .values({ artistId: ARTIST_ID, videoId: record.videoId, data: record })
+    .insert(artistMemory)
+    .values({ artistId: ARTIST_ID, kind: 'publish', key: record.videoId, data: record })
     .onConflictDoUpdate({
-      target: [artistPublishes.artistId, artistPublishes.videoId],
+      target: [artistMemory.artistId, artistMemory.kind, artistMemory.key],
       set: { data: record },
     });
 }

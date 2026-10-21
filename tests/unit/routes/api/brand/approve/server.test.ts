@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistBrand } from '$lib/server/core/schema';
+import { artistMemory } from '$lib/server/core/schema';
 import { POST } from '$routes/api/brand/approve/+server';
 import { seed, truncate } from '../../../../../helpers/db';
 import { USER_A, USER_B } from '../../../../../helpers/pipeline';
@@ -19,16 +19,17 @@ const approve = (body: string, user: typeof USER_A | typeof USER_B = USER_A) =>
   } as unknown as Event);
 
 const has = async (slot: 'proposal' | 'approved') =>
-  (await db().select().from(artistBrand).where(eq(artistBrand.slot, slot))).length > 0;
+  (await db().select().from(artistMemory).where(eq(artistMemory.key, slot))).length > 0;
 
 beforeEach(async () => {
   resetClients();
   await truncate();
   await seed({
-    artistBrand: [
+    artistMemory: [
       {
         artistId: 'flr',
-        slot: 'proposal',
+        kind: 'brand',
+        key: 'proposal',
         data: { ...GUIDE, status: 'PROPOSED', basedOn: ['v1'], createdAt: 1, approvedAt: null },
       },
     ],

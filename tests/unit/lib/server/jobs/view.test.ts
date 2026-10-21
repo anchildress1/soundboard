@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import { createJob, listChunks, type NewJob } from '$lib/server/jobs/jobs';
 import { authorizedJob, buildView, mediaExpired } from '$lib/server/jobs/view';
 import type { Chunk, JobState, Pick, Short } from '$lib/types';
@@ -73,12 +76,18 @@ const pick = (version: number): Pick => ({
   modelMs: 1,
 });
 
-const seedChunks = (jobId: string, ...indexes: number[]) =>
-  seed({ jobChunks: indexes.map((i) => ({ jobId, index: i, data: chunk(i) })) });
-const seedPicks = (jobId: string, ...versions: number[]) =>
-  seed({
-    jobPicks: versions.map((v) => ({ jobId, version: v, data: { ...pick(v), skipped: false } })),
-  });
+/** Stores chunks 0..`count` - 1, chunk i at index i. */
+const seedChunks = (jobId: string, count: number) =>
+  db()
+    .update(jobs)
+    .set({ chunks: Array.from({ length: count }, (_, i) => chunk(i)) })
+    .where(eq(jobs.id, jobId));
+/** Stores picks 1..`count`, version v at index v - 1. */
+const seedPicks = (jobId: string, count: number) =>
+  db()
+    .update(jobs)
+    .set({ picks: Array.from({ length: count }, (_, i) => ({ ...pick(i + 1), skipped: false })) })
+    .where(eq(jobs.id, jobId));
 
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
@@ -121,8 +130,8 @@ describe('authorizedJob', () => {
 describe('buildView', () => {
   it('bundles the public job, its chunks, and the latest pick', async () => {
     const job = await createJob(input(), 'v');
-    await seedChunks('v', 1, 0);
-    await seedPicks('v', 1, 2);
+    await seedChunks('v', 2);
+    await seedPicks('v', 2);
     const view = await buildView(job);
     expect(view.job.id).toBe('v');
     expect(view.job).not.toHaveProperty('trace');
@@ -143,7 +152,7 @@ describe('buildView', () => {
   it('reads only the job it was given', async () => {
     const job = await createJob(input(), 'v');
     await createJob(input(), 'other');
-    await seedChunks('other', 0);
+    await seedChunks('other', 1);
     expect((await buildView(job)).chunks).toEqual([]);
     expect(await listChunks('other')).toHaveLength(1);
   });

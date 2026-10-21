@@ -129,7 +129,6 @@ describe('job page load: where Approve uploads', () => {
       connections: [
         {
           uid: USER_B.uid,
-          platform: 'youtube',
           status: 'revoked',
           channelId: 'UCb',
           channelTitle: 'B',

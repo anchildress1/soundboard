@@ -1,88 +1,11 @@
 {
-  "id": "4327ddd2-7c6c-44f5-9314-6ec806aca93e",
+  "id": "604cca31-1a88-4274-b8d8-1d40acff89ea",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.artist_brand": {
-      "name": "artist_brand",
-      "schema": "",
-      "columns": {
-        "artist_id": {
-          "name": "artist_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slot": {
-          "name": "slot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "artist_brand_artist_id_slot_pk": {
-          "name": "artist_brand_artist_id_slot_pk",
-          "columns": ["artist_id", "slot"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "artist_brand_slot_check": {
-          "name": "artist_brand_slot_check",
-          "value": "\"artist_brand\".\"slot\" in ('proposal', 'approved')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.artist_facts": {
-      "name": "artist_facts",
-      "schema": "",
-      "columns": {
-        "artist_id": {
-          "name": "artist_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "artist_facts_artist_id_key_pk": {
-          "name": "artist_facts_artist_id_key_pk",
-          "columns": ["artist_id", "key"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.artist_feedback": {
-      "name": "artist_feedback",
+    "public.artist_memory": {
+      "name": "artist_memory",
       "schema": "",
       "columns": {
         "id": {
@@ -92,7 +15,7 @@
           "notNull": true,
           "identity": {
             "type": "always",
-            "name": "artist_feedback_id_seq",
+            "name": "artist_memory_id_seq",
             "schema": "public",
             "increment": "1",
             "startWith": "1",
@@ -108,64 +31,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "artist_feedback_recent_idx": {
-          "name": "artist_feedback_recent_idx",
-          "columns": [
-            {
-              "expression": "artist_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.artist_publishes": {
-      "name": "artist_publishes",
-      "schema": "",
-      "columns": {
-        "artist_id": {
-          "name": "artist_id",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "video_id": {
-          "name": "video_id",
+        "key": {
+          "name": "key",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "data": {
           "name": "data",
@@ -176,15 +52,21 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "artist_publishes_artist_id_video_id_pk": {
-          "name": "artist_publishes_artist_id_video_id_pk",
-          "columns": ["artist_id", "video_id"]
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "artist_memory_key": {
+          "name": "artist_memory_key",
+          "nullsNotDistinct": false,
+          "columns": ["artist_id", "kind", "key"]
         }
       },
-      "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "artist_memory_kind_check": {
+          "name": "artist_memory_kind_check",
+          "value": "\"artist_memory\".\"kind\" in ('fact', 'feedback', 'publish', 'brand') and (\"artist_memory\".\"key\" is null) = (\"artist_memory\".\"kind\" = 'feedback')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.connections": {
@@ -194,13 +76,7 @@
         "uid": {
           "name": "uid",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform": {
-          "name": "platform",
-          "type": "text",
-          "primaryKey": false,
+          "primaryKey": true,
           "notNull": true
         },
         "status": {
@@ -252,30 +128,17 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "connections_uid_platform_pk": {
-          "name": "connections_uid_platform_pk",
-          "columns": ["uid", "platform"]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "connections_platform_check": {
-          "name": "connections_platform_check",
-          "value": "\"connections\".\"platform\" = 'youtube'"
-        },
         "connections_status_check": {
           "name": "connections_status_check",
           "value": "\"connections\".\"status\" in ('connected', 'missing_scopes', 'no_channel', 'revoked')"
         },
-        "connections_token_check": {
-          "name": "connections_token_check",
-          "value": "\"connections\".\"status\" = 'connected' or \"connections\".\"token_ciphertext\" is null"
-        },
-        "connections_connected_check": {
-          "name": "connections_connected_check",
-          "value": "\"connections\".\"status\" <> 'connected' or (\"connections\".\"token_ciphertext\" is not null and \"connections\".\"channel_id\" is not null)"
+        "connections_shape_check": {
+          "name": "connections_shape_check",
+          "value": "(\"connections\".\"status\" = 'connected') = (\"connections\".\"token_ciphertext\" is not null) and (\"connections\".\"status\" <> 'connected' or \"connections\".\"channel_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -327,166 +190,6 @@
           "columns": ["bound_sub"]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.job_chunks": {
-      "name": "job_chunks",
-      "schema": "",
-      "columns": {
-        "job_id": {
-          "name": "job_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "index": {
-          "name": "index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "job_chunks_job_id_jobs_id_fk": {
-          "name": "job_chunks_job_id_jobs_id_fk",
-          "tableFrom": "job_chunks",
-          "tableTo": "jobs",
-          "columnsFrom": ["job_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "job_chunks_job_id_index_pk": {
-          "name": "job_chunks_job_id_index_pk",
-          "columns": ["job_id", "index"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.job_feedback": {
-      "name": "job_feedback",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "job_feedback_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "job_id": {
-          "name": "job_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "job_feedback_job_idx": {
-          "name": "job_feedback_job_idx",
-          "columns": [
-            {
-              "expression": "job_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "job_feedback_job_id_jobs_id_fk": {
-          "name": "job_feedback_job_id_jobs_id_fk",
-          "tableFrom": "job_feedback",
-          "tableTo": "jobs",
-          "columnsFrom": ["job_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.job_picks": {
-      "name": "job_picks",
-      "schema": "",
-      "columns": {
-        "job_id": {
-          "name": "job_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "job_picks_job_id_jobs_id_fk": {
-          "name": "job_picks_job_id_jobs_id_fk",
-          "tableFrom": "job_picks",
-          "tableTo": "jobs",
-          "columnsFrom": ["job_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "job_picks_job_id_version_pk": {
-          "name": "job_picks_job_id_version_pk",
-          "columns": ["job_id", "version"]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -578,6 +281,27 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "picks": {
+          "name": "picks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "chunks": {
+          "name": "chunks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "feedback": {
+          "name": "feedback",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         }
       },
       "indexes": {

@@ -3,12 +3,15 @@ import { EventEmitter } from 'node:events';
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, seedJob, USERS } from '../../../../helpers/pipeline';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { span, startSpan } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import type { JobDoc } from '$lib/server/jobs/jobs';
 import {
   buildHookMessages,
@@ -158,9 +161,10 @@ function shortJob(patch: Partial<JobDoc> = {}, short: Partial<Short> = {}): JobD
 }
 
 const seedChunks = (count: number) =>
-  seed({
-    jobChunks: Array.from({ length: count }, (_, i) => ({ jobId: 'p1', index: i, data: chunk(i) })),
-  });
+  db()
+    .update(jobs)
+    .set({ chunks: Array.from({ length: count }, (_, i) => chunk(i)) })
+    .where(eq(jobs.id, 'p1'));
 
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');

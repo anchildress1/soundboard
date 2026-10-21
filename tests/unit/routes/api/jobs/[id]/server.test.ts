@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import { GET } from '$routes/api/jobs/[id]/+server';
 import type { JobView } from '$lib/types';
 import { seed, truncate } from '../../../../../helpers/db';
@@ -38,7 +41,10 @@ beforeEach(async () => {
 
 describe('GET /api/jobs/[id]', () => {
   it('returns the public view of the job to its owner', async () => {
-    await seed({ jobChunks: [{ jobId: 'b', index: 0, data: { index: 0 } }] });
+    await db()
+      .update(jobs)
+      .set({ chunks: [{ index: 0 }] })
+      .where(eq(jobs.id, 'b'));
     const response = await get('b');
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;

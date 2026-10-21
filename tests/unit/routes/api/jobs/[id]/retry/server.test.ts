@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import { getJob } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/retry/+server';
 import type { JobView } from '$lib/types';
@@ -32,9 +35,10 @@ beforeEach(async () => {
 describe('POST /api/jobs/[id]/retry', () => {
   it('resumes at the failed chunk and keeps finished chunks', async () => {
     await put();
-    await seed({
-      jobChunks: [0, 1].map((index) => ({ jobId: 'j1', index, data: { index } })),
-    });
+    await db()
+      .update(jobs)
+      .set({ chunks: [0, 1].map((index) => ({ index })) })
+      .where(eq(jobs.id, 'j1'));
     const response = await retry('j1');
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;

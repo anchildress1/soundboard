@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
@@ -28,9 +29,10 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
     trace: { sentryTrace: 't', baggage: 'b' },
     ...patch,
   });
-  await seed({
-    jobPicks: [{ jobId: id, version: 1, data: { version: 1, title: 'First', skipped: false } }],
-  });
+  await db()
+    .update(jobs)
+    .set({ picks: [{ version: 1, title: 'First', skipped: false }] })
+    .where(eq(jobs.id, id));
 }
 
 beforeEach(async () => {

@@ -19,7 +19,9 @@ describe('/brand load', () => {
     ['signed out', null],
     ['an unlinked user', USER_B],
   ])('404s when %s', async (_label, user) => {
-    await seed({ artistBrand: [{ artistId: 'flr', slot: 'approved', data: { statement: 's' } }] });
+    await seed({
+      artistMemory: [{ artistId: 'flr', kind: 'brand', key: 'approved', data: { statement: 's' } }],
+    });
     const error = await Promise.resolve()
       .then(() => run(user))
       .catch((e: unknown) => e);
@@ -27,7 +29,9 @@ describe('/brand load', () => {
   });
 
   it("returns the artist's approved guide and proposal", async () => {
-    await seed({ artistBrand: [{ artistId: 'flr', slot: 'proposal', data: { statement: 'p' } }] });
+    await seed({
+      artistMemory: [{ artistId: 'flr', kind: 'brand', key: 'proposal', data: { statement: 'p' } }],
+    });
     expect(await run(USER_A)).toEqual({ approved: null, proposal: { statement: 'p' } });
   });
 });

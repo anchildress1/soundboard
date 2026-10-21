@@ -3,6 +3,7 @@ import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { getJob } from '$lib/server/jobs/jobs';
+import { jobRow } from '$lib/server/jobs/rows';
 import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
 import { load as layoutLoad } from '$routes/+layout.server';
 import { load as homeLoad } from '$routes/+page.server';
@@ -17,7 +18,7 @@ import { POST as rerun } from '$routes/api/jobs/[id]/rerun/+server';
 import { POST as makeShort } from '$routes/api/jobs/[id]/short/+server';
 import { POST as step } from '$routes/api/jobs/[id]/step/+server';
 import { seed, truncate } from '../../helpers/db';
-import { A_JOB, CHANNEL_A, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
+import { A_JOB, CHANNEL_A, jobDoc, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 
 // One process serving A, then B, then A: nothing one user saw may leak into the next request.
 
@@ -82,7 +83,6 @@ beforeEach(async () => {
     connections: [
       {
         uid: USER_B.uid,
-        platform: 'youtube',
         status: 'connected',
         channelId: CHANNEL_B,
         channelTitle: 'B',
@@ -96,7 +96,7 @@ beforeEach(async () => {
     ['a', A_JOB],
     ['b', { ownerUid: USER_B.uid, artistId: null }],
   ] as const) {
-    await seedJob({
+    const video = jobDoc({
       id,
       ...owner,
       state: 'REVIEW',
@@ -104,7 +104,7 @@ beforeEach(async () => {
       probe: PROBE,
       pickVersion: 1,
     });
-    await seed({ jobPicks: [{ jobId: id, version: 1, data: { version: 1, title: id } }] });
+    await seed({ jobs: [{ ...jobRow(video), picks: [{ version: 1, title: id }] }] });
     // A rendered Short of each user's video, in review, so its playback URL is signed.
     await seedJob({
       id: `${id}s`,

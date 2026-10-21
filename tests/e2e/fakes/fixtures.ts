@@ -179,7 +179,6 @@ export const SEED: Seed = {
     ...USERS.connections,
     ...broken.map(({ uid, status }) => ({
       uid,
-      platform: 'youtube',
       status,
       channelId: null,
       channelTitle: null,
@@ -188,11 +187,9 @@ export const SEED: Seed = {
       updatedAt: new Date(0),
     })),
   ],
-  jobs: JOBS.map(({ job }) => jobRow(job)),
-  jobPicks: JOBS.flatMap(({ job, pick }) =>
-    pick ? [{ jobId: job.id, version: pick.version, data: { ...pick, skipped: false } }] : [],
-  ),
-  jobChunks: JOBS.flatMap(({ job, chunks }) =>
-    chunks.map((c) => ({ jobId: job.id, index: c.index, data: c })),
-  ),
+  jobs: JOBS.map(({ job, pick, chunks }) => ({
+    ...jobRow(job),
+    picks: pick ? [{ ...pick, skipped: false }] : [],
+    chunks,
+  })),
 };

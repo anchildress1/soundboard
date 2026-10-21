@@ -24,16 +24,15 @@ Nothing is carried over from Firestore (pre-beta). The FLR artist memory starts 
 
 | Column             | Type                                                                   | Rule                                                         |
 | ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `uid`              | text → `users.uid` on delete cascade                                   | Primary key with `platform`                                  |
-| `platform`         | text, not null, check `= 'youtube'`                                    | The only platform in this spec                               |
+| `uid`              | text → `users.uid` on delete cascade                                   | Primary key: one YouTube connection per user                 |
 | `status`           | text, check `in ('connected','missing_scopes','no_channel','revoked')` | `connected` only per FR-027                                  |
 | `channel_id`       | text                                                                   | From `channels.list?mine=true` through this grant            |
 | `channel_title`    | text                                                                   | Same call                                                    |
 | `scopes`           | text[], not null                                                       | Granted scopes from the token response                       |
-| `token_ciphertext` | text, check `status = 'connected' or token_ciphertext is null`         | KMS-encrypted refresh token, base64. Null unless `connected` |
+| `token_ciphertext` | text, check `(status = 'connected') = (token_ciphertext is not null)`  | KMS-encrypted refresh token, base64. Null unless `connected` |
 | `updated_at`       | timestamptz, not null                                                  |                                                              |
 
-- One per user and platform (FR-014), always on the user's own Google account. Reconnect upserts the row in one statement, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
+- One per user (FR-014); a `connected` row always names a channel, always on the user's own Google account. Reconnect upserts the row in one statement, only after the new grant validates and its ID token `sub` equals the user's (FR-023, FR-027).
 - `revoked` is set when Google returns `invalid_grant` or YouTube refuses the access token (401) during publish, verify, or confirm-upload, and the ciphertext is cleared in the same `UPDATE`. A dead token is never kept.
 - Disconnect: revoke at Google, then delete the row.
 
@@ -69,19 +68,22 @@ Fields the app filters or locks on are columns; the rest of today's job document
 | `final_chunk_at`         | timestamptz                  | Persisted before sending the chunk that reaches the file size. A column, because session loss resets the upload session in `data`; nothing clears it          |
 | `video_id`               | text                         | Kept on every later state change, including discard                                                                                                           |
 | `data`                   | jsonb, not null              | Everything else on today's job document, minus the removed fields below                                                                                       |
+| `picks`                  | jsonb array, not null        | Pick version v at index v − 1, each with `skipped`                                                                                                            |
+| `chunks`                 | jsonb array, not null        | Chunk analysis i at index i                                                                                                                                   |
+| `feedback`               | jsonb array, not null        | Feedback on a job not tied to an artist; artist jobs write to `artist_memory`                                                                                 |
 
 - Removed: `owner` (`nathan` / `demo` / `visitor`), `channel` (`nathan` / `sandbox`), `sampleId`, `liveVideoId`, `ipHash`.
 - Shorts copy `owner_uid`, `artist_id` and a null destination from their parent.
 - Index for the home job list (FR-029): `(owner_uid, created_at desc) WHERE parent_id IS NULL`.
 - A step claims with `UPDATE jobs SET claim_token = $2, claim_until = now() + interval '3 minutes' WHERE id = $1 AND (claim_until IS NULL OR claim_until < now()) RETURNING *`, supplying a fresh random token; zero rows means another step holds it.
-- Saving step results, child-table writes and releasing the claim require the stored token to match the caller's token, atomically in the same transaction. Normal state changes also require the state the step claimed. Release sets `claim_token` and `claim_until` to null together. A superseded request writes nothing and never clears another request's claim.
+- Saving step results, pick and chunk writes and releasing the claim require the stored token to match the caller's token, atomically in the same transaction. Normal state changes also require the state the step claimed. Release sets `claim_token` and `claim_until` to null together. A superseded request writes nothing and never clears another request's claim.
 - A step result that lands after the job moved (for example a discard during the final chunk) still saves `video_id` and upload progress only while its claim token still matches. It preserves the new state and unrelated data, and clears only its own claim. Today `releaseJob` drops the whole patch (`jobs.ts:151-153`).
-- Today's subcollections become child tables keyed by `job_id` → `jobs.id` on delete cascade: `job_picks (job_id, version)`, `job_chunks (job_id, index)` and `job_feedback`, each holding its document as `data` jsonb.
+- Today's subcollections become the `picks`, `chunks` and `feedback` arrays, so a job is one row.
 
-## Artist tables
+## `artist_memory`
 
-- `artist_facts (artist_id, key)`, `artist_feedback`, `artist_publishes (artist_id, video_id)` and `artist_brand (artist_id, slot)` with `slot in ('proposal','approved')` replace `artists/flr/*`, each holding today's document as `data` jsonb plus the keys shown.
-- `artist_feedback` is indexed on `(artist_id, at desc)` for `recentFeedback`.
+- One table replaces `artists/flr/*`: `id` identity, `artist_id`, `kind in ('fact','feedback','publish','brand')`, `key`, and today's document as `data` jsonb.
+- `key` is the fact key, the video ID, or the brand slot (`proposal`/`approved`), unique per `(artist_id, kind)`. Feedback has no key (a check enforces it) and reads newest-first by `id`.
 
 ### Publishing and verification with a pinned destination
 
