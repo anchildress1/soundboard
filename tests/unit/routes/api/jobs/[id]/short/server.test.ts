@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
@@ -35,8 +35,13 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
     .where(eq(jobs.id, id));
 }
 
+// Every object reads as stored, so the Short's source upload is still there.
+vi.mock('@google-cloud/storage', () => import('../../../../../../e2e/fakes/storage'));
+
 beforeEach(async () => {
   resetClients();
+  vi.stubEnv('GCP_PROJECT_ID', 'p');
+  vi.stubEnv('GCS_BUCKET', 'b');
   await truncate();
   await seed(USERS);
 });

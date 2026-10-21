@@ -27,6 +27,7 @@ import {
   type Access,
 } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
+import { objectInfo } from '$lib/server/media/gcs';
 
 function requireState(job: JobDoc, states: JobState[]): void {
   if (!states.includes(job.state))
@@ -298,8 +299,9 @@ export async function retry(job: JobDoc): Promise<void> {
 }
 
 /**
- * Starts a Short from a video whose analysis is done, or returns the live one it already has. Its
- * metadata starts from what the owner approved, else the recommendation on screen.
+ * Starts a Short from a video whose analysis is done and whose upload is still stored, or returns
+ * the live one it already has. Its metadata starts from what the owner approved, else the
+ * recommendation on screen.
  */
 export async function makeShort(job: JobDoc): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
@@ -309,6 +311,10 @@ export async function makeShort(job: JobDoc): Promise<string> {
   }
   if (!canCutShort(job.probe.durationSec)) {
     throw new ActionError(409, `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`);
+  }
+  // The Short renders from this video's upload, which the bucket's 7-day lifecycle deletes.
+  if (!(await objectInfo(job.object))) {
+    throw new ActionError(409, 'This video is gone from storage. Upload it again to make a Short.');
   }
   const started = await createShort(job, SHORT_SOURCE_STATES);
   if (!started) throw new ActionError(409, 'The video moved on before the Short could start.');

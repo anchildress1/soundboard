@@ -12,6 +12,22 @@ import type { Hook, JobState, Pick, Short } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
+/** Objects the bucket's lifecycle already deleted; every other object exists. */
+const deleted = vi.hoisted(() => new Set<string>());
+
+vi.mock('@google-cloud/storage', () => ({
+  Storage: class {
+    bucket() {
+      return {
+        file: (object: string) => ({
+          exists: async () => [!deleted.has(object)],
+          getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
+        }),
+      };
+    }
+  },
+}));
+
 const SYNTHWAVE_TAG = '#synthwave';
 const RETROWAVE = '#retrowave';
 const DESCRIPTION = 'A bright synth track.\n\n#synthwave #retrowave';
@@ -130,6 +146,9 @@ const setBStatus = (status: 'connected' | 'missing_scopes' | 'no_channel' | 'rev
 
 beforeEach(async () => {
   resetClients();
+  deleted.clear();
+  vi.stubEnv('GCP_PROJECT_ID', 'p');
+  vi.stubEnv('GCS_BUCKET', 'b');
   vi.clearAllMocks();
   await truncate();
   await seed(USERS);
@@ -603,6 +622,18 @@ describe('makeShort', () => {
     await patchJob({ state: 'PUBLISHING', finalFields: final });
     const [stored] = await listPicks(await makeShort(stale));
     expect(stored).toMatchObject({ ...final, version: 1 });
+  });
+
+  it('refuses once storage has deleted the video, starting no Short', async () => {
+    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE } });
+    deleted.add(job.object);
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([
+      409,
+      'This video is gone from storage. Upload it again to make a Short.',
+    ]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+    expect(await db().select({ id: jobs.id }).from(jobs)).toEqual([{ id: 'job1' }]);
   });
 
   it('returns the live Short instead of starting another', async () => {
