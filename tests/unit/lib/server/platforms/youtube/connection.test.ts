@@ -408,4 +408,14 @@ describe('revokeGrant', () => {
       tokenCiphertext: 'bmV3',
     });
   });
+
+  it('still deletes a row a step marked revoked while Google answered', async () => {
+    await putConnection(UID, connected());
+    fetchMock.mockImplementation(async () => {
+      await markRevoked(UID, 'c2VhbGVk');
+      return new Response('', { status: 200 });
+    });
+    expect(await revokeGrant(UID)).toBe(true);
+    expect(await getConnection(UID)).toBeNull();
+  });
 });

@@ -1,5 +1,5 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db, type Database, type Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
@@ -83,19 +83,22 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
 }
 
 /**
- * Disconnects YouTube: revokes the stored grant at Google, then deletes the row. A failed revoke is
- * reported and the row is deleted anyway, so the app holds no token either way. Returns whether
- * Google confirmed the revoke; true when there was no token to revoke.
+ * Disconnects YouTube: revokes the stored grant at Google, then deletes the row unless a reconnect
+ * replaced its grant meanwhile. A failed revoke is reported and the row is deleted anyway, so the
+ * revoked token is never kept. Returns whether Google confirmed the revoke; true when there was no
+ * token to revoke.
  */
 export async function revokeGrant(uid: string): Promise<boolean> {
   const connection = await getConnection(uid);
   if (!connection) return true;
   const { tokenCiphertext } = connection;
   const revoked = tokenCiphertext ? await revokeAtGoogle(tokenCiphertext) : true;
-  // A reconnect from another tab can land while Google answers; its new grant stays.
+  // A reconnect from another tab can land while Google answers; its new grant stays. A tokenless
+  // row holds no grant, so a step that marked it revoked meanwhile doesn't keep it.
+  const tokenless = isNull(connections.tokenCiphertext);
   const observed = tokenCiphertext
-    ? eq(connections.tokenCiphertext, tokenCiphertext)
-    : isNull(connections.tokenCiphertext);
+    ? or(eq(connections.tokenCiphertext, tokenCiphertext), tokenless)
+    : tokenless;
   await db()
     .delete(connections)
     .where(and(mine(uid), observed));
