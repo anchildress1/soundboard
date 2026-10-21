@@ -340,10 +340,10 @@ async function verify(job: JobDoc): Promise<StepOutput> {
   } catch (error) {
     return youtubeWait(job, error, access, now);
   }
-  return unlimited(job, await verified(job, job.videoId, video));
+  return unlimited(job, verified(job, job.videoId, video));
 }
 
-async function verified(job: JobDoc, videoId: string, video: ReadBack | null): Promise<StepOutput> {
+function verified(job: JobDoc, videoId: string, video: ReadBack | null): StepOutput {
   if (video?.status === 'rejected') {
     return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
   }
