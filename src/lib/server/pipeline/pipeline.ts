@@ -56,8 +56,10 @@ export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 3;
 
 type Patch = JobPatch;
-/** A step's job patch, plus output to store only if the claim is still valid at release. */
-/** `alsoWrite` runs inside the release, so it lands only while the step still holds the job. */
+/**
+ * A step's job patch, plus output to store only if the claim is still valid at release. `alsoWrite`
+ * runs inside the release transaction for writes outside the job row.
+ */
 type StepOutput = Patch & {
   pick?: Pick;
   chunk?: Chunk;
