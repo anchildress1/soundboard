@@ -2,12 +2,12 @@
   import { timecode } from '$lib/format';
   import type { FieldErrors } from '$lib/metadata';
   import { cutErrors, lengthBounds, tenth } from '$lib/short';
-  import { jobStatus, modelSeconds } from '$lib/status';
-  import type { JobView, PickFields, Reframe } from '$lib/types';
+  import { jobStatus, modelSeconds, publishPaused } from '$lib/status';
+  import type { Destination, JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
-  import Payload from './Payload.svelte';
   import Track from './Track.svelte';
+  import UploadRecovery from './UploadRecovery.svelte';
 
   type Cut = { startSec: number; lengthSec: number; reframe: Reframe };
   type Fields = { title: string; description: string; tags: string[] };
@@ -18,22 +18,30 @@
     busy = false,
     message = '',
     serverErrors = {},
+    approveTo,
+    expired = false,
     onrecut,
     onapprove,
     onrerun,
     ondiscard,
     onretry,
+    onconfirm,
   }: {
     view: JobView;
     src?: string | null;
     busy?: boolean;
     message?: string;
     serverErrors?: FieldErrors;
+    /** The owner's connected channel, shown beside Approve until approval pins one. */
+    approveTo: Destination | null;
+    /** Storage dropped the media this Short's remaining work needs. */
+    expired?: boolean;
     onrecut: (cut: Cut) => void;
     onapprove: (fields: Fields) => void;
     onrerun: () => void;
     ondiscard: () => void;
     onretry: () => void;
+    onconfirm: (url: string) => void;
   } = $props();
 
   const job = $derived(view.job);
@@ -45,7 +53,7 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const fields = $derived<PickFields | null>(
-    job.payload ??
+    job.finalFields ??
       (view.pick
         ? {
             title: view.pick.title,
@@ -57,7 +65,7 @@
   );
   const bounds = $derived(lengthBounds(short.sourceDurationSec));
 
-  // Overridable: the artist's edits stick until a new hook or render resets them.
+  // Overridable: the owner's edits stick until a new hook or render resets them.
   let startSec = $derived(hook?.startSec ?? 0);
   let lengthSec = $derived(hook?.lengthSec ?? bounds.min);
   let reframe = $derived<Reframe>(short.reframe);
@@ -79,6 +87,12 @@
 </script>
 
 <div class="short">
+  {#if expired}
+    <p class="expired" role="note">
+      This Short's video is gone from storage after 7 days. Its saved details stay here; upload the
+      video again from the home page to finish anything that needs it.
+    </p>
+  {/if}
   {#if job.state === 'VERIFIED' && job.videoId}
     <p class="uploaded">
       <span class="check" aria-hidden="true">✓</span>
@@ -169,7 +183,10 @@
         {editable}
         {busy}
         {done}
+        discardable={publishPaused(view)}
         {serverErrors}
+        destination={job.destination ?? (editable ? approveTo : null)}
+        uploaded={job.videoId !== null}
         idPrefix="short-"
         heading="YouTube Short"
         rerunLabel="Re-pick hook"
@@ -177,10 +194,8 @@
         {onrerun}
         {ondiscard}
       />
+      <UploadRecovery {view} {busy} {onconfirm} />
     {/key}
-  {/if}
-  {#if job.state === 'PAYLOAD' && job.payload}
-    <Payload fields={job.payload} />
   {/if}
   {#if job.state === 'FAILED'}
     <div class="actions">
@@ -227,6 +242,13 @@
 
   .uploaded a {
     color: var(--green);
+  }
+
+  .expired {
+    margin: 0;
+    padding: 12px 14px;
+    border-left: 3px solid var(--yellow);
+    background: var(--panel);
   }
 
   .cut {

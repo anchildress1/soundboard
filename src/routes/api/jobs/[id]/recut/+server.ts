@@ -6,7 +6,7 @@ import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ params, request, locals }) =>
   respond(async () => {
-    const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
+    const job = await authorizedJob(params.id, locals.user?.uid);
     const body = await readBody(request);
     await recut(job, {
       startSec: num(body.startSec),

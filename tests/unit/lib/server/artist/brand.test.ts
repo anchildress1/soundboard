@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
+import { and, eq } from 'drizzle-orm';
 import { RULE_MAX, RULES_MAX, STATEMENT_MAX, type StoredBrand } from '$lib/brand';
 import { ActionError } from '$lib/server/core/errors';
 import {
@@ -13,18 +13,32 @@ import {
   getBrand,
   isBrandGuide,
   proposeBrand,
-  requireAllowlisted,
+  requireArtist,
 } from '$lib/server/artist/brand';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { artistMemory } from '$lib/server/core/schema';
+import { memoryOf } from '$lib/server/artist/memory';
 import { clearStatsCache, type CatalogVideo } from '$lib/server/platforms/youtube/youtube';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
+import { seed, truncate } from '../../../../helpers/db';
 
-const PROPOSAL_DOC = 'artists/flr/brand/proposal';
-const APPROVED_DOC = 'artists/flr/brand/approved';
+type Slot = 'proposal' | 'approved';
 
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+const read = async (slot: Slot) =>
+  (
+    await db()
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
+      .where(and(memoryOf('brand'), eq(artistMemory.key, slot)))
+  )[0]?.data ?? null;
+const has = async (slot: Slot) => (await read(slot)) !== null;
+const put = async (slot: Slot, data: StoredBrand) => {
+  await db()
+    .delete(artistMemory)
+    .where(and(memoryOf('brand'), eq(artistMemory.key, slot)));
+  await seed({ artistMemory: [{ artistId: 'flr', kind: 'brand', key: slot, data }] });
+};
 
 const GUIDE = {
   statement: 'Song title first, then a two-line story.',
@@ -58,11 +72,10 @@ const chatBody = () =>
 const completion = (content: string) =>
   json({ choices: [{ message: { content } }], usage: { total_tokens: 1 } });
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
+beforeEach(async () => {
   vi.stubEnv('YOUTUBE_API_KEY', 'key');
   vi.stubEnv('FLR_CHANNEL_ID', 'UCflr');
-  resetStore();
+  await truncate();
   resetClients();
   clearStatsCache();
   uploads = Array.from({ length: 35 }, (_, i) => `v${i + 1}`);
@@ -224,7 +237,7 @@ describe('proposeBrand', () => {
     on(/\/health$/, () => new Response('loading', { status: 503 }));
     expect(await proposeBrand()).toEqual({ wait: 'waking model' });
     expect(called(/youtube/)).toHaveLength(0);
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await has('proposal')).toBe(false);
   });
 
   it('waits while another run holds the model', async () => {
@@ -239,23 +252,31 @@ describe('proposeBrand', () => {
       () => new Response('Model is not yet ready for inference.', { status: 429 }),
     );
     expect(await proposeBrand()).toEqual({ wait: 'waking model' });
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await has('proposal')).toBe(false);
   });
 
   it('propagates any other model error', async () => {
     on(/chat\/completions$/, () => new Response('boom', { status: 500 }));
     await expect(proposeBrand()).rejects.toThrow('llama-server 500: boom');
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await has('proposal')).toBe(false);
   });
 
   it('reads 30 uploads and 10 thumbnails and stores the proposal', async () => {
     const result = await proposeBrand();
     expect(result).toMatchObject({ proposal: { ...GUIDE, status: 'PROPOSED', approvedAt: null } });
-    const stored = store.get(PROPOSAL_DOC) as StoredBrand;
+    const stored = (await read('proposal')) as StoredBrand;
     expect(stored.basedOn).toEqual(uploads.slice(0, 30));
     expect(called(/i\.ytimg\.com/)).toHaveLength(10);
     const parts = chatBody().messages[1]!.content as { type: string }[];
     expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(10);
+  });
+
+  it("reads FLR's own channel by FLR_CHANNEL_ID, never a signed-in user's", async () => {
+    await proposeBrand();
+    const [channels] = called(/youtube\/v3\/channels\?/);
+    const params = new URL(channels!.url).searchParams;
+    expect(params.get('id')).toBe('UCflr');
+    expect(params.get('mine')).toBeNull();
   });
 
   it('records the redacted request and the guide on the agent span', async () => {
@@ -290,13 +311,13 @@ describe('proposeBrand', () => {
     on(/chat\/completions$/, () => completion('{"statement": 1}'));
     clearAgentSpan();
     await expect(proposeBrand()).rejects.toMatchObject({ status: 502 });
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await has('proposal')).toBe(false);
     expect(agentSpanIO().output).toEqual([]);
   });
 });
 
 describe('approveBrand', () => {
-  beforeEach(() => store.set(PROPOSAL_DOC, PROPOSAL));
+  beforeEach(() => put('proposal', PROPOSAL));
 
   it('approves the edited guide, trimmed, and clears the proposal', async () => {
     const approved = await approveBrand({
@@ -315,14 +336,14 @@ describe('approveBrand', () => {
       basedOn: PROPOSAL.basedOn,
       createdAt: PROPOSAL.createdAt,
     });
-    expect(store.get(APPROVED_DOC)).toEqual(approved);
-    expect(store.has(PROPOSAL_DOC)).toBe(false);
+    expect(await read('approved')).toEqual(approved);
+    expect(await has('proposal')).toBe(false);
   });
 
   it('replaces an earlier approved guide', async () => {
-    store.set(APPROVED_DOC, { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
+    await put('approved', { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
     await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt });
-    expect((store.get(APPROVED_DOC) as StoredBrand).statement).toBe(GUIDE.statement);
+    expect(((await read('approved')) as StoredBrand).statement).toBe(GUIDE.statement);
   });
 
   it('400s on a malformed body', async () => {
@@ -335,8 +356,8 @@ describe('approveBrand', () => {
     ).rejects.toMatchObject({
       status: 422,
     });
-    expect(store.has(APPROVED_DOC)).toBe(false);
-    expect(store.has(PROPOSAL_DOC)).toBe(true);
+    expect(await has('approved')).toBe(false);
+    expect(await has('proposal')).toBe(true);
   });
 
   it('409s once the proposal is gone', async () => {
@@ -346,23 +367,23 @@ describe('approveBrand', () => {
     );
     expect(error).toBeInstanceOf(ActionError);
     expect((error as ActionError).status).toBe(409);
-    expect(store.has(APPROVED_DOC)).toBe(false);
+    expect(await has('approved')).toBe(false);
   });
 
   it('400s without the reviewed proposal named', async () => {
     await expect(approveBrand(GUIDE)).rejects.toMatchObject({ status: 400 });
-    expect(store.has(PROPOSAL_DOC)).toBe(true);
+    expect(await has('proposal')).toBe(true);
   });
 
   it('409s on stale text when another tab replaced the proposal, changing neither guide', async () => {
     const newer = { ...PROPOSAL, statement: 'Newer proposal.', createdAt: PROPOSAL.createdAt + 1 };
-    store.set(PROPOSAL_DOC, newer);
+    await put('proposal', newer);
     const error = await approveBrand({ ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
       (e: unknown) => e,
     );
     expect(error).toMatchObject({ status: 409 });
-    expect(store.has(APPROVED_DOC)).toBe(false);
-    expect(store.get(PROPOSAL_DOC)).toEqual(newer);
+    expect(await has('approved')).toBe(false);
+    expect(await read('proposal')).toEqual(newer);
   });
 });
 
@@ -373,13 +394,13 @@ describe('reads', () => {
   });
 
   it('gives smart pick only the guide fields', async () => {
-    store.set(APPROVED_DOC, { ...PROPOSAL, status: 'APPROVED', approvedAt: 5 });
+    await put('approved', { ...PROPOSAL, status: 'APPROVED', approvedAt: 5 });
     expect(await approvedBrand()).toEqual(GUIDE);
   });
 
   it('keeps the approved guide when a proposal is discarded', async () => {
-    store.set(APPROVED_DOC, { ...PROPOSAL, status: 'APPROVED' });
-    store.set(PROPOSAL_DOC, PROPOSAL);
+    await put('approved', { ...PROPOSAL, status: 'APPROVED' });
+    await put('proposal', PROPOSAL);
     await discardBrandProposal();
     const { approved, proposal } = await getBrand();
     expect(approved).not.toBeNull();
@@ -387,24 +408,22 @@ describe('reads', () => {
   });
 });
 
-describe('requireAllowlisted', () => {
+describe('requireArtist', () => {
   it.each([
     ['signed out', null],
-    ['not allowlisted', { email: 'v@example.com', allowlisted: false, demo: false }],
-    ['a demo account', { email: 'd@example.com', allowlisted: false, demo: true }],
-  ])('404s when %s', (_label, session) => {
+    ['not linked to an artist', { artistId: null }],
+    ['linked to another artist', { artistId: 'other' }],
+  ])('404s when %s', (_label, user) => {
     let thrown: unknown;
     try {
-      requireAllowlisted(session);
+      requireArtist(user);
     } catch (error) {
       thrown = error;
     }
     expect(isHttpError(thrown) && thrown.status).toBe(404);
   });
 
-  it('lets an allowlisted session through', () => {
-    expect(() =>
-      requireAllowlisted({ email: 'n@example.com', allowlisted: true, demo: false }),
-    ).not.toThrow();
+  it("lets Nathan's artist through", () => {
+    expect(() => requireArtist({ artistId: 'flr' })).not.toThrow();
   });
 });

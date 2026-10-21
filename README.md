@@ -3,7 +3,6 @@
 Soundboard analyzes a finished music video and drafts its YouTube title, description, hashtags, and tags. The artist approves, edits, or re-runs the draft; on approval, Soundboard uploads the video as private and confirms the upload through the YouTube API.
 
 [![Live app](https://img.shields.io/badge/live-soundboard.anchildress1.dev-ff2e88)](https://soundboard.anchildress1.dev)
-[![DEV submission](https://img.shields.io/badge/DEV-challenge%20submission-0a0a0a?logo=devdotto&logoColor=white)](https://dev.to/anchildress1/20-years-of-friendship-one-weekend-to-build-his-marketing-department-23c9-temp-slug-938322?preview=f731687adb96e0fe58253c4699ccf0957b2dc3e5a70455cc0e76de3a9787cd2e234b928b92371a51327d88b5d479b434078e40ffbedef2978b9b0cc1)
 [![CI](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=coverage)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)
@@ -76,7 +75,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 | Model         | Gemma 4 12B-it, Google's official QAT Q4_0 GGUF + vision/audio projector, on `llama-server` (llama.cpp) |
 | Media         | ffmpeg                                                                                                  |
 | Hosting       | Cloud Run (app) + a Vertex AI endpoint with one NVIDIA L4 (model), us-central1                          |
-| Data          | Firestore, Cloud Storage, Secret Manager                                                                |
+| Data          | Neon Postgres (Drizzle), Cloud Storage, Secret Manager, Cloud KMS                                       |
 | YouTube       | YouTube Data API v3                                                                                     |
 | Observability | Sentry (AI agent tracing)                                                                               |
 | Tooling       | pnpm, Vitest, Playwright, ESLint, Prettier, Lefthook, commitlint, Release Please                        |
@@ -89,11 +88,11 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 %%{init: {"theme": "default"}}%%
 flowchart LR
   accTitle: Soundboard architecture
-  accDescr: The browser uploads the video to Cloud Storage, then drives the pipeline one step at a time through the SvelteKit app. The app runs ffmpeg, calls Gemma on llama-server behind a Vertex AI endpoint, stores state in Firestore, reads YouTube with an API key, uploads with OAuth, and sends traces to Sentry.
+  accDescr: The browser uploads the video to Cloud Storage, then drives the pipeline one step at a time through the SvelteKit app. The app runs ffmpeg, calls Gemma on llama-server behind a Vertex AI endpoint, stores state in Neon Postgres, reads YouTube with an API key, uploads with OAuth, and sends traces to Sentry.
 
   B["Browser<br/>status page drives each step"]
   GCS[("Cloud Storage<br/>uploads/")]
-  FS[("Firestore<br/>jobs + artist memory")]
+  DB[("Neon Postgres<br/>users, jobs, artist memory")]
   YT["YouTube Data API"]
   S["Sentry<br/>one trace per job"]
 
@@ -106,7 +105,7 @@ flowchart LR
   B -- "POST /api/jobs/:id/step" --> APP
   APP -- "range reads" --> GCS
   APP -- "invoke: audio + frames" --> LLM
-  APP <--> FS
+  APP <--> DB
   APP -- "search + catalog: API key" --> YT
   APP -- "insert + verify: OAuth" --> YT
   B -. "trace" .-> S
@@ -127,10 +126,13 @@ flowchart LR
 ```bash
 git clone git@github.com:anchildress1/soundboard.git
 cd soundboard
-cp .env.example .env
+cp .env.example .env   # fill in the values listed under Configuration
 make install
+pnpm drizzle-kit migrate
 make dev
 ```
+
+`drizzle-kit migrate` runs over `DATABASE_URL_UNPOOLED`: Neon's pooler can break migrations. Deploys run it too, before the new revision takes traffic.
 
 | Command            | What it does                                                                                                  |
 | ------------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -142,11 +144,12 @@ make dev
 
 ### Operating it
 
-- **Connect channels:** sign in with an allowlisted account, then use the footer's _Connect channel_ links. _Nathan_ must be consented by Nathan's Google account; _Sandbox_ by the throwaway channel's. Each stores a YouTube refresh token in Secret Manager (`yt-refresh-nathan`, `yt-refresh-sandbox`).
-- **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the visitor used.
-- **Brand guide:** allowlisted accounts get a _Brand guide_ footer link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; visitor runs never read it.
+- **Production database:** its pooled URL lives only in Secret Manager, never in `.env`; deploys derive the direct URL from it for migrations. Create it once from Neon's `main` branch (paste the URL, then press Ctrl-D): `gcloud secrets create DATABASE_URL --replication-policy automatic --data-file=-`. `deploy.sh` fails until it exists.
+- **Invites:** while `SIGNUP_MODE=invite`, only invited emails can sign in. Manage them with `node --env-file=.env scripts/invite.ts add <email> [--artist flr]`, `revoke <email>`, `reactivate <email>`, or `list`. That edits the dev database in `.env`; for production, prefix the command with `DATABASE_URL="$(gcloud secrets versions access latest --secret DATABASE_URL)"`. `--artist flr` links the account to Nathan's artist profile. Revoking signs the user out on their next request.
+- **Connections:** signing in also connects the user's own YouTube channel. The _Connections_ page shows its status and offers Reconnect and Disconnect; a missing or revoked grant blocks approval until it's reconnected. Refresh tokens are stored encrypted with the Cloud KMS key.
+- **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
+- **Brand guide:** accounts linked to Nathan's artist profile get a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
 - **Model deploys:** run `make model-image` first, then `make deploy`. The first deploy uploads that image to Vertex and deploys it to the endpoint; expect 20+ minutes. Vertex can fail a deploy with a generic system error when no L4 is free in us-central1. `make deploy` refuses to queue a second deploy while one is still running, and uses the image tagged for the current `model/` tree. A model left idle for 30 days is undeployed automatically; `make deploy` puts it back.
-- **Samples:** `scripts/add-sample.sh <video> <youtube-video-id> "<song title>"` cuts the loudest 30 seconds, uploads it to `samples/`, and registers it on the home page.
 
 ---
 
@@ -156,14 +159,16 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 
 | Variable                                                | Purpose                                                                                          |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and Firestore                                            |
-| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days) and samples (`samples/`)                   |
+| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and KMS key                                              |
+| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days)                                            |
 | `MODEL_URL`                                             | `llama-server` base URL for local development; `deploy.sh` sets the Vertex endpoint's invoke URL |
 | `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
 | `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                                 |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
-| `ALLOWLIST_EMAILS`                                      | Comma-separated emails allowed to upload to Nathan's channel                                     |
-| `DEMO_EMAILS`                                           | Comma-separated demo accounts: run like Nathan, upload to the sandbox, save nothing              |
+| `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |
+| `KMS_KEY`                                               | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service |
+| `DATABASE_URL`                                          | Neon pooled connection string, for the app; locally, a dev branch (never `main`)                 |
+| `DATABASE_URL_UNPOOLED`                                 | Neon direct connection string, for `drizzle-kit migrate`                                         |
 | `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                                 |
 | `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                                    |
 | `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only         |
@@ -173,9 +178,9 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 ## Security
 
 - Video and audio are stored only in Cloud Storage and processed only by the model running on a Vertex AI endpoint in the same project. Sentry receives text, with audio and images replaced by size-only placeholders.
-- Signed-out visitors run against a separate test channel. Only allowlisted Google accounts can upload to Nathan's channel or read his jobs and stored preferences.
-- Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server.
-- Firestore denies all client access; only the app's service account reads and writes.
+- Every page except home and the sign-in pages, and every API, needs a signed-in Google account (an invited one while `SIGNUP_MODE=invite`). Each user sees and uploads only their own jobs, to their own channel; only accounts linked to Nathan's artist profile read or change his stored preferences.
+- Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server, encrypted with a Cloud KMS key only the app's service account can use.
+- No client access to the database: only the app, migrations, and the invite script connect, using connection strings from Secret Manager or a local `.env`.
 - Upload URLs are size-capped, and uploaded files are deleted after 7 days.
 
 ---

@@ -10,3 +10,11 @@ export class ActionError extends Error {
     super(message);
   }
 }
+
+/**
+ * Whether Google's token endpoint refused the grant: a used or expired code, or a revoked refresh
+ * token. Read from the response body: the library rewrites the message for reauth-required grants.
+ */
+export const invalidGrant = (error: unknown): boolean =>
+  (error as { response?: { data?: { error?: string } } } | null)?.response?.data?.error ===
+  'invalid_grant';

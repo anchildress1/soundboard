@@ -16,6 +16,7 @@ const fields: PickFields = {
 };
 
 const candidates = ['#synthwave', '#retrowave', '#newmusic'];
+const CHANNEL = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
 
 function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
   const onapprove = vi.fn();
@@ -25,6 +26,7 @@ function setup(props: Partial<ComponentProps<typeof Label>> = {}) {
     fields,
     candidates,
     editable: true,
+    destination: CHANNEL,
     onapprove,
     onrerun,
     ondiscard,
@@ -164,6 +166,21 @@ describe('Label: read-only', () => {
   });
 });
 
+describe('Label: a paused publish', () => {
+  it('enables only Discard', async () => {
+    const { ondiscard } = setup({ editable: false, done: true, discardable: true });
+    expect(screen.getByRole('button', { name: 'Uploaded' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: RERUN })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(ondiscard).toHaveBeenCalledOnce();
+  });
+
+  it('keeps Discard disabled while an action runs', () => {
+    setup({ editable: false, done: true, discardable: true, busy: true });
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  });
+});
+
 describe('Label: a second label on the page', () => {
   it('prefixes field ids so labels stay tied to their own fields', () => {
     const { container } = setup({ idPrefix: 'short-' });
@@ -193,5 +210,57 @@ describe('Label: a second label on the page', () => {
     expect(screen.queryByRole('button', { name: RERUN })).toBeNull();
     await fireEvent.click(screen.getByRole('button', { name: 'Re-pick hook' }));
     expect(onrerun).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Label: where Approve uploads', () => {
+  it('names the channel by title and ID beside Approve', () => {
+    setup();
+    const line = screen.getByText(/Uploads to/);
+    expect(line).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(line.nextElementSibling).toContainElement(approveButton());
+  });
+
+  it('falls back to a plain label when the channel has no title', () => {
+    setup({ destination: { channelId: 'UCx', channelTitle: null } });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to your channel UCx');
+  });
+
+  it('blocks approval with a plain fix while YouTube is not connected', () => {
+    setup({ destination: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.queryByText(/Uploads to/)).toBeNull();
+    expect(approveButton()).toBeDisabled();
+  });
+
+  it('names the pinned channel while the upload is under way', () => {
+    setup({ editable: false, done: true });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+  });
+
+  it('names the pinned channel in the past tense once YouTube holds the video', () => {
+    setup({ editable: false, done: true, uploaded: true });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent(
+      'Uploaded to Flies Like Robots UCflr',
+    );
+    expect(screen.queryByText(/Uploads to/)).toBeNull();
+  });
+
+  it('names the pinned channel on a failed upload, without actions', () => {
+    setup({ editable: false, done: false });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('keeps the past tense when a job fails after YouTube took the video', () => {
+    setup({ editable: false, done: false, uploaded: true });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent(
+      'Uploaded to Flies Like Robots UCflr',
+    );
+  });
+
+  it('shows no channel line on a read-only draft', () => {
+    setup({ editable: false, destination: null });
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
   });
 });

@@ -1,18 +1,20 @@
 /** Pipeline states. `CLAIMED_COMPLETE` comes from the insert response; only read-back sets `VERIFIED`. */
-export type JobState =
-  | 'AWAITING_UPLOAD'
-  | 'PREP'
-  | 'ANALYZE'
-  | 'PICK'
-  | 'HOOK'
-  | 'RENDER'
-  | 'REVIEW'
-  | 'PUBLISHING'
-  | 'CLAIMED_COMPLETE'
-  | 'VERIFIED'
-  | 'PAYLOAD'
-  | 'FAILED'
-  | 'DISCARDED';
+export const JOB_STATES = [
+  'AWAITING_UPLOAD',
+  'PREP',
+  'ANALYZE',
+  'PICK',
+  'HOOK',
+  'RENDER',
+  'REVIEW',
+  'PUBLISHING',
+  'CLAIMED_COMPLETE',
+  'VERIFIED',
+  'FAILED',
+  'DISCARDED',
+] as const;
+
+export type JobState = (typeof JOB_STATES)[number];
 
 /** Steps the status page drives with `POST /api/jobs/{id}/step`. */
 export const DRIVEN_STATES: readonly JobState[] = [
@@ -31,17 +33,10 @@ export const SHORT_SOURCE_STATES: readonly JobState[] = [
   'PUBLISHING',
   'CLAIMED_COMPLETE',
   'VERIFIED',
-  'PAYLOAD',
 ];
 
-/**
- * Who the job belongs to: allowlisted sessions own `nathan` jobs, demo sessions own `demo` jobs
- * (Nathan's memory read-only, sandbox channel), and everything else is a visitor job.
- */
-export type JobOwner = 'nathan' | 'demo' | 'visitor';
-
-/** Upload target: Nathan's channel, the throwaway sandbox channel, or none (ends at the would-be payload). */
-export type Channel = 'nathan' | 'sandbox' | null;
+/** The YouTube channel an approval pins the upload to. */
+export type Destination = { channelId: string; channelTitle: string | null };
 
 export type Measurements = {
   integratedLufs: number | null;
@@ -87,7 +82,7 @@ export type PickFields = {
   tags: string[];
 };
 
-/** Copy for Bandcamp's track editor; artist accounts have no upload API, so Nathan pastes it. */
+/** Copy for Bandcamp's track editor; artist accounts have no upload API, so the user pastes it. */
 export type BandcampDraft = { about: string; credits: string };
 
 export type Pick = PickFields & {
@@ -108,13 +103,12 @@ export type Hook = {
   window: number;
   startSec: number;
   lengthSec: number;
-  /** Why the model picked it; cleared when the artist moves the cut. */
+  /** Why the model picked it; cleared when the owner moves the cut. */
   reason: string;
 };
 
 /** A Short job's cut. Its metadata is the source video's pick, reviewed like any other. */
 export type Short = {
-  parentId: string;
   sourceDurationSec: number;
   reframe: Reframe;
   hook: Hook | null;
@@ -125,18 +119,24 @@ export type Short = {
 };
 
 export type Wait =
-  'waking model' | 'waiting on another run' | 'step running in another tab' | 'waiting on YouTube';
+  | 'waking model'
+  | 'waiting on another run'
+  | 'step running in another tab'
+  | 'waiting on YouTube'
+  | 'reconnect YouTube'
+  | 'upload outcome unknown'
+  | 'Daily upload limit reached. Try tomorrow.';
 
-/** The job as the browser sees it: no upload session URIs, claim tokens, or IP hashes. */
+/** The job as the browser sees it: no owner, upload session URIs, or claim tokens. */
 export type PublicJob = {
   id: string;
   state: JobState;
-  owner: JobOwner;
-  channel: Channel;
+  /** `null` on videos, the parent's ID on Shorts. */
+  parentId: string | null;
+  destination: Destination | null;
   songTitle: string;
   notes: string;
   filename: string;
-  sampleId: string | null;
   probe: Probe | null;
   measurements: Measurements | null;
   chunkCount: number;
@@ -145,7 +145,8 @@ export type PublicJob = {
   error: string | null;
   uploadProgress: { sent: number; total: number } | null;
   videoId: string | null;
-  payload: PickFields | null;
+  /** The approved fields, once approved. */
+  finalFields: PickFields | null;
   hashtagCandidates: string[] | null;
   /** Set on a video job once a Short is cut from it. */
   shortId: string | null;
@@ -161,14 +162,6 @@ export type JobView = {
   wait?: Wait;
   /** Signed playback URL of a rendered Short. */
   playbackUrl?: string;
-};
-
-export type Sample = {
-  id: string;
-  songTitle: string;
-  videoId: string;
-  object: string;
-  durationSec: number;
 };
 
 export type LiveMetadata = {

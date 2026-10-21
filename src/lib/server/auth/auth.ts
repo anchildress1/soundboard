@@ -1,16 +1,19 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { OAuth2Client } from 'google-auth-library';
-import { allowlist, demoEmails, required } from '$lib/server/core/env';
+import { OAuth2Client, type Credentials } from 'google-auth-library';
+import { required } from '$lib/server/core/env';
+import { invalidGrant } from '$lib/server/core/errors';
 import { YOUTUBE_SCOPES } from '$lib/server/platforms/youtube';
 
 export const SESSION_COOKIE = 'sb_session';
 export const OAUTH_COOKIE = 'sb_oauth';
 export const SESSION_TTL_SEC = 30 * 24 * 60 * 60;
+export const OAUTH_TTL_SEC = 10 * 60;
 
-export const SIGN_IN_SCOPES = ['openid', 'email'];
-export const CHANNEL_SCOPES = [...SIGN_IN_SCOPES, ...YOUTUBE_SCOPES];
+/** One consent covers identity and the YouTube channel, so sign-in also connects it. */
+export const SCOPES = ['openid', 'email', ...YOUTUBE_SCOPES];
 
-export type Session = { email: string; allowlisted: boolean; demo: boolean };
+/** `sid` is random per sign-in, so each browser session is distinct; `exp` never slides. */
+export type Session = { uid: string; sid: string; exp: number };
 
 const mac = (value: string) =>
   createHmac('sha256', required('SESSION_SECRET')).update(value).digest('base64url');
@@ -35,37 +38,54 @@ export function unsign<T>(token: string | undefined): T | null {
   }
 }
 
-export function isAllowlisted(email: string): boolean {
-  return allowlist().has(email.trim().toLowerCase());
+const randomId = () => randomBytes(16).toString('base64url');
+
+/** A new session for `uid`, signed for the cookie. */
+export function sessionCookie(uid: string, now = Date.now()): string {
+  const session: Session = { uid, sid: randomId(), exp: now + SESSION_TTL_SEC * 1000 };
+  return sign(session);
 }
 
-/** A demo account that isn't also allowlisted; allowlisting wins. */
-export function isDemo(email: string): boolean {
-  return !isAllowlisted(email) && demoEmails().has(email.trim().toLowerCase());
-}
-
-/** Allowlist membership is re-checked on every request, so removing an email revokes access at once. */
+/**
+ * The signed session, or null for a bad signature, an expired one, or a malformed payload. Whether
+ * the user is still active is the caller's check.
+ */
 export function readSession(cookie: string | undefined, now = Date.now()): Session | null {
-  const data = unsign<{ email: string; exp: number }>(cookie);
-  if (!data || typeof data.email !== 'string' || data.exp < now) return null;
-  return { email: data.email, allowlisted: isAllowlisted(data.email), demo: isDemo(data.email) };
+  const data = unsign<Partial<Session>>(cookie);
+  if (!data || typeof data.uid !== 'string' || !data.uid) return null;
+  if (typeof data.exp !== 'number' || data.exp <= now) return null;
+  if (typeof data.sid !== 'string') return null;
+  return { uid: data.uid, sid: data.sid, exp: data.exp };
 }
 
-export function sessionCookie(email: string, now = Date.now()): string {
-  return sign({ email, exp: now + SESSION_TTL_SEC * 1000 });
-}
-
+/** On `connect`, `uid` and `sid` name the session that started it, so a stale callback fails. */
 export type OAuthState = {
   nonce: string;
   purpose: 'sign-in' | 'connect';
-  channel: 'nathan' | 'sandbox' | null;
+  uid: string | null;
+  sid: string | null;
+  exp: number;
 };
 
 export function newOAuthState(
   purpose: OAuthState['purpose'],
-  channel: OAuthState['channel'],
+  session: Pick<Session, 'uid' | 'sid'> | null,
+  now = Date.now(),
 ): OAuthState {
-  return { nonce: randomBytes(16).toString('base64url'), purpose, channel };
+  return {
+    nonce: randomId(),
+    purpose,
+    uid: session?.uid ?? null,
+    sid: session?.sid ?? null,
+    exp: now + OAUTH_TTL_SEC * 1000,
+  };
+}
+
+/** The signed OAuth state, or null when it is missing, tampered with, or past its 10 minutes. */
+export function readOAuthState(cookie: string | undefined, now = Date.now()): OAuthState | null {
+  const state = unsign<OAuthState>(cookie);
+  if (!state || typeof state.nonce !== 'string' || typeof state.exp !== 'number') return null;
+  return state.exp > now ? state : null;
 }
 
 export function oauthClient(origin: string): OAuth2Client {
@@ -77,34 +97,56 @@ export function oauthClient(origin: string): OAuth2Client {
 }
 
 /**
- * Sign-in asks for identity only. Connecting a channel asks for upload and read scopes offline,
- * with forced consent so Google returns a refresh token. Both always show the account chooser:
- * connecting binds whichever account is picked, and a browser's default account is rarely the channel.
+ * Every flow asks for all scopes offline, folding in earlier grants. Sign-in shows the account
+ * chooser; connect also forces consent so Google returns a refresh token, and passes `loginHint`
+ * (the user's email) because the grant must belong to them. Sign-in ignores `loginHint`.
  */
-export function authUrl(origin: string, state: OAuthState): string {
+export function authUrl(origin: string, state: OAuthState, loginHint?: string): string {
   const connect = state.purpose === 'connect';
   return oauthClient(origin).generateAuthUrl({
-    scope: connect ? CHANNEL_SCOPES : SIGN_IN_SCOPES,
+    scope: SCOPES,
     state: state.nonce,
-    access_type: connect ? 'offline' : 'online',
+    access_type: 'offline',
+    include_granted_scopes: true,
     prompt: connect ? 'select_account consent' : 'select_account',
-    include_granted_scopes: false,
+    ...(connect && loginHint ? { login_hint: loginHint } : {}),
   });
 }
 
-export type CallbackResult = { email: string; refreshToken: string | null };
+/** What one code exchange proves and grants. Tokens never leave the callback. */
+export type Grant = {
+  sub: string;
+  email: string;
+  scopes: string[];
+  refreshToken: string | null;
+  accessToken: string;
+};
 
-/** Exchanges the code and verifies the ID token's audience and verified email. */
-export async function exchangeCode(origin: string, code: string): Promise<CallbackResult> {
+/**
+ * Exchanges the code and verifies the ID token's audience and verified email. Returns null for a
+ * used or expired code and for a missing or unverified email; any other failure throws.
+ */
+export async function exchangeCode(origin: string, code: string): Promise<Grant | null> {
   const client = oauthClient(origin);
-  const { tokens } = await client.getToken(code);
-  if (!tokens.id_token) throw new Error('Google returned no ID token');
+  let tokens: Credentials;
+  try {
+    ({ tokens } = await client.getToken(code));
+  } catch (error) {
+    if (invalidGrant(error)) return null;
+    throw error;
+  }
+  if (!tokens.id_token || !tokens.access_token) throw new Error('Google returned no tokens');
   const ticket = await client.verifyIdToken({
     idToken: tokens.id_token,
     audience: required('GOOGLE_OAUTH_CLIENT_ID'),
   });
   const payload = ticket.getPayload();
-  if (!payload?.email || !payload.email_verified)
-    throw new Error('Google account email is not verified');
-  return { email: payload.email.toLowerCase(), refreshToken: tokens.refresh_token ?? null };
+  if (!payload?.email || !payload.email_verified) return null;
+  return {
+    sub: payload.sub,
+    email: payload.email.toLowerCase(),
+    scopes: tokens.scope?.split(' ').filter(Boolean) ?? [],
+    refreshToken: tokens.refresh_token ?? null,
+    accessToken: tokens.access_token,
+  };
 }

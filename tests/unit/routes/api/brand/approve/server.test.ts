@@ -1,50 +1,55 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../helpers/fake-firestore';
+import { eq } from 'drizzle-orm';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { artistMemory } from '$lib/server/core/schema';
 import { POST } from '$routes/api/brand/approve/+server';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../../../../helpers/db';
+import { USER_A, USER_B } from '../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
 const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: [] };
 
-const approve = (body: string, allowlisted = true) =>
+const approve = (body: string, user: typeof USER_A | typeof USER_B = USER_A) =>
   POST({
-    locals: { session: { email: 'a@example.com', allowlisted } },
+    locals: { user },
     request: new Request('https://soundboard.test/api/brand/approve', { method: 'POST', body }),
   } as unknown as Event);
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+const has = async (slot: 'proposal' | 'approved') =>
+  (await db().select().from(artistMemory).where(eq(artistMemory.key, slot))).length > 0;
+
+beforeEach(async () => {
   resetClients();
-  store.set('artists/flr/brand/proposal', {
-    ...GUIDE,
-    status: 'PROPOSED',
-    basedOn: ['v1'],
-    createdAt: 1,
-    approvedAt: null,
+  await truncate();
+  await seed({
+    artistMemory: [
+      {
+        artistId: 'flr',
+        kind: 'brand',
+        key: 'proposal',
+        data: { ...GUIDE, status: 'PROPOSED', basedOn: ['v1'], createdAt: 1, approvedAt: null },
+      },
+    ],
   });
 });
 
 describe('POST /api/brand/approve', () => {
-  it('404s for a non-allowlisted session and leaves the proposal', async () => {
+  it('404s for a user not linked to the artist and leaves the proposal', async () => {
     const error = await Promise.resolve()
-      .then(() => approve(JSON.stringify({ ...GUIDE, proposedAt: 1 }), false))
+      .then(() => approve(JSON.stringify({ ...GUIDE, proposedAt: 1 }), USER_B))
       .catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
-    expect(store.has('artists/flr/brand/proposal')).toBe(true);
+    expect(await has('proposal')).toBe(true);
   });
 
   it('approves the posted guide', async () => {
     const response = await approve(JSON.stringify({ ...GUIDE, proposedAt: 1 }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ approved: { ...GUIDE, status: 'APPROVED' } });
-    expect(store.has('artists/flr/brand/approved')).toBe(true);
+    expect(await has('approved')).toBe(true);
   });
 
   it('400s on a body that is not JSON', async () => {

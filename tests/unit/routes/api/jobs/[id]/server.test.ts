@@ -1,39 +1,20 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../../helpers/fake-firestore';
+import { eq } from 'drizzle-orm';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import { GET } from '$routes/api/jobs/[id]/+server';
 import type { JobView } from '$lib/types';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../../../../helpers/db';
+import { seedJob, USER_A, USER_B, USERS } from '../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof GET>[0];
+type User = typeof USER_A | typeof USER_B | null;
 
-const get = async (id: string, allowlisted: boolean | null) =>
-  GET({
-    params: { id },
-    locals: {
-      session: allowlisted === null ? null : { email: 'someone@example.com', allowlisted },
-    },
-  } as unknown as Event);
-
-function seed(id: string, owner: 'visitor' | 'nathan') {
-  store.set(`jobs/${id}`, {
-    id,
-    owner,
-    state: 'ANALYZE',
-    songTitle: 'PeekaBoo',
-    chunkCount: 3,
-    chunkIndex: 1,
-    trace: { sentryTrace: 't', baggage: 'b' },
-    ipHash: 'h',
-    claim: null,
-    upload: { sessionUri: 'https://upload.example/secret', total: 1 },
-  });
-}
+const get = async (id: string, user: User = USER_B) =>
+  GET({ params: { id }, locals: { user } } as unknown as Event);
 
 async function thrown(promise: Promise<unknown>) {
   try {
@@ -44,37 +25,42 @@ async function thrown(promise: Promise<unknown>) {
   }
 }
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
+beforeEach(async () => {
   resetClients();
+  await truncate();
+  await seed(USERS);
+  await seedJob({
+    id: 'b',
+    state: 'ANALYZE',
+    chunkCount: 3,
+    chunkIndex: 1,
+    trace: { sentryTrace: 't', baggage: 'b' },
+    upload: { sessionUri: 'https://upload.example/secret', total: 1 },
+  });
 });
 
 describe('GET /api/jobs/[id]', () => {
-  it('returns the public view of a visitor job to a signed-out caller', async () => {
-    seed('v', 'visitor');
-    store.set('jobs/v/chunks/0000', { index: 0 });
-    const response = await get('v', null);
+  it('returns the public view of the job to its owner', async () => {
+    await db()
+      .update(jobs)
+      .set({ chunks: [{ index: 0 }] })
+      .where(eq(jobs.id, 'b'));
+    const response = await get('b');
     expect(response.status).toBe(200);
     const view = (await response.json()) as JobView;
-    expect(view.job).toMatchObject({ id: 'v', state: 'ANALYZE', chunkIndex: 1 });
+    expect(view.job).toMatchObject({ id: 'b', state: 'ANALYZE', chunkIndex: 1 });
     expect(view.chunks).toHaveLength(1);
     expect(view.pick).toBeNull();
     expect(JSON.stringify(view)).not.toContain('upload.example/secret');
+    expect(JSON.stringify(view)).not.toContain(USER_B.uid);
   });
 
-  it("returns Nathan's job to an allowlisted session", async () => {
-    seed('n', 'nathan');
-    expect((await get('n', true)).status).toBe(200);
-  });
-
-  it("404s Nathan's job for a non-allowlisted session", async () => {
-    seed('n', 'nathan');
-    expect(await thrown(get('n', false))).toBe(404);
-    expect(await thrown(get('n', null))).toBe(404);
+  it("404s another user's job, and any job when signed out", async () => {
+    expect(await thrown(get('b', USER_A))).toBe(404);
+    expect(await thrown(get('b', null))).toBe(404);
   });
 
   it('404s an unknown job', async () => {
-    expect(await thrown(get('ghost', true))).toBe(404);
+    expect(await thrown(get('ghost'))).toBe(404);
   });
 });

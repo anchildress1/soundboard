@@ -75,7 +75,7 @@ describe('splitTags', () => {
 describe('validateFields', () => {
   it('rejects angle brackets and hashtags in tags', () => {
     const base = { title: 't', description: '' };
-    expect(validateFields({ ...base, tags: ['synth', '<demo>'] }, []).tags).toMatch(/< and >/);
+    expect(validateFields({ ...base, tags: ['synth', '<live>'] }, []).tags).toMatch(/< and >/);
     expect(validateFields({ ...base, tags: ['#synthwave'] }, []).tags).toMatch(/plain terms/);
   });
 

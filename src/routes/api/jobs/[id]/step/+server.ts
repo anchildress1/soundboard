@@ -7,7 +7,7 @@ import type { RequestHandler } from './$types';
 /** One pipeline step per call; the status page keeps calling until the job leaves the driven states. */
 export const POST: RequestHandler = ({ params, locals }) =>
   respond(async () => {
-    const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
+    const job = await authorizedJob(params.id, locals.user?.uid);
     const { wait } = await runStep(job);
     return buildView((await getJob(job.id)) ?? job, wait);
   });

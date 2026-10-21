@@ -24,10 +24,10 @@ describe('error page', () => {
 
   it("shows the server's message for other errors", () => {
     h.page.status = 500;
-    h.page.error = { message: 'Firestore is down' };
+    h.page.error = { message: 'Database is down' };
     render(ErrorPage);
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-    expect(screen.getByText('Firestore is down')).toBeInTheDocument();
+    expect(screen.getByText('Database is down')).toBeInTheDocument();
   });
 
   it('falls back to a plain message when the error has none', () => {

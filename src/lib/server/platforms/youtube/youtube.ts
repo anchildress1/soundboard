@@ -21,14 +21,53 @@ export class YouTubeError extends Error {
   }
 }
 
-export type UploadFailure = 'session-lost' | 'quota-spent' | 'other';
+export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'denied' | 'other';
 
-/** Classifies an upload error: an expired resumable session, a spent daily quota, or anything else. */
+/**
+ * Classifies an upload error: an expired resumable session, a spent daily limit (the project's
+ * `quotaExceeded` or the channel's `uploadLimitExceeded`), a refused grant, any other refusal of
+ * the request (a 4xx), or `'other'`: a rate limit, a status outside 4xx, or no answer at all.
+ */
 export function uploadFailure(error: unknown): UploadFailure {
   if (!(error instanceof YouTubeError)) return 'other';
   if (error.status === 404 || error.status === 410) return 'session-lost';
+  if (error.status === 401) return 'access-lost';
+  // Google's docs don't pin the channel limit's status, so its reason counts on 400 or 403.
+  if ([400, 403].includes(error.status) && /uploadLimitExceeded/.test(error.message))
+    return 'quota-spent';
   if (error.status === 403 && /quota/i.test(error.message)) return 'quota-spent';
-  return 'other';
+  // A rate limit passes on a retry, so it reads as no answer rather than a denial.
+  if (error.status === 429 || (error.status === 403 && /rateLimit/i.test(error.message)))
+    return 'other';
+  return error.status >= 400 && error.status < 500 ? 'denied' : 'other';
+}
+
+const PACIFIC = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+});
+
+/** Pacific wall-clock time minus UTC at `at`, in ms. */
+function pacificOffset(at: number): number {
+  const part = Object.fromEntries(
+    PACIFIC.formatToParts(at).map((p) => [p.type, Number(p.value)]),
+  ) as Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', number>;
+  const wall = Date.UTC(part.year, part.month - 1, part.day, part.hour, part.minute, part.second);
+  return wall - Math.floor(at / 1000) * 1000;
+}
+
+/** The next midnight Pacific time, when YouTube's daily quota resets. */
+export function quotaResetAt(now: number): number {
+  const today = new Date(now + pacificOffset(now));
+  const midnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1);
+  // US clocks change at 2 a.m., so the offset an hour either side of midnight is midnight's own.
+  return midnight - pacificOffset(midnight - pacificOffset(now));
 }
 
 async function readJson<T>(response: Response, what: string): Promise<T> {
@@ -129,21 +168,23 @@ async function uploadsPage(playlistId: string, maxResults: number): Promise<Play
   return body.items ?? [];
 }
 
-let statsCache: { at: number; value: ChannelStats } | null = null;
+// Keyed by channel ID: each user's header shows their own channel, never another's.
+const statsCache = new Map<string, { at: number; value: ChannelStats }>();
 const STATS_TTL_MS = 10 * 60 * 1000;
 
 const latestUpload = async (playlistId: string): Promise<PlaylistItem | undefined> =>
   playlistId ? (await uploadsPage(playlistId, 1))[0] : undefined;
 
-/** FLR channel header stats; cached so the home page doesn't spend a read on every visit. */
-export async function channelStats(now = Date.now()): Promise<ChannelStats> {
-  if (statsCache && now - statsCache.at < STATS_TTL_MS) return statsCache.value;
+/** A channel's header stats; cached so the home page doesn't spend a read on every visit. */
+export async function channelStats(channelId: string, now = Date.now()): Promise<ChannelStats> {
+  const cached = statsCache.get(channelId);
+  if (cached && now - cached.at < STATS_TTL_MS) return cached.value;
   const body = await keyGet<ListResponse<ChannelItem>>('channels', {
     part: 'snippet,statistics,contentDetails',
-    id: required('FLR_CHANNEL_ID'),
+    id: channelId,
   });
   const item = body.items?.[0];
-  if (!item) throw new YouTubeError(404, 'FLR channel not found');
+  if (!item) throw new YouTubeError(404, 'Channel not found');
   const uploadsPlaylist = item.contentDetails?.relatedPlaylists?.uploads ?? '';
   const latest = await latestUpload(uploadsPlaylist);
   const value: ChannelStats = {
@@ -153,24 +194,21 @@ export async function channelStats(now = Date.now()): Promise<ChannelStats> {
     lastUploadAt: latest?.contentDetails?.videoPublishedAt ?? null,
     uploadsPlaylist,
   };
-  statsCache = { at: now, value };
+  statsCache.set(channelId, { at: now, value });
   return value;
 }
 
 export function clearStatsCache(): void {
-  statsCache = null;
+  statsCache.clear();
 }
 
-/** FLR's most recent public uploads, newest first, optionally leaving one video out. */
-export async function recentVideos(
-  count: number,
-  excludeId: string | null,
-): Promise<CatalogVideo[]> {
-  const { uploadsPlaylist } = await channelStats();
+/** A channel's most recent public uploads, newest first. */
+export async function recentVideos(channelId: string, count: number): Promise<CatalogVideo[]> {
+  const { uploadsPlaylist } = await channelStats(channelId);
   const items = await uploadsPage(uploadsPlaylist, count + 5);
   const ids = items
     .map((item) => item.contentDetails?.videoId)
-    .filter((id): id is string => typeof id === 'string' && id !== '' && id !== excludeId);
+    .filter((id): id is string => typeof id === 'string' && id !== '');
   const videos = await videosByIds(ids);
   const order = new Map(ids.map((id, i) => [id, i]));
   return videos.toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);
@@ -246,6 +284,10 @@ export async function startResumableUpload(
   return location;
 }
 
+/** Whether the chunk starting at `offset` reaches the end of a `total`-byte file. */
+export const finalChunk = (offset: number, total: number): boolean =>
+  offset + UPLOAD_CHUNK_BYTES >= total;
+
 export type ChunkResult = { done: true; videoId: string } | { done: false; next: number };
 
 const nextFromRange = (range: string | null) => {
@@ -271,24 +313,38 @@ export async function uploadOffset(sessionUri: string, total: number): Promise<C
   );
 }
 
-/**
- * Streams one range of the GCS object into the upload session. The body is piped from the signed
- * GCS response straight into the PUT, so the chunk never sits in app memory.
- */
-export async function uploadChunk(
-  sessionUri: string,
+const chunkEnd = (offset: number, total: number) =>
+  Math.min(offset + UPLOAD_CHUNK_BYTES, total) - 1;
+
+/** Opens the GCS range that the chunk starting at `offset` sends; null once the object is gone. */
+export async function sourceRange(
   sourceUrl: string,
   offset: number,
   total: number,
-): Promise<ChunkResult> {
-  const end = Math.min(offset + UPLOAD_CHUNK_BYTES, total) - 1;
+): Promise<Response | null> {
   const source = await fetch(sourceUrl, {
-    headers: { range: `bytes=${offset}-${end}` },
+    headers: { range: `bytes=${offset}-${chunkEnd(offset, total)}` },
     signal: AbortSignal.timeout(110_000),
   });
+  if (source.status === 404) return null;
   if (source.status !== 206 && source.status !== 200) {
-    throw new YouTubeError(source.status, `GCS range read ${source.status}`);
+    // A plain error: a GCS failure must not read as a lost upload session.
+    throw new Error(`GCS range read ${source.status}`);
   }
+  return source;
+}
+
+/**
+ * Sends one chunk from an open `sourceRange`. The body is piped from the signed GCS response
+ * straight into the PUT, so the chunk never sits in app memory.
+ */
+export async function uploadChunk(
+  sessionUri: string,
+  source: Response,
+  offset: number,
+  total: number,
+): Promise<ChunkResult> {
+  const end = chunkEnd(offset, total);
   return finish(
     await fetch(sessionUri, {
       method: 'PUT',
@@ -303,8 +359,45 @@ export async function uploadChunk(
   );
 }
 
+/** The channel the access token's account owns, or null when the account has none. */
+export async function channelsMine(
+  accessToken: string,
+): Promise<{ id: string; title: string } | null> {
+  const body = await readJson<ListResponse<{ id: string; snippet?: { title?: string } }>>(
+    await fetch(`${API}/channels?part=snippet&mine=true`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    }),
+    'channels.list',
+  );
+  const item = body.items?.[0];
+  return item ? { id: item.id, title: item.snippet?.title ?? '' } : null;
+}
+
+/**
+ * YouTube's verdict on a read-back upload. `uploadStatus` on a rejected verdict is YouTube's
+ * past-tense status word (`rejected`, `failed`, `deleted`); on a pending verdict it is an
+ * undocumented status word, or null when YouTube sent none.
+ */
+export type UploadVerdict =
+  | { status: 'accepted' }
+  | { status: 'pending'; uploadStatus: string | null }
+  | { status: 'rejected'; uploadStatus: string };
+
 /** Reads the video back from the target channel; only this result can mark a publish verified. */
-export type ReadBack = LiveMetadata & { uploadStatus: string | null };
+export type ReadBack = LiveMetadata & UploadVerdict;
+
+// Only an upload YouTube kept counts as accepted; `uploaded` is still processing but kept.
+const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
+const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
+
+function verdict(uploadStatus: string | undefined): UploadVerdict {
+  if (uploadStatus && REJECTED_UPLOADS.has(uploadStatus)) {
+    return { status: 'rejected', uploadStatus };
+  }
+  if (uploadStatus && ACCEPTED_UPLOADS.has(uploadStatus)) return { status: 'accepted' };
+  return { status: 'pending', uploadStatus: uploadStatus || null };
+}
 
 export async function readBack(accessToken: string, videoId: string): Promise<ReadBack | null> {
   const query = new URLSearchParams({ part: 'snippet,status', id: videoId });
@@ -316,5 +409,55 @@ export async function readBack(accessToken: string, videoId: string): Promise<Re
     'videos.list',
   );
   const item = body.items?.[0];
-  return item ? { ...toCatalog(item), uploadStatus: item.status?.uploadStatus ?? null } : null;
+  return item ? { ...toCatalog(item), ...verdict(item.status?.uploadStatus) } : null;
+}
+
+export type VideoOwner = { channelId: string; publishedAt: number };
+
+/**
+ * The channel that owns the video, as the token's grant sees it, and when it was published; null
+ * when it isn't visible or YouTube omits either field.
+ */
+export async function videoChannel(accessToken: string, id: string): Promise<VideoOwner | null> {
+  const query = new URLSearchParams({ part: 'snippet', id });
+  const body = await readJson<
+    ListResponse<{ snippet?: { channelId?: string; publishedAt?: string } }>
+  >(
+    await fetch(`${API}/videos?${query}`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    }),
+    'videos.list',
+  );
+  const snippet = body.items?.[0]?.snippet;
+  const publishedAt = Date.parse(snippet?.publishedAt ?? '');
+  return snippet?.channelId && Number.isFinite(publishedAt)
+    ? { channelId: snippet.channelId, publishedAt }
+    : null;
+}
+
+const VIDEO_ID = /^[\w-]{11}$/;
+
+/**
+ * The video ID in a pasted `watch?v=`, `youtu.be/`, `/shorts/` or YouTube Studio `/video/` URL;
+ * null for anything else.
+ */
+export function videoIdFromUrl(input: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const host = url.hostname.toLowerCase();
+  const [first, second] = url.pathname.split('/').filter(Boolean);
+  let id: string | null | undefined;
+  if (host === 'youtu.be') id = first;
+  else if (host === 'studio.youtube.com') id = first === 'video' ? second : null;
+  else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    if (url.pathname === '/watch') id = url.searchParams.get('v');
+    else if (first === 'shorts') id = second;
+  }
+  return id && VIDEO_ID.test(id) ? id : null;
 }

@@ -1,7 +1,12 @@
-// Jobs the E2E server starts with. Each test owns its job IDs, so parallel tests and both
-// Playwright projects never share mutable state.
+// Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
+// job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
+// backs the Connections page. Each test owns its job IDs, so parallel tests and both Playwright
+// projects never share mutable state.
 import type { JobDoc } from '$lib/server/jobs/jobs';
+import { jobRow } from '$lib/server/jobs/rows';
 import type { Chunk, Pick, Short } from '$lib/types';
+import type { Seed } from '../../helpers/db';
+import { A_JOB, CHANNEL_A, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
 
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE = '#retrowave';
@@ -48,31 +53,15 @@ const chunk = (index: number): Chunk => ({
 });
 
 function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
-  return {
+  return jobDoc({
     id,
+    ...A_JOB,
     state: 'REVIEW',
-    owner: 'visitor',
-    channel: null,
-    songTitle: 'PeekaBoo',
-    notes: '',
-    filename: 'peekaboo.mp4',
-    contentType: 'video/mp4',
-    sampleId: null,
-    liveVideoId: null,
     object: `uploads/${id}`,
-    ipHash: 'e2e-ip',
     probe: PROBE,
-    measurements: null,
     chunkCount: 5,
     chunkIndex: 5,
-    failedState: null,
-    error: null,
-    uploadProgress: null,
-    videoId: null,
-    payload: null,
     consecutiveFailures: 0,
-    claim: null,
-    trace: null,
     hashtagCandidates: [SYNTHWAVE, RETROWAVE],
     audience: {
       query: 'synthwave music video',
@@ -80,21 +69,12 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
       tags: [{ tag: 'synthwave', usedBy: 3 }],
       top: [],
     },
-    upload: null,
-    finalFields: null,
     pickVersion: 1,
-    verifyAttempts: 0,
-    shortId: null,
-    short: null,
-    sourceObject: null,
-    createdAt: 1,
-    updatedAt: 1,
     ...patch,
-  };
+  });
 }
 
 const SHORT: Short = {
-  parentId: 'e2e-cut',
   sourceDurationSec: 140,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
@@ -104,20 +84,38 @@ const SHORT: Short = {
 };
 
 /** A video in review with its chunks and pick, ready for a Short. */
-const reviewed = (id: string) => [job(id), PICK, [0, 1, 2, 3, 4].map(chunk)] as const;
+const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2, 3, 4].map(chunk) });
 
-export const SEED: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
-  ...['e2e-tabs', 'e2e-make-chromium', 'e2e-make-mobile'].map((id) => {
-    const [doc, pick, chunks] = reviewed(id);
-    return { job: doc, chunks: [...chunks], pick };
+const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
+  ...['chromium', 'mobile'].flatMap((project) => {
+    const id = `e2e-short-paused-${project}`;
+    return [
+      { ...reviewed(id), job: job(id, { shortId: `${id}-short` }) },
+      {
+        job: job(`${id}-short`, {
+          parentId: id,
+          short: SHORT,
+          state: 'PUBLISHING',
+          destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
+          finalFields: {
+            title: PICK.title,
+            description: PICK.description,
+            hashtags: PICK.hashtags,
+            tags: PICK.tags,
+          },
+          uploadStartedAt: 1,
+          finalChunkAt: 2,
+        }),
+        pick: PICK,
+        chunks: [],
+      },
+    ];
   }),
-  {
-    job: job('e2e-cut', { shortId: 'e2e-cut-short' }),
-    pick: PICK,
-    chunks: [0, 1, 2, 3, 4].map(chunk),
-  },
+  ...['e2e-tabs', 'e2e-make-chromium', 'e2e-make-mobile'].map(reviewed),
+  { ...reviewed('e2e-cut'), job: job('e2e-cut', { shortId: 'e2e-cut-short' }) },
   {
     job: job('e2e-cut-short', {
+      parentId: 'e2e-cut',
       filename: 'peekaboo (Short).mp4',
       object: 'uploads/e2e-cut-short-1',
       probe: { durationSec: 30, width: 1080, height: 1920, hasAudio: true },
@@ -130,8 +128,61 @@ export const SEED: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     chunks: [],
   },
   {
-    job: job('e2e-analyzing', { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
+    job: job('e2e-b-review', { ownerUid: USER_B.uid, artistId: null, songTitle: 'Vaporgram' }),
+    pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
+    chunks: [0, 1, 2, 3, 4].map(chunk),
+  },
+  { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
+  // Paused with the upload outcome unknown: its steps make no YouTube call.
+  ...['e2e-paused-chromium', 'e2e-paused-mobile'].map((id) => ({
+    job: job(id, {
+      state: 'PUBLISHING',
+      destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
+      finalFields: {
+        title: PICK.title,
+        description: PICK.description,
+        hashtags: PICK.hashtags,
+        tags: PICK.tags,
+      },
+      uploadStartedAt: 1,
+      finalChunkAt: 2,
+    }),
+    pick: PICK,
+    chunks: [0, 1, 2, 3, 4].map(chunk),
+  })),
+  ...['e2e-analyzing', 'e2e-signout-chromium', 'e2e-signout-mobile'].map((id) => ({
+    job: job(id, { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
     chunks: [chunk(0)],
-  },
+  })),
 ];
+
+/** One signed-up user per YouTube status that isn't connected, uid `uid-<status>`. */
+export const BROKEN_STATUSES = ['missing_scopes', 'no_channel', 'revoked'] as const;
+const broken = BROKEN_STATUSES.map((status) => ({
+  status,
+  uid: `uid-${status}`,
+  email: `${status}@example.com`,
+}));
+
+/** Every row the E2E database starts with, in `seed()` order. */
+export const SEED: Seed = {
+  users: [...USERS.users, ...broken.map(({ uid, email }) => ({ uid, email }))],
+  connections: [
+    ...USERS.connections,
+    ...broken.map(({ uid, status }) => ({
+      uid,
+      status,
+      channelId: null,
+      channelTitle: null,
+      scopes: ['openid', 'email'],
+      tokenCiphertext: null,
+      updatedAt: new Date(0),
+    })),
+  ],
+  jobs: JOBS.map(({ job, pick, chunks }) => ({
+    ...jobRow(job),
+    picks: pick ? [{ ...pick, skipped: false }] : [],
+    chunks,
+  })),
+};

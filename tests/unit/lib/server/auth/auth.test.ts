@@ -3,22 +3,22 @@ import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   authUrl,
-  CHANNEL_SCOPES,
   exchangeCode,
-  isAllowlisted,
-  isDemo,
   newOAuthState,
+  OAUTH_TTL_SEC,
   oauthClient,
+  readOAuthState,
   readSession,
+  SCOPES,
   SESSION_TTL_SEC,
   sessionCookie,
   sign,
-  SIGN_IN_SCOPES,
   unsign,
 } from '$lib/server/auth/auth';
 
 const NATHAN_EMAIL = 'nathan@example.com';
-const DEMO_EMAIL = 'demo@example.com';
+const UID = 'sub-nathan';
+const NOW = 1_800_000_000_000;
 
 const oauth = vi.hoisted(() => ({
   options: [] as unknown[],
@@ -46,7 +46,6 @@ beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', 'test-secret');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'cid');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'csecret');
-  vi.stubEnv('ALLOWLIST_EMAILS', 'nathan@example.com, Ashley@Example.com');
   vi.clearAllMocks();
   oauth.options.length = 0;
 });
@@ -99,98 +98,104 @@ describe('sign / unsign', () => {
   });
 });
 
-describe('isAllowlisted', () => {
-  it('matches case-insensitively and trims', () => {
-    expect(isAllowlisted(NATHAN_EMAIL)).toBe(true);
-    expect(isAllowlisted('  ASHLEY@example.COM ')).toBe(true);
-  });
-
-  it('rejects anyone else', () => {
-    expect(isAllowlisted('visitor@example.com')).toBe(false);
-  });
-
-  it('rejects everyone with an empty allowlist', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', '');
-    expect(isAllowlisted(NATHAN_EMAIL)).toBe(false);
-  });
-});
-
-describe('isDemo', () => {
-  it('matches demo accounts case-insensitively, and allowlisting wins', () => {
-    vi.stubEnv('DEMO_EMAILS', 'Demo@Example.com, nathan@example.com');
-    expect(isDemo(' demo@example.COM ')).toBe(true);
-    expect(isDemo(NATHAN_EMAIL)).toBe(false);
-    expect(isDemo('stranger@example.com')).toBe(false);
-  });
-
-  it('has no demo accounts when DEMO_EMAILS is unset', () => {
-    vi.stubEnv('DEMO_EMAILS', '');
-    expect(isDemo(DEMO_EMAIL)).toBe(false);
-  });
-});
-
-describe('readSession', () => {
-  const NOW = 1_800_000_000_000;
-
-  it('reads a demo session as demo, not allowlisted', () => {
-    vi.stubEnv('DEMO_EMAILS', DEMO_EMAIL);
-    expect(readSession(sessionCookie(DEMO_EMAIL, NOW), NOW)).toEqual({
-      email: DEMO_EMAIL,
-      allowlisted: false,
-      demo: true,
+describe('sessionCookie / readSession', () => {
+  it('round-trips the uid with a fixed 30-day expiry', () => {
+    const session = readSession(sessionCookie(UID, NOW), NOW + 1000);
+    expect(session).toEqual({
+      uid: UID,
+      sid: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+      exp: NOW + SESSION_TTL_SEC * 1000,
     });
   });
 
-  it('reads a fresh allowlisted session', () => {
-    const cookie = sessionCookie('Nathan@Example.com', NOW);
-    expect(readSession(cookie, NOW + 1000)).toEqual({
-      email: 'Nathan@Example.com',
-      allowlisted: true,
-      demo: false,
+  it('gives every sign-in its own sid', () => {
+    const a = readSession(sessionCookie(UID, NOW), NOW);
+    const b = readSession(sessionCookie(UID, NOW), NOW);
+    expect(a!.sid).not.toBe(b!.sid);
+  });
+
+  it('rejects a tampered session', () => {
+    const [, mac] = sessionCookie(UID, NOW).split('.');
+    const forged = Buffer.from(
+      JSON.stringify({ uid: 'someone-else', sid: 's', exp: NOW + 1000 }),
+    ).toString('base64url');
+    expect(readSession(`${forged}.${mac}`, NOW)).toBeNull();
+  });
+
+  it('expires at exp, never sliding', () => {
+    const cookie = sessionCookie(UID, NOW);
+    expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000 - 1)).not.toBeNull();
+    expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000)).toBeNull();
+  });
+
+  it.each([
+    ['no uid', { sid: 's', exp: NOW + 1000 }],
+    ['an empty uid', { uid: '', sid: 's', exp: NOW + 1000 }],
+    ['a numeric uid', { uid: 42, sid: 's', exp: NOW + 1000 }],
+    ['the old email-only shape', { email: NATHAN_EMAIL, exp: NOW + 1000 }],
+    ['no sid', { uid: UID, exp: NOW + 1000 }],
+    ['no expiry', { uid: UID, sid: 's' }],
+    ['null', null],
+  ])('rejects a payload with %s', (_label, payload) => {
+    expect(readSession(sign(payload), NOW)).toBeNull();
+  });
+
+  it('ignores an extra field such as a legacy generation', () => {
+    expect(readSession(sign({ uid: UID, sid: 's', gen: 1, exp: NOW + 1000 }), NOW)).toEqual({
+      uid: UID,
+      sid: 's',
+      exp: NOW + 1000,
     });
   });
 
-  it('reads a signed-in visitor as not allowlisted', () => {
-    expect(readSession(sessionCookie('v@example.com', NOW), NOW)).toEqual({
-      email: 'v@example.com',
-      allowlisted: false,
-      demo: false,
-    });
-  });
-
-  it('expires after the session TTL', () => {
-    const cookie = sessionCookie(NATHAN_EMAIL, NOW);
-    expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000)).not.toBeNull();
-    expect(readSession(cookie, NOW + SESSION_TTL_SEC * 1000 + 1)).toBeNull();
-  });
-
-  it('re-checks the allowlist on every read', () => {
-    const cookie = sessionCookie(NATHAN_EMAIL, NOW);
-    expect(readSession(cookie, NOW)?.allowlisted).toBe(true);
-    vi.stubEnv('ALLOWLIST_EMAILS', 'ashley@example.com');
-    expect(readSession(cookie, NOW)?.allowlisted).toBe(false);
-  });
-
-  it('rejects missing, garbage, and malformed cookies', () => {
+  it('rejects missing and garbage cookies', () => {
     expect(readSession(undefined)).toBeNull();
     expect(readSession('garbage')).toBeNull();
-    expect(readSession(sign({ email: 42, exp: NOW + 1000 }), NOW)).toBeNull();
-    expect(readSession(sign(null), NOW)).toBeNull();
   });
 
   it('uses the current time by default', () => {
-    expect(readSession(sessionCookie(NATHAN_EMAIL))).not.toBeNull();
-    expect(readSession(sign({ email: NATHAN_EMAIL, exp: 1 }))).toBeNull();
+    expect(readSession(sessionCookie(UID))).not.toBeNull();
+    expect(readSession(sign({ uid: UID, sid: 's', exp: 1 }))).toBeNull();
   });
 });
 
-describe('newOAuthState', () => {
-  it('carries a random nonce, purpose, and channel', () => {
-    const a = newOAuthState('connect', 'nathan');
-    const b = newOAuthState('sign-in', null);
-    expect(a).toMatchObject({ purpose: 'connect', channel: 'nathan' });
-    expect(a.nonce).toMatch(/^[A-Za-z0-9_-]{22}$/);
+describe('newOAuthState / readOAuthState', () => {
+  it('carries a random nonce, purpose, and the starting session, for 10 minutes', () => {
+    const a = newOAuthState('connect', { uid: UID, sid: 'sid-1' }, NOW);
+    const b = newOAuthState('sign-in', null, NOW);
+    expect(a).toEqual({
+      nonce: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+      purpose: 'connect',
+      uid: UID,
+      sid: 'sid-1',
+      exp: NOW + OAUTH_TTL_SEC * 1000,
+    });
+    expect(b).toMatchObject({ purpose: 'sign-in', uid: null, sid: null });
     expect(b.nonce).not.toBe(a.nonce);
+    expect(OAUTH_TTL_SEC).toBe(600);
+  });
+
+  it('reads a fresh state back', () => {
+    const state = newOAuthState('sign-in', null, NOW);
+    expect(readOAuthState(sign(state), NOW + 1000)).toEqual(state);
+  });
+
+  it('expires after 10 minutes', () => {
+    const cookie = sign(newOAuthState('sign-in', null, NOW));
+    expect(readOAuthState(cookie, NOW + OAUTH_TTL_SEC * 1000 - 1)).not.toBeNull();
+    expect(readOAuthState(cookie, NOW + OAUTH_TTL_SEC * 1000)).toBeNull();
+  });
+
+  it('rejects missing, tampered and malformed states', () => {
+    expect(readOAuthState(undefined, NOW)).toBeNull();
+    const [body] = sign(newOAuthState('sign-in', null, NOW)).split('.');
+    expect(readOAuthState(`${body}.forged`, NOW)).toBeNull();
+    expect(readOAuthState(sign({ purpose: 'sign-in', exp: NOW + 1000 }), NOW)).toBeNull();
+    expect(readOAuthState(sign({ nonce: 'n', purpose: 'sign-in' }), NOW)).toBeNull();
+  });
+
+  it('uses the current time by default', () => {
+    expect(readOAuthState(sign(newOAuthState('sign-in', null)))).not.toBeNull();
   });
 });
 
@@ -202,32 +207,36 @@ describe('oauthClient / authUrl', () => {
     ]);
   });
 
-  it('asks sign-in for identity only, online', () => {
+  it('asks sign-in for identity and YouTube offline in one consent, with the chooser', () => {
     const state = newOAuthState('sign-in', null);
-    const url = authUrl(ORIGIN, state);
+    const url = authUrl(ORIGIN, state, NATHAN_EMAIL);
     expect(url).toContain('accounts.google.com');
     expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
-      scope: SIGN_IN_SCOPES,
-      state: state.nonce,
-      access_type: 'online',
-      prompt: 'select_account',
-      include_granted_scopes: false,
-    });
-    expect(SIGN_IN_SCOPES).not.toContain('https://www.googleapis.com/auth/youtube.upload');
-  });
-
-  it('asks connect for upload scope offline with the chooser and forced consent', () => {
-    const state = newOAuthState('connect', 'nathan');
-    authUrl(ORIGIN, state);
-    expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
-      scope: CHANNEL_SCOPES,
+      scope: SCOPES,
       state: state.nonce,
       access_type: 'offline',
-      prompt: 'select_account consent',
-      include_granted_scopes: false,
+      include_granted_scopes: true,
+      prompt: 'select_account',
     });
-    expect(CHANNEL_SCOPES).toContain('https://www.googleapis.com/auth/youtube.upload');
-    expect(CHANNEL_SCOPES).toEqual(expect.arrayContaining(SIGN_IN_SCOPES));
+    expect(SCOPES).toEqual([
+      'openid',
+      'email',
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube.readonly',
+    ]);
+  });
+
+  it('forces consent on connect and hints at the user account', () => {
+    const state = newOAuthState('connect', { uid: UID, sid: 'sid-1' });
+    authUrl(ORIGIN, state, NATHAN_EMAIL);
+    expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
+      scope: SCOPES,
+      state: state.nonce,
+      access_type: 'offline',
+      include_granted_scopes: true,
+      prompt: 'select_account consent',
+      login_hint: NATHAN_EMAIL,
+    });
   });
 
   it('requires the client secret', () => {
@@ -240,46 +249,80 @@ describe('oauthClient / authUrl', () => {
 
 describe('exchangeCode', () => {
   const ticket = (payload: unknown) => ({ getPayload: () => payload });
+  const VERIFIED = { sub: UID, email: 'a@b.c', email_verified: true };
 
-  it('returns the lowercased verified email and the refresh token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', refresh_token: 'rt' } });
+  it('returns the verified identity, granted scopes and both tokens', async () => {
+    oauth.getToken.mockResolvedValueOnce({
+      tokens: {
+        id_token: 'idt',
+        access_token: 'at',
+        refresh_token: 'rt',
+        scope: 'openid email  https://www.googleapis.com/auth/youtube.upload',
+      },
+    });
     oauth.verifyIdToken.mockResolvedValueOnce(
-      ticket({ email: 'Nathan@Example.COM', email_verified: true }),
+      ticket({ sub: UID, email: 'Nathan@Example.COM', email_verified: true, name: 'Nathan' }),
     );
     expect(await exchangeCode(ORIGIN, 'code-1')).toEqual({
+      sub: UID,
       email: NATHAN_EMAIL,
+      scopes: ['openid', 'email', 'https://www.googleapis.com/auth/youtube.upload'],
       refreshToken: 'rt',
+      accessToken: 'at',
     });
     expect(oauth.getToken).toHaveBeenCalledWith('code-1');
     expect(oauth.verifyIdToken).toHaveBeenCalledWith({ idToken: 'idt', audience: 'cid' });
   });
 
-  it('returns a null refresh token for sign-in', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(ticket({ email: 'a@b.c', email_verified: true }));
-    expect((await exchangeCode(ORIGIN, 'c')).refreshToken).toBeNull();
+  it('returns no refresh token or scopes when Google sends none', async () => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
+    oauth.verifyIdToken.mockResolvedValueOnce(ticket(VERIFIED));
+    expect(await exchangeCode(ORIGIN, 'c')).toMatchObject({
+      refreshToken: null,
+      scopes: [],
+    });
   });
 
-  it('throws when Google returns no ID token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { refresh_token: 'rt' } });
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Google returned no ID token');
+  it.each([
+    ['no ID token', { access_token: 'at' }],
+    ['no access token', { id_token: 'idt' }],
+  ])('throws when Google returns %s', async (_label, tokens) => {
+    oauth.getToken.mockResolvedValueOnce({ tokens });
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Google returned no tokens');
     expect(oauth.verifyIdToken).not.toHaveBeenCalled();
   });
 
-  it('throws when the email is not verified', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(ticket({ email: 'a@b.c', email_verified: false }));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('not verified');
+  it('returns null for a used or expired code', async () => {
+    oauth.getToken.mockRejectedValueOnce(
+      Object.assign(new Error('Bad Request'), { response: { data: { error: 'invalid_grant' } } }),
+    );
+    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
+    expect(oauth.verifyIdToken).not.toHaveBeenCalled();
   });
 
-  it('throws when the payload has no email', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
-    oauth.verifyIdToken.mockResolvedValueOnce(ticket(undefined));
-    await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('not verified');
+  it.each([
+    ['a network failure', new Error('ECONNRESET')],
+    [
+      'another token error',
+      Object.assign(new Error('Unauthorized'), { response: { data: { error: 'invalid_client' } } }),
+    ],
+  ])('propagates %s in the code exchange', async (_label, error) => {
+    oauth.getToken.mockRejectedValueOnce(error);
+    await expect(exchangeCode(ORIGIN, 'c')).rejects.toBe(error);
   });
 
-  it('propagates an invalid ID token', async () => {
-    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt' } });
+  it.each([
+    ['an unverified email', ticket({ ...VERIFIED, email_verified: false })],
+    ['no email', ticket({ sub: UID, email_verified: true })],
+    ['no payload', ticket(undefined)],
+  ])('returns null for %s', async (_label, result) => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
+    oauth.verifyIdToken.mockResolvedValueOnce(result);
+    expect(await exchangeCode(ORIGIN, 'c')).toBeNull();
+  });
+
+  it('propagates an ID token that fails verification', async () => {
+    oauth.getToken.mockResolvedValueOnce({ tokens: { id_token: 'idt', access_token: 'at' } });
     oauth.verifyIdToken.mockRejectedValueOnce(new Error('Wrong recipient'));
     await expect(exchangeCode(ORIGIN, 'c')).rejects.toThrow('Wrong recipient');
   });

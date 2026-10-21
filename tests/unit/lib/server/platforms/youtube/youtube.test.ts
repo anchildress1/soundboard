@@ -1,17 +1,23 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  channelsMine,
   channelStats,
   clearStatsCache,
+  finalChunk,
+  quotaResetAt,
   readBack,
   recentVideos,
   searchMusicVideos,
+  sourceRange,
   startResumableUpload,
   thumbnailDataUrl,
   UPLOAD_CHUNK_BYTES,
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  videoChannel,
+  videoIdFromUrl,
   videosByIds,
   isoSeconds,
   YouTubeError,
@@ -141,7 +147,7 @@ describe('catalog reads', () => {
 describe('channelStats', () => {
   it('reads the channel and its latest upload', async () => {
     fetchMock.mockResolvedValueOnce(json(channel)).mockResolvedValueOnce(json(playlist('v1')));
-    const stats = await channelStats(1_000);
+    const stats = await channelStats('UCflr', 1_000);
     expect(stats).toEqual({
       handle: '@flieslikerobots',
       videoCount: 42,
@@ -159,33 +165,46 @@ describe('channelStats', () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).includes('/channels') ? json(channel) : json(playlist('v1')),
     );
-    await channelStats(0);
-    await channelStats(10 * 60 * 1000 - 1);
+    await channelStats('UCflr', 0);
+    await channelStats('UCflr', 10 * 60 * 1000 - 1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    await channelStats(10 * 60 * 1000);
+    await channelStats('UCflr', 10 * 60 * 1000);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('caches each channel on its own, never serving one channel for another', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (!url.pathname.endsWith('/channels')) return json(playlist('v1'));
+      const id = url.searchParams.get('id');
+      return json({ items: [{ snippet: { customUrl: `@${id}` } }] });
+    });
+    expect((await channelStats('UCa', 0)).handle).toBe('@UCa');
+    expect((await channelStats('UCb', 0)).handle).toBe('@UCb');
+    expect((await channelStats('UCa', 1)).handle).toBe('@UCa');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('clearStatsCache forces a fresh read', async () => {
     fetchMock.mockImplementation(async (input) =>
       String(input).includes('/channels') ? json(channel) : json(playlist('v1')),
     );
-    await channelStats(0);
+    await channelStats('UCflr', 0);
     clearStatsCache();
-    await channelStats(1);
+    await channelStats('UCflr', 1);
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('throws a 404 YouTubeError when the channel is missing', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [] }));
-    const error = await channelStats().catch((e: unknown) => e);
+    const error = await channelStats('UCflr').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(YouTubeError);
     expect((error as YouTubeError).status).toBe(404);
   });
 
   it('falls back to the title and zeros, and skips the playlist read without uploads', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [{ snippet: { title: 'FLR' } }] }));
-    expect(await channelStats()).toEqual({
+    expect(await channelStats('UCflr')).toEqual({
       handle: 'FLR',
       videoCount: 0,
       subscriberCount: 0,
@@ -201,7 +220,7 @@ describe('channelStats', () => {
         json({ items: [{ contentDetails: { relatedPlaylists: { uploads: 'UU1' } } }] }),
       )
       .mockResolvedValueOnce(json({}));
-    const stats = await channelStats();
+    const stats = await channelStats('UCflr');
     expect(stats.handle).toBe('');
     expect(stats.lastUploadAt).toBeNull();
   });
@@ -220,10 +239,12 @@ describe('recentVideos', () => {
       return json({ items: videos });
     });
 
-  it('keeps playlist order, drops the excluded id, and limits to count', async () => {
-    route([video('c'), video('a'), video('d'), video('b')], ['a', 'b', 'x', 'c', 'd']);
-    const videos = await recentVideos(3, 'x');
+  it('keeps playlist order and limits to count', async () => {
+    route([video('c'), video('a'), video('d'), video('b')], ['a', 'b', 'c', 'd']);
+    const videos = await recentVideos('UCx', 3);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b', 'c']);
+    const channelCall = fetchMock.mock.calls.findIndex(([u]) => String(u).includes('/channels'));
+    expect(urlOf(channelCall).searchParams.get('id')).toBe('UCx');
     const listCall = fetchMock.mock.calls.findIndex(([u]) => String(u).includes('/videos?'));
     expect(urlOf(listCall).searchParams.get('id')).toBe('a,b,c,d');
     const pageCall = fetchMock.mock.calls.findIndex(
@@ -232,15 +253,15 @@ describe('recentVideos', () => {
     expect(pageCall).toBeGreaterThan(-1);
   });
 
-  it('keeps every id when nothing is excluded and skips items without a video id', async () => {
+  it('skips playlist items without a video id', async () => {
     route([video('b'), video('a')], ['a', undefined, 'b']);
-    const videos = await recentVideos(5, null);
+    const videos = await recentVideos('UCx', 5);
     expect(videos.map((v) => v.videoId)).toEqual(['a', 'b']);
   });
 
   it('returns nothing when the playlist is empty', async () => {
     route([], []);
-    expect(await recentVideos(5, null)).toEqual([]);
+    expect(await recentVideos('UCx', 5)).toEqual([]);
   });
 });
 
@@ -390,55 +411,124 @@ describe('uploadOffset', () => {
   });
 });
 
-describe('uploadChunk', () => {
-  it('reads a range from GCS and forwards it with Content-Range', async () => {
+describe('quotaResetAt', () => {
+  it.each([
+    ['a winter afternoon', '2026-01-15T20:00:00Z', '2026-01-16T08:00:00Z'],
+    ['a summer afternoon', '2026-07-15T19:00:00Z', '2026-07-16T07:00:00Z'],
+    ['the day clocks spring forward', '2026-03-08T19:00:00Z', '2026-03-09T07:00:00Z'],
+    ['the day before they spring forward', '2026-03-07T20:00:00Z', '2026-03-08T08:00:00Z'],
+    ['the day clocks fall back', '2026-11-01T20:00:00Z', '2026-11-02T08:00:00Z'],
+    ['the day before they fall back', '2026-10-31T19:00:00Z', '2026-11-01T07:00:00Z'],
+    ['Pacific midnight itself', '2026-10-18T07:00:00Z', '2026-10-19T07:00:00Z'],
+    ['the last second of a Pacific day', '2026-10-19T06:59:59.999Z', '2026-10-19T07:00:00Z'],
+    ['a UTC date ahead of the Pacific one', '2026-12-31T23:30:00Z', '2027-01-01T08:00:00Z'],
+  ])('resets at the next Pacific midnight on %s', (_label, now, reset) => {
+    expect(new Date(quotaResetAt(Date.parse(now))).toISOString()).toBe(
+      new Date(reset).toISOString(),
+    );
+  });
+});
+
+describe('sourceRange', () => {
+  it("reads the chunk's range from GCS", async () => {
     const total = UPLOAD_CHUNK_BYTES * 2 + 10;
-    fetchMock.mockResolvedValueOnce(new Response('bytes', { status: 206 })).mockResolvedValueOnce(
+    fetchMock.mockResolvedValueOnce(new Response('bytes', { status: 206 }));
+    const source = await sourceRange('https://gcs/signed', 0, total);
+    expect(source?.status).toBe(206);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
+    expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
+  });
+
+  it('stops the last range at the file end', async () => {
+    const offset = UPLOAD_CHUNK_BYTES;
+    fetchMock.mockResolvedValueOnce(new Response('tail', { status: 200 }));
+    await sourceRange('g', offset, offset + 100);
+    expect(headersOf(0)).toEqual({ range: `bytes=${offset}-${offset + 99}` });
+  });
+
+  it('returns null once the object is gone', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('gone', { status: 404 }));
+    expect(await sourceRange('g', 0, 10)).toBeNull();
+  });
+
+  it.each([403, 503])('throws a plain error on a GCS %i', async (status) => {
+    fetchMock.mockResolvedValueOnce(new Response('denied', { status }));
+    const error = await sourceRange('g', 0, 10).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(YouTubeError);
+    expect(uploadFailure(error)).toBe('other');
+    expect((error as Error).message).toBe(`GCS range read ${status}`);
+  });
+});
+
+describe('uploadChunk', () => {
+  it('streams the open range into the session with Content-Range', async () => {
+    const total = UPLOAD_CHUNK_BYTES * 2 + 10;
+    fetchMock.mockResolvedValueOnce(
       new Response(null, {
         status: 308,
         headers: { range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` },
       }),
     );
-    const result = await uploadChunk(SESSION_URL, 'https://gcs/signed', 0, total);
+    const source = new Response('bytes', { status: 206 });
+    const result = await uploadChunk(SESSION_URL, source, 0, total);
     expect(result).toEqual({ done: false, next: UPLOAD_CHUNK_BYTES });
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('https://gcs/signed');
-    expect(headersOf(0)).toEqual({ range: `bytes=0-${UPLOAD_CHUNK_BYTES - 1}` });
-    expect(String(fetchMock.mock.calls[1]![0])).toBe(SESSION_URL);
-    expect(initOf(1).method).toBe('PUT');
-    expect(headersOf(1)).toEqual({
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(SESSION_URL);
+    expect(initOf(0).method).toBe('PUT');
+    expect(headersOf(0)).toEqual({
       'content-length': String(UPLOAD_CHUNK_BYTES),
       'content-range': `bytes 0-${UPLOAD_CHUNK_BYTES - 1}/${total}`,
     });
-    expect(initOf(1).body).toBeInstanceOf(ReadableStream);
+    expect(initOf(0).body).toBeInstanceOf(ReadableStream);
   });
 
   it('sends the last short chunk and returns the video id on 200', async () => {
     const offset = UPLOAD_CHUNK_BYTES;
     const total = offset + 100;
-    fetchMock
-      .mockResolvedValueOnce(new Response('tail', { status: 200 }))
-      .mockResolvedValueOnce(json({ id: 'newVid' }));
-    expect(await uploadChunk('s', 'g', offset, total)).toEqual({ done: true, videoId: 'newVid' });
-    expect(headersOf(0)).toEqual({ range: `bytes=${offset}-${total - 1}` });
-    expect(headersOf(1)).toEqual({
+    fetchMock.mockResolvedValueOnce(json({ id: 'newVid' }));
+    expect(await uploadChunk('s', new Response('tail'), offset, total)).toEqual({
+      done: true,
+      videoId: 'newVid',
+    });
+    expect(headersOf(0)).toEqual({
       'content-length': '100',
       'content-range': `bytes ${offset}-${total - 1}/${total}`,
     });
   });
 
-  it('throws YouTubeError on a bad GCS status without touching the session', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('denied', { status: 403 }));
-    const error = await uploadChunk('s', 'g', 0, 10).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(YouTubeError);
-    expect((error as YouTubeError).message).toBe('GCS range read 403');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it('throws when YouTube rejects the chunk', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('bad', { status: 500 }));
+    await expect(uploadChunk('s', new Response('x'), 0, 10)).rejects.toMatchObject({
+      status: 500,
+    });
+  });
+});
+
+describe('channelsMine', () => {
+  it("returns the token account's channel, read with the bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [{ id: 'UCa', snippet: { title: 'A' } }] }));
+    expect(await channelsMine('tok')).toEqual({ id: 'UCa', title: 'A' });
+    expect(urlOf(0).searchParams.get('mine')).toBe('true');
+    expect(urlOf(0).searchParams.get('part')).toBe('snippet');
+    expect(urlOf(0).searchParams.get('key')).toBeNull();
+    expect(headersOf(0)).toEqual({ authorization: 'Bearer tok' });
   });
 
-  it('throws when YouTube rejects the chunk', async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response('x', { status: 206 }))
-      .mockResolvedValueOnce(new Response('bad', { status: 500 }));
-    await expect(uploadChunk('s', 'g', 0, 10)).rejects.toMatchObject({ status: 500 });
+  it('returns an empty title when the channel has none', async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [{ id: 'UCa' }] }));
+    expect(await channelsMine('tok')).toEqual({ id: 'UCa', title: '' });
+  });
+
+  it.each([{ items: [] }, {}])(
+    'returns null for an account without a channel (%j)',
+    async (body) => {
+      fetchMock.mockResolvedValueOnce(json(body));
+      expect(await channelsMine('tok')).toBeNull();
+    },
+  );
+
+  it('throws on a non-ok read', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+    await expect(channelsMine('tok')).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -450,6 +540,29 @@ describe('readBack', () => {
     expect(urlOf(0).searchParams.get('id')).toBe('pub1');
     expect(urlOf(0).searchParams.get('key')).toBeNull();
     expect(headersOf(0)).toEqual({ authorization: 'Bearer tok' });
+  });
+
+  it.each([
+    ['uploaded', { status: 'accepted' }],
+    ['processed', { status: 'accepted' }],
+    ['rejected', { status: 'rejected', uploadStatus: 'rejected' }],
+    ['failed', { status: 'rejected', uploadStatus: 'failed' }],
+    ['deleted', { status: 'rejected', uploadStatus: 'deleted' }],
+    [undefined, { status: 'pending', uploadStatus: null }],
+    ['', { status: 'pending', uploadStatus: null }],
+    ['someNewStatus', { status: 'pending', uploadStatus: 'someNewStatus' }],
+  ])('reads uploadStatus %s as %o', async (uploadStatus, expected) => {
+    fetchMock.mockResolvedValueOnce(
+      json({ items: [{ ...video('pub1'), status: { uploadStatus } }] }),
+    );
+    const live = await readBack('tok', 'pub1');
+    expect(live).toMatchObject({ videoId: 'pub1', ...expected });
+    expect(live && 'uploadStatus' in live).toBe('uploadStatus' in expected);
+  });
+
+  it('reads a video with no status part as pending', async () => {
+    fetchMock.mockResolvedValueOnce(json({ items: [video('pub1')] }));
+    expect(await readBack('tok', 'pub1')).toMatchObject({ status: 'pending', uploadStatus: null });
   });
 
   it('returns null when the video is not listed yet', async () => {
@@ -497,8 +610,37 @@ describe('uploadFailure', () => {
     expect(uploadFailure(new YouTubeError(403, 'QUOTA'))).toBe('quota-spent');
   });
 
+  it.each([400, 403])(
+    "reads the channel's uploadLimitExceeded on a %i as a spent limit",
+    (status) => {
+      const error = new YouTubeError(
+        status,
+        `upload init ${status}: {"reason":"uploadLimitExceeded"}`,
+      );
+      expect(uploadFailure(error)).toBe('quota-spent');
+    },
+  );
+
+  it('reads a 401 as lost access, never a lost session', () => {
+    expect(uploadFailure(new YouTubeError(401, 'upload init 401: invalid credentials'))).toBe(
+      'access-lost',
+    );
+  });
+
   it.each([
     ['a 403 without quota', new YouTubeError(403, 'forbidden')],
+    ['a 400 naming another reason', new YouTubeError(400, 'invalidTitle')],
+    ['a 499 at the edge of the range', new YouTubeError(499, 'closed')],
+  ])('reads %s as denied', (_label, error) => {
+    expect(uploadFailure(error)).toBe('denied');
+  });
+
+  it.each([
+    ['a 429 rate limit', new YouTubeError(429, 'videos.list 429: rateLimitExceeded')],
+    ['a 403 rate limit', new YouTubeError(403, 'videos.list 403: rateLimitExceeded')],
+    ["a 403 on the user's rate limit", new YouTubeError(403, 'userRateLimitExceeded')],
+    ['a status below the 4xx range', new YouTubeError(399, 'odd')],
+    ['the upload limit on a 500', new YouTubeError(500, 'uploadLimitExceeded')],
     ['a quota message on another status', new YouTubeError(500, 'quota backend')],
     ['a plain Error with a session status', Object.assign(new Error('x'), { status: 404 })],
     ['a non-error value', 'quota'],
@@ -508,11 +650,96 @@ describe('uploadFailure', () => {
   });
 });
 
+describe('finalChunk', () => {
+  it.each([
+    [0, 10, true],
+    [0, UPLOAD_CHUNK_BYTES, true],
+    [0, UPLOAD_CHUNK_BYTES + 1, false],
+    [UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES + 1, true],
+  ])('from %i of %i is final: %s', (offset, total, final) => {
+    expect(finalChunk(offset, total)).toBe(final);
+  });
+});
+
 describe('YOUTUBE_SCOPES', () => {
   it('asks for upload and read-back only', () => {
     expect(YOUTUBE_SCOPES).toEqual([
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
     ]);
+  });
+});
+
+describe('videoChannel', () => {
+  it("reads the video's channel through the caller's grant", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({
+        items: [
+          {
+            id: 'dQw4w9WgXcQ',
+            snippet: { channelId: 'UCflr', publishedAt: '2026-10-18T12:00:00Z' },
+          },
+        ],
+      }),
+    );
+    expect(await videoChannel('tok', 'dQw4w9WgXcQ')).toEqual({
+      channelId: 'UCflr',
+      publishedAt: Date.parse('2026-10-18T12:00:00Z'),
+    });
+    expect(urlOf(0).pathname).toBe('/youtube/v3/videos');
+    expect(urlOf(0).searchParams.get('part')).toBe('snippet');
+    expect(urlOf(0).searchParams.get('id')).toBe('dQw4w9WgXcQ');
+    expect(urlOf(0).searchParams.get('key')).toBeNull();
+    expect(headersOf(0)).toEqual({ authorization: 'Bearer tok' });
+  });
+
+  it.each([
+    ['no items', {}],
+    ['an empty list', { items: [] }],
+    ['no snippet', { items: [{ id: 'x' }] }],
+    ['no publish time', { items: [{ id: 'x', snippet: { channelId: 'UCflr' } }] }],
+    ['no channel', { items: [{ id: 'x', snippet: { publishedAt: '2026-10-18T12:00:00Z' } }] }],
+  ])('returns null for %s', async (_label, body) => {
+    fetchMock.mockResolvedValueOnce(json(body));
+    expect(await videoChannel('tok', 'x')).toBeNull();
+  });
+
+  it('throws YouTubeError on an error status', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('nope', { status: 401 }));
+    await expect(videoChannel('tok', 'x')).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('videoIdFromUrl', () => {
+  const ID = 'dQw4w9WgXcQ';
+  it.each([
+    `https://www.youtube.com/watch?v=${ID}`,
+    `https://youtube.com/watch?v=${ID}&t=10s`,
+    `https://m.youtube.com/watch?v=${ID}`,
+    `https://youtu.be/${ID}`,
+    `https://youtu.be/${ID}?si=abc`,
+    `https://www.youtube.com/shorts/${ID}`,
+    `https://studio.youtube.com/video/${ID}/edit`,
+    `  https://youtu.be/${ID}  `,
+  ])('reads the ID from %s', (url) => {
+    expect(videoIdFromUrl(url)).toBe(ID);
+  });
+
+  it.each([
+    '',
+    ID,
+    'not a url',
+    `ftp://youtu.be/${ID}`,
+    `https://example.com/watch?v=${ID}`,
+    `https://notyoutube.com/watch?v=${ID}`,
+    `https://youtube.com.evil.example/watch?v=${ID}`,
+    'https://www.youtube.com/watch',
+    'https://www.youtube.com/watch?v=short',
+    `https://www.youtube.com/channel/${ID}`,
+    `https://studio.youtube.com/channel/${ID}`,
+    'https://youtu.be/',
+    `https://www.youtube.com/shorts/${ID}x`,
+  ])('rejects %j', (url) => {
+    expect(videoIdFromUrl(url)).toBeNull();
   });
 });

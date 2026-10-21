@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { signIn, USER_A, USER_B } from './session';
 
 test.describe('home page', () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page, USER_B);
+  });
+
   test('renders the Soundboard frame', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle('Soundboard');
@@ -16,25 +21,7 @@ test.describe('home page', () => {
     await expect(analyze).toBeDisabled();
     await page.getByLabel(/^Song title/).fill('PeekaBoo');
     await expect(analyze).toBeDisabled();
-    await expect(page.getByText('up to 5 min')).toBeVisible();
-  });
-
-  test('lets dev.to frame the page', async ({ request }) => {
-    const response = await request.get('/');
-    expect(response.ok()).toBe(true);
-    const csp = response.headers()['content-security-policy'] ?? '';
-    expect(csp).toContain('frame-ancestors');
-    expect(csp).toContain("'self'");
-    expect(csp).toContain('https://dev.to');
-    expect(csp).toContain('https://*.dev.to');
-    expect(response.headers()['x-content-type-options']).toBe('nosniff');
-  });
-
-  test('sets zero cookies for a signed-out visitor', async ({ page, context }) => {
-    const response = await page.goto('/');
-    expect(response?.headers()['set-cookie']).toBeUndefined();
-    await page.waitForLoadState('load');
-    expect(await context.cookies()).toEqual([]);
+    await expect(page.getByText('up to 15 min')).toBeVisible();
   });
 
   test('stacks the tape above the form on phones and side by side on desktop', async ({
@@ -62,4 +49,50 @@ test('health endpoint reports ok', async ({ request }) => {
   const response = await request.get('/health');
   expect(response.ok()).toBe(true);
   expect(await response.json()).toEqual({ ok: true });
+});
+
+test.describe('job list', () => {
+  test("lists only the signed-in user's runs and continues one", async ({ page }) => {
+    await signIn(page, USER_B);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('listitem')).toHaveCount(1);
+    await expect(runs.getByRole('listitem')).toContainText('Vaporgram');
+    await expect(runs.getByRole('listitem')).toContainText('Needs review');
+    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await expect(page).toHaveURL('/jobs/e2e-b-review');
+    await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
+  });
+
+  test('sends a client navigation home once the session is gone', async ({ page }) => {
+    await signIn(page, USER_B);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('link', { name: 'Continue Vaporgram' })).toBeVisible();
+    await page.context().clearCookies();
+    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await expect(page).toHaveURL('/');
+    await expect(page.getByLabel(/^Title/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Your runs' })).toHaveCount(0);
+  });
+
+  test('continues a run whose media expired, keeping its details', async ({ page }) => {
+    await signIn(page, USER_A);
+    await page.goto('/');
+    await page.getByRole('link', { name: 'Continue Gone Song' }).click();
+    await expect(page).toHaveURL('/jobs/e2e-expired');
+    await expect(page.getByRole('note')).toContainText('upload it again');
+    await expect(page.getByLabel(/^Title/)).toHaveValue('PeekaBoo (Official Video)');
+  });
+
+  test("leaves another user's runs and every Short off the list", async ({ page }) => {
+    await signIn(page, USER_A);
+    await page.goto('/');
+    const runs = page.getByRole('region', { name: 'Your runs' });
+    await expect(runs.getByRole('link', { name: 'Continue PeekaBoo' }).first()).toBeVisible();
+    await expect(runs).not.toContainText('Vaporgram');
+    await expect(runs.locator('a[href="/jobs/e2e-cut-short"]')).toHaveCount(0);
+    await expect(runs.locator('a[href="/jobs/e2e-cut"]')).toHaveCount(1);
+  });
 });

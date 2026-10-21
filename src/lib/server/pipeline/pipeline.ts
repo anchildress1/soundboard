@@ -1,6 +1,13 @@
 import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
 import { scrubUrl } from '$lib/scrub';
-import { DRIVEN_STATES, type Chunk, type JobState, type Pick, type Wait } from '$lib/types';
+import {
+  DRIVEN_STATES,
+  type Chunk,
+  type JobState,
+  type Pick,
+  type PickFields,
+  type Wait,
+} from '$lib/types';
 import { approvedBrand } from '$lib/server/artist/brand';
 import { analyzeChunk } from '$lib/server/ai/chunk-analyst';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '$lib/server/media/ffmpeg';
@@ -12,33 +19,53 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  markFinalChunk,
+  markUploadStarted,
   ok,
+  outcomeUnknown,
   releaseJob,
   transitionJob,
   type JobDoc,
 } from '$lib/server/jobs/jobs';
-import { listFacts, PUBLIC_FACTS, recentFeedback, recordPublish } from '$lib/server/artist/memory';
+import { artistJob, listFacts, recentFeedback, recordPublish } from '$lib/server/artist/memory';
+import type { Tx } from '$lib/server/core/db';
+import { required } from '$lib/server/core/env';
 import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
 import { hookStep, renderStep } from './short';
 import { runPick } from '$lib/server/ai/smart-pick';
+import type { JobPatch } from '$lib/server/jobs/rows';
 import { invokeAgent } from '$lib/server/core/tracing';
 import {
-  accessToken,
+  accessTokenFor,
+  finalChunk,
+  quotaResetAt,
   readBack,
   recentVideos,
+  sourceRange,
   startResumableUpload,
   thumbnailDataUrl,
   uploadChunk,
   uploadFailure,
   uploadOffset,
+  type Access,
+  type ChunkResult,
+  type ReadBack,
 } from '$lib/server/platforms/youtube';
 
 export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 3;
 
-type Patch = Partial<JobDoc>;
-/** A step's job patch, plus output to store only if the claim is still valid at release. */
-type StepOutput = Patch & { pick?: Pick; chunk?: Chunk; wait?: Wait };
+type Patch = JobPatch;
+/**
+ * A step's job patch, plus output to store only if the claim is still valid at release. `alsoWrite`
+ * runs inside the release transaction for writes outside the job row.
+ */
+type StepOutput = Patch & {
+  pick?: Pick;
+  chunk?: Chunk;
+  wait?: Wait;
+  alsoWrite?: (tx: Tx) => Promise<void>;
+};
 
 /** A failed step that still produced output worth keeping, so the retry doesn't redo it. */
 class StepFailure extends Error {
@@ -59,11 +86,10 @@ async function prep(job: JobDoc): Promise<Patch> {
   if (!Number.isFinite(probed.durationSec) || probed.durationSec <= 0) {
     return fail('PREP', "Couldn't read this video's duration. Re-export it and try again.");
   }
-  const limit = MAX_MINUTES[job.owner];
-  if (probed.durationSec > limit * 60) {
+  if (probed.durationSec > MAX_MINUTES * 60) {
     return fail(
       'PREP',
-      `Videos are capped at ${limit} minutes here; this one runs ${(probed.durationSec / 60).toFixed(1)}.`,
+      `Videos are capped at ${MAX_MINUTES} minutes; this one runs ${(probed.durationSec / 60).toFixed(1)}.`,
     );
   }
   const measurements = await measureFile(url, probed.durationSec);
@@ -99,12 +125,11 @@ async function analyze(job: JobDoc): Promise<StepOutput> {
 async function pick(job: JobDoc): Promise<StepOutput> {
   // The budget covers the catalog and search reads too, not only the model calls.
   const deadline = stepDeadline();
-  // Demo jobs read Nathan's memory so they run like his; they never write it.
-  const nathan = job.owner !== 'visitor';
+  const artist = await artistJob(job);
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
     listPicks(job.id),
-    recentVideos(RECENT_COUNT, job.liveVideoId),
+    artist ? recentVideos(required('FLR_CHANNEL_ID'), RECENT_COUNT) : [],
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
@@ -114,8 +139,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   );
   return invokeAgent('smart-pick', async (span) => {
     const audience =
-      job.audience ??
-      (await audienceEvidence(chunks, job.probe?.durationSec ?? null, job.liveVideoId));
+      job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
     try {
       return await pickWith(audience, span);
     } catch (error) {
@@ -125,15 +149,12 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   });
 
   async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
-    const [facts, feedback, brand] = nathan
-      ? await Promise.all([
-          listFacts({ seed: job.owner === 'nathan' }),
-          recentFeedback(),
-          approvedBrand(),
-        ])
-      : [PUBLIC_FACTS, [], null];
+    const [facts, feedback, brand] = artist
+      ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
+      : [[], [], null];
     const result = await runPick(
       {
+        artist,
         songTitle: job.songTitle,
         notes: job.notes,
         measurements: job.measurements,
@@ -169,53 +190,118 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   }
 }
 
-async function publishing(job: JobDoc): Promise<Patch> {
-  if (!job.channel || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
-  const token = await accessToken(job.channel);
-  if (!token) {
-    return {
-      state: 'PAYLOAD',
-      payload: job.finalFields,
-      error: 'The upload channel is not connected.',
-    };
-  }
-  if (!job.upload) {
-    const info = await objectInfo(job.object);
-    if (!info) return fail('PUBLISHING', 'The source video has expired from storage.');
-    try {
-      const sessionUri = await startResumableUpload(
-        token,
-        job.finalFields,
-        info.size,
-        job.contentType,
-      );
-      return ok({
-        upload: { sessionUri, total: info.size },
-        uploadProgress: { sent: 0, total: info.size },
-      });
-    } catch (error) {
-      if (uploadFailure(error) === 'quota-spent') {
-        return {
-          state: 'PAYLOAD',
-          payload: job.finalFields,
-          error: 'YouTube upload quota is spent for today.',
-        };
-      }
-      throw error;
-    }
-  }
-  const { sessionUri, total } = job.upload;
-  let status: Awaited<ReturnType<typeof uploadOffset>>;
+const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
+const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
+const RECONNECT: Wait = 'reconnect YouTube';
+const SOURCE_EXPIRED = 'The source video has expired from storage.';
+
+/** A wait is never a failure: it ends the failure streak and clears a stale error. */
+const pause = (wait: Wait, patch: Patch = {}): StepOutput => ({ ...ok(patch), wait });
+
+const limited = (job: JobDoc, now: number) => job.limitUntil !== null && now < job.limitUntil;
+
+/** A step that reached YouTube clears a limit that has passed. */
+const unlimited = (job: JobDoc, output: StepOutput): StepOutput =>
+  job.limitUntil ? { ...output, limitUntil: null } : output;
+
+/** A spent daily limit or a refused grant becomes its wait; any other error is rethrown. */
+async function youtubeWait(
+  job: JobDoc,
+  error: unknown,
+  access: Access,
+  now: number,
+): Promise<StepOutput> {
+  const failure = uploadFailure(error);
+  if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
+  if (failure !== 'access-lost') throw error;
+  // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
+  await access.refused(job.id);
+  return pause(RECONNECT);
+}
+
+/**
+ * One upload step. The grant is checked before every YouTube call, chunk PUTs included: the session
+ * URI alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload
+ * here. A spent daily limit and a refused grant are waits, never failures.
+ */
+async function publishing(job: JobDoc): Promise<StepOutput> {
+  if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
+  // No YouTube call at all: the page polls this wait, and polling must spend no quota.
+  if (outcomeUnknown(job)) return pause(OUTCOME_UNKNOWN);
+  // Nor while the daily limit is spent: the quota is project-wide, so any call fails until reset.
+  const now = Date.now();
+  if (limited(job, now)) return pause(DAILY_LIMIT);
+  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!access) return pause(RECONNECT);
   try {
-    status = await uploadOffset(sessionUri, total);
+    return unlimited(
+      job,
+      job.upload
+        ? await sendChunk(job, job.upload)
+        : await initiate(job, access.token, job.finalFields),
+    );
   } catch (error) {
-    // An expired or invalidated session can't resume; the next step opens a fresh one.
-    if (uploadFailure(error) === 'session-lost') return ok({ upload: null, uploadProgress: null });
-    throw error;
+    return youtubeWait(job, error, access, now);
   }
-  const result = status.done
-    ? status
-    : await uploadChunk(sessionUri, await signedReadUrl(job.object), status.next, total);
+}
+
+async function initiate(job: JobDoc, token: string, fields: PickFields): Promise<StepOutput> {
+  const info = await objectInfo(job.object);
+  if (!info) return fail('PUBLISHING', SOURCE_EXPIRED);
+  // Durable before the request: a crash after YouTube opened the session still shows it began.
+  await markUploadStarted(job.id);
+  const sessionUri = await startResumableUpload(token, fields, info.size, job.contentType);
+  return ok({
+    upload: { sessionUri, total: info.size },
+    uploadProgress: { sent: 0, total: info.size },
+  });
+}
+
+/**
+ * Resumes from the offset YouTube holds. A lost session restarts on the same destination only if
+ * the final chunk never went out; after it may have, the outcome is the owner's call.
+ */
+async function sendChunk(
+  job: JobDoc,
+  { sessionUri, total }: { sessionUri: string; total: number },
+): Promise<StepOutput> {
+  let finalSent = job.finalChunkAt !== null;
+  let result: ChunkResult;
+  try {
+    result = await uploadOffset(sessionUri, total);
+    if (!result.done) {
+      const source = await sourceRange(await signedReadUrl(job.object), result.next, total);
+      if (!source) return fail('PUBLISHING', SOURCE_EXPIRED);
+      // Marked once GCS answered and just before the PUT: a source that never opened sent nothing,
+      // and a lost reply to this PUT must never lead to a second upload.
+      if (finalChunk(result.next, total)) {
+        try {
+          await markFinalChunk(job.id);
+        } catch (error) {
+          // The open GCS read would otherwise hold its socket until the timeout. A failed cancel is
+          // reported on its own so the marker's error stays the one the step records.
+          await source.body?.cancel().catch((cancelError: unknown) =>
+            captureException(cancelError, {
+              tags: { 'job.id': job.id, component: 'gcs-cancel' },
+            }),
+          );
+          throw error;
+        }
+        finalSent = true;
+      }
+      result = await uploadChunk(sessionUri, source, result.next, total);
+    }
+  } catch (error) {
+    if (uploadFailure(error) !== 'session-lost') throw error;
+    // Tagged with the job only: the session URI alone authorizes uploads.
+    const tags = { 'job.id': job.id };
+    if (finalSent) {
+      captureMessage('Upload session lost after final chunk', { level: 'warning', tags });
+      return pause(OUTCOME_UNKNOWN, { upload: null });
+    }
+    captureMessage('Upload session lost; restarting', { level: 'info', tags });
+    return ok({ upload: null, uploadProgress: null });
+  }
   if (result.done) {
     // The insert response only claims success; the read-back step decides VERIFIED.
     return ok({
@@ -227,14 +313,10 @@ async function publishing(job: JobDoc): Promise<Patch> {
   return ok({ uploadProgress: { sent: result.next, total } });
 }
 
-// Only an upload YouTube kept counts as verified; `uploaded` is still processing but kept.
-const ACCEPTED_UPLOADS = new Set(['uploaded', 'processed']);
-const REJECTED_UPLOADS = new Set(['rejected', 'failed', 'deleted']);
-
-/** Nathan's verified uploads join his memory; demo and visitor uploads never do. */
-async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
-  if (job.owner !== 'nathan' || !job.finalFields) return;
-  await recordPublish({
+/** Verified uploads on artist jobs join the artist's memory; no one else's do. */
+async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<void> {
+  if (!job.finalFields || !(await artistJob(job, tx))) return;
+  await recordPublish(tx, {
     videoId,
     url: `https://youtu.be/${videoId}`,
     jobId: job.id,
@@ -244,22 +326,48 @@ async function recordVerified(job: JobDoc, videoId: string): Promise<void> {
   });
 }
 
-async function verify(job: JobDoc): Promise<Patch> {
-  const token = job.channel ? await accessToken(job.channel) : null;
-  if (!token || !job.videoId) return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
-  const video = await readBack(token, job.videoId);
-  const uploadStatus = video?.uploadStatus ?? '';
-  if (REJECTED_UPLOADS.has(uploadStatus)) {
-    return fail('CLAIMED_COMPLETE', `YouTube ${uploadStatus} the upload.`);
+async function verify(job: JobDoc): Promise<StepOutput> {
+  if (!job.destination || !job.videoId) {
+    return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   }
-  if (ACCEPTED_UPLOADS.has(uploadStatus)) {
-    await recordVerified(job, job.videoId);
-    return ok({ state: 'VERIFIED' });
+  const now = Date.now();
+  if (limited(job, now)) return pause(DAILY_LIMIT);
+  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
+  if (!access) return pause(RECONNECT);
+  let video: ReadBack | null;
+  try {
+    video = await readBack(access.token, job.videoId);
+  } catch (error) {
+    return youtubeWait(job, error, access, now);
+  }
+  return unlimited(job, verified(job, job.videoId, video));
+}
+
+function verified(job: JobDoc, videoId: string, video: ReadBack | null): StepOutput {
+  if (video?.status === 'rejected') {
+    return fail('CLAIMED_COMPLETE', `YouTube ${video.uploadStatus} the upload.`);
+  }
+  if (video?.status === 'accepted') {
+    return {
+      ...ok({ state: 'VERIFIED' }),
+      alsoWrite: (tx) => recordVerified(tx, job, videoId),
+    };
+  }
+  if (video?.uploadStatus) {
+    captureMessage('Unknown YouTube uploadStatus', {
+      level: 'warning',
+      tags: { 'job.id': job.id, uploadStatus: video.uploadStatus },
+    });
   }
   const attempts = job.verifyAttempts + 1;
-  if (attempts >= VERIFY_ATTEMPTS)
-    return fail('CLAIMED_COMPLETE', 'YouTube never returned the uploaded video.');
-  return { verifyAttempts: attempts };
+  if (attempts < VERIFY_ATTEMPTS) return { verifyAttempts: attempts };
+  if (!video) return fail('CLAIMED_COMPLETE', 'YouTube never returned the uploaded video.');
+  return fail(
+    'CLAIMED_COMPLETE',
+    video.uploadStatus
+      ? `YouTube kept the upload at "${video.uploadStatus}".`
+      : 'YouTube never gave the upload a status.',
+  );
 }
 
 const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> = {
@@ -347,8 +455,8 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   }
 
   const output = await runHandler(job, handler);
-  const { pick: newPick, chunk, wait: woke, ...patch } = output;
-  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk }))) {
+  const { pick: newPick, chunk, wait: woke, alsoWrite, ...patch } = output;
+  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk, alsoWrite }))) {
     captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },

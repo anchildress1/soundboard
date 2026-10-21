@@ -1,9 +1,14 @@
-import type { Transaction } from '@google-cloud/firestore';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PickFields } from '$lib/types';
-import { db } from '$lib/server/core/clients';
+import { db, type Database, type Tx } from '$lib/server/core/db';
+import { artistMemory, jobs, users } from '$lib/server/core/schema';
 
 export const ARTIST_ID = 'flr';
 export const ARTIST_NAME = 'Flies Like Robots';
+
+/** The artist's memory rows of one kind. */
+export const memoryOf = (kind: (typeof artistMemory.kind.enumValues)[number]) =>
+  and(eq(artistMemory.artistId, ARTIST_ID), eq(artistMemory.kind, kind));
 
 export type FactKind = 'FACT' | 'INFERENCE' | 'APPROVED';
 export type Fact = { key: string; value: string; kind: FactKind; public: boolean };
@@ -27,54 +32,97 @@ export const SEED_FACTS: Fact[] = [
   { key: 'mr-kill', value: 'Connected to the artist Mr. Kill', kind: 'INFERENCE', public: false },
 ];
 
-/** What a visitor job may know about the artist without reading `artists/*`. */
-export const PUBLIC_FACTS: Fact[] = [SEED_FACTS[0]!];
-
-const artist = () => db().collection('artists').doc(ARTIST_ID);
-
 /**
- * Reads Nathan's facts. With `seed` (Nathan's own jobs only), an empty collection is seeded on first
- * use; without it, the seeds are returned in memory and nothing is written, so demo jobs stay
- * read-only.
+ * Whether a job may use the artist's identity and memory: the job was created under the artist and
+ * its owner is still linked now, so unlinking a user cuts off their open jobs too. Pass the
+ * transaction that writes the feedback, so the link is read where it is used.
  */
-export async function listFacts({ seed }: { seed: boolean }): Promise<Fact[]> {
-  const col = artist().collection('facts');
-  const snap = await col.get();
-  if (!snap.empty) return snap.docs.map((d) => d.data() as Fact);
-  if (seed) await Promise.all(SEED_FACTS.map((fact) => col.doc(fact.key).set(fact)));
+export async function artistJob(
+  job: { ownerUid: string; artistId: string | null },
+  q: Database | Tx = db(),
+): Promise<boolean> {
+  if (job.artistId !== ARTIST_ID) return false;
+  const [owner] = await q
+    .select({ artistId: users.artistId })
+    .from(users)
+    .where(eq(users.uid, job.ownerUid));
+  return owner?.artistId === ARTIST_ID;
+}
+
+/** Reads Nathan's facts, seeding an empty table on first use. Call only on artist jobs. */
+export async function listFacts(): Promise<Fact[]> {
+  const rows = await db()
+    .select({ data: artistMemory.data })
+    .from(artistMemory)
+    .where(memoryOf('fact'));
+  if (rows.length > 0) return rows.map((r) => r.data as Fact);
+  await db()
+    .insert(artistMemory)
+    .values(
+      SEED_FACTS.map((fact) => ({
+        artistId: ARTIST_ID,
+        kind: 'fact' as const,
+        key: fact.key,
+        data: fact,
+      })),
+    )
+    .onConflictDoNothing();
   return SEED_FACTS;
 }
 
 /**
- * Queues feedback rows in the caller's transaction, so they commit with the state change they
- * describe. Allowlisted feedback goes to the artist; visitor feedback stays on its job.
+ * Writes feedback rows in the caller's transaction, so they commit with the state change they
+ * describe. Feedback on an artist job (`artistJob`) goes to the artist; any other stays on the job.
  */
-export function writeFeedback(
-  tx: Transaction,
+export async function writeFeedback(
+  tx: Tx,
   entries: Feedback[],
-  target: { allowlisted: boolean; jobId: string },
-): void {
-  const col = target.allowlisted
-    ? artist().collection('feedback')
-    : db().collection('jobs').doc(target.jobId).collection('feedback');
-  for (const entry of entries) tx.set(col.doc(), entry);
+  job: { id: string; ownerUid: string; artistId: string | null },
+): Promise<void> {
+  if (entries.length === 0) return;
+  if (await artistJob(job, tx)) {
+    await tx
+      .insert(artistMemory)
+      .values(entries.map((data) => ({ artistId: ARTIST_ID, kind: 'feedback' as const, data })));
+  } else {
+    const kept = await tx
+      .update(jobs)
+      .set({ feedback: sql`${jobs.feedback} || ${JSON.stringify(entries)}::jsonb` })
+      .where(eq(jobs.id, job.id))
+      .returning({ id: jobs.id });
+    if (kept.length === 0) throw new Error(`No job ${job.id} to keep feedback on`);
+  }
 }
 
-/** Allowlisted callers only: Nathan's latest feedback, newest first. */
+/** Nathan's latest feedback, newest first. */
 export async function recentFeedback(limit = 20): Promise<Feedback[]> {
-  const snap = await artist().collection('feedback').orderBy('at', 'desc').limit(limit).get();
-  return snap.docs.map((d) => d.data() as Feedback);
+  const rows = await db()
+    .select({ data: artistMemory.data })
+    .from(artistMemory)
+    .where(memoryOf('feedback'))
+    .orderBy(desc(artistMemory.id))
+    .limit(limit);
+  return rows.map((r) => r.data as Feedback);
 }
 
-export async function recordPublish(record: {
-  videoId: string;
-  url: string;
-  jobId: string;
-  fields: PickFields;
-  status: 'VERIFIED';
-  at: number;
-}): Promise<void> {
-  await artist().collection('publishes').doc(record.videoId).set(record);
+export async function recordPublish(
+  tx: Tx,
+  record: {
+    videoId: string;
+    url: string;
+    jobId: string;
+    fields: PickFields;
+    status: 'VERIFIED';
+    at: number;
+  },
+): Promise<void> {
+  await tx
+    .insert(artistMemory)
+    .values({ artistId: ARTIST_ID, kind: 'publish', key: record.videoId, data: record })
+    .onConflictDoUpdate({
+      target: [artistMemory.artistId, artistMemory.kind, artistMemory.key],
+      set: { data: record },
+    });
 }
 
 const asText = (v: string | string[]) => (Array.isArray(v) ? v.join(', ') : v);

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPending } from '$lib/pending';
 import { POLL_BACKOFF } from '$lib/retry';
-import type { Chunk, JobState, JobView, LiveMetadata, Pick, PublicJob, Short } from '$lib/types';
+import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '$lib/types';
 import Page from '$routes/jobs/[id]/+page.svelte';
 
 const BRAND_CHECK = 'Keeps the naming pattern.';
@@ -26,12 +26,11 @@ const TRACE = { sentryTrace: 'trace-1', baggage: 'bag-1' };
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   id: 'j1',
   state: 'REVIEW',
-  owner: 'visitor',
-  channel: null,
+  parentId: null,
+  destination: null,
   songTitle: 'PeekaBoo',
   notes: '',
   filename: 'peekaboo.mp4',
-  sampleId: null,
   probe: { durationSec: 140, width: 1920, height: 1080, hasAudio: true },
   measurements: null,
   chunkCount: 5,
@@ -40,7 +39,7 @@ const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   error: null,
   uploadProgress: null,
   videoId: null,
-  payload: null,
+  finalFields: null,
   hashtagCandidates: ['#synthwave', '#retrowave'],
   shortId: null,
   short: null,
@@ -100,20 +99,30 @@ const json = (body: unknown, status = 200) =>
 const hang = () => new Promise<Response>(() => {});
 const paths = () => fetchMock.mock.calls.map(([p]) => String(p));
 
+const CONNECTED = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
+
 function setup(
   v: JobView,
-  extra: { live?: LiveMetadata | null; playbackUrl?: string | null; short?: JobView | null } = {},
+  extra: {
+    playbackUrl?: string | null;
+    short?: JobView | null;
+    expired?: boolean;
+    shortExpired?: boolean;
+    approveTo?: typeof CONNECTED | null;
+  } = {},
 ) {
   return render(Page, {
     props: {
       data: {
         view: v,
         playbackUrl: extra.playbackUrl ?? PLAYBACK_URL,
-        live: extra.live ?? null,
         short: extra.short ?? null,
+        shortExpired: extra.shortExpired ?? false,
+        expired: extra.expired ?? false,
+        approveTo: extra.approveTo === undefined ? CONNECTED : extra.approveTo,
         trace: TRACE,
         channel: null,
-        session: null,
+        user: null,
       },
     } as never,
   });
@@ -254,23 +263,11 @@ describe('job page: status chip', () => {
     expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('Done');
   });
 
-  it('shows the would-be payload for PAYLOAD', () => {
-    const payload = { title: 'PeekaBoo', description: 'd', hashtags: [], tags: ['synthwave'] };
-    setup(view({ state: 'PAYLOAD', payload }, { pick: PICK }));
-    expect(chip()).toHaveTextContent('Payload ready');
-    const block = screen.getByRole('region', { name: 'Would-be upload payload' });
-    const body = JSON.parse(block.querySelector('pre')!.textContent!) as Record<string, unknown>;
-    expect(body).toEqual({
-      snippet: { title: 'PeekaBoo', description: 'd', tags: ['synthwave'], categoryId: '10' },
-      status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-    });
+  it('shows the approved fields over the recommendation once approved', () => {
+    const finalFields = { title: 'Edited', description: 'd', hashtags: [], tags: ['synthwave'] };
+    setup(view({ state: 'VERIFIED', videoId: 'vid1', finalFields }, { pick: PICK }));
+    expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Edited');
     expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
-  });
-
-  it('renders the live-video diff for a sample', () => {
-    const live = { videoId: 'live1', title: 'Neon', description: '', tags: [] };
-    setup(view({ state: 'REVIEW' }, { pick: PICK }), { live });
-    expect(screen.getByRole('region', { name: 'Current versus proposed' })).toBeInTheDocument();
   });
 
   it('streams playback from the signed URL', () => {
@@ -304,6 +301,13 @@ describe('job page: driving', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('goes home to sign in when a step finds the session gone', async () => {
+    fetchMock.mockResolvedValueOnce(json({ message: 'Sign in first.' }, 401));
+    setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { invalidateAll: true }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the job error from a step', async () => {
     fetchMock.mockResolvedValueOnce(
       json(view({ state: 'FAILED', failedState: 'ANALYZE', error: FFMPEG_EXITED })),
@@ -315,17 +319,19 @@ describe('job page: driving', () => {
 });
 
 describe('job page: actions', () => {
-  it('approves and shows the resulting payload', async () => {
-    const payload = {
+  it('approves and shows the upload starting', async () => {
+    const finalFields = {
       title: PICK.title,
       description: PICK.description,
       hashtags: PICK.hashtags,
       tags: PICK.tags,
     };
-    fetchMock.mockResolvedValueOnce(json(view({ state: 'PAYLOAD', payload }, { pick: PICK })));
+    fetchMock
+      .mockResolvedValueOnce(json(view({ state: 'PUBLISHING', finalFields }, { pick: PICK })))
+      .mockImplementation(hang);
     setup(view({ state: 'REVIEW' }, { pick: PICK }));
     await fireEvent.click(screen.getByRole('button', { name: APPROVE }));
-    await waitFor(() => expect(chip()).toHaveTextContent('Payload ready'));
+    await waitFor(() => expect(chip()).toHaveTextContent('Uploading to YouTube'));
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/api/jobs/j1/approve');
     expect(init!.headers).toMatchObject({ 'sentry-trace': 'trace-1' });
@@ -334,7 +340,21 @@ describe('job page: actions', () => {
       description: PICK.description,
       tags: PICK.tags,
       pickVersion: PICK.version,
+      channelId: CONNECTED.channelId,
     });
+  });
+
+  it('shows the connected channel beside Approve before approval', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+  });
+
+  it('blocks approval while YouTube is not connected', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }), { approveTo: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: APPROVE })).toBeDisabled();
   });
 
   it('keeps driving after an approval starts the upload', async () => {
@@ -415,6 +435,116 @@ describe('job page: actions', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Failed to fetch')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+  });
+});
+
+describe('job page: paused publish', () => {
+  const FINAL = {
+    title: PICK.title,
+    description: PICK.description,
+    hashtags: PICK.hashtags,
+    tags: PICK.tags,
+  };
+  const publishing = (wait?: JobView['wait'], patch: Partial<PublicJob> = {}) =>
+    view(
+      { state: 'PUBLISHING', destination: CONNECTED, finalFields: FINAL, ...patch },
+      { pick: PICK, ...(wait ? { wait } : {}) },
+    );
+  /** Steps answer `stepView`; every other call answers by path. */
+  const serve = (stepView: JobView, other: Record<string, Response> = {}) =>
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      return path === STEP_PATH ? json(stepView) : (other[path] ?? hang());
+    });
+  const paused = () => screen.findByRole('region', { name: 'Upload outcome unknown' });
+
+  it('links the pinned channel in YouTube Studio and offers a pasted link and Discard', async () => {
+    serve(publishing('upload outcome unknown'));
+    setup(publishing());
+    const panel = await paused();
+    expect(
+      within(panel).getByRole('link', { name: 'Open YouTube Studio uploads' }),
+    ).toHaveAttribute('href', 'https://studio.youtube.com/channel/UCflr/videos/upload');
+    expect(within(panel).getByLabelText('Video link')).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+    expect(chip()).toHaveTextContent('upload outcome unknown');
+  });
+
+  it('posts the pasted link to confirm-upload and drops the panel once confirmed', async () => {
+    const url = 'https://youtu.be/dQw4w9WgXcQ';
+    serve(publishing('upload outcome unknown'), {
+      '/api/jobs/j1/confirm-upload': json(
+        view(
+          {
+            state: 'CLAIMED_COMPLETE',
+            destination: CONNECTED,
+            finalFields: FINAL,
+            videoId: 'dQw4w9WgXcQ',
+          },
+          { pick: PICK },
+        ),
+      ),
+    });
+    setup(publishing());
+    const panel = await paused();
+    await fireEvent.input(within(panel).getByLabelText('Video link'), { target: { value: url } });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Upload outcome unknown' })).toBeNull(),
+    );
+    const call = fetchMock.mock.calls.find(([p]) => String(p) === '/api/jobs/j1/confirm-upload')!;
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ url });
+  });
+
+  it('shows why a pasted link was refused and keeps the panel', async () => {
+    serve(publishing('upload outcome unknown'), {
+      '/api/jobs/j1/confirm-upload': json({ error: "That video isn't on Flies Like Robots." }, 422),
+    });
+    setup(publishing());
+    const panel = await paused();
+    await fireEvent.input(within(panel).getByLabelText('Video link'), {
+      target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
+    });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    expect(await screen.findByText("That video isn't on Flies Like Robots.")).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Upload outcome unknown' })).toBeInTheDocument();
+  });
+
+  it('points a job that lost YouTube access to Connections and lets it be discarded', async () => {
+    serve(publishing('reconnect YouTube'), {
+      '/api/jobs/j1/discard': json(view({ state: 'DISCARDED' }, { pick: PICK })),
+    });
+    setup(publishing());
+    const panel = await screen.findByRole('region', { name: 'Upload paused' });
+    expect(within(panel).getByRole('link', { name: 'Reconnect on Connections' })).toHaveAttribute(
+      'href',
+      '/connections',
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
+  });
+
+  it('lets a verifying job that lost access be discarded too', async () => {
+    serve(publishing('reconnect YouTube', { state: 'CLAIMED_COMPLETE', videoId: 'vid1' }));
+    setup(publishing(undefined, { state: 'CLAIMED_COMPLETE', videoId: 'vid1' }));
+    await screen.findByRole('region', { name: 'Upload paused' });
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+  });
+
+  it('shows no paused panel and keeps Discard off while the upload runs', async () => {
+    serve(publishing());
+    setup(publishing());
+    await waitFor(() => expect(paths()).toContain(STEP_PATH));
+    expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  });
+
+  it('lets a job waiting on the daily limit be discarded, with no paused panel', async () => {
+    serve(publishing('Daily upload limit reached. Try tomorrow.'));
+    setup(publishing());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled());
+    expect(screen.queryByRole('region', { name: /Upload (paused|outcome unknown)/ })).toBeNull();
   });
 });
 
@@ -561,7 +691,6 @@ describe('job page: upload hand-off', () => {
 });
 
 const SPEC: Short = {
-  parentId: 'j1',
   sourceDurationSec: 140,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands.' },
@@ -579,6 +708,7 @@ const shortView = (
   job: job({
     id: 's1',
     state,
+    parentId: 'j1',
     filename: 'peekaboo (Short).mp4',
     probe: { durationSec: 30, width: 720, height: 1280, hasAudio: true },
     short: { ...SPEC, ...spec },
@@ -617,7 +747,52 @@ describe('job page: Short tab', () => {
     expect(shortPanel()).toHaveAttribute('aria-labelledby', 'tab-short');
   });
 
-  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'PAYLOAD'] as JobState[])(
+  it('keeps the saved details and asks for a new upload once the media expired', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }), { expired: true, playbackUrl: null });
+    expect(screen.getByRole('note')).toHaveTextContent(/gone from storage after 7 days/);
+    expect(screen.getByRole('note')).toHaveTextContent(/upload it again/);
+    expect(screen.getByLabelText(/^Title/)).toHaveValue(PICK.title);
+  });
+
+  it('says nothing about storage while the media is there', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('names the channel an approved upload is pinned to', () => {
+    fetchMock.mockImplementation(hang);
+    const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+    setup(view({ state: 'PUBLISHING', destination }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
+  });
+
+  it('still names the pinned channel when the upload failed in PUBLISHING', () => {
+    fetchMock.mockImplementation(hang);
+    const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+    setup(view({ state: 'FAILED', failedState: 'PUBLISHING', destination }, { pick: PICK }));
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Old Channel UCold');
+  });
+
+  it.each([
+    ['VERIFIED', null],
+    ['FAILED', 'CLAIMED_COMPLETE'],
+  ] as const)('says Uploaded to on a %s job that has a video ID', (state, failedState) => {
+    fetchMock.mockImplementation(hang);
+    const destination = { channelId: 'UCold', channelTitle: 'Old Channel' };
+    setup(view({ state, failedState, destination, videoId: 'vid1' }, { pick: PICK }));
+    const lines = screen.getAllByText(/Uploaded to/).map((line) => line.textContent);
+    expect(lines).toContain('Uploaded to Old Channel UCold');
+  });
+
+  it('names no channel on a job that failed before approval', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'FAILED', failedState: 'PICK', error: 'boom' }, { pick: PICK }));
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
+  });
+
+  it.each(['REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'] as JobState[])(
     'offers Make a Short in %s',
     async (state) => {
       fetchMock.mockImplementation(hang);
@@ -763,6 +938,153 @@ describe('job page: Short', () => {
 });
 
 describe('job page: Short actions', () => {
+  const publishing = (wait?: JobView['wait']) =>
+    shortView('PUBLISHING', {}, { wait }, { destination: CONNECTED });
+
+  it('confirms an uncertain Short upload using only the Short job', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === '/api/jobs/s1/confirm-upload') {
+        return json(shortView('VERIFIED', {}, {}, { videoId: 'short-video' }));
+      }
+      return hang();
+    });
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    expect(
+      within(panel).getByRole('link', { name: 'Open YouTube Studio uploads' }),
+    ).toHaveAttribute('href', 'https://studio.youtube.com/channel/UCflr/videos/upload');
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeDisabled();
+    const url = 'https://youtu.be/short-video';
+    await fireEvent.input(within(panel).getByLabelText('Video link'), { target: { value: url } });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    await waitFor(() => expect(tab('Short')).toHaveTextContent('Done'));
+    const call = fetchMock.mock.calls.find(([p]) => String(p) === '/api/jobs/s1/confirm-upload')!;
+    expect(JSON.parse(String(call[1]!.body))).toEqual({ url });
+    expect(paths()).not.toContain('/api/jobs/j1/confirm-upload');
+    expect(
+      within(youtubePanel()).getByRole('button', { name: APPROVE, hidden: true }),
+    ).toBeEnabled();
+    expect(
+      within(shortPanel()).queryByRole('region', { name: 'Upload outcome unknown' }),
+    ).toBeNull();
+  });
+
+  it('keeps a rejected Short link editable and shows the error only on the Short', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/confirm-upload') ? json({ error: 'Wrong channel.' }, 422) : hang(),
+    );
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    await fireEvent.input(within(panel).getByLabelText('Video link'), {
+      target: { value: 'https://youtu.be/other-video' },
+    });
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Confirm video' }));
+    expect(await within(shortPanel()).findByText('Wrong channel.')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeEnabled();
+    expect(within(youtubePanel()).queryByText('Wrong channel.')).toBeNull();
+  });
+
+  it.each([
+    'upload outcome unknown',
+    'reconnect YouTube',
+    'Daily upload limit reached. Try tomorrow.',
+  ] as const)('discards only the paused Short on %s', async (wait) => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith('/discard') ? json(shortView('DISCARDED')) : hang(),
+    );
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), { short: publishing(wait) });
+    await fireEvent.click(tab('Short'));
+    const discard = within(shortPanel()).getByRole('button', { name: 'Discard' });
+    expect(discard).toBeEnabled();
+    await fireEvent.click(discard);
+    expect(await within(shortPanel()).findByRole('button', { name: MAKE_SHORT })).toBeEnabled();
+    expect(paths()).toContain('/api/jobs/s1/discard');
+    expect(paths()).not.toContain('/api/jobs/j1/discard');
+    expect(h.goto).not.toHaveBeenCalled();
+  });
+
+  it('keeps Discard disabled while the Short upload is active', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), { short: publishing() });
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(
+      within(shortPanel()).queryByRole('region', { name: 'Upload outcome unknown' }),
+    ).toBeNull();
+  });
+
+  it('ignores a delayed Short poll after discarding it', async () => {
+    const delayed = Promise.withResolvers<Response>();
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === SHORT_STEP_PATH) return delayed.promise;
+      if (String(input) === '/api/jobs/s1/discard') return json(shortView('DISCARDED'));
+      return hang();
+    });
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    await waitFor(() => expect(paths()).toContain(SHORT_STEP_PATH));
+    await fireEvent.click(within(shortPanel()).getByRole('button', { name: 'Discard' }));
+    expect(await within(shortPanel()).findByRole('button', { name: MAKE_SHORT })).toBeEnabled();
+    await fireEvent.click(within(shortPanel()).getByRole('button', { name: MAKE_SHORT }));
+    await waitFor(() => expect(paths()).toContain('/api/jobs/j1/short'));
+    await fireEvent.click(tab('YouTube'));
+    delayed.resolve(json(publishing('upload outcome unknown')));
+    await waitFor(() => expect(tab('Short')).toHaveTextContent('To do'));
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('button', { name: MAKE_SHORT })).toBeInTheDocument();
+  });
+
+  it('disables Short recovery controls while confirmation is pending', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: publishing('upload outcome unknown'),
+    });
+    await fireEvent.click(tab('Short'));
+    const panel = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    const input = within(panel).getByLabelText('Video link');
+    const confirm = within(panel).getByRole('button', { name: 'Confirm video' });
+    await fireEvent.input(input, { target: { value: 'https://youtu.be/short-video' } });
+    await fireEvent.click(confirm);
+    await waitFor(() => expect(confirm).toBeDisabled());
+    expect(input).toBeDisabled();
+    expect(within(shortPanel()).getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(paths().filter((path) => path.endsWith('/confirm-upload'))).toEqual([
+      '/api/jobs/s1/confirm-upload',
+    ]);
+  });
+
+  it('keeps simultaneous parent and Short recovery fields independent', async () => {
+    fetchMock.mockImplementation(hang);
+    setup(
+      view(
+        { state: 'PUBLISHING', shortId: 's1', destination: CONNECTED },
+        {
+          pick: PICK,
+          wait: 'upload outcome unknown',
+        },
+      ),
+      { short: publishing('upload outcome unknown') },
+    );
+    const parent = screen.getByRole('region', { name: 'Upload outcome unknown' });
+    const input = within(parent).getByLabelText('Video link');
+    await fireEvent.input(input, { target: { value: 'https://youtu.be/parent-video' } });
+    await fireEvent.click(tab('Short'));
+    const short = within(shortPanel()).getByRole('region', { name: 'Upload outcome unknown' });
+    const shortInput = within(short).getByLabelText('Video link');
+    expect(shortInput).toHaveValue('');
+    expect(shortInput.id).not.toBe(input.id);
+    const ids = Array.from(document.querySelectorAll('[id]'), (element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('re-cuts, then plays the new render', async () => {
     fetchMock
       .mockResolvedValueOnce(json(shortView('RENDER', { reframe: 'crop' })))
@@ -807,7 +1129,21 @@ describe('job page: Short actions', () => {
     await waitFor(() => expect(paths()).toContain(SHORT_STEP_PATH));
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/api/jobs/s1/approve');
-    expect(JSON.parse(String(init!.body))).toMatchObject({ title: PICK.title, pickVersion: 1 });
+    expect(JSON.parse(String(init!.body))).toMatchObject({
+      title: PICK.title,
+      pickVersion: 1,
+      channelId: CONNECTED.channelId,
+    });
+  });
+
+  it("flags the Short's expired media in the Short tab", async () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
+      short: shortView('REVIEW', {}, {}),
+      shortExpired: true,
+    });
+    await fireEvent.click(tab('Short'));
+    expect(within(shortPanel()).getByRole('note')).toHaveTextContent(/gone from storage/);
   });
 
   it('shows field errors from a rejected Short approval in the Short tab', async () => {

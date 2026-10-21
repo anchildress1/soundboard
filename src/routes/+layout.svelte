@@ -9,22 +9,11 @@
   import wordmarkFont from '@fontsource/mr-dafoe/files/mr-dafoe-latin-400-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
-  import { page } from '$app/state';
   import Footer from '$lib/components/Footer.svelte';
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
-
-  const CHANNELS: Record<string, string> = { nathan: "Nathan's", sandbox: 'The sandbox' };
-  const notice = $derived.by(() => {
-    const query = page.url.searchParams;
-    if (query.get('signin') === 'denied') {
-      return "That Google account isn't on the allowlist, so you're still signed out. Demo runs work without signing in.";
-    }
-    const connected = CHANNELS[query.get('connected') ?? ''];
-    return connected ? `${connected} channel is connected.` : null;
-  });
 </script>
 
 <svelte:head>
@@ -46,8 +35,7 @@
       <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
     </h1>
     <div class="bar">
-      <!-- Channel stats are Nathan's dashboard; next to Sign in they read as a signed-in account. -->
-      {#if data.channel && (data.session?.allowlisted || data.session?.demo)}
+      {#if data.channel}
         <p class="chip">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
             ><path
@@ -58,30 +46,24 @@
           <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
         </p>
       {/if}
-      {#if data.session?.allowlisted}
+      {#if data.user}
+        <a class="btn ghost small" href={resolve('/connections')}>Connections</a>
+      {/if}
+      {#if data.user?.artistId === 'flr'}
         <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>
       {/if}
-      {#if data.session}
+      {#if data.user}
         <form method="POST" action="/auth/logout">
-          <button class="btn ghost small" type="submit" title={data.session.email}>Sign out</button>
+          <button class="btn ghost small" type="submit" title={data.user.email}>Sign out</button>
         </form>
       {:else}
-        <a class="btn ghost small" href={resolve('/auth/login')} data-sveltekit-reload>Sign in</a>
+        <!-- A full page load: the login route redirects off-site to Google. -->
+        <a class="btn primary small" href={resolve('/auth/login')} data-sveltekit-reload
+          >Sign in with Google</a
+        >
       {/if}
     </div>
   </header>
-
-  {#if data.session?.demo}
-    <!-- Every page, not just the form: a demo run must never be mistaken for one on Nathan's channel. -->
-    <aside class="demo" aria-label="Demo account">
-      <strong>Demo account</strong>
-      <span>Uploads go private to the sandbox channel. Nothing is saved to Nathan's memory.</span>
-    </aside>
-  {/if}
-
-  {#if notice}
-    <p class="notice" role="status">{notice}</p>
-  {/if}
 
   <div id="content" class="content" tabindex="-1">
     {@render children()}
@@ -214,34 +196,6 @@
   .chip b {
     color: var(--ink);
     font-weight: 500;
-  }
-
-  .demo {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 14px;
-    padding: 12px 16px;
-    border: 2px solid var(--info);
-    background: color-mix(in srgb, var(--info) 14%, var(--panel));
-    font-size: 14px;
-  }
-
-  .demo strong {
-    padding: 4px 10px;
-    background: var(--info);
-    color: var(--ground);
-    font: 900 12px/1 var(--display);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .notice {
-    margin: 0;
-    padding: 10px 14px;
-    border-left: 3px solid var(--info);
-    background: var(--panel);
-    font-size: 14px;
   }
 
   /* A real box, not display: contents, so the skip link can focus and scroll to it. */

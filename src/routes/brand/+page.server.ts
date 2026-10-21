@@ -1,7 +1,7 @@
-import { getBrand, requireAllowlisted } from '$lib/server/artist/brand';
+import { getBrand, requireArtist } from '$lib/server/artist/brand';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
-  requireAllowlisted(locals.session);
+  requireArtist(locals.user);
   return getBrand();
 };

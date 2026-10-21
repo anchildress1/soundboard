@@ -7,7 +7,7 @@ import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ params, request, locals }) =>
   respond(async () => {
-    const job = await authorizedJob(params.id, locals.session?.allowlisted ?? false);
+    const job = await authorizedJob(params.id, locals.user?.uid);
     const body = await readBody(request);
     const tags = Array.isArray(body.tags)
       ? body.tags.map((tag) => text(tag).trim()).filter(Boolean)
@@ -16,6 +16,7 @@ export const POST: RequestHandler = ({ params, request, locals }) =>
       title: text(body.title),
       description: text(body.description),
       pickVersion: num(body.pickVersion),
+      channelId: text(body.channelId),
       tags,
     });
     return buildView((await getJob(job.id)) ?? job);

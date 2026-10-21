@@ -1,44 +1,25 @@
-import { createHmac } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
-
-// Mirrors $lib/server/auth sign(): base64url JSON body, then its HMAC with the session secret.
-function sessionCookie(email: string): string {
-  const body = Buffer.from(JSON.stringify({ email, exp: Date.now() + 3_600_000 })).toString(
-    'base64url',
-  );
-  const mac = createHmac('sha256', 'e2e-session-secret').update(body).digest('base64url');
-  return `${body}.${mac}`;
-}
-
-async function signIn(page: Page, email: string) {
-  await page
-    .context()
-    .addCookies([
-      { name: 'sb_session', value: sessionCookie(email), url: 'http://localhost:4173' },
-    ]);
-}
+import { expect, test } from '@playwright/test';
+import { signIn, USER_A, USER_B } from './session';
 
 const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
-for (const [who, email, control] of [
-  ['a signed-out visitor', null, 'Sign in'],
-  ['Nathan', 'nathan@e2e.test', 'Sign out'],
-  ['the demo account', 'demo@e2e.test', 'Sign out'],
+for (const [who, uid, brand, signOut] of [
+  ['a signed-out user', null, 0, 0],
+  ['Nathan', USER_A, 1, 1],
+  ['an unlinked user', USER_B, 0, 1],
 ] as const) {
   test(`keeps the header controls clear of the wordmark for ${who}`, async ({ page }) => {
-    if (email) await signIn(page, email);
+    if (uid) await signIn(page, uid);
     await page.goto('/');
     const header = page.getByRole('banner');
-    await expect(header.getByText(control)).toBeVisible();
+    await expect(header.getByRole('link', { name: 'Brand guide' })).toHaveCount(brand);
+    await expect(header.getByRole('button', { name: 'Sign out' })).toHaveCount(signOut);
     const wordmark = await page.getByRole('heading', { level: 1 }).boundingBox();
     const bar = await header.locator('.bar').boundingBox();
     expect(wordmark && bar).toBeTruthy();
     expect(overlaps(wordmark!, bar!)).toBe(false);
     await expect(page.getByText('Flies Like Robots · Release agent')).toBeVisible();
-    const banner = page.getByRole('complementary', { name: 'Demo account' });
-    if (email === 'demo@e2e.test') await expect(banner).toBeVisible();
-    else await expect(banner).toHaveCount(0);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(page.viewportSize()!.width);
   });

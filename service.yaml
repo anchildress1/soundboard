@@ -13,12 +13,13 @@ spec:
         autoscaling.knative.dev/minScale: '0'
         autoscaling.knative.dev/maxScale: '1'
         run.googleapis.com/startup-cpu-boost: 'true'
-    spec:
+    # Cloud Run rejects Kubernetes securityContext; the distroless :nonroot image runs as non-root.
+    spec: # nosemgrep: yaml.kubernetes.security.run-as-non-root.run-as-non-root
       serviceAccountName: ${SERVICE_ACCOUNT}
       containerConcurrency: 80
       timeoutSeconds: 3600
       containers:
-        - name: app
+        - name: app # nosemgrep: yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-securitycontext
           image: ${APP_IMAGE}
           ports:
             - containerPort: 8080
@@ -33,22 +34,17 @@ spec:
               value: ${FLR_CHANNEL_ID}
             - name: GOOGLE_OAUTH_CLIENT_ID
               value: ${GOOGLE_OAUTH_CLIENT_ID}
-            - name: ALLOWLIST_EMAILS
-              value: ${ALLOWLIST_EMAILS}
-            - name: DEMO_EMAILS
-              value: ${DEMO_EMAILS}
+            - name: SIGNUP_MODE
+              value: ${SIGNUP_MODE}
+            - name: KMS_KEY
+              value: ${KMS_KEY}
             - name: PUBLIC_SENTRY_DSN
               value: ${PUBLIC_SENTRY_DSN}
-            # Cloud Run terminates TLS and appends the client to X-Forwarded-For; adapter-node reads
-            # the origin (for the OAuth redirect) and client IP (for per-visitor caps) from these.
+            # Cloud Run terminates TLS; adapter-node reads the origin for the OAuth redirect from these.
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto
             - name: HOST_HEADER
               value: host
-            - name: ADDRESS_HEADER
-              value: x-forwarded-for
-            - name: XFF_DEPTH
-              value: '1'
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef: { name: soundboard-session-secret, key: latest }
@@ -58,6 +54,9 @@ spec:
             - name: YOUTUBE_API_KEY
               valueFrom:
                 secretKeyRef: { name: soundboard-youtube-api-key, key: latest }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: DATABASE_URL, key: latest }
           resources:
             limits:
               cpu: '2'

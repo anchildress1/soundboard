@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { allowlist, modelUrl, optional, required } from '$lib/server/core/env';
+import { kmsKey, modelUrl, optional, required, signupMode } from '$lib/server/core/env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -49,21 +49,38 @@ describe('modelUrl', () => {
   });
 });
 
-describe('allowlist', () => {
-  it('parses a comma list, trimming and lowercasing', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', ' Nathan@Example.com , ops@example.com,');
-    expect(allowlist()).toEqual(new Set(['nathan@example.com', 'ops@example.com']));
+describe('signupMode', () => {
+  it('defaults to invite when unset or empty', () => {
+    vi.stubEnv('SIGNUP_MODE', undefined);
+    expect(signupMode()).toBe('invite');
+    vi.stubEnv('SIGNUP_MODE', '');
+    expect(signupMode()).toBe('invite');
   });
 
-  it('is empty when unset or blank', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', undefined);
-    expect(allowlist().size).toBe(0);
-    vi.stubEnv('ALLOWLIST_EMAILS', ' , ,');
-    expect(allowlist().size).toBe(0);
+  it('honours open and invite', () => {
+    vi.stubEnv('SIGNUP_MODE', 'open');
+    expect(signupMode()).toBe('open');
+    vi.stubEnv('SIGNUP_MODE', 'invite');
+    expect(signupMode()).toBe('invite');
   });
 
-  it('collapses duplicates that differ only by case', () => {
-    vi.stubEnv('ALLOWLIST_EMAILS', 'a@x.com,A@X.COM');
-    expect([...allowlist()]).toEqual(['a@x.com']);
+  it('rejects any other value instead of guessing', () => {
+    vi.stubEnv('SIGNUP_MODE', 'Open');
+    expect(() => signupMode()).toThrow('Unknown SIGNUP_MODE Open');
+  });
+});
+
+describe('kmsKey', () => {
+  it('returns KMS_KEY', () => {
+    vi.stubEnv(
+      'KMS_KEY',
+      'projects/p/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens',
+    );
+    expect(kmsKey()).toMatch(/cryptoKeys\/refresh-tokens$/);
+  });
+
+  it('throws when unset', () => {
+    vi.stubEnv('KMS_KEY', undefined);
+    expect(() => kmsKey()).toThrow('Missing required env var KMS_KEY');
   });
 });

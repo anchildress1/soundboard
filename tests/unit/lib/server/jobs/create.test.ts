@@ -1,21 +1,19 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../../../helpers/fake-firestore';
+import { db } from '$lib/server/core/db';
+import { jobs } from '$lib/server/core/schema';
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
 import { create, MAX_BYTES, NOTES_MAX, type CreateInput } from '$lib/server/jobs/create';
-import { RUNS_PER_DAY } from '$lib/server/jobs/quota';
-import type { JobDoc } from '$lib/server/jobs/jobs';
+import { getJob, type JobDoc } from '$lib/server/jobs/jobs';
+import { seed, truncate } from '../../../../helpers/db';
 import { omit } from '../../../../helpers/omit';
+import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
 const SIGNED_PUT = 'https://storage/put';
-const TOO_LONG = 'Videos are capped at 5 minutes here.';
+const TOO_LONG = 'Videos are capped at 15 minutes.';
 const TITLE_REQUIRED = 'Song title is required.';
 const TOO_BIG = 'Videos must be under 2 GB.';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
 
 const gcs = vi.hoisted(() => ({ getSignedUrl: vi.fn(), files: [] as string[] }));
 
@@ -32,10 +30,6 @@ vi.mock('@google-cloud/storage', () => ({
   },
 }));
 
-const visitor = { allowlisted: false, demo: false, ip: '203.0.113.7' };
-const nathan = { allowlisted: true, demo: false, ip: '198.51.100.1' };
-const demo = { allowlisted: false, demo: true, ip: '192.0.2.9' };
-
 const upload = (over: Record<string, unknown> = {}): CreateInput =>
   ({
     songTitle: 'PeekaBoo',
@@ -47,10 +41,8 @@ const upload = (over: Record<string, unknown> = {}): CreateInput =>
     ...over,
   }) as CreateInput;
 
-const job = (id: string) => store.get(`jobs/${id}`) as JobDoc;
-const quota = () =>
-  [...store.entries()].find(([k]) => k.startsWith('quota/'))?.[1] as
-    { runs: number; ips: Record<string, number> } | undefined;
+const job = async (id: string) => (await getJob(id)) as JobDoc;
+const jobCount = async () => (await db().select().from(jobs)).length;
 
 const rejection = async (promise: Promise<unknown>) => {
   const error = await promise.catch((e: unknown) => e);
@@ -58,147 +50,73 @@ const rejection = async (promise: Promise<unknown>) => {
   return error as ActionError;
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'b');
-  vi.stubEnv('SESSION_SECRET', 's');
-  resetStore();
   resetClients();
   vi.clearAllMocks();
   gcs.files.length = 0;
   gcs.getSignedUrl.mockResolvedValue([SIGNED_PUT]);
-  store.set('samples/peek', {
-    songTitle: 'PeekaBoo',
-    videoId: 'yt-peek',
-    object: 'samples/peek.mp4',
-    durationSec: 30,
-  });
+  await truncate();
+  await seed(USERS);
 });
 
-describe('create from a sample', () => {
-  it('makes a visitor job on the sandbox channel with no upload URL', async () => {
-    const { id, uploadUrl } = await create({ sampleId: 'peek' }, visitor);
-    expect(uploadUrl).toBeNull();
-    expect(gcs.getSignedUrl).not.toHaveBeenCalled();
-    expect(job(id)).toMatchObject({
-      owner: 'visitor',
-      channel: 'sandbox',
-      state: 'PREP',
-      songTitle: 'PeekaBoo',
-      notes: '',
-      filename: 'PeekaBoo.mp4',
-      contentType: 'video/mp4',
-      object: 'samples/peek.mp4',
-      sampleId: 'peek',
-      liveVideoId: 'yt-peek',
-    });
-    expect(job(id).ipHash).toMatch(/^[0-9a-f]{32}$/);
-    expect(job(id).ipHash).not.toContain('203.0.113.7');
-    expect(quota()).toMatchObject({ runs: 1 });
-  });
-
-  it("makes an allowlisted sample job Nathan's, without IP caps", async () => {
-    const { id } = await create({ sampleId: 'peek' }, nathan);
-    expect(job(id)).toMatchObject({ owner: 'nathan', channel: 'nathan', ipHash: null });
-    expect(quota()).toBeUndefined();
-  });
-
-  it('makes a demo sample job a demo job on the sandbox, without IP caps', async () => {
-    const { id } = await create({ sampleId: 'peek' }, demo);
-    expect(job(id)).toMatchObject({ owner: 'demo', channel: 'sandbox', ipHash: null });
-    expect(quota()).toBeUndefined();
-  });
-
-  it.each([
-    ['an empty id', ''],
-    ['a path', 'peek/../peek'],
-    ['a nested path', 'peek/x'],
-    ['an object', { id: 'peek' }],
-    ['null', null],
-  ])(
-    'returns 404 for %s as the sample id, without reading a path from it',
-    async (_label, sampleId) => {
-      const error = await rejection(create({ sampleId } as CreateInput, visitor));
-      expect([error.status, error.message]).toEqual([404, 'That sample is gone.']);
-      expect(store.size).toBe(1);
-    },
-  );
-
-  it('returns 404 for a missing sample', async () => {
-    const error = await rejection(create({ sampleId: 'gone' }, visitor));
-    expect(error.status).toBe(404);
-    expect(quota()).toBeUndefined();
-  });
-});
-
-describe('create from an own video', () => {
-  it('makes a visitor job that ends at the payload, with a signed upload URL', async () => {
-    const { id, uploadUrl } = await create(upload(), visitor);
+describe('create', () => {
+  it("makes the user's job awaiting upload, with a signed upload URL", async () => {
+    const { id, uploadUrl } = await create(upload(), USER_B);
     expect(uploadUrl).toBe(SIGNED_PUT);
     expect(gcs.files).toEqual([`uploads/${id}`]);
     expect(gcs.getSignedUrl).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'write', contentType: 'video/mp4' }),
     );
     expect(id).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(job(id)).toMatchObject({
-      owner: 'visitor',
-      channel: null,
+    expect(await job(id)).toMatchObject({
+      ownerUid: USER_B.uid,
+      artistId: null,
+      parentId: null,
+      destination: null,
+      uploadStartedAt: null,
+      finalChunkAt: null,
       state: 'AWAITING_UPLOAD',
       object: `uploads/${id}`,
       songTitle: 'PeekaBoo',
       notes: 'first cut',
       filename: 'peekaboo.mp4',
-      sampleId: null,
-      liveVideoId: null,
     });
   });
 
-  it('makes a demo own-video job that uploads to the sandbox, 15 minutes, no IP caps', async () => {
-    const { id } = await create(upload({ durationSec: 900 }), demo);
-    expect(job(id)).toMatchObject({ owner: 'demo', channel: 'sandbox', ipHash: null });
-    expect(quota()).toBeUndefined();
-    const error = await rejection(create(upload({ durationSec: 901 }), demo));
-    expect(error.status).toBe(400);
-    expect(error.message).toBe('Videos are capped at 15 minutes here.');
+  it("copies the owner's artist link", async () => {
+    const { id } = await create(upload(), USER_A);
+    expect(await job(id)).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr' });
   });
 
   it('trims the title and notes and caps the filename', async () => {
     const { id } = await create(
       upload({ songTitle: '  PeekaBoo  ', notes: '  n  ', filename: 'f'.repeat(300) }),
-      visitor,
+      USER_B,
     );
-    expect(job(id).songTitle).toBe('PeekaBoo');
-    expect(job(id).notes).toBe('n');
-    expect(job(id).filename).toHaveLength(200);
+    expect((await job(id)).songTitle).toBe('PeekaBoo');
+    expect((await job(id)).notes).toBe('n');
+    expect((await job(id)).filename).toHaveLength(200);
   });
 
   it('defaults a missing filename and notes', async () => {
-    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, visitor);
-    expect(job(id).filename).toBe('video');
-    expect(job(id).notes).toBe('');
+    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, USER_B);
+    expect((await job(id)).filename).toBe('video');
+    expect((await job(id)).notes).toBe('');
   });
 
   it('defaults a filename that is not text', async () => {
-    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), visitor);
-    expect(job(id).filename).toBe('video');
+    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), USER_B);
+    expect((await job(id)).filename).toBe('video');
   });
 
-  it('accepts a visitor video at exactly 5 minutes and rejects one over', async () => {
-    await expect(create(upload({ durationSec: 300 }), visitor)).resolves.toBeTruthy();
-    const error = await rejection(create(upload({ durationSec: 301 }), visitor));
-    expect(error.status).toBe(400);
-    expect(error.message).toBe(TOO_LONG);
-  });
-
-  it("gives Nathan's uploads 15 minutes, his channel, and no IP caps", async () => {
-    for (let i = 0; i < 6; i++) {
-      const { id, uploadUrl } = await create(upload({ durationSec: 900 }), nathan);
-      expect(uploadUrl).toBe(SIGNED_PUT);
-      expect(job(id)).toMatchObject({ owner: 'nathan', channel: 'nathan', ipHash: null });
+  it('accepts a video at exactly 15 minutes and rejects one over, for every user', async () => {
+    for (const user of [USER_A, USER_B]) {
+      await expect(create(upload({ durationSec: 900 }), user)).resolves.toBeTruthy();
+      const error = await rejection(create(upload({ durationSec: 901 }), user));
+      expect([error.status, error.message]).toEqual([400, TOO_LONG]);
     }
-    expect(quota()).toBeUndefined();
-    const error = await rejection(create(upload({ durationSec: 901 }), nathan));
-    expect(error.message).toBe('Videos are capped at 15 minutes here.');
   });
 
   it.each([
@@ -229,55 +147,31 @@ describe('create from an own video', () => {
     ['a null duration', upload({ durationSec: null }), TOO_LONG],
     ['a duration in an array', upload({ durationSec: [180] }), TOO_LONG],
   ])('rejects %s with 400', async (_label, input, message) => {
-    const error = await rejection(create(input as CreateInput, visitor));
+    const error = await rejection(create(input as CreateInput, USER_B));
     expect(error.status).toBe(400);
     expect(error.message).toBe(message);
-    expect(store.size).toBe(1);
+    expect(await jobCount()).toBe(0);
   });
 
   it('accepts the boundaries: 100-char title, 1000-char notes, exactly 2 GB', async () => {
     await expect(
       create(
         upload({ songTitle: 'x'.repeat(100), notes: 'n'.repeat(NOTES_MAX), size: MAX_BYTES }),
-        visitor,
+        USER_B,
       ),
     ).resolves.toBeTruthy();
   });
 });
 
-describe('signing failures', () => {
-  it('charges no visitor run and stores no job when the upload URL cannot be signed', async () => {
+describe('failures', () => {
+  it('stores no job when the upload URL cannot be signed', async () => {
     gcs.getSignedUrl.mockRejectedValueOnce(new Error('iam.serviceAccounts.signBlob denied'));
-    await expect(create(upload(), visitor)).rejects.toThrow('signBlob');
-    expect(quota()).toBeUndefined();
-    expect([...store.keys()].some((k) => k.startsWith('jobs/'))).toBe(false);
-  });
-});
-
-describe('visitor caps', () => {
-  it('returns 429 after 5 runs from one IP', async () => {
-    for (let i = 0; i < 5; i++) await create({ sampleId: 'peek' }, visitor);
-    const error = await rejection(create(upload(), visitor));
-    expect(error.status).toBe(429);
-    expect(error.message).toContain('5 runs per visitor');
-    expect([...store.keys()].filter((k) => k.startsWith('jobs/'))).toHaveLength(5);
+    await expect(create(upload(), USER_B)).rejects.toThrow('signBlob');
+    expect(await jobCount()).toBe(0);
   });
 
-  it('returns 429 once the daily public runs are spent', async () => {
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(
-      new Date(),
-    );
-    store.set(`quota/${day}`, { runs: RUNS_PER_DAY, ips: {}, uploads: 0, visitorUploads: 0 });
-    const error = await rejection(create({ sampleId: 'peek' }, visitor));
-    expect(error.status).toBe(429);
-    expect(error.message).toContain('40 public runs');
-  });
-
-  it('does not cap allowlisted sessions when the public runs are spent', async () => {
-    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(
-      new Date(),
-    );
-    store.set(`quota/${day}`, { runs: RUNS_PER_DAY, ips: {}, uploads: 0, visitorUploads: 0 });
-    await expect(create({ sampleId: 'peek' }, nathan)).resolves.toBeTruthy();
+  it('stores no job for an owner who is not a user', async () => {
+    await expect(create(upload(), { uid: 'ghost', artistId: null })).rejects.toThrow();
+    expect(await jobCount()).toBe(0);
   });
 });

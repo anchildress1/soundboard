@@ -1,50 +1,30 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetStore, store } from '../../helpers/fake-firestore';
-import { resetClients } from '$lib/server/core/clients';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { load } from '$routes/+page.server';
-
-vi.mock('@google-cloud/firestore', async () =>
-  (await import('../../helpers/fake-firestore')).fakeFirestoreModule(),
-);
+import { seed, truncate } from '../../helpers/db';
+import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];
-const run = async () => (await load({} as Event)) as { samples: unknown[] };
 
-beforeEach(() => {
-  vi.stubEnv('GCP_PROJECT_ID', 'p');
-  resetStore();
-  resetClients();
+const run = async (user: Event['locals']['user']) =>
+  (await load({ locals: { user } } as unknown as Event)) as { jobs: { id: string }[] };
+
+beforeEach(async () => {
+  await truncate();
+  await seed(USERS);
+  await seedJob({ id: 'a1', ...A_JOB, songTitle: 'PeekaBoo', state: 'REVIEW', createdAt: 5 });
+  await seedJob({ id: 'b1', createdAt: 6 });
 });
 
-describe('home load', () => {
-  it('lists samples by song title without their bucket paths', async () => {
-    store.set('samples/b', {
-      songTitle: 'Zero',
-      videoId: 'v2',
-      object: 'samples/z.mp4',
-      durationSec: 30,
-    });
-    store.set('samples/a', {
-      songTitle: 'Neon',
-      videoId: 'v1',
-      object: 'samples/n.mp4',
-      durationSec: 30,
-    });
-    const { samples } = await run();
-    expect(samples).toEqual([
-      { id: 'a', songTitle: 'Neon', videoId: 'v1', durationSec: 30 },
-      { id: 'b', songTitle: 'Zero', videoId: 'v2', durationSec: 30 },
+describe('home page load', () => {
+  it("lists only the signed-in user's jobs with the list fields", async () => {
+    expect((await run(USER_A)).jobs).toEqual([
+      { id: 'a1', songTitle: 'PeekaBoo', state: 'REVIEW', createdAt: 5 },
     ]);
-    expect(JSON.stringify(samples)).not.toContain('samples/');
+    expect((await run(USER_B)).jobs.map((j) => j.id)).toEqual(['b1']);
   });
 
-  it('returns no samples when none are seeded', async () => {
-    expect((await run()).samples).toEqual([]);
-  });
-
-  it('still renders the upload path when Firestore is unavailable', async () => {
-    vi.stubEnv('GCP_PROJECT_ID', '');
-    expect((await run()).samples).toEqual([]);
+  it('lists nothing when signed out', async () => {
+    expect((await run(null)).jobs).toEqual([]);
   });
 });

@@ -8,12 +8,11 @@ const view = (state: JobState, wait?: Wait): JobView => ({
   job: {
     state,
     id: 'j1',
-    owner: 'visitor',
-    channel: null,
+    parentId: null,
+    destination: null,
     songTitle: 'PeekaBoo',
     notes: '',
     filename: 'peekaboo.mp4',
-    sampleId: null,
     probe: null,
     measurements: null,
     chunkCount: 0,
@@ -22,7 +21,7 @@ const view = (state: JobState, wait?: Wait): JobView => ({
     error: null,
     uploadProgress: null,
     videoId: null,
-    payload: null,
+    finalFields: null,
     hashtagCandidates: null,
     shortId: null,
     short: null,
@@ -45,6 +44,7 @@ function deps(steps: (JobView | Error | string)[], stopped = () => false) {
     stopped: vi.fn(stopped),
     onView: vi.fn(),
     onError: vi.fn(),
+    signedOut: vi.fn(),
   } satisfies DriverDeps;
 }
 
@@ -155,6 +155,22 @@ describe('drive', () => {
     expect(d.onError).toHaveBeenCalledWith('Job not found');
     expect(slept).toBe(0);
     expect(d.step).toHaveBeenCalledTimes(1);
+    expect(d.signedOut).not.toHaveBeenCalled();
+  });
+
+  it('stops on a 401 at once and hands the page back to sign-in', async () => {
+    const d = deps([new ApiError(401, 'Sign in first.')]);
+    const { slept } = await run(view('ANALYZE'), d);
+    expect(d.step).toHaveBeenCalledTimes(1);
+    expect(d.signedOut).toHaveBeenCalledTimes(1);
+    expect(slept).toBe(0);
+  });
+
+  it('signs out after earlier waits once a step 401s', async () => {
+    const d = deps([view('ANALYZE', 'waking model'), new ApiError(401, 'Sign in first.')]);
+    await run(view('ANALYZE'), d);
+    expect(d.step).toHaveBeenCalledTimes(2);
+    expect(d.signedOut).toHaveBeenCalledTimes(1);
   });
 
   it('stops when the caller says so between steps', async () => {

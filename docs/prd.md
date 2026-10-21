@@ -1,9 +1,8 @@
 # 🎛️ Soundboard — Product Requirements
 
-- **Status:** Draft v4 · 2026-10-03
+- **Status:** Draft v5 · 2026-10-16 (v2: sign-in and connections, spec `specs/001-google-sign-in`)
 - **Owner:** Ashley Childress
 - **User:** Nathan / Flies Like Robots (FLR), Virginia
-- **Deadline:** 2026-10-05 06:59 UTC — DEV Hacktoberfest Weekend Challenge: Build for a Friend
 - **Design:** [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg)
 
 ## Problem
@@ -32,8 +31,7 @@
 | --- | ------------------------------------------------------------------------ |
 | G1  | Nathan gets a publish-ready recommendation by typing only the song title |
 | G2  | Every upload is approved by Nathan and verified by read-back             |
-| G3  | Anyone can run the real app inside the DEV post, signed out, on a phone  |
-| G4  | The diff view shows what Soundboard would improve on a live FLR video    |
+| G3  | An invited artist signs in once with Google and uploads to their channel |
 
 ## Non-Goals
 
@@ -43,14 +41,15 @@
 - Competitor research beyond the genre search (R4).
 - Downloading videos from YouTube.
 - Browser automation.
-- Multi-artist or collaboration.
+- Collaboration: a job belongs to one user.
+- Per-artist voice, memory, and brand guide in this version; they come with spec 002.
 - Third-party inference providers.
 
 ## Users
 
-- **Nathan:** signs in with Google; uploads go to his channel.
-- **Visitor (judge or anyone):** signed out, often in the dev.to iframe.
-- **Ashley:** operates it and reads the traces.
+- **Nathan:** signs in with Google; uploads go to his channel. His account is linked to the FLR artist profile.
+- **Ashley:** signs in with Google; uploads go to her own channel. Operates the app and reads the traces.
+- **Anyone else:** not invited, turned away at sign-in.
 
 ## Requirements
 
@@ -61,14 +60,14 @@
 - Video + song title (required) + notes. Browser PUTs straight to GCS via signed URL.
 - Signed URL carries `x-goog-content-length-range: 1,2147483648` (2 GB). Bucket has CORS for the app origin and a 7-day delete rule.
 - Job IDs are random and unguessable.
-- [ ] Nathan's uploads up to 15 minutes and visitor uploads up to 5 minutes are accepted; longer gets a clear message.
+- [ ] Uploads up to 15 minutes are accepted; longer gets a clear message.
 - [ ] A 12-minute video completes end to end.
 
 **R2 · Video playback**
 
 - The monitor plays the local file from an object URL the moment it's picked, while the upload runs.
-- After upload, and for samples and reloads, it streams from GCS through a signed GET URL; GCS serves range requests, so playback starts at once and seeking works.
-- [ ] A 12-minute video plays and seeks in the monitor on a phone inside the dev.to iframe.
+- After upload, and on reloads, it streams from GCS through a signed GET URL; GCS serves range requests, so playback starts at once and seeking works.
+- [ ] A 12-minute video plays and seeks in the monitor on a phone.
 
 **R3 · Analysis**
 
@@ -90,20 +89,19 @@
 - `flags[]` are never the model's. The server builds them from ffmpeg's measurements, the Short notice, and the windows' own quality flags, each once. A free-form flag field let the model restate the video's look as problems.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
-  - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count, and a sample's own live video is left out.
+  - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count.
   - Genre terms fold into the more specific heard genre that contains them ("electronic" into "industrial electronic") before the top two seed the query.
   - Hashtag candidates: every `#hashtag` in those descriptions, ranked by frequency; top 30.
   - Tag candidates: their tags and description hashtags, ranked by how many videos use them, then by those videos' views; top 40.
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
   - Stored on the job, so re-runs reuse it.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
-- Every run reads as Nathan, the signed-out demo included: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
+- Every run reads as Nathan until spec 002 makes voice per artist: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
 - The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
 - The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
-- For a sample, its own live video is excluded from the 5, so the proposal can't copy the metadata it's compared against.
 - Thumbnails go to the model as base64 data URLs.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.
 - [ ] Every hashtag in the description and every tag is in the job's candidate lists.
@@ -117,44 +115,65 @@
 - Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
 - Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
-- [ ] Allowlisted sessions store edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Visitor feedback stays on the job.
+- [ ] The user linked to the artist profile stores edits, re-runs (as skips), and approvals in `artists/{id}/feedback`. Other users' feedback stays on the job.
 - [ ] Each re-run produces a new title and a new description; a repeat of a skipped version is retried once, then fails the pick.
 
 **R6 · Upload and verify**
 
 - `videos.insert` as private (`madeForKids: false`), streamed from GCS as a resumable upload, then `videos.list(id)`.
-- Upload quota fits 6 uploads a day: visitors get at most 4, leaving 2 for Nathan.
+- YouTube allows 100 uploads a day per GCP project, shared by all users, first come; a channel may have a lower cap of its own. The app keeps no count. When YouTube says either limit is reached, the job waits "Daily upload limit reached. Try tomorrow." and continues after the reset. More needs Google's YouTube API audit.
+- Each upload uses its owner's own YouTube grant, so it lands on the owner's channel.
+- Approval shows and records the exact destination YouTube channel ID and name with the approved fields. Publishing and verification use only the owner's grant verified for that channel.
+- YouTube connects only the signed-in Google account, which has one channel, so a job's channel never changes.
+- Persist the upload-start marker before the external initiation request; expired or cleared resumable sessions never clear it. Recovery checks the stored session for completion or a resumable offset. An expired session restarts on the same channel only if the final bytes were never sent. If they may have been sent, pause with "upload outcome unknown" and a link to the channel's uploads in YouTube Studio. The owner either pastes the video's URL, which the app accepts only after checking the video is on the pinned channel through the owner's grant, or discards. The app never searches for the video, and never uploads again on its own. A 401 means lost access, not an unknown outcome.
+- Disconnecting or losing access pauses unfinished publishing and verification, preserving the job, approved fields and completed progress. Reconnecting the same channel resumes the next unfinished step without a duplicate upload. a request already in flight may finish against the original channel.
+- Recovery preserves returned video IDs. An uncertain external outcome must be reconciled before retrying.
+- Discarding a paused job stops future app steps; it does not delete a YouTube video or cancel an accepted external request. Keep any returned video ID and outcome.
 - Search and catalog reads use an API key from a second GCP project, so they never spend upload quota.
 - [ ] `VERIFIED` is set by the read-back.
+- [ ] Reconnecting from a different Google account is rejected; a job's channel never changes.
+- [ ] Disconnect and same-channel reconnect preserve publishing progress and resume upload or verification without a duplicate upload.
 
 **R7 · Status**
 
 - The status page drives the run: it calls the next step until the job reaches review.
+- The home page lists only the signed-in user's jobs, newest first, with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
+- Resume depends on the seven-day media lifecycle. Missing media gets a clear new-upload requirement; saved metadata stays visible.
 - [ ] Chunk N/M or a named wait ("waking model", "waiting on another run") is always on screen.
 - [ ] Reloading the page resumes from the next unfinished step.
 - [ ] A step's claim on the job expires after 3 minutes, so an aborted request frees the job.
 
-**R8 · Public home page**
+**R8 · Sign-in**
 
-- The home page is the app. Signed out: zero cookies, 30-second FLR samples cut from the strongest part of each song (one tap) plus own-video upload.
-- Signed-out samples upload to Ashley's throwaway channel. Signed-out own-video runs end at the would-be payload and read as Nathan, with his name and credits.
-- Caps: 40 runs/day, 5 per IP. When upload quota is spent, runs end at the would-be payload.
-- DEV embeds Cloud Run through `{% embed https://<service>.run.app %}` and nothing else from an arbitrary domain, so the post uses the default `run.app` URL ([DEV editor guide](https://dev.to/p/editor_guide)).
-- [ ] Embeds in a DEV draft with `frame-ancestors 'self' https://dev.to https://*.dev.to` and completes a sample run on a phone.
+- Signed out, the home page shows sign-in; other app pages lead there and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
+- One Google consent screen grants identity plus YouTube upload and read access, offline, so sign-in also connects the user's channel.
+- While invite gating is enabled, only active invitations get a session; anyone else sees "not invited" and no session, user record or token is retained. One setting opens signup later; accounts that sign up while it's open stay on the allowlist until revoked.
+- First redemption atomically binds a normalized invited email to the verified Google account ID. Later email changes preserve that binding; another account cannot claim the old email's invitation or artist link.
+- A user is their stable Google account ID; email is for display and the allowlist.
+- The session is a signed cookie with a fixed 30-day expiry and a unique browser session ID. Activity never extends expiry. Check access on every authenticated request; revoking denies old sessions on their next request. Reactivating lets unexpired sessions back in.
+- The app refuses to be framed by any origin but its own.
+- [ ] Every app page and data/mutation API refuses a signed-out request; enumerated auth and static-asset exceptions expose no app data.
+- [ ] Two users signed in at once never see or upload each other's jobs.
+- [ ] Interleaved A → B → A requests in one app process isolate headers, Connections, job lists, signed media URL issuance and all video/Short mutations on desktop Chrome and Pixel 7.
 
-**R9 · Reupload diff**
+**R9 · Connections**
 
-- [ ] Each sample shows current vs proposed metadata for its live video, field by field, with a reason.
+- One row per platform with its status and Connect, Reconnect, Disconnect. YouTube only for now; YouTube connects only the signed-in Google account; future platforms may use other accounts. Each user has one YouTube connection.
+- Each user's YouTube refresh token is stored per user. A revoked or missing grant blocks approval with "reconnect YouTube" and doesn't fail the job.
+- Connect and Reconnect bind to the initiating user, exact browser session, purpose and ten-minute expiry. Reject expired, replayed, superseded or mismatched callbacks and attempts after sign-out or session replacement; never change the sign-in identity. Failed or cancelled reconnect preserves the existing connection.
+- Connected means both YouTube upload and read scopes, a usable long-lived grant and the selected channel's ID and name confirmed through that grant. Partial consent or no channel permits identity sign-in but blocks approval with an actionable status.
+- Returning sign-in without a new refresh token preserves a valid existing matching grant. Validate replacement credentials before storing them; never erase a usable connection on an incomplete attempt.
+- [ ] Same-channel Reconnect restores eligible work before upload initiation, during upload and before verification, preserving fields and progress without duplicate uploads.
 
-**R10 · Auth**
+**R10 · Access**
 
-- Google sign-in with an allowlist (Nathan, Ashley) targets Nathan's channel. YouTube refresh tokens live in Secret Manager.
-- Demo accounts (`DEMO_EMAILS`) sign in and run like Nathan: 15-minute videos, no visitor caps, picks that read his memory. They never write it: feedback stays on the job, nothing lands in `artists/*`. Approvals upload private to the sandbox channel on the visitor quota. No brand guide, channel connect, or access to Nathan's jobs. A "Demo account" banner under the header says so on every page.
-- Any other Google account is turned away with a notice and stays signed out.
-- OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays: Advanced → Continue (tell Nathan).
+- Every job belongs to the user who made it; anyone else gets not-found.
+- User-specific caches and credentials are isolated by user and, where needed, channel. Check ownership before issuing a signed media URL; already-issued URLs retain their bounded expiry after sign-out.
+- Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
+- OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
-- Firestore security rules deny all client access; only the app's service account reads and writes.
-- [ ] Nathan's token and Nathan's jobs are reachable only from an allowlisted session.
+- The database has no client access: only the app (pooled URL from Secret Manager), migrations (direct URL), and the invite script (either URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
+- [ ] A user's token and jobs are reachable only from that user's session.
 
 **R11 · Sentry agent tracing**
 
@@ -166,7 +185,6 @@
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
 - Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
-- [ ] Screenshots for the post: a full trace and a failed run.
 
 ### P1
 
@@ -180,8 +198,7 @@
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.
 - **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
 - **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
-- Approve uploads through R6 (private, read-back verified) and takes an upload slot. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
-- A visitor's new Short counts as one run against R8's caps (one model call and one render); returning the live Short is free.
+- Approve uploads through R6 (private, read-back verified) and counts against YouTube's daily upload limit. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
 - [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
 - [ ] A 60 s Short renders inside one step on the app container.
 - [ ] A Short is `VERIFIED` only by read-back.
@@ -201,31 +218,30 @@ One Cloud Run service for the app and one Vertex AI endpoint for the model, both
 - **Why Vertex:** Cloud Run's L4 quota for the project is 0 and two increase requests were denied. Vertex's L4 serving quota in us-central1 is 2 without a request. Audio still never leaves the project.
 - **Cost:** about $0.81/hr while a model replica is up (`g2-standard-4` online inference, L4 included), billed for at least 5 minutes per wake. The app bills only while serving. $0 when nobody visits.
 - **Storage:** one GCS bucket, `uploads/`.
-- **State:** Firestore. **Secrets:** Secret Manager.
-- **Region:** us-central1 for everything. Firestore is created there; its location is permanent.
+- **State:** Neon Postgres through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
+- **Region:** us-central1 for everything on Google Cloud. The database is the one exception: Neon runs in `aws-us-east-2`.
 - **Pipeline:** runs in the app container while Nathan watches. The status page calls `POST /api/jobs/{id}/step`; each call does one step and returns the job.
   - **prep:** probe and measure the whole file.
   - **analyze:** cut and analyze one 29.5s window per call.
   - **pick:** hashtag search, then smart pick → job to `REVIEW`.
   - **hook** (Short jobs): pick the hook window, place the cut from loudness.
   - **render** (Short jobs): cut and reframe to 9:16 into GCS → job to `REVIEW`.
-- Each step claims the job in a Firestore transaction with a 3-minute expiry, so a second tab waits instead of double-running.
+- Each step claims the job with one conditional update that sets a random claim token and a 3-minute expiry, so a second tab waits instead of double-running. A step's result is saved only while its token still holds the claim.
 
-### Firestore
+### Postgres
 
-| Path                                     | Holds                                                                                                                                                                                 |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jobs/{id}`                              | state, chunk progress, trace headers, hashtag candidates; `shortId` on a video, `short` (hook, framing, renders) on a Short                                                           |
-| `jobs/{id}/chunks/{n}`, `jobs/{id}/pick` | step results                                                                                                                                                                          |
-| `artists/{id}/facts`                     | FACT (Nathan said it) · INFERENCE (model's guess) · APPROVED (Nathan approved it). Seeds: name and Virginia as FACT; the "Mr. Kill" connection as INFERENCE, kept out of public copy. |
-| `artists/{id}/feedback`                  | EDITED · SKIPPED · ACCEPTED                                                                                                                                                           |
-| `artists/{id}/publishes`                 | video ID, URL, final metadata, status                                                                                                                                                 |
+| Table           | Holds                                                                                                                                                                                                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`         | the allowlist and the accounts: invited email, Google account ID bound at first sign-in, artist profile link, active flag                                                                                                                                                                                   |
+| `connections`   | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                                            |
+| `jobs`          | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile                   |
+| `artist_memory` | per artist, by kind: facts (FACT · INFERENCE · APPROVED; seeds: name and Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), publishes (video ID, URL, final metadata, status), and the brand guide's proposal and approved version |
 
 ## UX
 
 Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg). One screen, dark only.
 
-- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and, for Nathan, the FLR channel stats from `channels.list` top right.
+- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and the signed-in user's channel stats from `channels.list` top right.
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution (short side, marked vertical when taller than wide), and timecode overlays.
   - State chip + magenta progress bar + model label (`gemma-4-12b-it · 52s`, total model time for the job; it ticks live while the pick runs).
@@ -238,7 +254,10 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
   - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
 - **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.
 - **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
-- **Header:** one aligned row. Signed out: Sign in. Allowlisted: the channel handle and video and subscriber counts, Brand guide, and Sign out. Signed out, the stats would read as a signed-in account, so they're hidden. A denied sign-in or a connected channel shows a notice under the header. Channel connect links live on the Brand guide page.
+- **Signed out:** the home page is a sign-in view: the frame, the wordmark, and one "Sign in with Google" button in the header. Nothing else.
+- **Signed-in home:** own jobs, newest first, with title, state and a continuation link; no other user's work.
+- **Header:** one aligned row: the user's channel handle and video and subscriber counts, Connections, Brand guide (artist-linked user only), and Sign out. A "not invited" or "sign-in expired" notice shows under the header on the sign-in view.
+- **Connections:** one row per platform with Connected as … / Not connected and Connect, Reconnect, Disconnect. YouTube only for now.
 - **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.
 - **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
 - **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
@@ -249,32 +268,18 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 
 ## Success Metrics
 
-| Metric                                                 | Target  |
-| ------------------------------------------------------ | ------- |
-| Sample runs completing in the dev.to iframe on a phone | All     |
-| Warm 30s sample, upload → recommendation               | ≤ 2 min |
-| Uploads verified by read-back                          | 100%    |
-| Real FLR releases through Soundboard, two weeks out    | ≥ 1     |
+| Metric                                              | Target  |
+| --------------------------------------------------- | ------- |
+| Warm 30s video, upload → recommendation             | ≤ 2 min |
+| Uploads verified by read-back                       | 100%    |
+| Real FLR releases through Soundboard, two weeks out | ≥ 1     |
 
 ## Open Questions (Ashley)
 
-- Source FLR videos for the samples + their `videoId`s.
-- Throwaway YouTube channel, added as an OAuth test user with Nathan and Ashley.
+- OAuth app verification for `youtube.upload` before open signup.
 - Second GCP project for the read-only YouTube API key.
 - Sentry DSN / org.
-- Nathan's OK on his songs playing as public samples.
 
-## Timeline
+## License
 
-| When (EDT)      | Milestone                                                           |
-| --------------- | ------------------------------------------------------------------- |
-| Sat night       | Repo, OAuth consent, throwaway channel, GPU service up, upload path |
-| Sun 08:00–13:00 | P0, then brand guide                                                |
-| Sun 13:00       | Freeze                                                              |
-| Sun 14:00–17:00 | Walkthrough recording, post                                         |
-| **Sun 17:00**   | **Publish**                                                         |
-| Mon 02:59       | Deadline                                                            |
-
-- **Cut-off timers:** model audio + images 90 min (fallback: frames + ffmpeg only) · Sentry 20 min (fallback: Cloud Trace) · anything else 15 min.
-- **Categories:** Gemma, Sentry Agent Tracing.
-- **License:** MIT.
+MIT.

@@ -5,9 +5,9 @@ import Short from '$lib/components/Short.svelte';
 import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$lib/types';
 
 const INVALID = 'aria-invalid';
+const CONNECTED = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
 
 const SPEC: ShortSpec = {
-  parentId: 'p1',
   sourceDurationSec: 180,
   reframe: 'blur',
   hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
@@ -38,12 +38,11 @@ const view = (
   job: {
     id: 's1',
     state,
-    owner: 'visitor',
-    channel: 'sandbox',
+    parentId: 'p1',
+    destination: null,
     songTitle: 'PeekaBoo',
     notes: '',
     filename: 'peekaboo (Short).mp4',
-    sampleId: null,
     probe: { durationSec: 30, width: 720, height: 1280, hasAudio: true },
     measurements: null,
     chunkCount: 0,
@@ -52,7 +51,7 @@ const view = (
     error: null,
     uploadProgress: null,
     videoId: null,
-    payload: null,
+    finalFields: null,
     hashtagCandidates: ['#synthwave'],
     shortId: null,
     short: { ...SPEC, ...spec },
@@ -71,10 +70,12 @@ function setup(props: Partial<ComponentProps<typeof Short>> = {}) {
     onrerun: vi.fn(),
     ondiscard: vi.fn(),
     onretry: vi.fn(),
+    onconfirm: vi.fn(),
   };
   const utils = render(Short, {
     view: view(),
     src: 'https://storage.googleapis.com/bkt/uploads/s1-1?sig=read',
+    approveTo: CONNECTED,
     ...handlers,
     ...props,
   });
@@ -182,7 +183,7 @@ describe('Short: review', () => {
     expect(recut()).toBeDisabled();
   });
 
-  it('names the length bounds for a 30-second sample', () => {
+  it('names the length bounds for a 30-second video', () => {
     setup({
       view: view('REVIEW', {
         sourceDurationSec: 30,
@@ -230,10 +231,9 @@ describe('Short: review', () => {
 });
 
 describe('Short: after approval', () => {
-  it('shows the would-be payload when there is no channel to upload to', () => {
-    const payload = { title: 'Edited', description: 'd', hashtags: [], tags: [] };
-    setup({ view: view('PAYLOAD', {}, { payload }) });
-    expect(screen.getByRole('region', { name: 'Would-be upload payload' })).toBeInTheDocument();
+  it('shows the approved fields, not the recommendation, once approved', () => {
+    const finalFields = { title: 'Edited', description: 'd', hashtags: [], tags: [] };
+    setup({ view: view('PUBLISHING', {}, { finalFields }) });
     expect((screen.getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Edited');
     expect(start()).toBeDisabled();
   });
@@ -295,5 +295,71 @@ describe('Short: accessibility', () => {
     const ids = [...container.querySelectorAll('[id]')].map((el) => el.id);
     expect(ids.filter((id) => !id.startsWith('short-'))).toEqual([]);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('Short: where Approve uploads', () => {
+  it("shows the owner's connected channel beside Approve in review", () => {
+    setup();
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Flies Like Robots UCflr');
+    expect(screen.getByRole('button', { name: 'Approve & upload' })).toBeEnabled();
+  });
+
+  it('blocks approval while YouTube is not connected', () => {
+    setup({ approveTo: null });
+    expect(screen.getByText('Reconnect YouTube to approve.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve & upload' })).toBeDisabled();
+  });
+
+  it('shows the pinned channel once approved, whatever is connected now', () => {
+    setup({
+      view: view('PUBLISHING', {}, { destination: { channelId: 'UCold', channelTitle: 'Old' } }),
+      approveTo: null,
+    });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
+  });
+
+  it('says the Short uploaded to the pinned channel once YouTube holds it', () => {
+    setup({
+      view: view(
+        'VERIFIED',
+        {},
+        { videoId: 'abc123', destination: { channelId: 'UCold', channelTitle: 'Old' } },
+      ),
+      approveTo: null,
+    });
+    expect(screen.getByText(/Uploaded to/)).toHaveTextContent('Uploaded to Old UCold');
+  });
+
+  it('still names the pinned channel when the upload failed', () => {
+    setup({
+      view: view(
+        'FAILED',
+        {},
+        {
+          failedState: 'PUBLISHING',
+          destination: { channelId: 'UCold', channelTitle: 'Old' },
+        },
+      ),
+    });
+    expect(screen.getByText(/Uploads to/)).toHaveTextContent('Uploads to Old UCold');
+  });
+
+  it('names no channel on a Short that failed before approval', () => {
+    setup({ view: view('FAILED', {}, { failedState: 'PICK' }) });
+    expect(screen.queryByText(/Uploads to|Reconnect/)).toBeNull();
+  });
+});
+
+describe('Short: expired media', () => {
+  it('says the video is gone and keeps the saved details', () => {
+    setup({ expired: true });
+    expect(screen.getByRole('note')).toHaveTextContent(/gone from storage after 7 days/);
+    expect(screen.getByLabelText(/^Title/)).toHaveValue(PICK.title);
+  });
+
+  it('says nothing about storage while the media is there', () => {
+    setup();
+    expect(screen.queryByRole('note')).toBeNull();
   });
 });

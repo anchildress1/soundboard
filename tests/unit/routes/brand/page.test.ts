@@ -42,16 +42,9 @@ afterEach(() => {
 });
 
 describe('brand page: approved guide', () => {
-  it('offers the one-time channel connect links', () => {
+  it('offers no channel connect links; YouTube is connected at sign-in', () => {
     setup();
-    expect(screen.getByRole('link', { name: 'Connect Nathan' })).toHaveAttribute(
-      'href',
-      '/auth/login?connect=nathan',
-    );
-    expect(screen.getByRole('link', { name: 'Connect sandbox' })).toHaveAttribute(
-      'href',
-      '/auth/login?connect=sandbox',
-    );
+    expect(screen.queryByRole('link', { name: /connect/i })).toBeNull();
   });
 
   it('says smart pick follows the recent uploads until a guide is approved', () => {

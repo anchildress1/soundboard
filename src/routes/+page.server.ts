@@ -1,18 +1,6 @@
-import { listSamples } from '$lib/server/jobs/samples';
-import type { Sample } from '$lib/types';
+import { listJobs } from '$lib/server/jobs/jobs';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
-  let samples: Omit<Sample, 'object'>[] = [];
-  try {
-    samples = (await listSamples()).map(({ id, songTitle, videoId, durationSec }) => ({
-      id,
-      songTitle,
-      videoId,
-      durationSec,
-    }));
-  } catch {
-    // Samples are optional; the upload path still works.
-  }
-  return { samples };
-};
+export const load: PageServerLoad = async ({ locals }) => ({
+  jobs: locals.user ? await listJobs(locals.user.uid) : [],
+});

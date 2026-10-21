@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
+import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
 import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
 
 const WAKING = 'waking model';
@@ -8,12 +8,11 @@ const SYNTH_BASS = 'synth bass';
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   id: 'j1',
   state: 'ANALYZE',
-  owner: 'visitor',
-  channel: null,
+  parentId: null,
+  destination: null,
   songTitle: 'PeekaBoo',
   notes: '',
   filename: 'peekaboo.mp4',
-  sampleId: null,
   probe: null,
   measurements: null,
   chunkCount: 4,
@@ -22,7 +21,7 @@ const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
   error: null,
   uploadProgress: null,
   videoId: null,
-  payload: null,
+  finalFields: null,
   hashtagCandidates: null,
   shortId: null,
   short: null,
@@ -57,6 +56,30 @@ const chunk = (index: number, analysis: ChunkAnalysis | null, modelMs = 1000): C
     silences: [],
   },
   raw: analysis ? null : '{bad',
+});
+
+describe('publishPaused', () => {
+  it.each(['PUBLISHING', 'CLAIMED_COMPLETE'] as const)(
+    'allows owner action in paused %s',
+    (state) => {
+      for (const wait of [
+        'reconnect YouTube',
+        'upload outcome unknown',
+        'Daily upload limit reached. Try tomorrow.',
+      ] as const) {
+        expect(publishPaused(view({ state }, { wait }))).toBe(true);
+      }
+      expect(publishPaused(view({ state }))).toBe(false);
+      expect(publishPaused(view({ state }, { wait: 'step running in another tab' }))).toBe(false);
+    },
+  );
+
+  it.each(['REVIEW', 'FAILED', 'VERIFIED', 'DISCARDED'] as const)(
+    'ignores stale publishing waits in %s',
+    (state) => {
+      expect(publishPaused(view({ state }, { wait: 'upload outcome unknown' }))).toBe(false);
+    },
+  );
 });
 
 describe('jobStatus', () => {
@@ -129,7 +152,6 @@ describe('jobStatus', () => {
       ['HOOK', 'info', 'Picking the hook', 30],
       ['RENDER', 'info', 'Cutting the Short', 60],
       ['REVIEW', 'warn', 'Needs review', 100],
-      ['PAYLOAD', 'warn', 'Payload ready', 100],
       ['FAILED', 'err', 'Failed', 6 + 21],
       ['DISCARDED', 'err', 'Discarded', 0],
     ];

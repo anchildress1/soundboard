@@ -5,19 +5,18 @@
   import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
   import Bandcamp from '$lib/components/Bandcamp.svelte';
   import Destinations from '$lib/components/Destinations.svelte';
-  import Diff from '$lib/components/Diff.svelte';
   import Heard from '$lib/components/Heard.svelte';
   import Label from '$lib/components/Label.svelte';
   import Monitor from '$lib/components/Monitor.svelte';
-  import Payload from '$lib/components/Payload.svelte';
   import Short from '$lib/components/Short.svelte';
+  import UploadRecovery from '$lib/components/UploadRecovery.svelte';
   import Track from '$lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
   import { drive } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
   import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import { heardTags, jobStatus, modelSeconds, modelWorking } from '$lib/status';
+  import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
   import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
   import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
@@ -47,7 +46,7 @@
   // svelte-ignore state_referenced_locally
   let shortMessage = $state(data.short?.job.error ?? '');
   let shortErrors = $state<FieldErrors>({});
-  let drivingShort = false;
+  let drivingShort: string | null = null;
 
   const job = $derived(view.job);
   const status = $derived(jobStatus(view, view.wait, uploadPct));
@@ -55,7 +54,7 @@
   const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
   const fields = $derived<PickFields | null>(
-    job.payload ??
+    job.finalFields ??
       (view.pick
         ? {
             title: view.pick.title,
@@ -68,6 +67,7 @@
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const canMakeShort = $derived(SHORT_SOURCE_STATES.includes(job.state));
+  const paused = $derived(publishPaused(view));
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
 
   // Reading `view` reruns this whenever a new view lands.
@@ -79,6 +79,8 @@
     const tick = working ? setInterval(() => (now = Date.now()), 1000) : undefined;
     return () => clearInterval(tick);
   });
+
+  const signedOut = () => void goto(resolve('/'), { invalidateAll: true });
 
   const run = async () => {
     if (driving) return;
@@ -92,6 +94,7 @@
           message = next.job.error ?? '';
         },
         onError: (text) => (message = text),
+        signedOut,
       });
     } finally {
       driving = false;
@@ -108,21 +111,25 @@
   };
 
   const runShort = async () => {
-    if (drivingShort || !shortView) return;
-    drivingShort = true;
+    if (!shortView || drivingShort === shortView.job.id) return;
     const id = shortView.job.id;
+    drivingShort = id;
     try {
       await drive(shortView, {
         step: () => step(id, data.trace),
         stopped: () => stopped || shortView?.job.id !== id,
         onView: (next) => {
+          if (stopped || shortView?.job.id !== id) return;
           showShort(next);
           shortMessage = next.job.error ?? '';
         },
-        onError: (text) => (shortMessage = text),
+        onError: (text) => {
+          if (!stopped && shortView?.job.id === id) shortMessage = text;
+        },
+        signedOut,
       });
     } finally {
-      drivingShort = false;
+      if (drivingShort === id) drivingShort = null;
     }
   };
 
@@ -233,16 +240,19 @@
     />
     <Track {status} {model} />
     <Heard tags={heardTags(view)} measurements={job.measurements} />
-    {#if data.live && view.pick}
-      <Diff live={data.live} pick={view.pick} />
-    {/if}
   </section>
 
   <div class="right">
+    {#if data.expired}
+      <p class="expired" role="note">
+        This video is gone from storage after 7 days. Its saved details stay here; upload it again
+        from the home page to finish anything that needs the video.
+      </p>
+    {/if}
     {#if fields && view.pick}
       {@const pick = view.pick}
       {#if pick.flags.length > 0}
-        <!-- Above both tabs: an audio or video problem matters wherever the song goes. -->
+        <!-- Above the tabs: an audio or video problem matters wherever the song goes. -->
         <section class="warning" aria-labelledby="warning-title">
           <h2 id="warning-title"><span aria-hidden="true">⚠</span> Check before uploading</h2>
           <ul>
@@ -275,14 +285,19 @@
               {busy}
               {done}
               {serverErrors}
-              onapprove={(f) => act('approve', { ...f, pickVersion: pick.version })}
+              destination={job.destination ?? (editable ? data.approveTo : null)}
+              uploaded={job.videoId !== null}
+              discardable={paused}
+              onapprove={(f) =>
+                act('approve', {
+                  ...f,
+                  pickVersion: pick.version,
+                  channelId: data.approveTo?.channelId,
+                })}
               onrerun={() => act('rerun')}
               ondiscard={() => act('discard')}
             />
           {/key}
-          {#if job.state === 'PAYLOAD' && job.payload}
-            <Payload fields={job.payload} />
-          {/if}
         {/snippet}
         {#snippet short()}
           {#if shortView}
@@ -292,12 +307,19 @@
               busy={shortBusy}
               message={shortMessage}
               serverErrors={shortErrors}
+              approveTo={data.approveTo}
+              expired={data.shortExpired && shortView.job.id === data.short?.job.id}
               onrecut={(cut) => actShort('recut', cut)}
               onapprove={(f) =>
-                actShort('approve', { ...f, pickVersion: shortView?.pick?.version })}
+                actShort('approve', {
+                  ...f,
+                  pickVersion: shortView?.pick?.version,
+                  channelId: data.approveTo?.channelId,
+                })}
               onrerun={() => actShort('rerun')}
               ondiscard={() => actShort('discard')}
               onretry={() => actShort('retry')}
+              onconfirm={(url) => actShort('confirm-upload', { url })}
             />
           {:else}
             <section class="placeholder make" aria-labelledby="make-short-heading">
@@ -338,6 +360,8 @@
         <p>The recommendation appears here once every chunk is analyzed.</p>
       </section>
     {/if}
+
+    <UploadRecovery {view} {busy} onconfirm={(url) => act('confirm-upload', { url })} />
 
     {#if job.state === 'FAILED'}
       <div class="actions">
@@ -403,6 +427,13 @@
 
   .uploaded a {
     color: var(--green);
+  }
+
+  .expired {
+    margin: 0;
+    padding: 12px 14px;
+    border-left: 3px solid var(--yellow);
+    background: var(--panel);
   }
 
   .placeholder {

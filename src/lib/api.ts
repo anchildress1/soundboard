@@ -34,19 +34,17 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export type Trace = { sentryTrace: string; baggage: string } | null;
 
-export type CreateBody =
-  | { sampleId: string }
-  | {
-      songTitle: string;
-      notes: string;
-      filename: string;
-      contentType: string;
-      size: number;
-      durationSec: number;
-    };
+export type CreateBody = {
+  songTitle: string;
+  notes: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  durationSec: number;
+};
 
 export function createJob(body: CreateBody) {
-  return call<{ id: string; uploadUrl: string | null }>('/api/jobs', {
+  return call<{ id: string; uploadUrl: string }>('/api/jobs', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -60,7 +58,8 @@ export function step(id: string, trace: Trace) {
   return call<JobView>(`/api/jobs/${id}/step`, { method: 'POST', headers: traceHeaders(trace) });
 }
 
-export type ActionName = 'approve' | 'rerun' | 'discard' | 'retry' | 'recut' | 'short';
+export type ActionName =
+  'approve' | 'rerun' | 'discard' | 'retry' | 'recut' | 'short' | 'confirm-upload';
 
 /** `short` starts the job's Short and returns the Short's view; every other action returns the job's. */
 export function action(id: string, name: ActionName, trace: Trace, body: unknown = {}) {
@@ -87,6 +86,13 @@ export function approveBrand(guide: BrandGuide, proposedAt: number) {
 
 export function discardBrandProposal() {
   return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
+}
+
+/** Always forgets the grant here; `revokedAtGoogle` is false when Google didn't confirm. */
+export function disconnectYouTube() {
+  return call<{ revokedAtGoogle: boolean }>('/api/connections/youtube/disconnect', {
+    method: 'POST',
+  });
 }
 
 /** Signed PUT straight to GCS, with progress. The headers must match what the URL was signed with. */

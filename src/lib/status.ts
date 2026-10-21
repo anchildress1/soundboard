@@ -34,7 +34,6 @@ const LABELS: Record<JobState, Label> = {
   },
   CLAIMED_COMPLETE: fixed('info', 'Verifying upload', 100),
   VERIFIED: fixed('ok', 'Verified · private', 100),
-  PAYLOAD: fixed('warn', 'Payload ready', 100),
   FAILED: (view) => ({ tone: 'err', text: 'Failed', progress: runningProgress(view) }),
   DISCARDED: fixed('err', 'Discarded', 0),
 };
@@ -43,6 +42,16 @@ const LABELS: Record<JobState, Label> = {
 export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
   if (wait) return { tone: 'info', text: wait, progress: runningProgress(view) };
   return LABELS[view.job.state](view, uploadPct);
+}
+
+/** Whether publishing is paused for owner action and can be discarded. */
+export function publishPaused({ job, wait }: JobView): boolean {
+  return (
+    (job.state === 'PUBLISHING' || job.state === 'CLAIMED_COMPLETE') &&
+    (wait === 'reconnect YouTube' ||
+      wait === 'upload outcome unknown' ||
+      wait === 'Daily upload limit reached. Try tomorrow.')
+  );
 }
 
 function runningProgress({ job }: JobView): number {

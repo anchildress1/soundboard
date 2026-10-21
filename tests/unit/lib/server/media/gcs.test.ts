@@ -121,8 +121,8 @@ describe('uploadFile', () => {
 describe('signedReadUrl', () => {
   it('signs a v4 read for two hours', async () => {
     gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/get']);
-    expect(await signedReadUrl('samples/a.mp4')).toBe('https://storage/get');
-    expect(gcs.files).toEqual(['samples/a.mp4']);
+    expect(await signedReadUrl('uploads/a.mp4')).toBe('https://storage/get');
+    expect(gcs.files).toEqual(['uploads/a.mp4']);
     expect(gcs.getSignedUrl).toHaveBeenCalledWith({
       version: 'v4',
       action: 'read',

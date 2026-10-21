@@ -8,15 +8,18 @@ export type DriverDeps = {
   stopped: () => boolean;
   onView: (view: JobView) => void;
   onError: (message: string) => void;
+  /** The session ended mid-run; the caller leaves the page for sign-in. */
+  signedOut: () => void;
 };
 
 const driven = (view: JobView) => DRIVEN_STATES.includes(view.job.state);
-const jobGone = (error: unknown) =>
-  error instanceof ApiError && (error.status === 404 || error.status === 403);
+const final = (error: unknown) =>
+  error instanceof ApiError && [401, 403, 404].includes(error.status);
 
 /**
  * Calls the next step until the job leaves the driven states. A wait or a request error backs off
- * and retries; a missing job, a stop, or a non-network TypeError ends the loop.
+ * and retries; a missing job, a stop, or a non-network TypeError ends the loop. A 401 also hands
+ * the page back to sign-in.
  */
 export async function drive(initial: JobView, deps: DriverDeps): Promise<JobView> {
   let view = initial;
@@ -35,10 +38,11 @@ export async function drive(initial: JobView, deps: DriverDeps): Promise<JobView
           onFailedAttempt: ({ error }) => {
             if (!(error instanceof Waiting)) deps.onError(error.message);
           },
-          shouldRetry: ({ error }) => !jobGone(error),
+          shouldRetry: ({ error }) => !final(error),
         },
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) deps.signedOut();
       break;
     }
   }

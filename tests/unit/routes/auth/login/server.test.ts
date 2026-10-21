@@ -1,19 +1,26 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OAUTH_COOKIE, unsign, type OAuthState } from '$lib/server/auth/auth';
+import { OAUTH_COOKIE, readOAuthState } from '$lib/server/auth/auth';
 import { GET } from '$routes/auth/login/+server';
+import { USER_A } from '../../../../helpers/pipeline';
 
 type Event = Parameters<typeof GET>[0];
+type User = Event['locals']['user'];
 
-function call(query: string, allowlisted: boolean | null, origin = 'http://localhost:5173') {
-  const cookies = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+const SCOPES =
+  'openid email https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly';
+
+function call(query: string, opts: { origin?: string; user?: User } = {}) {
+  const cookies = {
+    get: vi.fn(() => undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
   const event = {
     cookies,
-    url: new URL(`${origin}/auth/login${query}`),
-    locals: {
-      session: allowlisted === null ? null : { allowlisted, email: 'nathan@example.com' },
-    },
+    url: new URL(`${opts.origin ?? 'http://localhost:5173'}/auth/login${query}`),
+    locals: { user: opts.user ?? null },
   } as unknown as Event;
   let thrown: unknown;
   try {
@@ -30,20 +37,25 @@ const location = (thrown: unknown) => {
   return new URL(thrown.location);
 };
 
+const status = (thrown: unknown) => isHttpError(thrown) && thrown.status;
+
 beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', 'secret');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'client-1');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'shh');
 });
 
-describe('GET /auth/login', () => {
-  it('signs in with identity scopes only and stores a signed state cookie', () => {
-    const { thrown, cookies } = call('', null);
+describe('GET /auth/login: sign-in', () => {
+  it('asks for all four scopes offline with the chooser and a signed, expiring state', () => {
+    const { thrown, cookies } = call('');
     const url = location(thrown);
     expect(url.origin).toBe('https://accounts.google.com');
-    expect(url.searchParams.get('scope')).toBe('openid email');
+    expect(url.searchParams.get('scope')).toBe(SCOPES);
+    expect(url.searchParams.get('access_type')).toBe('offline');
+    expect(url.searchParams.get('include_granted_scopes')).toBe('true');
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.get('login_hint')).toBeNull();
     expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:5173/auth/callback');
-    expect(url.searchParams.get('access_type')).toBe('online');
 
     expect(cookies.set).toHaveBeenCalledTimes(1);
     const [name, value, options] = cookies.set.mock.calls[0]!;
@@ -55,40 +67,52 @@ describe('GET /auth/login', () => {
       sameSite: 'lax',
       maxAge: 600,
     });
-    const state = unsign<OAuthState>(value as string)!;
-    expect(state).toMatchObject({ purpose: 'sign-in', channel: null });
+    const state = readOAuthState(value as string)!;
+    expect(state).toMatchObject({ purpose: 'sign-in', uid: null, sid: null });
     expect(url.searchParams.get('state')).toBe(state.nonce);
   });
 
   it('marks the cookie secure over https', () => {
-    const { cookies } = call('', null, 'https://soundboard.run.app');
+    const { cookies } = call('', { origin: 'https://soundboard.run.app' });
     expect(cookies.set.mock.calls[0]![2]).toMatchObject({ secure: true });
   });
 
-  it.each(['nathan', 'sandbox'] as const)(
-    'lets an allowlisted session connect the %s channel offline',
-    (channel) => {
-      const { thrown, cookies } = call(`?connect=${channel}`, true);
-      const url = location(thrown);
-      expect(url.searchParams.get('scope')).toContain('youtube.upload');
-      expect(url.searchParams.get('access_type')).toBe('offline');
-      expect(url.searchParams.get('prompt')).toBe('select_account consent');
-      const state = unsign<OAuthState>(cookies.set.mock.calls[0]![1] as string);
-      expect(state).toMatchObject({ purpose: 'connect', channel });
-    },
-  );
+  it('starts a plain sign-in even when already signed in', () => {
+    const { thrown, cookies } = call('', { user: USER_A });
+    const url = location(thrown);
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+    expect(url.searchParams.get('login_hint')).toBeNull();
+    expect(readOAuthState(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
+      purpose: 'sign-in',
+      uid: null,
+    });
+  });
+});
 
-  it('400s an unknown channel', () => {
-    const { thrown, cookies } = call('?connect=elsewhere', true);
-    expect(isHttpError(thrown) && thrown.status).toBe(400);
+describe('GET /auth/login: connect', () => {
+  it("forces consent, hints at the user's email and binds the state to the session", () => {
+    const { thrown, cookies } = call('?connect=youtube', { user: USER_A });
+    const url = location(thrown);
+    expect(url.searchParams.get('scope')).toBe(SCOPES);
+    expect(url.searchParams.get('prompt')).toBe('select_account consent');
+    expect(url.searchParams.get('login_hint')).toBe(USER_A.email);
+    const state = readOAuthState(cookies.set.mock.calls[0]![1] as string)!;
+    expect(state).toMatchObject({
+      purpose: 'connect',
+      uid: USER_A.uid,
+      sid: USER_A.sid,
+    });
+  });
+
+  it('401s without a session', () => {
+    const { thrown, cookies } = call('?connect=youtube');
+    expect(status(thrown)).toBe(401);
     expect(cookies.set).not.toHaveBeenCalled();
   });
 
-  it('403s a connect from a non-allowlisted session', () => {
-    const stranger = call('?connect=nathan', false);
-    expect(isHttpError(stranger.thrown) && stranger.thrown.status).toBe(403);
-    const signedOut = call('?connect=nathan', null);
-    expect(isHttpError(signedOut.thrown) && signedOut.thrown.status).toBe(403);
-    expect(signedOut.cookies.set).not.toHaveBeenCalled();
+  it.each(['nathan', 'sandbox', '', 'YouTube'])('400s connect=%s', (value) => {
+    const { thrown, cookies } = call(`?connect=${value}`, { user: USER_A });
+    expect(status(thrown)).toBe(400);
+    expect(cookies.set).not.toHaveBeenCalled();
   });
 });

@@ -19,10 +19,14 @@ Audience: AI coding agents. Directives only.
 ## Data and access
 
 - `VERIFIED` only after `videos.list` returns the upload. Insert response → `CLAIMED_COMPLETE`.
-- Only allowlisted sessions write `artists/*` or reach Nathan's jobs and tokens.
-- Demo jobs read Nathan's memory, NEVER write it. Visitor and demo feedback stays on the job.
+- A user is their Google `sub` (`users.uid`). Email is the allowlist key and display only.
+- `users` is the allowlist: the operator adds emails by hand. Sign-in needs an active row while `SIGNUP_MODE=invite`. First sign-in binds `uid`; NEVER rebind it. `SIGNUP_MODE=open` adds a permanent active row per new account.
+- Load a job by a request-supplied ID only through `authorizedJob` (owner check); list jobs only through `listJobs(uid)`. Another user's job → 404, never 403.
+- Only a user with `artistId` reads or writes `artist_memory` rows or opens `/brand`.
+- Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.
+- One YouTube connection per user, bound to their own Google account. Refresh tokens: KMS ciphertext in `connections.token_ciphertext` only. NEVER log, trace, or return a token or ciphertext.
+- Upload and verify use only the job's approved destination channel and its owner's grant.
 - Short approvals write EDITED feedback only, never ACCEPTED.
-- A visitor's new Short takes one visitor run (`takeVisitorRun`) in the create transaction.
 
 ## Media
 
@@ -38,12 +42,13 @@ Audience: AI coding agents. Directives only.
 - NEVER add other services, queues, Cloud Functions, Eventarc, or background workers.
 - Pipeline is page-driven: one step per `POST /api/jobs/{id}/step`, each under ~2 minutes.
 - Model scaled to zero (429), loading, or busy → return a wait reason immediately. NEVER block a step on it.
-- Each step claims the job in a Firestore transaction, 3-minute expiry.
+- Each step claims the job with one conditional `UPDATE … RETURNING` (claim token, 3-minute expiry). Release only with the matching token.
 - Gemma calls: temperature 0.2, `max_tokens` ≥ 2048, JSON schema, parse `content` (not `reasoning_content`). Audio windows: 29.5 s.
 
 ## Stack
 
 - SvelteKit 2, Svelte 5 runes, TypeScript strict, Node 24 (`.nvmrc`), pnpm.
+- Data: Neon Postgres via Drizzle (`src/lib/server/core/schema.ts`). Schema change → `pnpm drizzle-kit generate`; commit the SQL in `drizzle/`. NEVER hand-edit applied migrations.
 - Ask before upgrading to SvelteKit 3, TypeScript 7, or adapter-node 6.
 
 ## Tests
@@ -52,10 +57,11 @@ Audience: AI coding agents. Directives only.
 - Import app code via `$lib` / `$routes`. NEVER relative paths into `src/`.
 - Coverage floors: 85% lines/functions/statements, 80% branches. NEVER lower.
 - Every new module: positive, negative, error, and edge-case tests.
-- Mock at process boundaries only (GCS, Firestore, Secret Manager, YouTube, `llama-server`, ffmpeg). NEVER mock internal modules.
+- Mock at process boundaries only (GCS, KMS, `google-auth-library`, Google/YouTube HTTP via `fetch`, `llama-server`, ffmpeg). NEVER mock internal modules.
+- NEVER mock the database. `$lib/server/core/db` aliases to `tests/helpers/db.ts` (PGlite, real migrations) in `vitest.config.ts`; seed rows through it.
 - `@sentry/sveltekit` is mocked globally (`tests/mocks/sentry.ts`). Assert through that mock. NEVER load the real SDK in tests.
-- E2E projects: desktop Chrome and Pixel 7. Pixel 7 is the judged path.
-- E2E builds alias Firestore, Storage, and Secret Manager to `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`). Seed jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
+- E2E projects: desktop Chrome and Pixel 7. Pixel 7 is the primary path.
+- E2E builds swap the db module, KMS, and Storage for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
 - E2E has no `llama-server`: model steps end at the "waking model" wait.
 
 ## Workflow

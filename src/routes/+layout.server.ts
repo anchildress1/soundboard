@@ -1,21 +1,21 @@
-import { channelStats, type ChannelStats } from '$lib/server/platforms/youtube';
+import { captureException } from '@sentry/sveltekit';
+import { channelStats, getConnection, type ChannelStats } from '$lib/server/platforms/youtube';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
+  const { user } = locals;
   let channel: ChannelStats | null = null;
-  try {
-    channel = await channelStats();
-  } catch {
-    // The header renders without stats when the read key or channel is unavailable.
+  const connection = user ? await getConnection(user.uid) : null;
+  if (connection?.status === 'connected') {
+    try {
+      channel = await channelStats(connection.channelId);
+    } catch (error) {
+      // Stats are optional: report the failure, render the header without them.
+      captureException(error, { tags: { component: 'header-stats' } });
+    }
   }
   return {
     channel,
-    session: locals.session
-      ? {
-          email: locals.session.email,
-          allowlisted: locals.session.allowlisted,
-          demo: locals.session.demo,
-        }
-      : null,
+    user: user ? { email: user.email, artistId: user.artistId } : null,
   };
 };
