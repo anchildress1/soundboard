@@ -165,10 +165,11 @@ async function putAt(
   index: number,
   value: unknown,
 ): Promise<void> {
+  const path = `{${index}}`;
   const written = await tx
     .update(jobs)
     .set({
-      [column.name]: sql`jsonb_set(${column}, ${`{${index}}`}::text[], ${JSON.stringify(value)}::jsonb, true)`,
+      [column.name]: sql`jsonb_set(${column}, ${path}::text[], ${JSON.stringify(value)}::jsonb, true)`,
     })
     .where(and(eq(jobs.id, jobId), sql`jsonb_array_length(${column}) >= ${index}`))
     .returning({ id: jobs.id });
@@ -274,11 +275,10 @@ export async function skipAndRepick(
       .returning({ id: jobs.id });
     if (moved.length === 0) return false;
     if (version !== null) {
+      const path = `{${version - 1},skipped}`;
       await tx
         .update(jobs)
-        .set({
-          picks: sql`jsonb_set(${jobs.picks}, ${`{${version - 1},skipped}`}::text[], 'true')`,
-        })
+        .set({ picks: sql`jsonb_set(${jobs.picks}, ${path}::text[], 'true')` })
         .where(eq(jobs.id, id));
     }
     await alsoWrite(tx);
