@@ -1,5 +1,5 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { db, type Database, type Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
@@ -60,10 +60,6 @@ export async function putConnection(uid: string, row: ConnectionRow): Promise<vo
     });
 }
 
-export async function deleteConnection(uid: string): Promise<void> {
-  await db().delete(connections).where(mine(uid));
-}
-
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
 /** Revokes a stored grant at Google; false, and reported, when Google didn't confirm it. */
@@ -93,10 +89,16 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
  */
 export async function revokeGrant(uid: string): Promise<boolean> {
   const connection = await getConnection(uid);
-  const revoked = connection?.tokenCiphertext
-    ? await revokeAtGoogle(connection.tokenCiphertext)
-    : true;
-  await deleteConnection(uid);
+  if (!connection) return true;
+  const { tokenCiphertext } = connection;
+  const revoked = tokenCiphertext ? await revokeAtGoogle(tokenCiphertext) : true;
+  // A reconnect from another tab can land while Google answers; its new grant stays.
+  const observed = tokenCiphertext
+    ? eq(connections.tokenCiphertext, tokenCiphertext)
+    : isNull(connections.tokenCiphertext);
+  await db()
+    .delete(connections)
+    .where(and(mine(uid), observed));
   return revoked;
 }
 

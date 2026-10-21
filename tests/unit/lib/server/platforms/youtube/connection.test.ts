@@ -6,7 +6,6 @@ import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import {
   accessTokenFor,
-  deleteConnection,
   getConnection,
   markRevoked,
   putConnection,
@@ -145,20 +144,6 @@ describe('putConnection / getConnection', () => {
 
   it('rejects an unknown user', async () => {
     await expect(putConnection('nobody', connected())).rejects.toThrow();
-  });
-});
-
-describe('deleteConnection', () => {
-  it("deletes only that user's connection", async () => {
-    await putConnection(UID, connected());
-    await putConnection('sub-b', connected({ channelId: 'UC-b' }));
-    await deleteConnection(UID);
-    expect(await getConnection(UID)).toBeNull();
-    expect(await getConnection('sub-b')).not.toBeNull();
-  });
-
-  it('is a no-op without a connection', async () => {
-    await expect(deleteConnection(UID)).resolves.toBeUndefined();
   });
 });
 
@@ -409,5 +394,18 @@ describe('revokeGrant', () => {
   it('is a no-op without a connection', async () => {
     expect(await revokeGrant(UID)).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a reconnect that lands while Google answers the revoke', async () => {
+    await putConnection(UID, connected());
+    fetchMock.mockImplementation(async () => {
+      await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+      return new Response('', { status: 200 });
+    });
+    expect(await revokeGrant(UID)).toBe(true);
+    expect(await getConnection(UID)).toMatchObject({
+      status: 'connected',
+      tokenCiphertext: 'bmV3',
+    });
   });
 });
