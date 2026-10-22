@@ -1,6 +1,6 @@
-import { gt, sql } from 'drizzle-orm';
+import { eq, gt, sql } from 'drizzle-orm';
 import { db, type Database, type Tx } from '$lib/server/core/db';
-import { jobAudience } from '$lib/server/core/schema';
+import { jobAudience, jobAudienceFresh } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
 
 /** The database clock excludes expired research even before scheduled deletion runs. */
@@ -9,11 +9,9 @@ export async function readAudience(
   q: Database | Tx = db(),
 ): Promise<AudienceEvidence | null> {
   const [row] = await q
-    .select({ evidence: jobAudience.evidence })
-    .from(jobAudience)
-    .where(
-      sql`${jobAudience.jobId} = ${id} and ${jobAudience.retrievedAt} > now() - interval '30 days'`,
-    );
+    .select({ evidence: jobAudienceFresh.evidence })
+    .from(jobAudienceFresh)
+    .where(eq(jobAudienceFresh.jobId, id));
   return row?.evidence ?? null;
 }
 

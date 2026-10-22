@@ -497,8 +497,14 @@ describe('createShort', () => {
       audience: {
         retrievedAt: Date.now(),
         query: 'q',
-        hashtags: [SYNTHWAVE],
-        tags: [{ tag: 'synthwave' }],
+        candidateLists: [
+          {
+            videoId: 'peer',
+            title: 'Peer release',
+            hashtags: [SYNTHWAVE],
+            tags: [{ tag: 'synthwave' }],
+          },
+        ],
         top: [],
       },
       pickVersion: 3,
@@ -532,7 +538,7 @@ describe('createShort', () => {
       object: 'uploads/s1',
       sourceObject: SOURCE_OBJECT,
       hashtagCandidates: [SYNTHWAVE],
-      audience: { tags: [{ tag: 'synthwave' }] },
+      audience: { candidateLists: [{ videoId: 'peer', tags: [{ tag: 'synthwave' }] }] },
       pickVersion: 1,
       trace: { sentryTrace: 't-s-1', baggage: 'b' },
       shortId: null,

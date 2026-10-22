@@ -66,8 +66,14 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
     audience: {
       retrievedAt: Date.now(),
       query: 'synthwave music video',
-      hashtags: [SYNTHWAVE, RETROWAVE],
-      tags: [{ tag: 'synthwave' }],
+      candidateLists: [
+        {
+          videoId: 'peer',
+          title: 'Peer release',
+          hashtags: [SYNTHWAVE, RETROWAVE],
+          tags: [{ tag: 'synthwave' }],
+        },
+      ],
       top: [],
     },
     pickVersion: 1,

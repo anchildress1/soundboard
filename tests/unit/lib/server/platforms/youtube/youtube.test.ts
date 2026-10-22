@@ -276,6 +276,7 @@ describe('searchMusicVideos', () => {
     expect(params.get('q')).toBe('synthwave music video');
     expect(params.get('type')).toBe('video');
     expect(params.get('videoCategoryId')).toBe('10');
+    expect(params.get('order')).toBe('viewCount');
     expect(params.get('maxResults')).toBe('25');
     expect(params.get('part')).toBe('id');
     expect(params.get('key')).toBe('key-123');

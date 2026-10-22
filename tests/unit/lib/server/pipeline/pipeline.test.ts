@@ -498,8 +498,12 @@ const context = () => {
     facts: { key: string }[];
     feedback: unknown[];
     skippedVersions?: { title: string }[];
-    candidateHashtags: string[];
-    candidateTags: { tag: string }[];
+    candidateLists: {
+      videoId: string;
+      title: string;
+      hashtags: string[];
+      tags: { tag: string }[];
+    }[];
     audienceTopVideos: unknown[];
     recentUploads?: unknown[];
     brandGuide?: unknown;
@@ -540,13 +544,15 @@ describe('runStep: PICK', () => {
     expect(ctx.facts).toEqual([]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
-    expect(ctx.candidateTags.map((c) => c.tag)).not.toContain(ARTIST);
+    expect(ctx.candidateLists.flatMap((list) => list.tags.map((c) => c.tag))).not.toContain(ARTIST);
     expect(pick.tags).not.toContain(ARTIST);
     expect(await artistRowCount()).toBe(0);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
     expect(called(/playlistItems/)).toHaveLength(0);
     expect(ctx.recentUploads).toEqual([]);
-    expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
+    expect(job.audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual(
+      job.hashtagCandidates,
+    );
   });
 
   it('records the pick request and the stored pick on the smart-pick agent span', async () => {
@@ -607,8 +613,14 @@ describe("runStep: PICK with Nathan's memory", () => {
       audience: {
         retrievedAt: Date.now(),
         query: 'synthwave music video',
-        hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-        tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
+        candidateLists: [
+          {
+            videoId: 'peer',
+            title: 'Peer release',
+            hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+            tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
+          },
+        ],
         top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
       },
     });
@@ -636,7 +648,14 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe(ARTIST);
-    expect(ctx.candidateTags).toEqual([{ tag: 'synthwave' }, { tag: 'outrun' }, { tag: ARTIST }]);
+    expect(ctx.candidateLists).toEqual([
+      {
+        videoId: 'peer',
+        title: 'Peer release',
+        hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+        tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
+      },
+    ]);
     expect(ctx.audienceTopVideos).toEqual([{ title: 'Top', description: 'd', tags: ['outrun'] }]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
@@ -696,9 +715,11 @@ describe("runStep: PICK with Nathan's memory", () => {
     on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
     await runStep(await pickJob());
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    expect((await saved()).audience).toMatchObject({
-      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-    });
+    expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
+      SYNTHWAVE,
+      RETROWAVE,
+      '#newmusic',
+    ]);
 
     on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
     await runStep(await saved());
@@ -713,9 +734,11 @@ describe("runStep: PICK with Nathan's memory", () => {
     );
     expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
-    expect((await saved()).audience).toMatchObject({
-      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-    });
+    expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
+      SYNTHWAVE,
+      RETROWAVE,
+      '#newmusic',
+    ]);
     expect(captureException).not.toHaveBeenCalled();
   });
 });

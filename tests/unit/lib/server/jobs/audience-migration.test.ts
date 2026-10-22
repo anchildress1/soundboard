@@ -45,6 +45,17 @@ describe('genre evidence migration', () => {
       expect((await database.query('select data, picks from jobs')).rows).toEqual([
         { data: { songTitle: 'Song' }, picks: draft },
       ]);
+
+      await database.query(
+        'insert into job_audience (job_id, retrieved_at, evidence) values ($1, now(), $2)',
+        ['old', JSON.stringify({ hashtags: ['#rock'], tags: [{ tag: 'rock' }], top: [] })],
+      );
+      await database.exec(await readFile('drizzle/0003_fresh_genre_evidence_view.sql', 'utf8'));
+      expect((await database.query('select * from job_audience')).rows).toEqual([]);
+      expect((await database.query('select * from job_audience_fresh')).rows).toEqual([]);
+      expect((await database.query('select data, picks from jobs')).rows).toEqual([
+        { data: { songTitle: 'Song' }, picks: draft },
+      ]);
     } finally {
       await database.close();
     }

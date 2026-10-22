@@ -160,8 +160,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         measurements: job.measurements,
         probe: job.probe,
         recent: withThumbs,
-        candidates: audience.hashtags,
-        tagCandidates: audience.tags,
+        candidateLists: audience.candidateLists,
         audience: audience.top,
         skipped: picks
           .filter((p) => p.skipped)
@@ -180,7 +179,6 @@ async function pick(job: JobDoc): Promise<StepOutput> {
     return {
       ...ok({
         state: 'REVIEW',
-        hashtagCandidates: audience.hashtags,
         pickVersion: version,
         audience,
       }),

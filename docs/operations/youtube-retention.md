@@ -1,11 +1,12 @@
 # YouTube genre-search retention
 
 - `job_audience` holds search evidence and its original retrieval time; job JSON holds no research cache.
-- Database reads exclude evidence at least 30 days old. Re-picking refreshes expired evidence; retries and Shorts preserve the original retrieval time.
+- All evidence reads use the `job_audience_fresh` view, which excludes evidence at least 30 days old using the database clock. Re-picking refreshes expired evidence; retries and Shorts preserve the original retrieval time.
 - Migration `0001` discards legacy research because its retrieval time was never recorded; artist drafts remain available.
 - Migration `0002` rejects embedded research at the database write boundary so an older app revision cannot restore it during deployment.
 - After expiry, approval accepts the draft's own selected tags and hashtags, not the expired candidate pool.
-- Candidate lists use first-seen unique terms from one eligible reference video, without pooling unrelated channels, usage counts, or summed views. Other examples remain separate records ordered by their reported views; those numbers do not enter model prompts.
+- Migration `0003` discards incompatible single-list research and adds the freshness view; drafts survive, and expired rows remain inaccessible before daily deletion.
+- Each eligible video supplies a separate labeled list of first-seen unique terms. No cross-video merging, counts, ranking, or weighting; approval uses union membership only. Examples preserve YouTube search order, and view counts never enter candidate logic or model prompts.
 
 ## Daily deletion on Neon
 

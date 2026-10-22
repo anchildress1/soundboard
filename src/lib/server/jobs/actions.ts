@@ -49,7 +49,14 @@ function tagError(
   const allowed = new Set(
     tagPool({
       artist,
-      tagCandidates: job.audience?.tags ?? draft.tags.map((tag) => ({ tag })),
+      candidateLists: job.audience?.candidateLists ?? [
+        {
+          videoId: job.videoId ?? job.id,
+          title: draft.title,
+          hashtags: draft.hashtags,
+          tags: draft.tags.map((tag) => ({ tag })),
+        },
+      ],
     }).map((c) => c.tag.toLowerCase()),
   );
   const stray = tags.filter((tag) => !allowed.has(tag.trim().toLowerCase()));

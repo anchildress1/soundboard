@@ -97,8 +97,14 @@ async function makeJob(
     audience: {
       retrievedAt: Date.now(),
       query: 'synthwave music video',
-      hashtags: candidates,
-      tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag })),
+      candidateLists: [
+        {
+          videoId: 'peer',
+          title: 'Peer release',
+          hashtags: candidates,
+          tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag })),
+        },
+      ],
       top: [],
     },
     ...opts.patch,
@@ -173,6 +179,32 @@ beforeEach(async () => {
 });
 
 describe('approve', () => {
+  it('accepts tags and hashtags selected across separate source lists', async () => {
+    const job = await makeJob({
+      patch: {
+        audience: {
+          retrievedAt: Date.now(),
+          query: 'synthwave music video',
+          candidateLists: [
+            {
+              videoId: 'one',
+              title: 'One',
+              hashtags: [SYNTHWAVE_TAG],
+              tags: [{ tag: 'synthwave' }],
+            },
+            { videoId: 'two', title: 'Two', hashtags: [RETROWAVE], tags: [{ tag: 'outrun' }] },
+          ],
+          top: [],
+        },
+      },
+    });
+    await approve(job, input());
+    expect((await getJob('job1'))!.finalFields).toMatchObject({
+      hashtags: [SYNTHWAVE_TAG, RETROWAVE],
+      tags: ['synthwave', 'outrun'],
+    });
+  });
+
   it('requires REVIEW', async () => {
     const job = await makeJob({ state: 'ANALYZE' });
     const error = await rejection(approve(job, input()));
@@ -247,8 +279,14 @@ describe('approve', () => {
         audience: {
           retrievedAt: Date.now(),
           query: 'q',
-          hashtags: candidates,
-          tags: [{ tag: ARTIST }],
+          candidateLists: [
+            {
+              videoId: 'peer',
+              title: 'Peer release',
+              hashtags: candidates,
+              tags: [{ tag: ARTIST }],
+            },
+          ],
           top: [],
         },
       },
@@ -284,7 +322,7 @@ describe('approve', () => {
   it('rejects any hashtag when the job has no candidates', async () => {
     const job = await makeJob({
       patch: {
-        audience: { retrievedAt: Date.now(), query: 'q', hashtags: [], tags: [], top: [] },
+        audience: { retrievedAt: Date.now(), query: 'q', candidateLists: [], top: [] },
       },
     });
     const error = await rejection(approve(job, input()));

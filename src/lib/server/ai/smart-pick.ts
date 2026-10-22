@@ -14,7 +14,7 @@ import { ARTIST_NAME, type Fact, type Feedback } from '$lib/server/artist/memory
 import { chatJson, stepDeadline } from './model';
 import { stripDeep } from './numerics';
 import { isString, isStrings, shape } from './shape';
-import type { AudienceVideo, TagCandidate } from '$lib/server/pipeline/hashtags';
+import type { AudienceVideo, CandidateList, TagCandidate } from '$lib/server/pipeline/hashtags';
 import {
   agentInput,
   agentOutput,
@@ -84,10 +84,8 @@ export type PickContext = {
   measurements: Measurements | null;
   probe: Probe | null;
   recent: (CatalogVideo & { thumbnail: string | null })[];
-  /** Hashtag candidates from the genre search (R4). */
-  candidates: string[];
-  /** Tag candidates from the genre search's results. */
-  tagCandidates: TagCandidate[];
+  /** Candidates remain labeled by their source video (R4). */
+  candidateLists: CandidateList[];
   /** Genre search examples for metadata format, without causal performance claims. */
   audience: AudienceVideo[];
   facts: Fact[];
@@ -152,21 +150,28 @@ export function weighFeedback(feedback: Feedback[]) {
 }
 
 /**
- * Tags the pick may use: the genre search's tags, with the artist name only on an artist job, even
- * when the search returned it.
+ * Internal membership whitelist, with the artist name only on artist jobs, even when search found it.
  */
-export function tagPool(fix: { artist: boolean; tagCandidates: TagCandidate[] }): TagCandidate[] {
+export function tagPool(fix: { artist: boolean; candidateLists: CandidateList[] }): TagCandidate[] {
   const artist = ARTIST_NAME.toLowerCase();
-  const found = fix.tagCandidates.filter((c) => c.tag.toLowerCase() !== artist);
-  return fix.artist ? [...found, { tag: ARTIST_NAME }] : found;
+  const found = new Map<string, TagCandidate>();
+  for (const list of fix.candidateLists) {
+    for (const { tag } of list.tags) {
+      const key = tag.toLowerCase();
+      if (key !== artist && !found.has(key)) found.set(key, { tag });
+    }
+  }
+  return [...found.values(), ...(fix.artist ? [{ tag: ARTIST_NAME }] : [])];
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
-  const artistTag = ctx.artist ? ` Include "${ARTIST_NAME}".` : '';
+  const artistTag = ctx.artist
+    ? ` Include "${ARTIST_NAME}". This required artist tag may be absent from the reference lists.`
+    : '';
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
     "audienceTopVideos are genre search examples: model the title format and the description's structure and length on them. Do not claim these choices caused audience reach or success.",
-    'candidateHashtags and candidateTags are observed in one reference video, not pooled popularity signals.',
+    'candidateLists keep hashtags and tags labeled by their source video. Select across lists when relevant; do not pool, count, rank, or infer popularity from repeated terms.',
     ctx.artist
       ? "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags."
       : '',
@@ -175,8 +180,8 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     ARTIST_VOICE,
     ctx.artist ? ARTIST_CREDITS : '',
     'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
-    'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
-    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${artistTag} Never the song title. Never invent one.`,
+    'hashtags: pick 3 to 5, copied exactly from a candidateLists hashtags entry, matching your tags where a candidate does. Never invent one.',
+    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateLists tags entry. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${artistTag} Never the song title. Never invent one.`,
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
@@ -216,8 +221,14 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       tags,
     })),
     brandGuide: ctx.brand ?? undefined,
-    candidateHashtags: ctx.candidates,
-    candidateTags: tagPool(ctx),
+    candidateLists: ctx.candidateLists.map(({ videoId, title, hashtags, tags }) => ({
+      videoId,
+      title,
+      hashtags,
+      tags: tags
+        .filter(({ tag }) => tag.toLowerCase() !== ARTIST_NAME.toLowerCase())
+        .map(({ tag }) => ({ tag })),
+    })),
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,
   };
@@ -277,8 +288,7 @@ export type PickFixups = {
   artist: boolean;
   songTitle: string;
   chunks: Chunk[];
-  candidates: string[];
-  tagCandidates: TagCandidate[];
+  candidateLists: CandidateList[];
   facts: Fact[];
   measurements: Measurements | null;
   probe: Probe | null;
@@ -395,7 +405,8 @@ export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
     tagPool(fix).map((c) => c.tag),
     fix,
   );
-  const hashtags = pickHashtags(draft, fix.candidates, tags);
+  const allowedHashtags = [...new Set(fix.candidateLists.flatMap((list) => list.hashtags))];
+  const hashtags = pickHashtags(draft, allowedHashtags, tags);
 
   // tidy() runs first so `#<word>` can't turn into a hashtag after the brackets go.
   let body = tidy(

@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  pgView,
   text,
   timestamp,
   unique,
@@ -106,6 +107,13 @@ export const jobAudience = pgTable(
     evidence: jsonb('evidence').$type<AudienceEvidence>().notNull(),
   },
   (t) => [index('job_audience_retrieved_idx').on(t.retrievedAt)],
+);
+
+export const jobAudienceFresh = pgView('job_audience_fresh').as((qb) =>
+  qb
+    .select()
+    .from(jobAudience)
+    .where(sql`${jobAudience.retrievedAt} > now() - interval '30 days'`),
 );
 
 /**

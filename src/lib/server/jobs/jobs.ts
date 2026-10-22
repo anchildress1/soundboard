@@ -119,7 +119,9 @@ async function hydrateJob(row: typeof jobs.$inferSelect, q: Database | Tx): Prom
   return {
     ...doc,
     audience,
-    hashtagCandidates: audience?.hashtags ?? draft?.hashtags ?? doc.finalFields?.hashtags ?? null,
+    hashtagCandidates: audience
+      ? [...new Set(audience.candidateLists.flatMap((list) => list.hashtags))]
+      : (draft?.hashtags ?? doc.finalFields?.hashtags ?? null),
   };
 }
 

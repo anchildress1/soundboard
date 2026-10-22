@@ -2,7 +2,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '$lib/server/core/db';
-import { jobAudience, jobs } from '$lib/server/core/schema';
+import { jobAudience, jobAudienceFresh, jobs } from '$lib/server/core/schema';
 import { deleteExpiredAudience, readAudience, saveAudience } from '$lib/server/jobs/audience';
 import { claimJob, getJob, latestPick, releaseJob, transitionJob } from '$lib/server/jobs/jobs';
 import { jobRow } from '$lib/server/jobs/rows';
@@ -15,8 +15,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const evidence = (retrievedAt = Date.now()): AudienceEvidence => ({
   retrievedAt,
   query: 'synthwave music video',
-  hashtags: ['#synthwave'],
-  tags: [{ tag: 'synthwave' }],
+  candidateLists: [
+    {
+      videoId: 'peer',
+      title: 'A peer release',
+      hashtags: ['#synthwave'],
+      tags: [{ tag: 'synthwave' }],
+    },
+  ],
   top: [{ title: 'A peer release', description: 'Peer copy.', tags: ['synthwave'], views: 42 }],
 });
 
@@ -59,6 +65,9 @@ describe('readAudience', () => {
       });
 
       expect(await readAudience('j1', tx)).toEqual(visible ? stored : null);
+      expect(
+        await tx.select({ evidence: jobAudienceFresh.evidence }).from(jobAudienceFresh),
+      ).toEqual(visible ? [{ evidence: stored }] : []);
       expect(await tx.select().from(jobAudience)).toHaveLength(1);
     });
   });
@@ -131,6 +140,11 @@ describe('deleteExpiredAudience', () => {
           evidence: evidence(),
         });
       }
+
+      expect(await tx.select({ id: jobAudienceFresh.jobId }).from(jobAudienceFresh)).toEqual([
+        { id: 'fresh' },
+      ]);
+      expect(await tx.select().from(jobAudience)).toHaveLength(3);
 
       expect(await deleteExpiredAudience(tx)).toBe(2);
       expect(await deleteExpiredAudience(tx)).toBe(0);
