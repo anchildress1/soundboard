@@ -282,4 +282,4 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 
 ## License
 
-MIT.
+PolyForm Noncommercial 1.0.0 (source-available). Releases through v1.0.0 stay MIT.

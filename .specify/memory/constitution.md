@@ -22,19 +22,24 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
 - Audio numbers MUST come from ffmpeg. Model-emitted numerics MUST be stripped.
 - Hashtags and tags MUST come from the job's candidate lists. Anything else is rejected.
 - UI text is plain labels. No persona or chatbot copy.
-- Description voice MUST be grounded in the artist's own writing, never invented.
+- Description voice MUST be grounded in the artist's own writing, never invented. The only
+  exception is peer influence the artist explicitly chooses through saved per-role settings.
+  Copied peer sentences or distinctive phrases MUST NOT appear.
 - Nathan's surname MUST NOT be written in code, fixtures, prompts, commits or docs, and MUST NOT
   be filtered from runtime data.
 
-### III. One Service, Page-Driven
+### III. One Service, One Model Provider, Page-Driven
 
-- One Cloud Run service and one model endpoint. No added services, queues, functions or
-  background workers.
-- The pipeline advances one step per page request, each under about 2 minutes, claimed in a
-  database transaction.
-- A cold, busy or unauthorized dependency MUST return a wait reason immediately. A wait never
-  fails a job.
-- Nothing runs unattended; the user's open page drives every step.
+- One Cloud Run service and one model provider. No added services, queues, functions or
+  background workers, with two exceptions:
+  - Research and learning stages (spec 005) MAY run server-side, independent of the browser.
+    Their plan chooses the mechanism.
+  - One scheduled database retention job deletes expired YouTube statistics (Platform Terms).
+- Every other pipeline step advances one step per page request, each under about 2 minutes,
+  claimed in a database transaction.
+- A cold or busy dependency, or a missing or revoked user grant, MUST return a wait reason
+  immediately. A wait never fails a job. A rejected app credential is a failure.
+- Outside the two exceptions, nothing runs unattended; the user's open page drives every step.
 
 Rationale: one person watches each run; scale comes from raising instance limits, not new parts.
 
@@ -44,6 +49,7 @@ Rationale: one person watches each run; scale comes from raising instance limits
   `jobs`, `pipeline`, `ai`, `media`). Tests mirror the same paths.
 - Each external platform MUST live in its own folder, `src/lib/server/platforms/<name>/`.
   Platform API calls, scopes and error mapping MUST NOT appear outside it.
+- The model provider is not a publishing platform. Its client lives in `src/lib/server/ai/`.
 - Core domains reach a platform only through that folder's `index.ts`.
 - A shared platform interface is extracted when the second platform lands, not before.
 - Artist-specific values (name, voice, channel IDs) MUST NOT be constants in core code. They
@@ -56,12 +62,12 @@ addition local instead of spreading through every file.
 
 - Coverage floors: 85% lines, functions and statements; 80% branches. Never lowered.
 - Every new module gets positive, negative, error and edge-case tests.
-- Mock only at process boundaries (GCS, Secret Manager, KMS, platform HTTP,
-  `llama-server`, ffmpeg). Never mock internal modules.
+- Mock only at process boundaries (GCS, Secret Manager, KMS, platform HTTP, the model
+  provider's HTTP API, ffmpeg). Never mock internal modules.
 - The database is never mocked. Tests run it as PGlite with the real migrations.
 - E2E runs on desktop Chrome and Pixel 7 against the in-repo fakes.
-- Provider behavior that Google does not document MUST be proven by a recorded manual gate
-  before dependent code is built. Passing mocked tests does not close that gate.
+- External service or library behavior that is not documented MUST be proven by a recorded
+  manual gate before dependent code is built. Passing mocked tests does not close that gate.
 
 ### VI. Simplicity
 
@@ -77,6 +83,18 @@ addition local instead of spreading through every file.
 - Signed URLs are issued only after an ownership check.
 - Sentry never records audio, image bytes, tokens or ciphertext.
 - Secrets live only in Secret Manager or a local `.env`. Never in the repo.
+
+## Platform Terms
+
+- The app MUST NOT violate the YouTube API Services Terms of Service or Developer Policies.
+- Every stored YouTube statistic, peer or the artist's own, MUST carry its retrieval time and
+  MUST be kept at most 30 days. The database enforces it: statistics older than 30 days MUST be
+  unreadable by the app and MUST be deleted daily, even while the app is idle.
+- Until YouTube accepts the derived-metrics amendment, no number MAY be calculated from YouTube
+  statistics, and no channel MAY be scored, ranked or grouped by its statistics.
+- API data MUST NOT be aggregated across different content owners.
+
+Rationale: a policy violation can cost the API access that uploads and verification depend on.
 
 ## Development Workflow
 
@@ -96,4 +114,4 @@ addition local instead of spreading through every file.
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 1.0.3 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-17
+**Version**: 2.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-22
