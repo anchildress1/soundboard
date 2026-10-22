@@ -46,7 +46,7 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
 
 const candidates = [SYNTHWAVE, RETROWAVE_TAG, '#newmusic', '#electronic', '#indie', '#80s'];
 const tagNames = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'outrun'];
-const cands = (...tags: string[]) => tags.map((tag) => ({ tag, usedBy: 1 }));
+const cands = (...tags: string[]) => tags.map((tag) => ({ tag }));
 const tagCandidates = cands(...tagNames);
 
 const facts: Fact[] = [
@@ -271,7 +271,7 @@ describe('buildPickMessages', () => {
     expect(body.artist).toBe(ARTIST);
     expect(body.artistNotes).toBe('live take');
     expect(body.candidateHashtags).toEqual(candidates);
-    expect(body.candidateTags).toEqual([...tagCandidates, { tag: ARTIST, usedBy: 0 }]);
+    expect(body.candidateTags).toEqual([...tagCandidates, { tag: ARTIST }]);
     expect(body.ffmpeg).toEqual(measurements());
     expect(system(messages)).toContain("recentUploads are the artist's own uploads");
     expect(system(messages)).toContain('credit lines');
@@ -307,8 +307,19 @@ describe('buildPickMessages', () => {
     const audience = [{ title: 'Top hit', description: 'Credits.', tags: ['outrun'], views: 9000 }];
     const messages = buildPickMessages(ctx({ audience }));
     const body = context(messages);
-    expect(body.audienceTopVideos).toEqual(audience);
-    expect(system(messages)).toContain('most-viewed music videos in this genre');
+    expect(body.audienceTopVideos).toEqual([
+      { title: 'Top hit', description: 'Credits.', tags: ['outrun'] },
+    ]);
+    expect(JSON.stringify(body)).not.toContain('9000');
+    expect(JSON.stringify(body)).not.toContain('views');
+    expect(system(messages)).toContain('genre search examples');
+    expect(system(messages)).toContain(
+      'Do not claim these choices caused audience reach or success',
+    );
+    expect(system(messages)).not.toContain('usedBy');
+    expect(system(messages)).toContain(
+      'observed in one reference video, not pooled popularity signals',
+    );
     expect(system(messages)).toContain('copied exactly from a candidateTags tag');
     expect(system(messages)).toContain('must name something the windows heard');
     expect(system(messages)).toContain('Skip mood, scene, and decade words');
@@ -767,8 +778,8 @@ describe('finalizePick: links, tags, and limits', () => {
     );
     const parts = messages[1]!.content as { text?: string }[];
     expect(JSON.parse(parts[0]!.text!).candidateTags).toEqual([
-      { tag: 'synthwave', usedBy: 1 },
-      { tag: ARTIST, usedBy: 0 },
+      { tag: 'synthwave' },
+      { tag: ARTIST },
     ]);
   });
 

@@ -35,6 +35,7 @@ import { artistMemory, connections, jobs, users } from '$lib/server/core/schema'
 import { discard, retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
+import { saveAudience } from '$lib/server/jobs/audience';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
 import { clearStatsCache, quotaResetAt } from '$lib/server/platforms/youtube/youtube';
 
@@ -108,7 +109,10 @@ const chatBodies = () =>
 const put = (patch: Partial<JobDoc> = {}) => seedJob(patch);
 const saved = async () => (await getJob('j1'))!;
 const patchJob = (fields: JobPatch) =>
-  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
+  db().transaction(async (tx) => {
+    await tx.update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
+    if (fields.audience) await saveAudience(tx, 'j1', fields.audience);
+  });
 const claimToken = async () =>
   (await db().select({ token: jobs.claimToken }).from(jobs).where(eq(jobs.id, 'j1')))[0]!.token;
 const arrays = async () =>
@@ -495,7 +499,7 @@ const context = () => {
     feedback: unknown[];
     skippedVersions?: { title: string }[];
     candidateHashtags: string[];
-    candidateTags: { tag: string; usedBy: number }[];
+    candidateTags: { tag: string }[];
     audienceTopVideos: unknown[];
     recentUploads?: unknown[];
     brandGuide?: unknown;
@@ -601,12 +605,10 @@ describe("runStep: PICK with Nathan's memory", () => {
       ...A_JOB,
       hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
       audience: {
+        retrievedAt: Date.now(),
         query: 'synthwave music video',
         hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-        tags: [
-          { tag: 'synthwave', usedBy: 9 },
-          { tag: 'outrun', usedBy: 4 },
-        ],
+        tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
         top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
       },
     });
@@ -634,14 +636,8 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe(ARTIST);
-    expect(ctx.candidateTags).toEqual([
-      { tag: 'synthwave', usedBy: 9 },
-      { tag: 'outrun', usedBy: 4 },
-      { tag: ARTIST, usedBy: 0 },
-    ]);
-    expect(ctx.audienceTopVideos).toEqual([
-      { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
-    ]);
+    expect(ctx.candidateTags).toEqual([{ tag: 'synthwave' }, { tag: 'outrun' }, { tag: ARTIST }]);
+    expect(ctx.audienceTopVideos).toEqual([{ title: 'Top', description: 'd', tags: ['outrun'] }]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
     expect(ctx.feedback).toHaveLength(1);

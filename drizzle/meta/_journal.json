@@ -8,6 +8,20 @@
       "when": 1792572038905,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792689987259,
+      "tag": "0001_genre_evidence_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792690481719,
+      "tag": "0002_reject_embedded_research",
+      "breakpoints": true
     }
   ]
 }

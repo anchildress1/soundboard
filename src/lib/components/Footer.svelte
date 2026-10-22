@@ -1,3 +1,7 @@
+<script lang="ts">
+  import { resolve } from '$app/paths';
+</script>
+
 <footer>
   <p>
     Built for
@@ -7,12 +11,11 @@
       target="_blank"
       rel="noopener noreferrer"><b>Flies Like Robots</b></a
     >
-    by <b>Ashley Childress</b><br />
-    Hacktoberfest Weekend Challenge: Build for a Friend
+    by <b>Ashley Childress</b>
   </p>
+  <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
   <nav class="links" aria-label="Ashley Childress">
-    <!-- Icons from Simple Icons (CC0) and Lucide (ISC). The app runs inside the DEV iframe,
-         so links open a new tab instead of replacing it. -->
+    <!-- Icons from Simple Icons (CC0) and Lucide (ISC). -->
     <a
       href="https://anchildress1.dev"
       target="_blank"

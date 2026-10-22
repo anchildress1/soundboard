@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/pg-core';
 // Relative, not $lib: drizzle-kit loads this file outside Vite's aliases.
 import { JOB_STATES } from '../../types';
+import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const quotedStates = JOB_STATES.map((state) => `'${state}'`).join(', ');
@@ -85,10 +86,26 @@ export const jobs = pgTable(
   },
   (t) => [
     check('jobs_state_check', sql`${t.state} in (${sql.raw(quotedStates)})`),
+    check(
+      'jobs_research_external',
+      sql`not (${t.data} ? 'audience') and not (${t.data} ? 'hashtagCandidates')`,
+    ),
     index('jobs_owner_list_idx')
       .on(t.ownerUid, t.createdAt.desc())
       .where(sql`${t.parentId} is null`),
   ],
+);
+
+export const jobAudience = pgTable(
+  'job_audience',
+  {
+    jobId: text('job_id')
+      .primaryKey()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    retrievedAt: at('retrieved_at').notNull(),
+    evidence: jsonb('evidence').$type<AudienceEvidence>().notNull(),
+  },
+  (t) => [index('job_audience_retrieved_idx').on(t.retrievedAt)],
 );
 
 /**

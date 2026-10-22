@@ -25,6 +25,7 @@ import {
   type NewJob,
 } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
+import { saveAudience } from '$lib/server/jobs/audience';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, SESSION_URI, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
@@ -74,7 +75,10 @@ const pick = (version: number): Pick => ({
 });
 
 const patch = (id: string, fields: JobPatch) =>
-  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, id));
+  db().transaction(async (tx) => {
+    await tx.update(jobs).set(jobSet(fields)).where(eq(jobs.id, id));
+    if (fields.audience) await saveAudience(tx, id, fields.audience);
+  });
 /** Stores picks 1..`count`, version v at index v - 1. */
 const seedPicks = (jobId: string, count: number) =>
   db()
@@ -491,9 +495,10 @@ describe('createShort', () => {
       probe: { durationSec: 180, width: 1920, height: 1080, hasAudio: true },
       hashtagCandidates: [SYNTHWAVE],
       audience: {
+        retrievedAt: Date.now(),
         query: 'q',
         hashtags: [SYNTHWAVE],
-        tags: [{ tag: 'synthwave', usedBy: 2 }],
+        tags: [{ tag: 'synthwave' }],
         top: [],
       },
       pickVersion: 3,
@@ -514,6 +519,7 @@ describe('createShort', () => {
     expect(job.destination).toEqual({ channelId: 'UCflr', channelTitle: 'FLR' });
     expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
     const short = (await getJob('s1'))!;
+    expect(short.audience?.retrievedAt).toBe(job.audience?.retrievedAt);
     expect(short).toMatchObject({
       state: 'HOOK',
       ownerUid: USER_A.uid,
@@ -526,7 +532,7 @@ describe('createShort', () => {
       object: 'uploads/s1',
       sourceObject: SOURCE_OBJECT,
       hashtagCandidates: [SYNTHWAVE],
-      audience: { tags: [{ tag: 'synthwave', usedBy: 2 }] },
+      audience: { tags: [{ tag: 'synthwave' }] },
       pickVersion: 1,
       trace: { sentryTrace: 't-s-1', baggage: 'b' },
       shortId: null,

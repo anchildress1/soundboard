@@ -46,14 +46,17 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 let fetchMock: ReturnType<typeof vi.fn>;
+const RETRIEVED_AT = Date.UTC(2026, 9, 22);
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(RETRIEVED_AT);
   vi.stubEnv('YOUTUBE_API_KEY', 'test-key');
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -99,14 +102,14 @@ describe('genreTerms', () => {
 });
 
 describe('rankHashtags', () => {
-  it('ranks by how many descriptions use a tag, ties in first-seen order', () => {
+  it('keeps first-seen order regardless of how many descriptions repeat a tag', () => {
     const ranked = rankHashtags([
       '#indie #synthwave',
       '#Synthwave #synthwave #newmusic',
       '#newmusic #synthwave',
       '#lofi',
     ]);
-    expect(ranked).toEqual([SYNTHWAVE_TAG, '#newmusic', '#indie', '#lofi']);
+    expect(ranked).toEqual(['#indie', SYNTHWAVE_TAG, '#newmusic', '#lofi']);
   });
 
   it('caps the list', () => {
@@ -182,34 +185,31 @@ describe('similarLength', () => {
 });
 
 describe('rankTags', () => {
-  it('ranks by how many videos use a tag, then by their total views, keeping first spelling', () => {
+  it('keeps first-seen spelling and order regardless of frequency or views', () => {
     const tags = rankTags([
       video('a', 10, ['Synthwave', 'outrun', 'retro']),
       video('b', 500, ['synthwave', 'darkwave']),
       video('c', 20, ['SYNTHWAVE', 'outrun']),
     ]);
     expect(tags).toEqual([
-      { tag: 'Synthwave', usedBy: 3 },
-      { tag: 'outrun', usedBy: 2 },
-      { tag: 'darkwave', usedBy: 1 },
-      { tag: 'retro', usedBy: 1 },
+      { tag: 'Synthwave' },
+      { tag: 'outrun' },
+      { tag: 'retro' },
+      { tag: 'darkwave' },
     ]);
   });
 
-  it("counts a result's description hashtags as tags, once per video", () => {
+  it("includes a result's description hashtags without counting repetitions", () => {
     const tags = rankTags([
       video('a', 10, ['glitch'], 'New one #Glitch #industrial'),
       video('b', 5, [], INDUSTRIAL),
     ]);
-    expect(tags).toEqual([
-      { tag: 'industrial', usedBy: 2 },
-      { tag: 'glitch', usedBy: 1 },
-    ]);
+    expect(tags).toEqual([{ tag: 'glitch' }, { tag: 'industrial' }]);
   });
 
   it('drops hashtags, blanks, and repeats within one video', () => {
     expect(rankTags([video('a', 1, [SYNTHWAVE_TAG, '  ', 'retro', 'Retro '])])).toEqual([
-      { tag: 'retro', usedBy: 1 },
+      { tag: 'retro' },
     ]);
   });
 
@@ -238,7 +238,101 @@ describe('topVideos', () => {
 });
 
 describe('audienceEvidence', () => {
-  it('derives hashtags, tags, and top videos from one genre search', async () => {
+  it('does not let repeated tags on other channels influence the reference candidates', async () => {
+    const items = [
+      {
+        id: 'reference',
+        snippet: { title: 'Reference', tags: ['glitch'], description: '#industrial' },
+        statistics: { viewCount: '900' },
+      },
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `other${i}`,
+        snippet: { title: `Other ${i}`, tags: ['synthwave'], description: '#retro' },
+        statistics: { viewCount: '800' },
+      })),
+    ];
+    fetchMock
+      .mockResolvedValueOnce(json({ items: items.map(({ id }) => ({ id: { videoId: id } })) }))
+      .mockResolvedValueOnce(json({ items }));
+
+    const evidence = await audienceEvidence([], null);
+
+    expect(evidence.hashtags).toEqual([INDUSTRIAL]);
+    expect(evidence.tags).toEqual([{ tag: 'glitch' }, { tag: 'industrial' }]);
+    expect(evidence.top).toHaveLength(TOP_VIDEO_COUNT);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { tags: ['glitch'], description: '', expectedHashtags: [], expectedTags: [{ tag: 'glitch' }] },
+    {
+      tags: [],
+      description: INDUSTRIAL,
+      expectedHashtags: [INDUSTRIAL],
+      expectedTags: [{ tag: 'industrial' }],
+    },
+  ])(
+    'skips untagged higher-view results and uses one valid reference: $description',
+    async ({ tags, description, expectedHashtags, expectedTags }) => {
+      fetchMock
+        .mockResolvedValueOnce(
+          json({ items: ['untagged', 'reference'].map((videoId) => ({ id: { videoId } })) }),
+        )
+        .mockResolvedValueOnce(
+          json({
+            items: [
+              {
+                id: 'untagged',
+                snippet: { tags: [' ', '#invalid'] },
+                statistics: { viewCount: '900' },
+              },
+              { id: 'reference', snippet: { tags, description }, statistics: { viewCount: '800' } },
+            ],
+          }),
+        );
+
+      const evidence = await audienceEvidence([], null);
+
+      expect(evidence.hashtags).toEqual(expectedHashtags);
+      expect(evidence.tags).toEqual(expectedTags);
+      expect(evidence.top.map(({ views }) => views)).toEqual([900, 800]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('returns no candidates when all results lack valid reference metadata', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json({ items: [{ id: { videoId: 'a' } }] }))
+      .mockResolvedValueOnce(
+        json({
+          items: [{ id: 'a', snippet: { tags: ['#invalid'] }, statistics: { viewCount: '900' } }],
+        }),
+      );
+
+    const evidence = await audienceEvidence([], null);
+
+    expect(evidence.hashtags).toEqual([]);
+    expect(evidence.tags).toEqual([]);
+    expect(evidence.top).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the retrieval start time when catalog requests finish later', async () => {
+    fetchMock
+      .mockImplementationOnce(async () => {
+        vi.spyOn(Date, 'now').mockReturnValue(RETRIEVED_AT + 1_000);
+        return json({ items: [{ id: { videoId: 'a' } }] });
+      })
+      .mockImplementationOnce(async () => {
+        vi.spyOn(Date, 'now').mockReturnValue(RETRIEVED_AT + 2_000);
+        return json({ items: [] });
+      });
+
+    expect((await audienceEvidence([], null)).retrievedAt).toBe(RETRIEVED_AT);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses only the highest-view reference for candidates and preserves individual top examples', async () => {
     fetchMock
       .mockResolvedValueOnce(
         json({ items: [{ id: { videoId: 'v1' } }, { id: {} }, { id: { videoId: 'v2' } }] }),
@@ -263,13 +357,14 @@ describe('audienceEvidence', () => {
     const evidence = await audienceEvidence([chunk(['synthwave'])], null);
 
     expect(evidence.query).toBe('synthwave music video');
-    expect(evidence.hashtags).toEqual([SYNTHWAVE_TAG, '#retro', '#80s']);
-    expect(evidence.tags).toEqual([
-      { tag: 'synthwave', usedBy: 2 },
-      { tag: '80s', usedBy: 1 },
-      { tag: 'retro', usedBy: 1 },
-    ]);
+    expect(evidence.retrievedAt).toBe(RETRIEVED_AT);
+    expect(evidence.hashtags).toEqual([SYNTHWAVE_TAG, '#80s']);
+    expect(evidence.tags).toEqual([{ tag: 'synthwave' }, { tag: '80s' }]);
     expect(evidence.top.map((v) => v.title)).toEqual(['Two', 'One']);
+    expect(evidence.top.map((v) => v.description)).toEqual([
+      '#Synthwave #80s',
+      '#synthwave #retro',
+    ]);
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
     expect(searchUrl.pathname).toBe('/youtube/v3/search');
     expect(searchUrl.searchParams.get('q')).toBe('synthwave music video');
@@ -319,7 +414,7 @@ describe('audienceEvidence', () => {
     expect(searchUrl.searchParams.get('videoDuration')).toBe('short');
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.hashtags).toEqual([INDUSTRIAL]);
-    expect(evidence.tags).toEqual([{ tag: 'industrial', usedBy: 1 }]);
+    expect(evidence.tags).toEqual([{ tag: 'industrial' }]);
   });
 
   it('reads every search result back for the evidence', async () => {
@@ -355,6 +450,7 @@ describe('audienceEvidence', () => {
   it('returns empty evidence and skips the videos lookup when the search finds nothing', async () => {
     fetchMock.mockResolvedValueOnce(json({}));
     expect(await audienceEvidence([], null)).toEqual({
+      retrievedAt: RETRIEVED_AT,
       query: 'music video',
       hashtags: [],
       tags: [],

@@ -91,10 +91,12 @@
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, top 50, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length.
   - Only results within 60 seconds of the upload's length count, so hour-long mixes and compilations never become evidence. Results with an unknown length never count.
   - Genre terms fold into the more specific heard genre that contains them ("electronic" into "industrial electronic") before the top two seed the query.
-  - Hashtag candidates: every `#hashtag` in those descriptions, ranked by frequency; top 30.
-  - Tag candidates: their tags and description hashtags, ranked by how many videos use them, then by those videos' views; top 40.
+  - Candidate source: the most-viewed eligible result with usable tags or description hashtags. Both candidate lists come only from that one reference video; unrelated channels' metadata is not pooled.
+  - Hashtag candidates: unique `#hashtags` observed in that reference description, in first-seen order; at most 30. No cross-channel frequency counts.
+  - Tag candidates: unique tags and description hashtag terms from that reference, in first-seen order; at most 40. No usage counts, summed views, or combined scores.
   - Top videos: the 5 most-viewed results. The title format and the description's structure and length are modeled on them.
-  - Stored on the job, so re-runs reuse it.
+  - Research is stored separately in `job_audience` with its original retrieval time. Database queries exclude rows at least 30 days old; a daily Neon Function deletes expired rows even without app activity. Retries and Shorts never extend the retrieval time. Re-picking after expiry fetches fresh research.
+  - Raw view counts order the examples but never enter model prompts. After expiry, existing drafts retain only their selected tags and hashtags for approval validation; the full research pool is unavailable.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
 - Every run reads as Nathan until spec 002 makes voice per artist: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
@@ -145,7 +147,7 @@
 
 **R8 · Sign-in**
 
-- Signed out, the home page shows sign-in; other app pages lead there and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
+- Signed out, the home page shows sign-in; `/privacy` is public through the shared footer. Other app pages lead home and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
 - One Google consent screen grants identity plus YouTube upload and read access, offline, so sign-in also connects the user's channel.
 - While invite gating is enabled, only active invitations get a session; anyone else sees "not invited" and no session, user record or token is retained. One setting opens signup later; accounts that sign up while it's open stay on the allowlist until revoked.
 - First redemption atomically binds a normalized invited email to the verified Google account ID. Later email changes preserve that binding; another account cannot claim the old email's invitation or artist link.
@@ -258,7 +260,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Signed-in home:** own jobs, newest first, with title, state and a continuation link; no other user's work.
 - **Header:** one aligned row: the user's channel handle and video and subscriber counts, Connections, Brand guide (artist-linked user only), and Sign out. A "not invited" or "sign-in expired" notice shows under the header on the sign-in view.
 - **Connections:** one row per platform with Connected as … / Not connected and Connect, Reconnect, Disconnect. YouTube only for now.
-- **Footer:** one quiet row: credits, then icon links to Ashley's site and socials. Neutral colors only.
+- **Footer:** artist and Ashley credits, a public Privacy policy link, then icon links to Ashley's site and socials. No DEV challenge credit. Neutral colors only.
 - **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
 - **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.

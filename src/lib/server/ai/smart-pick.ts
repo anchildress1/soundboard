@@ -88,7 +88,7 @@ export type PickContext = {
   candidates: string[];
   /** Tag candidates from the genre search's results. */
   tagCandidates: TagCandidate[];
-  /** The genre search's most-viewed results: the evidence for what reaches listeners. */
+  /** Genre search examples for metadata format, without causal performance claims. */
   audience: AudienceVideo[];
   facts: Fact[];
   feedback: Feedback[];
@@ -158,14 +158,15 @@ export function weighFeedback(feedback: Feedback[]) {
 export function tagPool(fix: { artist: boolean; tagCandidates: TagCandidate[] }): TagCandidate[] {
   const artist = ARTIST_NAME.toLowerCase();
   const found = fix.tagCandidates.filter((c) => c.tag.toLowerCase() !== artist);
-  return fix.artist ? [...found, { tag: ARTIST_NAME, usedBy: 0 }] : found;
+  return fix.artist ? [...found, { tag: ARTIST_NAME }] : found;
 }
 
 export function buildPickMessages(ctx: PickContext): ChatMessage[] {
   const artistTag = ctx.artist ? ` Include "${ARTIST_NAME}".` : '';
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
-    "audienceTopVideos are the most-viewed music videos in this genre, ranked by views. They are the evidence for what reaches listeners: model the title format and the description's structure and length on them.",
+    "audienceTopVideos are genre search examples: model the title format and the description's structure and length on them. Do not claim these choices caused audience reach or success.",
+    'candidateHashtags and candidateTags are observed in one reference video, not pooled popularity signals.',
     ctx.artist
       ? "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags."
       : '',
@@ -175,7 +176,7 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     ctx.artist ? ARTIST_CREDITS : '',
     'Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep his slang, asides, the song title as styled, and the credited name exactly.',
     'hashtags: pick 3 to 5, copied exactly from candidateHashtags, matching your tags where a candidate does. Never invent one.',
-    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. usedBy is how many of the genre's top videos use it. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${artistTag} Never the song title. Never invent one.`,
+    `tags: pick 5 to ${MAX_TAGS}, each copied exactly from a candidateTags tag. Every tag must name something the windows heard: a genre, subgenre, style, or instrument a listener would search for. Skip mood, scene, and decade words (like neon, night city, 90s) unless the windows name them. Fewer strong tags beat many weak ones.${artistTag} Never the song title. Never invent one.`,
     ctx.brand
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
@@ -209,7 +210,11 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
       description: v.description.slice(0, RECENT_DESCRIPTION_CHARS),
       publishedAt: v.publishedAt,
     })),
-    audienceTopVideos: ctx.audience,
+    audienceTopVideos: ctx.audience.map(({ title, description, tags }) => ({
+      title,
+      description,
+      tags,
+    })),
     brandGuide: ctx.brand ?? undefined,
     candidateHashtags: ctx.candidates,
     candidateTags: tagPool(ctx),

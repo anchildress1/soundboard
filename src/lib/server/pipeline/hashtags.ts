@@ -16,17 +16,15 @@ export const TAG_CANDIDATE_LIMIT = 40;
 export const TOP_VIDEO_COUNT = 5;
 const TOP_DESCRIPTION_CHARS = 700;
 
-/** One of the most-viewed genre search results, as the model sees it. */
+/** A genre search example with its original view count for sorting. */
 export type AudienceVideo = { title: string; description: string; tags: string[]; views: number };
 
-/** A tag from the genre search and how many of its results use it. */
-export type TagCandidate = { tag: string; usedBy: number };
+/** A tag observed in a genre search result. */
+export type TagCandidate = { tag: string };
 
-/**
- * What the genre's audience responds to, from the genre search: the deterministic hashtag and tag
- * candidates, and the most-viewed results as examples. Stored on the job so re-runs reuse it.
- */
+/** Genre search candidates and examples, stored with their original retrieval time. */
 export type AudienceEvidence = {
+  retrievedAt: number;
   query: string;
   hashtags: string[];
   tags: TagCandidate[];
@@ -63,44 +61,29 @@ export function genreTerms(chunks: Chunk[], limit = 2): string[] {
     .map(([term]) => term);
 }
 
-/** Hashtags across descriptions ranked by how many descriptions use them; ties keep first-seen order. */
+/** Unique observed hashtags in first-seen order, without cross-channel counts. */
 export function rankHashtags(descriptions: string[], limit = CANDIDATE_LIMIT): string[] {
-  const counts = new Map<string, number>();
+  const found = new Set<string>();
   for (const description of descriptions) {
-    for (const tag of parseHashtags(description)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    for (const tag of parseHashtags(description)) found.add(tag);
   }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([tag]) => tag);
+  return [...found].slice(0, limit);
 }
 
-/**
- * Tags and hashtag terms across videos, ranked by how many videos use them, then by those videos'
- * total views.
- * Case-folded for counting; the first spelling seen is kept.
- */
+/** Unique observed tags and hashtag terms, retaining first-seen spelling and order. */
 export function rankTags(videos: CatalogVideo[], limit = TAG_CANDIDATE_LIMIT): TagCandidate[] {
-  const stats = new Map<string, { tag: string; videos: number; views: number }>();
+  const found = new Map<string, TagCandidate>();
   for (const video of videos) {
-    const seen = new Set<string>();
     // A result's own hashtags are tags too: the same evidence, often more specific than its tags.
     const hashtagTerms = parseHashtags(video.description).map((h) => h.slice(1));
     for (const raw of [...video.tags, ...hashtagTerms]) {
       const tag = raw.trim();
       const key = tag.toLowerCase();
-      if (!tag || tag.startsWith('#') || seen.has(key)) continue;
-      seen.add(key);
-      const entry = stats.get(key) ?? { tag, videos: 0, views: 0 };
-      entry.videos += 1;
-      entry.views += video.views;
-      stats.set(key, entry);
+      if (!tag || tag.startsWith('#') || found.has(key)) continue;
+      found.set(key, { tag });
     }
   }
-  return [...stats.values()]
-    .sort((a, b) => b.videos - a.videos || b.views - a.views)
-    .slice(0, limit)
-    .map((entry) => ({ tag: entry.tag, usedBy: entry.videos }));
+  return [...found.values()].slice(0, limit);
 }
 
 export function topVideos(videos: CatalogVideo[], count = TOP_VIDEO_COUNT): AudienceVideo[] {
@@ -141,13 +124,14 @@ export function similarLength(videos: CatalogVideo[], seconds: number): CatalogV
 }
 
 /**
- * Runs the genre search once and derives every candidate list from it. With the upload's length,
- * only results within a minute of it count.
+ * Uses one genre result's metadata for candidates, without pooling different owners' metadata.
+ * With the upload's length, only results within a minute of it count.
  */
-export async function audienceEvidence(
+export function audienceEvidence(
   chunks: Chunk[],
   durationSec: number | null,
 ): Promise<AudienceEvidence> {
+  const retrievedAt = Date.now();
   const query = searchQuery(chunks);
   return toolSpan('smart-pick', 'hashtag_search', { query }, async (span) => {
     const ids = await searchMusicVideos(
@@ -157,10 +141,14 @@ export async function audienceEvidence(
     );
     const results = await videosByIds(ids);
     const found = durationSec === null ? results : similarLength(results, durationSec);
+    const reference = found
+      .toSorted((a, b) => b.views - a.views)
+      .find((video) => rankTags([video]).length > 0);
     const evidence: AudienceEvidence = {
+      retrievedAt,
       query,
-      hashtags: rankHashtags(found.map((v) => v.description)),
-      tags: rankTags(found),
+      hashtags: reference ? rankHashtags([reference.description]) : [],
+      tags: reference ? rankTags([reference]) : [],
       top: topVideos(found),
     };
     span.setAttributes({

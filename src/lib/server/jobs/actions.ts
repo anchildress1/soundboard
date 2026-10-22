@@ -38,11 +38,19 @@ function requireState(job: JobDoc, states: JobState[]): void {
  * Edited tags follow the pick's rules: the job's tag candidates, plus the artist name on an artist
  * job, never the title.
  */
-function tagError(tags: string[], job: JobDoc, artist: boolean): string | undefined {
+function tagError(
+  tags: string[],
+  job: JobDoc,
+  artist: boolean,
+  draft: PickFields,
+): string | undefined {
   const titled = tags.filter((tag) => containsWords(tag, job.songTitle));
   if (titled.length > 0) return `Tags can't contain the song title: ${titled.join(', ')}`;
   const allowed = new Set(
-    tagPool({ artist, tagCandidates: job.audience?.tags ?? [] }).map((c) => c.tag.toLowerCase()),
+    tagPool({
+      artist,
+      tagCandidates: job.audience?.tags ?? draft.tags.map((tag) => ({ tag })),
+    }).map((c) => c.tag.toLowerCase()),
   );
   const stray = tags.filter((tag) => !allowed.has(tag.trim().toLowerCase()));
   if (stray.length > 0) return `Not in this job's tag list: ${stray.join(', ')}`;
@@ -59,10 +67,15 @@ type ApprovalInput = {
 };
 
 /** The approved fields, or a 422 naming each field that breaks the job's rules. */
-function finalFields(input: ApprovalInput, job: JobDoc, artist: boolean): PickFields {
+function finalFields(
+  input: ApprovalInput,
+  job: JobDoc,
+  artist: boolean,
+  draft: PickFields,
+): PickFields {
   const candidates = job.hashtagCandidates ?? [];
   const errors = validateFields(input, candidates);
-  const tags = errors.tags ?? tagError(input.tags, job, artist);
+  const tags = errors.tags ?? tagError(input.tags, job, artist, draft);
   if (tags) errors.tags = tags;
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
@@ -102,7 +115,7 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
     if (connection.channelId !== input.channelId) {
       throw new ActionError(409, 'Your YouTube channel changed. Reload to approve.');
     }
-    const final = finalFields(input, current, await artistJob(current, tx));
+    const final = finalFields(input, current, await artistJob(current, tx), proposed);
 
     const feedback = approvalFeedback(proposed, final, {
       jobId: job.id,

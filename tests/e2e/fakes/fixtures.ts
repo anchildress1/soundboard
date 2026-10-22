@@ -64,9 +64,10 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
     consecutiveFailures: 0,
     hashtagCandidates: [SYNTHWAVE, RETROWAVE],
     audience: {
+      retrievedAt: Date.now(),
       query: 'synthwave music video',
       hashtags: [SYNTHWAVE, RETROWAVE],
-      tags: [{ tag: 'synthwave', usedBy: 3 }],
+      tags: [{ tag: 'synthwave' }],
       top: [],
     },
     pickVersion: 1,
@@ -185,4 +186,9 @@ export const SEED: Seed = {
     picks: pick ? [{ ...pick, skipped: false }] : [],
     chunks,
   })),
+  jobAudience: JOBS.flatMap(({ job }) =>
+    job.audience
+      ? [{ jobId: job.id, retrievedAt: new Date(job.audience.retrievedAt), evidence: job.audience }]
+      : [],
+  ),
 };
