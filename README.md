@@ -197,7 +197,7 @@ Issues and pull requests are welcome.
 
 ## License
 
-This repository's code is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). It is not open source. You may read, run, modify, and share it for personal, research, educational, and nonprofit use. Any commercial use, including running it to grow a monetized channel, selling it, or offering it as a hosted service, needs separate written permission.
+This repository's code is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). It is not open source. You may read, run, modify, and share it for any noncommercial purpose, such as personal study, hobby projects, or research with no commercial application. Charities, schools, public research, safety, health, and environmental organizations, and government bodies may use it however they are funded. Other commercial use, including running it to grow a monetized channel, selling it, or offering it as a hosted service, needs separate written permission.
 
 Artists can email [anchildress1@gmail.com](mailto:anchildress1@gmail.com) to ask for permission to run their own copy, or for an invite to test the hosted version.
 
