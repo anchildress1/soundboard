@@ -6,7 +6,7 @@ Soundboard analyzes a finished music video and drafts its YouTube title, descrip
 [![CI](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml/badge.svg)](https://github.com/anchildress1/soundboard/actions/workflows/codeql.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=coverage)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange)](LICENSE)
 
 ![Node 24](https://img.shields.io/badge/Node-24-5FA04E?logo=nodedotjs&logoColor=white)
 ![SvelteKit 2](https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white)
@@ -197,7 +197,11 @@ Issues and pull requests are welcome.
 
 ## License
 
-This repository's code is licensed under [MIT](LICENSE): you may use, modify, and redistribute it, including commercially, as long as the copyright notice is kept.
+This repository's code is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). It is not open source. You may read, run, modify, and share it for any noncommercial purpose, such as personal study, hobby projects, or research with no commercial application. Charities, schools, public research, safety, health, and environmental organizations, and government bodies may use it however they are funded. Other commercial use, including running it to grow a monetized channel, selling it, or offering it as a hosted service, needs separate written permission.
+
+Artists can email [anchildress1@gmail.com](mailto:anchildress1@gmail.com) to ask for permission to run their own copy, or for an invite to test the hosted version.
+
+Releases up to and including v1.0.0 were published under MIT and stay MIT. The PolyForm terms apply to everything after that release.
 
 Gemma 4's model weights are not part of this repository. Google DeepMind distributes them separately under [Apache 2.0](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf).
 
