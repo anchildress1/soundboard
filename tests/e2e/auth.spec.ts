@@ -2,6 +2,32 @@ import { expect, test } from '@playwright/test';
 import { sessionCookie, signIn, USER_A, USER_B } from './session';
 
 test.describe('signed out', () => {
+  test('opens the privacy policy from the footer without signing in', async ({ page, context }) => {
+    await page.goto('/');
+    const footer = page.getByRole('contentinfo');
+    await expect(footer).toContainText('Ashley Childress');
+    await expect(footer).not.toContainText('Hacktoberfest');
+    await footer.getByRole('link', { name: 'Privacy policy' }).click();
+    await expect(page).toHaveURL('/privacy');
+    await expect(page).toHaveTitle('Privacy policy · Soundboard');
+    await expect(page.getByRole('heading', { name: 'Privacy policy', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Google Privacy Policy' })).toHaveAttribute(
+      'href',
+      'https://policies.google.com/privacy',
+    );
+    expect(await context.cookies()).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      page.viewportSize()!.width,
+    );
+  });
+
+  test('serves the privacy policy directly without a redirect', async ({ request }) => {
+    const response = await request.get('/privacy', { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain('Storage and deletion');
+    expect(response.headers()['set-cookie']).toBeUndefined();
+  });
+
   test('shows only the sign-in view and sets zero cookies', async ({ page, context }) => {
     const response = await page.goto('/');
     expect(response?.headers()['set-cookie']).toBeUndefined();
@@ -84,4 +110,17 @@ test('a client navigation home after the session ends drops the signed-in layout
   await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
   await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
+});
+
+test('opens privacy after a session ends without retaining signed-in controls', async ({
+  page,
+}) => {
+  await signIn(page, USER_B);
+  await page.goto('/');
+  await page.context().clearCookies();
+  await page.getByRole('contentinfo').getByRole('link', { name: 'Privacy policy' }).click();
+  await expect(page).toHaveURL('/privacy');
+  await expect(page.getByRole('heading', { name: 'Privacy policy', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
 });

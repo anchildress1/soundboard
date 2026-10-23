@@ -35,6 +35,7 @@ import { artistMemory, connections, jobs, users } from '$lib/server/core/schema'
 import { discard, retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
+import { saveAudience } from '$lib/server/jobs/audience';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
 import { clearStatsCache, quotaResetAt } from '$lib/server/platforms/youtube/youtube';
 
@@ -108,7 +109,10 @@ const chatBodies = () =>
 const put = (patch: Partial<JobDoc> = {}) => seedJob(patch);
 const saved = async () => (await getJob('j1'))!;
 const patchJob = (fields: JobPatch) =>
-  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
+  db().transaction(async (tx) => {
+    await tx.update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'j1'));
+    if (fields.audience) await saveAudience(tx, 'j1', fields.audience);
+  });
 const claimToken = async () =>
   (await db().select({ token: jobs.claimToken }).from(jobs).where(eq(jobs.id, 'j1')))[0]!.token;
 const arrays = async () =>
@@ -494,8 +498,12 @@ const context = () => {
     facts: { key: string }[];
     feedback: unknown[];
     skippedVersions?: { title: string }[];
-    candidateHashtags: string[];
-    candidateTags: { tag: string; usedBy: number }[];
+    candidateLists: {
+      videoId: string;
+      title: string;
+      hashtags: string[];
+      tags: { tag: string }[];
+    }[];
     audienceTopVideos: unknown[];
     recentUploads?: unknown[];
     brandGuide?: unknown;
@@ -536,13 +544,15 @@ describe('runStep: PICK', () => {
     expect(ctx.facts).toEqual([]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
-    expect(ctx.candidateTags.map((c) => c.tag)).not.toContain(ARTIST);
+    expect(ctx.candidateLists.flatMap((list) => list.tags.map((c) => c.tag))).not.toContain(ARTIST);
     expect(pick.tags).not.toContain(ARTIST);
     expect(await artistRowCount()).toBe(0);
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
     expect(called(/playlistItems/)).toHaveLength(0);
     expect(ctx.recentUploads).toEqual([]);
-    expect(job.audience).toMatchObject({ hashtags: job.hashtagCandidates });
+    expect(job.audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual(
+      job.hashtagCandidates,
+    );
   });
 
   it('records the pick request and the stored pick on the smart-pick agent span', async () => {
@@ -601,11 +611,15 @@ describe("runStep: PICK with Nathan's memory", () => {
       ...A_JOB,
       hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
       audience: {
+        retrievedAt: Date.now(),
         query: 'synthwave music video',
-        hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-        tags: [
-          { tag: 'synthwave', usedBy: 9 },
-          { tag: 'outrun', usedBy: 4 },
+        candidateLists: [
+          {
+            videoId: 'peer',
+            title: 'Peer release',
+            hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+            tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
+          },
         ],
         top: [{ title: 'Top', description: 'd', tags: ['outrun'], views: 9 }],
       },
@@ -634,14 +648,15 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe(ARTIST);
-    expect(ctx.candidateTags).toEqual([
-      { tag: 'synthwave', usedBy: 9 },
-      { tag: 'outrun', usedBy: 4 },
-      { tag: ARTIST, usedBy: 0 },
+    expect(ctx.candidateLists).toEqual([
+      {
+        videoId: 'peer',
+        title: 'Peer release',
+        hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
+        tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
+      },
     ]);
-    expect(ctx.audienceTopVideos).toEqual([
-      { title: 'Top', description: 'd', tags: ['outrun'], views: 9 },
-    ]);
+    expect(ctx.audienceTopVideos).toEqual([{ title: 'Top', description: 'd', tags: ['outrun'] }]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
     expect(ctx.feedback).toHaveLength(1);
@@ -700,9 +715,11 @@ describe("runStep: PICK with Nathan's memory", () => {
     on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
     await runStep(await pickJob());
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    expect((await saved()).audience).toMatchObject({
-      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-    });
+    expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
+      SYNTHWAVE,
+      RETROWAVE,
+      '#newmusic',
+    ]);
 
     on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
     await runStep(await saved());
@@ -717,9 +734,11 @@ describe("runStep: PICK with Nathan's memory", () => {
     );
     expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
-    expect((await saved()).audience).toMatchObject({
-      hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
-    });
+    expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
+      SYNTHWAVE,
+      RETROWAVE,
+      '#newmusic',
+    ]);
     expect(captureException).not.toHaveBeenCalled();
   });
 });

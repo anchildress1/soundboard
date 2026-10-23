@@ -5,6 +5,7 @@ import { jobs } from '$lib/server/core/schema';
 import type { JobDoc } from './jobs';
 
 type Row = typeof jobs.$inferSelect;
+const transient = new Set(['audience', 'hashtagCandidates']);
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 const toMs = (date: Date | null) => (date === null ? null : date.getTime());
@@ -24,6 +25,8 @@ export function fromRow(row: Row): JobDoc {
     uploadStartedAt: toMs(row.uploadStartedAt),
     finalChunkAt: toMs(row.finalChunkAt),
     videoId: row.videoId,
+    audience: null,
+    hashtagCandidates: null,
   };
 }
 
@@ -54,7 +57,7 @@ export function jobRow(doc: JobDoc): typeof jobs.$inferInsert {
     uploadStartedAt: toDate(uploadStartedAt),
     finalChunkAt: toDate(finalChunkAt),
     videoId,
-    data,
+    data: Object.fromEntries(Object.entries(data).filter(([key]) => !transient.has(key))),
   };
 }
 
@@ -71,7 +74,10 @@ const GUARDED = [
   'finalChunkAt',
 ] as const;
 const guarded = new Set<string>(GUARDED);
-type JobData = Omit<JobDoc, (typeof GUARDED)[number] | 'state' | 'videoId'>;
+type JobData = Omit<
+  JobDoc,
+  (typeof GUARDED)[number] | 'state' | 'videoId' | 'audience' | 'hashtagCandidates'
+>;
 
 /** What a step or action may change on a job; `jobSet` drops the guarded fields at runtime too. */
 export type JobPatch = Partial<Omit<JobDoc, (typeof GUARDED)[number] | 'updatedAt'>>;
@@ -83,7 +89,9 @@ export type JobPatch = Partial<Omit<JobDoc, (typeof GUARDED)[number] | 'updatedA
  */
 export function jobSet(patch: JobPatch) {
   const { state, videoId, ...rest } = patch;
-  const data = Object.fromEntries(Object.entries(rest).filter(([key]) => !guarded.has(key)));
+  const data = Object.fromEntries(
+    Object.entries(rest).filter(([key]) => !guarded.has(key) && !transient.has(key)),
+  );
   return {
     state,
     videoId: videoId === undefined ? undefined : sql`coalesce(${jobs.videoId}, ${videoId})`,

@@ -227,6 +227,7 @@ export async function searchMusicVideos(
     q: query,
     type: 'video',
     videoCategoryId: '10',
+    order: 'viewCount',
     maxResults: String(maxResults),
     ...(videoDuration ? { videoDuration } : {}),
   });

@@ -290,6 +290,7 @@ const ROUTES = Object.keys(
 const PATHS = [...new Set(ROUTES)];
 const EXEMPT = [
   '/',
+  '/privacy',
   '/auth/login',
   '/auth/callback',
   '/auth/logout',

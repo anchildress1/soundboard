@@ -42,14 +42,20 @@ describe('layout', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toHaveTextContent(
-      'Built for Flies Like Robots by Ashley Childress Hacktoberfest Weekend Challenge: Build for a Friend',
+      'Built for Flies Like Robots by Ashley Childress',
     );
+    expect(screen.getByRole('contentinfo')).not.toHaveTextContent('Hacktoberfest');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
     const artist = within(screen.getByRole('contentinfo')).getByRole('link', {
       name: 'Flies Like Robots',
     });
     expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
     expect(artist).toHaveAttribute('target', '_blank');
+    const privacy = within(screen.getByRole('contentinfo')).getByRole('link', {
+      name: 'Privacy policy',
+    });
+    expect(privacy).toHaveAttribute('href', '/privacy');
+    expect(privacy).toHaveAttribute('data-sveltekit-reload');
   });
 
   it("links Ashley's site and socials in the footer, opening new tabs", () => {

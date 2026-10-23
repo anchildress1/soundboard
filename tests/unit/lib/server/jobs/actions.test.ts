@@ -1,13 +1,14 @@
 // @vitest-environment node
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jobs/actions';
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
-import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
+import { artistMemory, connections, jobAudience, jobs, users } from '$lib/server/core/schema';
 import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
+import { saveAudience } from '$lib/server/jobs/audience';
 import type { Hook, JobState, Pick, Short } from '$lib/types';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
@@ -51,7 +52,10 @@ const pick = (version: number, title = `Title ${version}`): Pick => ({
 });
 
 const patchJob = (fields: JobPatch) =>
-  db().update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'job1'));
+  db().transaction(async (tx) => {
+    await tx.update(jobs).set(jobSet(fields)).where(eq(jobs.id, 'job1'));
+    if (fields.audience) await saveAudience(tx, 'job1', fields.audience);
+  });
 
 /** B's job by default: no artist link, so its feedback stays on the job. */
 async function makeJob(
@@ -91,9 +95,16 @@ async function makeJob(
     hashtagCandidates: candidates,
     pickVersion: picks > 0 ? picks : null,
     audience: {
+      retrievedAt: Date.now(),
       query: 'synthwave music video',
-      hashtags: candidates,
-      tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag, usedBy: 1 })),
+      candidateLists: [
+        {
+          videoId: 'peer',
+          title: 'Peer release',
+          hashtags: candidates,
+          tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag })),
+        },
+      ],
       top: [],
     },
     ...opts.patch,
@@ -168,6 +179,32 @@ beforeEach(async () => {
 });
 
 describe('approve', () => {
+  it('accepts tags and hashtags selected across separate source lists', async () => {
+    const job = await makeJob({
+      patch: {
+        audience: {
+          retrievedAt: Date.now(),
+          query: 'synthwave music video',
+          candidateLists: [
+            {
+              videoId: 'one',
+              title: 'One',
+              hashtags: [SYNTHWAVE_TAG],
+              tags: [{ tag: 'synthwave' }],
+            },
+            { videoId: 'two', title: 'Two', hashtags: [RETROWAVE], tags: [{ tag: 'outrun' }] },
+          ],
+          top: [],
+        },
+      },
+    });
+    await approve(job, input());
+    expect((await getJob('job1'))!.finalFields).toMatchObject({
+      hashtags: [SYNTHWAVE_TAG, RETROWAVE],
+      tags: ['synthwave', 'outrun'],
+    });
+  });
+
   it('requires REVIEW', async () => {
     const job = await makeJob({ state: 'ANALYZE' });
     const error = await rejection(approve(job, input()));
@@ -239,7 +276,19 @@ describe('approve', () => {
   it('rejects the artist name even when the genre search returned it, on an unlinked job', async () => {
     const job = await makeJob({
       patch: {
-        audience: { query: 'q', hashtags: candidates, tags: [{ tag: ARTIST, usedBy: 4 }], top: [] },
+        audience: {
+          retrievedAt: Date.now(),
+          query: 'q',
+          candidateLists: [
+            {
+              videoId: 'peer',
+              title: 'Peer release',
+              hashtags: candidates,
+              tags: [{ tag: ARTIST }],
+            },
+          ],
+          top: [],
+        },
       },
     });
     expect((await rejection(approve(job, input({ tags: [ARTIST] })))).status).toBe(422);
@@ -271,10 +320,43 @@ describe('approve', () => {
   });
 
   it('rejects any hashtag when the job has no candidates', async () => {
-    const job = await makeJob({ patch: { hashtagCandidates: null } });
+    const job = await makeJob({
+      patch: {
+        audience: { retrievedAt: Date.now(), query: 'q', candidateLists: [], top: [] },
+      },
+    });
     const error = await rejection(approve(job, input()));
     expect(error.status).toBe(422);
     expect(error.fields?.description).toContain(SYNTHWAVE_TAG);
+  });
+
+  it('approves the saved draft after its research expires without retaining the candidate pool', async () => {
+    await makeJob();
+    await db()
+      .update(jobAudience)
+      .set({ retrievedAt: sql`now() - interval '31 days'` });
+    const job = (await getJob('job1'))!;
+    expect(job.audience).toBeNull();
+
+    await approve(job, input());
+
+    expect((await getJob('job1'))!.finalFields).toMatchObject({
+      description: DESCRIPTION,
+      tags: ['synthwave', 'outrun'],
+    });
+  });
+
+  it('rejects a tag from expired research that was never selected in the saved draft', async () => {
+    await makeJob();
+    await db()
+      .update(jobAudience)
+      .set({ retrievedAt: sql`now() - interval '31 days'` });
+
+    const error = await rejection(approve((await getJob('job1'))!, input({ tags: ['42'] })));
+
+    expect(error.status).toBe(422);
+    expect(error.fields?.tags).toContain('Not in this job');
+    expect((await getJob('job1'))!.state).toBe('REVIEW');
   });
 
   it('reports title and tags errors together', async () => {

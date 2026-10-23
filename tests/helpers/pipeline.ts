@@ -264,6 +264,11 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
 /** Inserts `jobDoc(patch)`; its owner must already be seeded. */
 export async function seedJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
   const doc = jobDoc(patch);
-  await seed({ jobs: [jobRow(doc)] });
+  await seed({
+    jobs: [jobRow(doc)],
+    jobAudience: doc.audience
+      ? [{ jobId: doc.id, retrievedAt: new Date(doc.audience.retrievedAt), evidence: doc.audience }]
+      : [],
+  });
   return doc;
 }

@@ -18,6 +18,7 @@ Audience: AI coding agents. Directives only.
 
 ## Data and access
 
+- YouTube API terms: NEVER store a YouTube statistic without its retrieval time. The database hides it after 30 days and deletes it daily. NEVER calculate numbers from YouTube statistics, or score, rank or group channels by them, until YouTube accepts the derived-metrics amendment. NEVER aggregate API data across content owners.
 - `VERIFIED` only after `videos.list` returns the upload. Insert response → `CLAIMED_COMPLETE`.
 - A user is their Google `sub` (`users.uid`). Email is the allowlist key and display only.
 - `users` is the allowlist: the operator adds emails by hand. Sign-in needs an active row while `SIGNUP_MODE=invite`. First sign-in binds `uid`; NEVER rebind it. `SIGNUP_MODE=open` adds a permanent active row per new account.
@@ -39,7 +40,7 @@ Audience: AI coding agents. Directives only.
 
 - App: one Cloud Run service, max 1 instance, no GPU.
 - Model: one Vertex AI dedicated endpoint, one `g2-standard-4` (one L4), scale to zero, max 1 replica. App → `llama-server` paths via invoke routes, service-account auth.
-- NEVER add other services, queues, Cloud Functions, Eventarc, or background workers.
+- NEVER add other services, queues, Cloud Functions, Eventarc, or background workers. Two exceptions (constitution III): spec 005's server-side research and learning stages, and one scheduled database job that deletes expired YouTube statistics.
 - Pipeline is page-driven: one step per `POST /api/jobs/{id}/step`, each under ~2 minutes.
 - Model scaled to zero (429), loading, or busy → return a wait reason immediately. NEVER block a step on it.
 - Each step claims the job with one conditional `UPDATE … RETURNING` (claim token, 3-minute expiry). Release only with the matching token.

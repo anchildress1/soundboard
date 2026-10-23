@@ -5,6 +5,7 @@ import { db, type Database, type Tx } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
+import { readAudience, saveAudience } from './audience';
 
 /** A step's claim on a job; an aborted request frees the job when it lapses. */
 export const CLAIM_TTL_MS = 3 * 60 * 1000;
@@ -108,7 +109,20 @@ export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc>
 
 export async function getJob(id: string): Promise<JobDoc | null> {
   const [row] = await db().select().from(jobs).where(eq(jobs.id, id));
-  return row ? fromRow(row) : null;
+  return row ? hydrateJob(row, db()) : null;
+}
+
+async function hydrateJob(row: typeof jobs.$inferSelect, q: Database | Tx): Promise<JobDoc> {
+  const doc = fromRow(row);
+  const audience = await readAudience(row.id, q);
+  const draft = (row.picks as StoredPick[]).at(-1);
+  return {
+    ...doc,
+    audience,
+    hashtagCandidates: audience
+      ? [...new Set(audience.candidateLists.flatMap((list) => list.hashtags))]
+      : (draft?.hashtags ?? doc.finalFields?.hashtags ?? null),
+  };
 }
 
 export type JobListItem = { id: string; songTitle: string; state: JobState; createdAt: number };
@@ -147,7 +161,7 @@ export async function claimJob(id: string): Promise<{ token: string; job: JobDoc
     })
     .where(and(eq(jobs.id, id), or(isNull(jobs.claimUntil), lt(jobs.claimUntil, sql`now()`))))
     .returning();
-  return row ? { token, job: fromRow(row) } : null;
+  return row ? { token, job: await hydrateJob(row, db()) } : null;
 }
 
 export type StoredPick = Pick & { skipped: boolean };
@@ -213,6 +227,7 @@ export async function releaseJob(
       return false;
     }
     // Step output lands in the same transaction, so a worker that lost its claim persists nothing.
+    if (patch.audience) await saveAudience(tx, id, patch.audience);
     if (writes.pick) await putPick(tx, id, { ...writes.pick, skipped: false });
     if (writes.chunk) await putChunk(tx, id, writes.chunk);
     if (writes.alsoWrite) await writes.alsoWrite(tx);
@@ -307,7 +322,7 @@ export async function pickIn(tx: Tx, id: string, version: number): Promise<Store
 /** Reads and row-locks the job inside the caller's transaction, so concurrent writers queue. */
 export async function lockJob(tx: Tx, id: string): Promise<JobDoc | null> {
   const [row] = await tx.select().from(jobs).where(eq(jobs.id, id)).for('update');
-  return row ? fromRow(row) : null;
+  return row ? hydrateJob(row, tx) : null;
 }
 
 /** Strips server-only fields before a job reaches the browser. */
@@ -411,6 +426,7 @@ export async function createShort(
     if (!stored) return { noPick: true };
     const pick: StoredPick = { ...stored, ...current.finalFields, version: 1, skipped: false };
     await tx.insert(jobs).values({ ...jobRow(shortDoc(current, id)), picks: [pick] });
+    if (current.audience) await saveAudience(tx, id, current.audience);
     await tx
       .update(jobs)
       .set(jobSet({ shortId: id }))

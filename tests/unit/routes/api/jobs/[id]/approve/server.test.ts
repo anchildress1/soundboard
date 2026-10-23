@@ -42,9 +42,16 @@ async function put(id: string, patch: Partial<JobDoc> = {}) {
     state: 'REVIEW',
     hashtagCandidates: CANDIDATES,
     audience: {
+      retrievedAt: Date.now(),
       query: 'synthwave music video',
-      hashtags: CANDIDATES,
-      tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag, usedBy: 1 })),
+      candidateLists: [
+        {
+          videoId: 'peer',
+          title: 'Peer release',
+          hashtags: CANDIDATES,
+          tags: ['synthwave', 'outrun', '42'].map((tag) => ({ tag })),
+        },
+      ],
       top: [],
     },
     pickVersion: 1,

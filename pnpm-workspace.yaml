@@ -1,25 +1,3 @@
-# Supply-chain guard: resolve only versions published at least 7 days ago (value in minutes).
-minimumReleaseAge: 10080
-
-# Direct dependencies pinned deliberately to their latest release at scaffold time (2026-10-03),
-# some newer than 7 days, plus the internal packages that ship in lockstep with them. The guard
-# still applies to every other transitive dependency.
-minimumReleaseAgeExclude:
-  - '@sentry/*'
-  - oxc-parser
-  - '@oxc-parser/*'
-  - '@oxc-project/*'
-  - '@types/node'
-  - eslint
-  - globals
-  - lefthook
-  - 'lefthook-*'
-  - typescript-eslint
-  - '@typescript-eslint/*'
-  - vite
-  - vitest
-  - '@vitest/*'
-
 # lefthook's postinstall only installs hooks; `make install` runs `lefthook install` explicitly.
 # protobufjs's postinstall only checks its CLI version. esbuild (via drizzle-kit) gets its binary
 # from an optional dependency, so its postinstall is redundant.
