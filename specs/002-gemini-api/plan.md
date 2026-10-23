@@ -129,7 +129,7 @@ docs/prd.md, README.md, AGENTS.md, src/routes/privacy/+page.svelte, .specify/mem
 1. **Gate G1:** done on 2026-10-22 (research R12). The long-file failure led to inline window clips.
 2. **Model client + tracing**, with unit tests. Agents compile against the new `ModelRequest`.
 3. **Analyst + ffmpeg `cutWindowClip` and `measureWindow`** (60 s windows).
-4. **G1 follow-up: re-time the pick at the full #20 prompt size** (research R13; needs the owner's OK to spend about $0.30).
+4. **G1 follow-up: re-time the pick at the full #20 prompt size**: done on 2026-10-23, p95 10.5 s (research R13).
 5. **Pick, hook and brand on the new client**, with YouTube-sourced parts marked and redacted.
 6. **Waits:** `model busy` and `model quota spent` through pipeline, brand, view, UI, driver tests.
 7. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (model module, storage fixture).

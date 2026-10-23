@@ -8,19 +8,19 @@
 - **Cleanup:** every object under `g1-check/` was deleted.
 - **Details:** [research R12](research.md#r12--manual-gate-g1-constitution-v-ran-2026-10-22).
 
-| Check                                             | Result                                                                                       |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Register the 2 GB object ×31                      | ✅ 0.3–0.5 s each; no `state` or expiry returned (now moot)                                  |
-| Auth                                              | Key + OAuth → 401; OAuth only → 403. The authorization key is the only credential.           |
-| `store: false` and clip offsets on the wire       | ✅                                                                                           |
-| Clip limits frames **and** audio                  | ✅ only that window's speech and counter                                                     |
-| Tokens scale with clip length                     | ✅ ~1.4k for 15 s, ~2.7k for 29.5 s, ~5.5k for 60 s                                          |
-| Analyst, registered 2 GB file, last window, ≤30 s | ❌ 504 at 120 s ×2, then 255 s                                                               |
-| Fallbacks, same clip                              | 58 MB proxy 34 s; 0.8 MB clip registered 8 s; **60 s clip inline 6.4 s**, adopted            |
-| Argon smart pick p95 (`medium`, 5 runs)           | ✅ 32.8 s                                                                                    |
-| Argon hook pick p95 (`low`, 5 runs)               | ✅ 34.6 s                                                                                    |
-| Per-day quota 429 body                            | Not captured; shape from docs, verify on first occurrence                                    |
-| Follow-up: pick p95 at full #20 prompt (FR-021)   | Pending: 5 Argon runs, about 30k tokens each, about $0.30. Needs the owner's OK. Pass ≤ 45 s |
+| Check                                             | Result                                                                                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Register the 2 GB object ×31                      | ✅ 0.3–0.5 s each; no `state` or expiry returned (now moot)                                                                                       |
+| Auth                                              | Key + OAuth → 401; OAuth only → 403. The authorization key is the only credential.                                                                |
+| `store: false` and clip offsets on the wire       | ✅                                                                                                                                                |
+| Clip limits frames **and** audio                  | ✅ only that window's speech and counter                                                                                                          |
+| Tokens scale with clip length                     | ✅ ~1.4k for 15 s, ~2.7k for 29.5 s, ~5.5k for 60 s                                                                                               |
+| Analyst, registered 2 GB file, last window, ≤30 s | ❌ 504 at 120 s ×2, then 255 s                                                                                                                    |
+| Fallbacks, same clip                              | 58 MB proxy 34 s; 0.8 MB clip registered 8 s; **60 s clip inline 6.4 s**, adopted                                                                 |
+| Argon smart pick p95 (`medium`, 5 runs)           | ✅ 32.8 s                                                                                                                                         |
+| Argon hook pick p95 (`low`, 5 runs)               | ✅ 34.6 s                                                                                                                                         |
+| Per-day quota 429 body                            | Not captured; shape from docs, verify on first occurrence                                                                                         |
+| Follow-up: pick p95 at full #20 prompt (FR-021)   | ✅ 2026-10-23: 5/5 runs at 12.7k input tokens (10 lists × 40 tags + 30 hashtags, 5 examples, 3 recent uploads, 15 chunks), p95 10.5 s, cost $0.15 |
 
 Setup the gate needed that the app doesn't:
 

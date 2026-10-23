@@ -231,4 +231,4 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
     - 5 Argon runs at `medium`.
     - The prompt is 10 full candidate lists (40 tags and 30 hashtags each), 5 top videos and 3 recent uploads: about 30k input tokens each, about $0.30 total at post-increase prices.
   - **Pass:** p95 ≤ 45 s. If it fails, lower the thinking level before raising any budget.
-  - **Status:** pending; it needs the owner's OK to spend.
+  - **Status:** passed on 2026-10-23. All 5 runs succeeded at 12.7k input tokens (about 0.4k output) with a p95 of 10.5 s, for $0.15 in total. The smart-pick minimum call budget stays at the G1 value of 33 s, the slower of the two measurements.
