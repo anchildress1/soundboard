@@ -21,8 +21,8 @@ Replaces the OpenAI-style `ChatMessage[]`.
 
 ```ts
 type Part =
-  | { type: 'text'; text: string }
-  | { type: 'image'; data: string; mime_type: string } // thumbnails, base64
+  | { type: 'text'; text: string; source?: 'youtube' } // source marks YouTube API data (FR-017)
+  | { type: 'image'; data: string; mime_type: string; source?: 'youtube' } // thumbnails, base64
   | { type: 'video'; data: Uint8Array; mime_type: string; start: number; end: number }; // inline window clip (360p MP4); start/end in source seconds
 
 type Turn = { role: 'user' | 'assistant'; parts: Part[] };
@@ -32,9 +32,11 @@ type ModelRequest = { system: string; turns: Turn[] };
 
 - `turns` holds the re-ask history: pick and hook resend the earlier answer as an `assistant` turn plus a `user` follow-up. The first call is one `user` turn.
 - Redacted for Sentry, turn by turn:
-  - `image` → `{type, mime, bytes}`.
+  - `text` with `source` → `{type: 'text', source, chars}`; other text is recorded as is.
+  - `image` → `{type, mime, bytes}`, plus `source` when it's YouTube's.
   - `video` → `{type, mime, bytes, clip: '<start>s–<end>s'}`.
-  - Never `data`.
+  - Never `data`, and never the text of a YouTube-sourced part.
+  - Recorded output and assistant turns: `hashtags` and `tags` → `{count}`, description `#hashtag` → `#…`.
 
 ### `JobView` (`src/lib/types.ts`)
 
