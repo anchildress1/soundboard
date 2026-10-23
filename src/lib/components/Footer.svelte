@@ -109,10 +109,6 @@
     font-weight: 500;
   }
 
-  .artist {
-    color: inherit;
-  }
-
   .artist:hover,
   .artist:focus-visible {
     color: var(--magenta);

@@ -38,7 +38,7 @@ body {
 }
 
 a {
-  color: var(--info);
+  color: inherit;
 }
 
 .btn {
