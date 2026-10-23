@@ -142,7 +142,8 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 
 ## R9 · Privacy and retention
 
-- `store: false` on every interaction. Interactions are stored for 55 days on paid tier by default; nothing here reads them back.
+- `store: false` on every interaction. Without it, interactions are stored for 55 days on the paid tier. `store: false` turns off that state storage only.
+- Abuse monitoring is separate. Google logs prompts and responses for up to 55 days, solely to enforce its Prohibited Use Policy and never for training, and `store: false` doesn't turn it off. Guaranteed zero data retention is offered only on Vertex AI. The app also uses no context caching, no file uploads and no grounding, each of which would add provider storage.
 - Paid-tier terms: content is not used to improve Google products. Abuse-monitoring logging still applies under Google's terms.
 - Sentry (see also R13 for YouTube-sourced text and images):
   - Video parts become `{type: 'video', mime, bytes, clip}`: the byte count and the `<start>s–<end>s` range, never the data.
@@ -216,11 +217,11 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
     - Rely on Sentry's retention setting: not under our control per plan, and still a third-party store. Rejected.
     - Drop prompt tracing: loses the debugging the spans exist for. Rejected.
 - **FR-018: privacy page (III.A.2.e).**
-  - **Decision:** `/privacy` replaces "the self-hosted model" with the Gemini API as a processor. It runs on the paid tier, `store: false` means it keeps nothing, and it doesn't train on the data. It receives short clips of the artist's video and YouTube metadata.
+  - **Decision:** `/privacy` replaces "the self-hosted model" with the Gemini API as a processor. It runs on the paid tier and doesn't train on the data. `store: false` turns off interaction storage, but Google still keeps prompts and responses for up to 55 days for abuse monitoring, and the page says so. It receives short clips of the artist's video and YouTube metadata.
   - The Sentry paragraph also changes: YouTube-sourced text and images are replaced by placeholders.
 - **FR-019: the owner's III.E.4.h position.**
   - **Decision:** drafts informed by YouTube API data are new content for the user's own upload, not metrics, scores or replacements for YouTube data.
-  - API data is used per call only. The provider stores nothing (`store: false`), and app storage stays under #20's 30-day view and daily cleanup.
+  - API data is used per call only. The app asks the provider to store nothing (`store: false`, no caching, files or grounding). The only provider copy is Google's 55-day abuse-monitoring log, and whether that counts toward III.E.4 is unsettled (spec Assumptions; the fallback is Vertex AI zero retention). App storage stays under #20's 30-day view and daily cleanup.
   - The YouTube audit application describes this use.
   - **Risk:** this is a stated position, not a YouTube ruling. A contrary audit answer reopens the spec.
 - **FR-020: the artist's own authorized data (III.E.3.b).**

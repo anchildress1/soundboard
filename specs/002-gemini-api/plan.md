@@ -44,7 +44,7 @@ Replace `llama-server` + Gemma 4 on the Vertex L4 endpoint with the Gemini API t
 - Only one window's small clip passes through the app per call, never the whole video.
 - No retries that block a step.
 - No token, key, URI or media in Sentry.
-- No YouTube API data in traces or captured errors; the provider keeps nothing (FR-017, FR-019).
+- No YouTube API data in traces or captured errors; the provider is asked to store nothing; Google's 55-day abuse-monitoring log is the only provider copy (FR-017, FR-019).
 
 **Scale/Scope**:
 
