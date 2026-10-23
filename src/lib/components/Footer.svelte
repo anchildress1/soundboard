@@ -110,7 +110,8 @@
   }
 
   .artist:hover,
-  .artist:focus-visible {
+  .artist:focus-visible,
+  .artist:is(:hover, :focus-visible) b {
     color: var(--magenta);
   }
 
@@ -125,7 +126,6 @@
     place-items: center;
     width: 40px;
     height: 40px;
-    color: var(--muted);
     transition:
       color 0.15s ease,
       transform 0.15s ease;
