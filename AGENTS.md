@@ -48,7 +48,7 @@ Audience: AI coding agents. Directives only.
 
 ## Stack
 
-- SvelteKit 2, Svelte 5 runes, TypeScript strict, Node 26 (`.nvmrc`), pnpm.
+- SvelteKit 2, Svelte 5 runes, TypeScript strict, Node 24 (`.nvmrc`), pnpm.
 - Data: Neon Postgres via Drizzle (`src/lib/server/core/schema.ts`). Schema change → `pnpm drizzle-kit generate`; commit the SQL in `drizzle/`. NEVER hand-edit applied migrations.
 - Ask before upgrading to SvelteKit 3, TypeScript 7, or adapter-node 6.
 
