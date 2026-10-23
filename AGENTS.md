@@ -40,7 +40,7 @@ Audience: AI coding agents. Directives only.
 
 - App: one Cloud Run service, max 1 instance, no GPU.
 - Model: one Vertex AI dedicated endpoint, one `g2-standard-4` (one L4), scale to zero, max 1 replica. App → `llama-server` paths via invoke routes, service-account auth.
-- NEVER add other services, queues, Cloud Functions, Eventarc, or background workers. Two exceptions (constitution III): spec 005's server-side research and learning stages, and one scheduled database job that deletes expired YouTube statistics.
+- NEVER add other services, queues, Cloud Functions, Eventarc, or background workers. Two exceptions (constitution III): spec 006's server-side research and learning stages, and one scheduled database job that deletes expired YouTube statistics.
 - Pipeline is page-driven: one step per `POST /api/jobs/{id}/step`, each under ~2 minutes.
 - Model scaled to zero (429), loading, or busy → return a wait reason immediately. NEVER block a step on it.
 - Each step claims the job with one conditional `UPDATE … RETURNING` (claim token, 3-minute expiry). Release only with the matching token.

@@ -8,18 +8,19 @@
 - **Cleanup:** every object under `g1-check/` was deleted.
 - **Details:** [research R12](research.md#r12--manual-gate-g1-constitution-v-ran-2026-10-22).
 
-| Check                                             | Result                                                                             |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Register the 2 GB object ×31                      | ✅ 0.3–0.5 s each; no `state` or expiry returned (now moot)                        |
-| Auth                                              | Key + OAuth → 401; OAuth only → 403. The authorization key is the only credential. |
-| `store: false` and clip offsets on the wire       | ✅                                                                                 |
-| Clip limits frames **and** audio                  | ✅ only that window's speech and counter                                           |
-| Tokens scale with clip length                     | ✅ ~1.4k for 15 s, ~2.7k for 29.5 s, ~5.5k for 60 s                                |
-| Analyst, registered 2 GB file, last window, ≤30 s | ❌ 504 at 120 s ×2, then 255 s                                                     |
-| Fallbacks, same clip                              | 58 MB proxy 34 s; 0.8 MB clip registered 8 s; **60 s clip inline 6.4 s**, adopted  |
-| Argon smart pick p95 (`medium`, 5 runs)           | ✅ 32.8 s                                                                          |
-| Argon hook pick p95 (`low`, 5 runs)               | ✅ 34.6 s                                                                          |
-| Per-day quota 429 body                            | Not captured; shape from docs, verify on first occurrence                          |
+| Check                                             | Result                                                                                                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Register the 2 GB object ×31                      | ✅ 0.3–0.5 s each; no `state` or expiry returned (now moot)                                                                                       |
+| Auth                                              | Key + OAuth → 401; OAuth only → 403. The authorization key is the only credential.                                                                |
+| `store: false` and clip offsets on the wire       | ✅                                                                                                                                                |
+| Clip limits frames **and** audio                  | ✅ only that window's speech and counter                                                                                                          |
+| Tokens scale with clip length                     | ✅ ~1.4k for 15 s, ~2.7k for 29.5 s, ~5.5k for 60 s                                                                                               |
+| Analyst, registered 2 GB file, last window, ≤30 s | ❌ 504 at 120 s ×2, then 255 s                                                                                                                    |
+| Fallbacks, same clip                              | 58 MB proxy 34 s; 0.8 MB clip registered 8 s; **60 s clip inline 6.4 s**, adopted                                                                 |
+| Argon smart pick p95 (`medium`, 5 runs)           | ✅ 32.8 s                                                                                                                                         |
+| Argon hook pick p95 (`low`, 5 runs)               | ✅ 34.6 s                                                                                                                                         |
+| Per-day quota 429 body                            | Not captured; shape from docs, verify on first occurrence                                                                                         |
+| Follow-up: pick p95 at full #20 prompt (FR-021)   | ✅ 2026-10-23: 5/5 runs at 12.7k input tokens (10 lists × 40 tags + 30 hashtags, 5 examples, 3 recent uploads, 15 chunks), p95 10.5 s, cost $0.15 |
 
 Setup the gate needed that the app doesn't:
 
@@ -54,6 +55,10 @@ Expected:
   - Pipeline: `ModelBusy` mid-analyze or mid-pick returns `model busy`, keeps finished chunks, and leaves `consecutiveFailures` unchanged. `ModelQuotaSpent` sets `limitUntil`, and later steps wait without calling the provider. Two real failures still set `FAILED`.
   - Tracing: provider `gcp.gemini`, per-call model on both `chat` and `invoke_agent` spans, video redacted to `{type, mime, bytes, clip}` with no data.
   - View: `model` is the analyst model during `PREP`/`ANALYZE` and the pick model after.
+  - YouTube data stays out of Sentry (FR-017):
+    - Pick, hook and brand spans (inputs, raw replies, the finalized pick and re-ask assistant turns), the `hashtag_search` tool result and captured errors contain no YouTube-sourced titles, descriptions, tags or thumbnails, and no copied tags or hashtags, only `{source, chars}` and `{mime, bytes, source}` placeholders.
+    - The song title and notes are still recorded.
+  - The privacy page names the Gemini API as a processor of video clips and YouTube metadata (FR-018).
 - **E2E:** analyze and Short steps show `model busy` from the faked client, after the clip cut runs on the generated fixture video. No `waking model` text remains.
 - **Removal sweep:** `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` returns nothing. `model/` and `build-model.sh` are gone.
 
@@ -63,7 +68,8 @@ Expected:
 2. Upload a 3-minute video and a 15-minute video. Both reach review with chunk N/M shown and every step under about 2 minutes, including the clip cut on Cloud Run (SC-002, SC-003). Check real pick and hook latency against the G1 budgets.
 3. Check the pick: every hashtag and tag is from the candidates, and there are no loudness numbers in the text (SC-004).
 4. Make a Short and propose a brand guide. Both complete.
-5. In Sentry, the job is one trace, with `chat gemini-3.8-flash` and `chat gemini-4-argon` spans and no media or signed-URL queries (SC-007). There's no second `gen_ai.generate_content` span from the AI SDK.
+   - Open `/privacy`: it names the Gemini API (SC-008).
+5. In Sentry, a pick's spans show placeholders where the candidate lists, top videos and recent uploads were, and no YouTube text (SC-007). The job is one trace, with `chat gemini-3.8-flash` and `chat gemini-4-argon` spans and no media or signed-URL queries (SC-007). There's no second `gen_ai.generate_content` span from the AI SDK.
 6. One-time teardown of the GPU deployment (FR-014):
    ```bash
    gcloud ai endpoints list --region us-central1 --project "$GCP_PROJECT_ID"   # find soundboard-model
