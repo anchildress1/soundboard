@@ -34,3 +34,4 @@
 - The provider and model names are the feature itself, so they appear in the spec by design (same as spec 001 naming Google and YouTube).
 - SC-007 and SC-001 name Sentry and GPU spend: both are the operator's own outcomes, kept as written.
 - 2026-10-22: gate G1 ran. Registering the full upload was too slow (120–255 s), so each 60 s window is cut into a small clip and sent inline (6.4 s). Registration, `@google/genai` and the Gemini bucket grants are dropped. One credential: the authorization key.
+- 2026-10-23 update (YouTube API policy review): added FR-017–FR-021 and SC-007–SC-009. They cover API data kept out of traces, the privacy-page disclosure, the owner's III.E.4.h interpretation, the artist's own data going only to that artist's request, and pick latency at the #20 prompt size. All items still pass. No clarification markers.

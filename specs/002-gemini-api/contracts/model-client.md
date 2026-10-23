@@ -51,6 +51,9 @@ export function modelFor(agent: Agent): string; // configured model id
 - **Analyze order:** `limited()` → `cutWindowClip` (`media/ffmpeg.ts`, temp file deleted in `finally`) → `measureWindow` → `chatJson`. `limited()` skips the provider during a spent quota.
 - **Brand propose:** `ModelQuotaSpent` returns `{ wait: 'model quota spent' }`, and the brand page stops polling on that wait. `ModelBusy` returns `model busy` and keeps polling.
 - Wrapped in `chatSpan` with provider `gcp.gemini` and `modelFor(agent)`.
+- **YouTube API data never reaches Sentry (FR-017):**
+  - Callers (smart pick, hook, brand) put every YouTube-sourced field in its own part marked `source: 'youtube'`.
+  - Spans, the `hashtag_search` tool result and captured errors record those parts only as `{source, chars}` or `{mime, bytes, source}` (research R13).
 
 ## Removed exports
 

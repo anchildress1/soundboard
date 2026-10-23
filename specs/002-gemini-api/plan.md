@@ -44,6 +44,7 @@ Replace `llama-server` + Gemma 4 on the Vertex L4 endpoint with the Gemini API t
 - Only one window's small clip passes through the app per call, never the whole video.
 - No retries that block a step.
 - No token, key, URI or media in Sentry.
+- No YouTube API data in traces or captured errors; the provider keeps nothing (FR-017, FR-019).
 
 **Scale/Scope**:
 
@@ -54,16 +55,17 @@ Replace `llama-server` + Gemma 4 on the Vertex L4 endpoint with the Gemini API t
 
 Gates from `.specify/memory/constitution.md` v2.0.0 (amended 2026-10-22 for this spec, 003 and 005).
 
-| Principle                     | Status      | Notes                                                                                                                                                                                                                                    |
-| ----------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I. Owned Data                 | ✅          | The clip is cut from a job already loaded through `authorizedJob` / the claimed step. No new cache or credential crosses users. The API key is app-wide, like the YouTube search key.                                                    |
-| II. Truthful Output           | ✅          | Numerics stripping, candidate-only tags, server-built flags and read-back verify are untouched.                                                                                                                                          |
-| III. One Service, Page-Driven | ✅ amended  | No new service, queue or worker. "One model endpoint" becomes "one model provider". Waits stay immediate (`model busy`, `model quota spent`). A provider 401/403 is a failure, not a wait, so "unauthorized" must mean user grants only. |
-| IV. Domain-Grouped            | ✅ amended  | The client stays in `src/lib/server/ai/model.ts`. IV says every external platform lives in `platforms/<name>/`, with no publishing-only carve-out, so the model provider needs an explicit exemption.                                    |
-| V. Tested at the Boundaries   | ✅ amended  | The mock boundary list swaps `llama-server` for the Gemini API. Gate G1 ran 2026-10-22 (research R12).                                                                                                                                   |
-| VI. Simplicity                | ✅          | Net deletion: model image, Vertex deploy, readiness checks, ffmpeg frame/WAV extraction. One clip cutter replaces them. No compat path.                                                                                                  |
-| Media, Privacy, Secrets       | ✅          | A window clip (a few MB) replaces today's in-memory WAV and frames; the whole video is never buffered. The temp file is deleted in `finally`. The API key lives in Secret Manager. Sentry redacts video to a placeholder.                |
-| Workflow                      | ✅ approved | `package.json` (+`ai`, `@ai-sdk/google`), `deploy.sh`, `service.yaml`, `.env.example`, `playwright.config.ts`, `vite.config.ts`, `Makefile`, `cleanup-policy.json` change. These are repo config; the owner approved them on 2026-10-22. |
+| Principle                     | Status      | Notes                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I. Owned Data                 | ✅          | The clip is cut from a job already loaded through `authorizedJob` / the claimed step. No new cache or credential crosses users. The API key is app-wide, like the YouTube search key.                                                                                                                         |
+| II. Truthful Output           | ✅          | Numerics stripping, candidate-only tags, server-built flags and read-back verify are untouched.                                                                                                                                                                                                               |
+| III. One Service, Page-Driven | ✅ amended  | No new service, queue or worker. "One model endpoint" becomes "one model provider". Waits stay immediate (`model busy`, `model quota spent`). A provider 401/403 is a failure, not a wait, so "unauthorized" must mean user grants only.                                                                      |
+| IV. Domain-Grouped            | ✅ amended  | The client stays in `src/lib/server/ai/model.ts`. IV says every external platform lives in `platforms/<name>/`, with no publishing-only carve-out, so the model provider needs an explicit exemption.                                                                                                         |
+| V. Tested at the Boundaries   | ✅ amended  | The mock boundary list swaps `llama-server` for the Gemini API. Gate G1 ran 2026-10-22 (research R12).                                                                                                                                                                                                        |
+| VI. Simplicity                | ✅          | Net deletion: model image, Vertex deploy, readiness checks, ffmpeg frame/WAV extraction. One clip cutter replaces them. No compat path.                                                                                                                                                                       |
+| Media, Privacy, Secrets       | ✅          | A window clip (a few MB) replaces today's in-memory WAV and frames; the whole video is never buffered. The temp file is deleted in `finally`. The API key lives in Secret Manager. Sentry redacts video to a placeholder.                                                                                     |
+| Platform Terms                | ✅          | Traces carry no YouTube API data (FR-017). The privacy page names Gemini as a processor (FR-018). The provider stores nothing and app storage stays under #20's 30-day view and cleanup (FR-019). The artist's own data serves only their request (FR-020). The III.E.4.h position is stated in research R13. |
+| Workflow                      | ✅ approved | `package.json` (+`ai`, `@ai-sdk/google`), `deploy.sh`, `service.yaml`, `.env.example`, `playwright.config.ts`, `vite.config.ts`, `Makefile`, `cleanup-policy.json` change. These are repo config; the owner approved them on 2026-10-22.                                                                      |
 
 **Amendment:** done in constitution 2.0.0 (2026-10-22). It covers:
 
@@ -95,17 +97,20 @@ specs/002-gemini-api/
 src/lib/server/ai/
 ├── model.ts            # rewritten: AI SDK client, chat, chatJson, ModelBusy, ModelQuotaSpent, modelFor, per-agent min call budget
 ├── chunk-analyst.ts    # one inline video part (the window clip); no frames/WAV
-├── smart-pick.ts       # ModelRequest; thumbnails as image parts
+├── smart-pick.ts       # ModelRequest built on #20's candidateLists; YouTube-sourced fields in their own parts marked source 'youtube'; thumbnails as marked image parts
 ├── numerics.ts, shape.ts   # unchanged
-src/lib/server/artist/brand.ts      # ModelRequest; ModelBusy → 'model busy'; ModelQuotaSpent → 'model quota spent'; no modelStatus
+src/lib/server/artist/brand.ts      # ModelRequest; recent uploads and thumbnails marked source 'youtube'; ModelBusy → 'model busy'; ModelQuotaSpent → 'model quota spent'; no modelStatus
 src/routes/brand/+page.svelte, src/routes/api/brand/propose/+server.ts   # new waits; stop polling on 'model quota spent'; no waking-model copy
 src/lib/server/pipeline/
 ├── pipeline.ts         # drop modelWait/NEEDS_MODEL pre-flight; ModelBusy → 'model busy'; ModelQuotaSpent → limitUntil + 'model quota spent'; analyze order limited() → cutWindowClip → measureWindow
-└── short.ts            # hook-pick via ModelRequest
+└── short.ts            # hook-pick via ModelRequest; YouTube-sourced parts marked
+src/lib/server/pipeline/hashtags.ts # hashtag_search span records list and term counts only (FR-017); job_audience, job_audience_fresh and candidateLists from #20 unchanged
 src/lib/server/media/ffmpeg.ts      # WINDOW_SEC 60; extractWindow → cutWindowClip (360p MP4 temp file) + measureWindow; drop FRAMES_PER_WINDOW
 src/lib/server/core/
 ├── env.ts              # drop modelUrl; add geminiApiKey, analystModel, pickModel
-└── tracing.ts          # Part/ModelRequest, provider gcp.gemini, per-call model on chatSpan and invokeAgent (no MODEL_NAME), video redaction
+└── tracing.ts          # Part/ModelRequest, provider gcp.gemini, per-call model on chatSpan and invokeAgent (no MODEL_NAME), video redaction, YouTube-source redaction (FR-017)
+src/lib/scrub.ts                    # redacts YouTube-sourced prompt text quoted in error messages before capture
+src/routes/privacy/+page.svelte     # Gemini API as processor (FR-018)
 src/lib/server/jobs/view.ts         # JobView.model
 src/lib/types.ts                    # Wait: 'model busy', 'model quota spent'; JobView.model
 src/lib/status.ts (text for both new waits), src/lib/components/Short.svelte, src/lib/components/Track.svelte, src/routes/jobs/[id]/+page.svelte  # label from view.model; new wait texts; drop stale model comments
@@ -114,7 +119,7 @@ tests/unit/… mirrors the above; tests/helpers/pipeline.ts updated for the new 
 deploy.sh, service.yaml, .env.example, playwright.config.ts, vite.config.ts   # config (approved); deploy.sh enables generativelanguage.googleapis.com and drops aiplatform; vite.config.ts generalizes the e2eDb resolveId plugin to redirect ai/model.ts
 Makefile, cleanup-policy.json      # config (approved): drop the model-image target and its .PHONY entry; drop keep-model-2
 model/, build-model.sh             # deleted
-docs/prd.md, README.md, AGENTS.md, .specify/memory/constitution.md   # FR-016
+docs/prd.md, README.md, AGENTS.md, src/routes/privacy/+page.svelte, .specify/memory/constitution.md   # FR-016, FR-018
 ```
 
 **Structure Decision**: Single SvelteKit project. The change stays inside the existing `ai`, `pipeline`, `media`, `core` and `jobs` domains. No new folders except one E2E fake.
@@ -124,11 +129,12 @@ docs/prd.md, README.md, AGENTS.md, .specify/memory/constitution.md   # FR-016
 1. **Gate G1:** done on 2026-10-22 (research R12). The long-file failure led to inline window clips.
 2. **Model client + tracing**, with unit tests. Agents compile against the new `ModelRequest`.
 3. **Analyst + ffmpeg `cutWindowClip` and `measureWindow`** (60 s windows).
-4. **Pick, hook and brand on the new client.**
-5. **Waits:** `model busy` and `model quota spent` through pipeline, brand, view, UI, driver tests.
-6. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (model module, storage fixture).
-7. **Docs:** PRD, AGENTS.md, README (the constitution is already at 2.0.0).
-8. **Deployed manual checks**, then the one-time teardown.
+4. **G1 follow-up: re-time the pick at the full #20 prompt size** (research R13; needs the owner's OK to spend about $0.30).
+5. **Pick, hook and brand on the new client**, with YouTube-sourced parts marked and redacted.
+6. **Waits:** `model busy` and `model quota spent` through pipeline, brand, view, UI, driver tests.
+7. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (model module, storage fixture).
+8. **Docs:** PRD, AGENTS.md, README, the privacy page (the constitution is already at 2.0.0).
+9. **Deployed manual checks**, then the one-time teardown.
 
 ## Complexity Tracking
 

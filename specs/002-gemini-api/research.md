@@ -144,7 +144,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 
 - `store: false` on every interaction. Interactions are stored for 55 days on paid tier by default; nothing here reads them back.
 - Paid-tier terms: content is not used to improve Google products. Abuse-monitoring logging still applies under Google's terms.
-- Sentry:
+- Sentry (see also R13 for YouTube-sourced text and images):
   - Video parts become `{type: 'video', mime, bytes, clip}`: the byte count and the `<start>s–<end>s` range, never the data.
   - Image parts stay `{type, mime, bytes}`.
 
@@ -196,3 +196,39 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 
 - The pick and hook prompts were synthetic, at recorded-size. Real prompts are checked in the deployed manual run.
 - p95s set the minimum call budgets (R7).
+
+## R13 · YouTube API policy compliance (FR-017–FR-021)
+
+Checked against the YouTube API Services Developer Policies (last updated 2026-10-15). Starting point is `main` after #20: genre-search evidence lives in `job_audience` with its retrieval time, every read goes through the `job_audience_fresh` view (rows under 30 days), a daily Neon function deletes the rest, and candidates arrive as up to 10 separate `candidateLists`.
+
+- **FR-017: no YouTube API data in traces (III.E.4).**
+  - **Decision:** mark every YouTube-sourced prompt part at construction with `source: 'youtube'`:
+    - genre-search candidate lists;
+    - top-video titles, descriptions and tags;
+    - the artist's recent uploads;
+    - thumbnails.
+  - **Required split:** today `smart-pick.ts` packs all context into one JSON text part. The YouTube-sourced fields move into their own text parts so they can be marked; song title, notes, windows, facts and feedback stay in the unmarked part. Brand (`brand.ts`) and hook (`short.ts`) mark theirs the same way.
+  - **Redaction:** `redactMessages` turns a marked text part into `{type: 'text', source, chars}` and a marked image into `{type, mime, bytes, source}`. Song title, notes and model output stay.
+  - **Tool span:** the `hashtag_search` span's `gen_ai.tool.call.result` (`hashtags.ts`, today the full `candidateLists`) records only list and term counts.
+  - **Errors:** messages that quote prompt text are redacted the same way before `captureException`.
+  - **Rationale:** III.E.4 caps stored API data at 30 days, and a Sentry span is a store this app doesn't control.
+  - **Alternatives:**
+    - Rely on Sentry's retention setting: not under our control per plan, and still a third-party store. Rejected.
+    - Drop prompt tracing: loses the debugging the spans exist for. Rejected.
+- **FR-018: privacy page (III.A.2.e).**
+  - **Decision:** `/privacy` replaces "the self-hosted model" with the Gemini API as a processor. It runs on the paid tier, `store: false` means it keeps nothing, and it doesn't train on the data. It receives short clips of the artist's video and YouTube metadata.
+  - The Sentry paragraph also changes: YouTube-sourced text and images are replaced by placeholders.
+- **FR-019: the owner's III.E.4.h position.**
+  - **Decision:** drafts informed by YouTube API data are new content for the user's own upload, not metrics, scores or replacements for YouTube data.
+  - API data is used per call only. The provider stores nothing (`store: false`), and app storage stays under #20's 30-day view and daily cleanup.
+  - The YouTube audit application describes this use.
+  - **Risk:** this is a stated position, not a YouTube ruling. A contrary audit answer reopens the spec.
+- **FR-020: the artist's own authorized data (III.E.3.b).**
+  - **Decision:** recent uploads and thumbnails go to Gemini only inside that artist's own pick or brand request.
+  - The `artistJob` gating is unchanged: other users' picks get no artist data.
+- **FR-021: pick latency at the #20 prompt size.**
+  - **Decision:** re-time the pick before building pick changes. This is a G1 follow-up:
+    - 5 Argon runs at `medium`.
+    - The prompt is 10 full candidate lists (40 tags and 30 hashtags each), 5 top videos and 3 recent uploads: about 30k input tokens each, about $0.30 total at post-increase prices.
+  - **Pass:** p95 ≤ 45 s. If it fails, lower the thinking level before raising any budget.
+  - **Status:** pending; it needs the owner's OK to spend.

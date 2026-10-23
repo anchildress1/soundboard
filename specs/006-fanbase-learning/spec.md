@@ -1,6 +1,6 @@
 # Feature Specification: Learn what grows the fanbase
 
-**Feature Branch**: 005-fanbase-learning
+**Feature Branch**: 006-fanbase-learning
 
 **Created**: 2026-10-22
 
