@@ -12,6 +12,8 @@
 
 Run migrations before deploying the cleanup function. Deployment is separate from the app release; the schedule must be enabled on the intended Neon branch.
 
+Neon Functions run only on Node.js 24, while the app runs on 26. Keep `functions/genrecleanup.ts` and everything it imports (`src/lib/server/core/genre-cleanup.ts`, `pg`) to APIs available in Node 24.
+
 ```sh
 pnpm dlx neon@8.10.3 functions deploy genrecleanup \
   --src functions/genrecleanup.ts --runtime nodejs24 \
