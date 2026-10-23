@@ -40,7 +40,12 @@
     inset: 0 auto 0 0;
     width: var(--p, 0%);
     background: var(--magenta);
-    transition: width 0.5s;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .bar i {
+      transition: width 0.5s;
+    }
   }
 
   .state {

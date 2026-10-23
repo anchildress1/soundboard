@@ -126,9 +126,14 @@
     place-items: center;
     width: 40px;
     height: 40px;
-    transition:
-      color 0.15s ease,
-      transform 0.15s ease;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .links a {
+      transition:
+        color 0.15s ease,
+        transform 0.15s ease;
+    }
   }
 
   .links svg {

@@ -60,7 +60,12 @@
   li {
     padding: 5px 8px;
     background: var(--well);
-    animation: pop 0.3s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    li {
+      animation: pop 0.3s ease-out both;
+    }
   }
 
   @keyframes pop {
