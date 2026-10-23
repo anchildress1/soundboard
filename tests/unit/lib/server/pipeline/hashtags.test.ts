@@ -386,7 +386,7 @@ describe('audienceEvidence', () => {
     expect(searchUrl.searchParams.has('videoDuration')).toBe(false);
   });
 
-  it("limits the search to 5 results in the upload's length bucket and keeps those within a minute", async () => {
+  it("searches 50 results in the upload's length bucket and keeps those within a minute", async () => {
     fetchMock
       .mockResolvedValueOnce(
         json({ items: ['near', 'mix', 'far'].map((videoId) => ({ id: { videoId } })) }),
@@ -419,12 +419,45 @@ describe('audienceEvidence', () => {
     const evidence = await audienceEvidence([chunk(['industrial'])], 78);
 
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
-    expect(searchUrl.searchParams.get('maxResults')).toBe('5');
+    expect(searchUrl.searchParams.get('maxResults')).toBe('50');
     expect(searchUrl.searchParams.get('videoDuration')).toBe('short');
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.candidateLists).toEqual([
       { videoId: 'near', title: 'Near', hashtags: [INDUSTRIAL], tags: [{ tag: 'industrial' }] },
     ]);
+  });
+
+  it('keeps the first 10 of 12 eligible videos from 50 results in search order', async () => {
+    const ids = Array.from({ length: 50 }, (_, i) => `v${i}`);
+    const eligible = ids.filter((_, i) => i % 4 === 2);
+    const items = ids.map((id, i) => ({
+      id,
+      snippet: { title: id, tags: [id], description: `#${id}` },
+      statistics: { viewCount: String(i) },
+      contentDetails: { duration: i % 4 === 2 ? 'PT3M' : 'PT5M' },
+    }));
+    fetchMock
+      .mockResolvedValueOnce(json({ items: ids.map((videoId) => ({ id: { videoId } })) }))
+      .mockResolvedValueOnce(json({ items: items.toReversed() }));
+
+    const evidence = await audienceEvidence([], 180);
+
+    expect(eligible).toHaveLength(12);
+    expect(evidence.candidateLists).toEqual(
+      eligible.slice(0, 10).map((id) => ({
+        videoId: id,
+        title: id,
+        hashtags: [`#${id}`],
+        tags: [{ tag: id }],
+      })),
+    );
+    expect(evidence.top.map(({ title }) => title)).toEqual(eligible.slice(0, 5));
+    const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(searchUrl.searchParams.get('maxResults')).toBe('50');
+    expect(searchUrl.searchParams.get('order')).toBe('viewCount');
+    const videosUrl = new URL(fetchMock.mock.calls[1]![0] as string);
+    expect(videosUrl.searchParams.get('id')).toBe(ids.join(','));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('reads every search result back for the evidence', async () => {

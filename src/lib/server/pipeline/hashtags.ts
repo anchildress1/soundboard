@@ -9,7 +9,8 @@ import {
 } from '$lib/server/platforms/youtube';
 
 export const CANDIDATE_LIMIT = 30;
-export const SEARCH_RESULTS = 5;
+export const SEARCH_RESULTS = 50;
+const CANDIDATE_VIDEO_LIMIT = 10;
 /** Evidence counts only from videos this close to the upload's length, which drops hour-long mixes. */
 export const LENGTH_TOLERANCE_SEC = 60;
 export const TAG_CANDIDATE_LIMIT = 40;
@@ -147,7 +148,7 @@ export function audienceEvidence(
     const evidence: AudienceEvidence = {
       retrievedAt,
       query,
-      candidateLists: found.map((video) => ({
+      candidateLists: found.slice(0, CANDIDATE_VIDEO_LIMIT).map((video) => ({
         videoId: video.videoId,
         title: video.title,
         hashtags: rankHashtags(video.description),
