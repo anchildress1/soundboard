@@ -36,6 +36,7 @@ type ModelRequest = { system: string; turns: Turn[] };
   - `image` → `{type, mime, bytes}`, plus `source` when it's YouTube's.
   - `video` → `{type, mime, bytes, clip: '<start>s–<end>s'}`.
   - Never `data`, and never the text of a YouTube-sourced part.
+  - Recorded output and assistant turns: `hashtags` and `tags` → `{count}`, description `#hashtag` → `#…`.
 
 ### `JobView` (`src/lib/types.ts`)
 

@@ -53,6 +53,7 @@ export function modelFor(agent: Agent): string; // configured model id
 - Wrapped in `chatSpan` with provider `gcp.gemini` and `modelFor(agent)`.
 - **YouTube API data never reaches Sentry (FR-017):**
   - Callers (smart pick, hook, brand) put every YouTube-sourced field in its own part marked `source: 'youtube'`.
+  - Recorded output, both the raw reply and the finalized pick, and re-ask assistant turns record `hashtags` and `tags` as `{count}` and each description `#hashtag` as `#…`, because those are copied verbatim from YouTube candidates.
   - Spans, the `hashtag_search` tool result and captured errors record those parts only as `{source, chars}` or `{mime, bytes, source}` (research R13).
 
 ## Removed exports

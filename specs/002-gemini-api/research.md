@@ -209,7 +209,16 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
     - the artist's recent uploads;
     - thumbnails.
   - **Required split:** today `smart-pick.ts` packs all context into one JSON text part. The YouTube-sourced fields move into their own text parts so they can be marked; song title, notes, windows, facts and feedback stay in the unmarked part. Brand (`brand.ts`) and hook (`short.ts`) mark theirs the same way.
-  - **Redaction:** `redactMessages` turns a marked text part into `{type: 'text', source, chars}` and a marked image into `{type, mime, bytes, source}`. Song title, notes and model output stay.
+  - **Redaction:** `redactMessages` turns a marked text part into `{type: 'text', source, chars}` and a marked image into `{type, mime, bytes, source}`.
+  - **Copied output:** smart pick and the Short must copy tags and hashtags verbatim from the candidate lists, so these are redacted wherever they're recorded:
+    - the raw reply on the `chat` span
+    - the finalized pick on the `invoke_agent` output
+    - an assistant turn resent in a re-ask
+  - **How copied output is recorded:**
+    - `hashtags` and `tags` become `{count}`.
+    - Each `#hashtag` in the description becomes `#…`.
+    - Title, description text, `why` and Bandcamp copy stay; they're the model's own wording for the user's upload.
+    - Song title and notes stay.
   - **Tool span:** the `hashtag_search` span's `gen_ai.tool.call.result` (`hashtags.ts`, today the full `candidateLists`) records only list and term counts.
   - **Errors:** messages that quote prompt text are redacted the same way before `captureException`.
   - **Rationale:** III.E.4 caps stored API data at 30 days, and a Sentry span is a store this app doesn't control.

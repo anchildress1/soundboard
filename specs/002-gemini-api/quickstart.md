@@ -56,7 +56,7 @@ Expected:
   - Tracing: provider `gcp.gemini`, per-call model on both `chat` and `invoke_agent` spans, video redacted to `{type, mime, bytes, clip}` with no data.
   - View: `model` is the analyst model during `PREP`/`ANALYZE` and the pick model after.
   - YouTube data stays out of Sentry (FR-017):
-    - Pick, hook and brand spans, the `hashtag_search` tool result and captured errors contain no YouTube-sourced titles, descriptions, tags or thumbnails, only `{source, chars}` and `{mime, bytes, source}` placeholders.
+    - Pick, hook and brand spans (inputs, raw replies, the finalized pick and re-ask assistant turns), the `hashtag_search` tool result and captured errors contain no YouTube-sourced titles, descriptions, tags or thumbnails, and no copied tags or hashtags, only `{source, chars}` and `{mime, bytes, source}` placeholders.
     - The song title and notes are still recorded.
   - The privacy page names the Gemini API as a processor of video clips and YouTube metadata (FR-018).
 - **E2E:** analyze and Short steps show `model busy` from the faked client, after the clip cut runs on the generated fixture video. No `waking model` text remains.
