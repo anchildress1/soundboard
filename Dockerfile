@@ -1,4 +1,4 @@
-FROM node:24.21.0-trixie-slim AS build
+FROM node:26.12.1-trixie-slim AS build
 WORKDIR /app
 RUN npm install --global --ignore-scripts pnpm@12.9.1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
@@ -16,8 +16,8 @@ RUN --mount=type=secret,id=sentry_auth_token \
 # Static ffmpeg/ffprobe: the Debian ffmpeg package drags in hundreds of MB of shared libraries.
 FROM mwader/static-ffmpeg:9.0.2@sha256:7d9bdaaf887f7e6ce6151f67325c344074b5ff1fb75316011c3376503e449a7b AS ffmpeg
 
-# Distroless: no shell or package manager, smallest Node 24 runtime, non-root by default.
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:9eeb7f5887d0e239e78264b06f7f11d2e14be534050481803a9e4728fcdd278e
+# Distroless: no shell or package manager, smallest Node 26 runtime, non-root by default.
+FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:3a6f4e6fd37efe00042667d06fd52240f2589ed09b0694fbb3b1bf860030a839
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080
 COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/

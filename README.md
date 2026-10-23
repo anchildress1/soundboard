@@ -8,7 +8,7 @@ Soundboard analyzes a finished music video and drafts its YouTube title, descrip
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=anchildress1_soundboard&metric=coverage)](https://sonarcloud.io/summary/new_code?id=anchildress1_soundboard)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange)](LICENSE)
 
-![Node 24](https://img.shields.io/badge/Node-24-5FA04E?logo=nodedotjs&logoColor=white)
+![Node 26](https://img.shields.io/badge/Node-26-5FA04E?logo=nodedotjs&logoColor=white)
 ![SvelteKit 2](https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white)
 ![Gemma 4](https://img.shields.io/badge/Gemma%204-12B--it-4285F4?logo=google&logoColor=white)
 ![Vertex AI](https://img.shields.io/badge/Vertex%20AI-NVIDIA%20L4-4285F4?logo=googlecloud&logoColor=white)
@@ -71,7 +71,7 @@ The model is Gemma 4 12B-it, an open-weight model released by Google DeepMind un
 
 | Layer         | Choice                                                                                                  |
 | ------------- | ------------------------------------------------------------------------------------------------------- |
-| App           | SvelteKit 2 + Svelte 5, TypeScript, Node 24                                                             |
+| App           | SvelteKit 2 + Svelte 5, TypeScript, Node 26                                                             |
 | Model         | Gemma 4 12B-it, Google's official QAT Q4_0 GGUF + vision/audio projector, on `llama-server` (llama.cpp) |
 | Media         | ffmpeg                                                                                                  |
 | Hosting       | Cloud Run (app) + a Vertex AI endpoint with one NVIDIA L4 (model), us-central1                          |
