@@ -25,6 +25,12 @@
 - Q: Gate G1 failed on large files. What now? → A: Each analyze step cuts its window into a small 360p clip and sends it with the call. On the 2 GB test file, the registered upload took 120–255 s per call; the inline clip took 6.4 s.
 - Q: Window length now that Gemma's 30 s audio cap is gone? → A: 60 s.
 
+### Session 2026-10-23
+
+- Q: Do AI drafts informed by YouTube API data count as "new or derived data" under YouTube's Developer Policies (III.E.4.h)? → A: No. The owner's position is that a draft is new content for the user's own upload, not a metric and not a replacement for YouTube's data. That position is stated in the spec, disclosed in the privacy policy, and described in the YouTube audit application.
+- Q: Can YouTube API data appear in model-call traces? → A: No. Traces keep the song title, notes and model output, but YouTube-sourced text and images are replaced by placeholders, so no API data sits in a third-party store past 30 days (III.E.4).
+- Q: The pick now receives up to 10 separate candidate lists (#20). Does the latency target still hold? → A: It must. The pick is re-timed at that prompt size before the pick changes are built.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - A job reaches review with no GPU running (Priority: P1)
@@ -99,6 +105,8 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - A provider safety block or empty reply: treated like a parse failure (retry once, keep raw text).
 - The last window is shorter than the window length: the model sees only what remains, as today.
 - A provider price change: model names are configuration, so moving the analyst to the Lite model needs no code change.
+- A pick with all 10 candidate lists full plus 5 example videos: it still meets the pick latency target, or the plan lowers its thinking level before raising any budget.
+- A failed call whose error message quotes a prompt fragment: YouTube-sourced text in it is redacted the same way as in spans.
 
 ## Requirements _(mandatory)_
 
@@ -119,7 +127,13 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - **FR-013**: The model label on the job page and the Short tab MUST name the model in use instead of `gemma-4-12b-it`, with the same total-model-time counter.
 - **FR-014**: Deploys MUST NOT create a model endpoint or build a model image. A one-time teardown MUST delete the existing endpoint, deployed model and model image.
 - **FR-015**: Provider behavior the docs leave open MUST be proven by a recorded manual gate before dependent code is built. Gate G1 ran on 2026-10-22: clip handling, token scaling, latency and Argon timing are recorded in research R12.
-- **FR-016**: The PRD, README, AGENTS.md and the constitution MUST be updated to match: the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, call settings, wait names, the model label, and the mock boundary.
+- **FR-016**: The PRD, README, AGENTS.md, the public privacy page and the constitution MUST be updated to match: the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, call settings, wait names, the model label, and the mock boundary.
+
+- **FR-017**: Model-call traces MUST NOT contain YouTube API data. Titles, descriptions, tags, statistics and thumbnails from YouTube (genre-search results and the artist's own channel) MUST be replaced by placeholders naming the source and size. That includes model output that copies them: the picked tags and hashtags, the hashtags that close the description, and any earlier answer resent in a re-ask, in every span (model call, finalized pick, tool result). These are recorded as counts. The song title, notes and the rest of the model output (title, description text, why, Bandcamp copy) MAY be recorded.
+- **FR-018**: The public privacy page MUST state that analysis and drafts are produced by the Gemini API (paid tier, not used for training). It MUST say Google keeps prompts and responses for up to 55 days solely for abuse monitoring, and that `store: false` turns off its separate interaction storage. It MUST say the API receives short clips of the artist's video and YouTube metadata (YouTube Developer Policies III.A.2.e).
+- **FR-019**: YouTube API data sent to the model MUST be used for that one call only. The app MUST NOT ask the provider to store it (no interaction storage, caching, file uploads or grounding). The only provider copy MUST be Google's abuse-monitoring log, which is kept up to 55 days and used solely for policy enforcement. The app MUST keep it no longer than 30 days. Drafts informed by it MUST be new content for the requesting user's own upload, never metrics, scores or replacements for YouTube's data (III.E.4.h, per the owner's stated interpretation).
+- **FR-020**: The artist's own authorized channel data (recent videos, thumbnails) MUST be sent to the model only for that artist's own request, and MUST never be shown to another user (III.E.3.b).
+- **FR-021**: The smart pick MUST meet its latency target with the full prompt from #20: up to 10 separate candidate lists plus 5 example videos.
 
 ### Key Entities
 
@@ -136,7 +150,9 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - **SC-004**: 100% of hashtags and tags in picks come from the job's candidate lists across the regression suite.
 - **SC-005**: A forced rate-limit during analyze or pick fails 0 jobs.
 - **SC-006**: Typical model cost for a 15-minute job (the upload cap) stays under $0.50 at the post-increase prices. The worst case (full thinking budgets plus every re-ask) is stated in research R6, not capped.
-- **SC-007**: No Sentry event contains media bytes or a signed URL's credential query.
+- **SC-007**: No Sentry event contains media bytes, a signed URL's credential query, or YouTube-sourced titles, descriptions, tags, statistics or thumbnails, including tags and hashtags a draft copied from them.
+- **SC-008**: The live privacy page names the Gemini API as a processor of video clips and YouTube metadata on the day the swap ships.
+- **SC-009**: Smart pick p95 stays at or under 45 s with a full-size prompt (10 candidate lists, 5 example videos).
 
 ## Evidence Boundary
 
@@ -150,3 +166,6 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - Argon's intro price doubles on 2026-12-01 and Flash's on 2027-01-01. SC-006 uses the higher prices.
 - E2E keeps no live model: model steps end at a faked provider wait, as they end at "waking model" today.
 - Pre-beta: no migration of in-flight jobs. A job mid-analysis at deploy restarts from prep.
+- Google's abuse-monitoring log keeps prompts, including any YouTube API data in them, for up to 55 days. Whether a processor's own enforcement log counts toward YouTube's 30-day limit (III.E.4) is unsettled. If the audit or the owner decides it does, the client switches to Gemini on Vertex AI, which offers guaranteed zero data retention. That's a configuration change, per research R1.
+- The owner's interpretation of III.E.4.h (drafts are new content, not derived data) is a stated position, not a YouTube ruling. The audit application describes it, and an audit answer that contradicts it reopens this spec.
+- Genre-search evidence storage (the `job_audience` table, the fresh-evidence view and the daily cleanup) shipped in #20 and is unchanged here.

@@ -32,7 +32,7 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
 
 - One Cloud Run service and one model provider. No added services, queues, functions or
   background workers, with two exceptions:
-  - Research and learning stages (spec 005) MAY run server-side, independent of the browser.
+  - Research and learning stages (spec 006) MAY run server-side, independent of the browser.
     Their plan chooses the mechanism.
   - One scheduled database retention job deletes expired YouTube statistics (Platform Terms).
 - Every other pipeline step advances one step per page request, each under about 2 minutes,
@@ -114,4 +114,4 @@ Rationale: a policy violation can cost the API access that uploads and verificat
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-22
+**Version**: 2.0.1 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-23

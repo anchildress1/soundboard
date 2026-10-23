@@ -1,6 +1,6 @@
 # Feature Specification: Learn what grows the fanbase
 
-**Feature Branch**: 005-fanbase-learning
+**Feature Branch**: 006-fanbase-learning
 
 **Created**: 2026-10-22
 
@@ -123,7 +123,7 @@ Research and learning run in the pipeline without another subscription or a sepa
 - **FR-017**: Brackets MUST use reported subscriber-count ranges, with the same range boundaries for Nathan and peers. Views and engagement MUST remain separate evidence for selecting useful releases; calculations MUST be limited to simple arithmetic on YouTube metrics, with no combined performance score. A combined views-plus-audience bracket score is a later upgrade once the derived-metrics allowance is granted.
 - **FR-018**: Peers MUST be artist channels that share the artist's sound and genre; labels, compilations, and multi-artist curators MUST be excluded, and uncertain matches skipped. Peer selection MUST always prefer the next bracket up, and recommendations MUST be modeled on what works for those peers. Same-bracket peers MAY serve only as a baseline, or as a fallback when too few next-bracket peers exist. The recommendation MUST say when it fell back. Peers two brackets up MAY add secondary evidence: labeled as such, weighted below next-bracket peers, and never the sole basis for the main hypothesis. Peers further up MUST NOT be used. Each peer MUST record its match basis (heard or metadata-only) and an explanation; metadata-only matches MUST be labeled.
 - **FR-019**: The review MUST identify the current and target subscriber-count ranges and consider recent release results separately. A bracket changes only when the reported subscriber count crosses a range boundary, not because one release gains unusually high views or engagement.
-- **FR-020**: Eligible peer releases MUST replace the genre search's most-viewed videos as structure evidence. Tag and hashtag candidates MUST come from eligible peer releases plus the genre search, and drafts MUST still use candidates only.
+- **FR-020**: Eligible peer releases MUST replace the genre search's most-viewed videos as structure evidence. Tag and hashtag candidates MUST come from eligible peer releases plus the genre search. Each release's terms MUST stay a separate, labeled list: never merged, counted or weighted across channels (III.E.2.a). Drafts MUST still use candidates only.
 
 **Artist identity and borrowed evidence**
 
