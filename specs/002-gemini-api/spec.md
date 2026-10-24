@@ -124,7 +124,7 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - **FR-010**: The "waking model" and "waiting on another run" waits, the readiness and slot checks, and the endpoint URL setting MUST be removed with their code, config and tests.
 - **FR-011**: All existing output rules MUST hold unchanged: numbers only from ffmpeg with model numerics stripped, hashtags and tags only from the job's candidates, the artist voice, the server-built flags, and verified-by-read-back.
 - **FR-012**: Sentry spans MUST name the provider and the actual model of each call. Image parts MUST be recorded as `{type, mime, bytes}` and video parts as `{type, mime, bytes, clip}` placeholders, never their content.
-- **FR-013**: The model label on the job page and the Short tab MUST name the model in use instead of `gemma-4-12b-it`, with the same total-model-time counter.
+- **FR-013**: The model label on the job page and the Short screen MUST name the model in use instead of `gemma-4-12b-it`, with the same total-model-time counter.
 - **FR-014**: Deploys MUST NOT create a model endpoint or build a model image. A one-time teardown MUST delete the existing endpoint, deployed model and model image.
 - **FR-015**: Provider behavior the docs leave open MUST be proven by a recorded manual gate before dependent code is built. Gate G1 ran on 2026-10-22: clip handling, token scaling, latency and Argon timing are recorded in research R12.
 - **FR-016**: The PRD, README, AGENTS.md, the public privacy page and the constitution MUST be updated to match: the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, call settings, wait names, the model label, and the mock boundary.

@@ -41,7 +41,7 @@ type ModelRequest = { system: string; turns: Turn[] };
 ### `JobView` (`src/lib/types.ts`)
 
 - Adds `model: string`. The server sets it: the analyst model while the job is in `PREP`/`ANALYZE`, the pick model otherwise, and the pick model for Shorts.
-- The job page and Short tab render `${view.model} · ${seconds}s` instead of the hard-coded `gemma-4-12b-it`.
+- The job page and Short screen render `${view.model} · ${seconds}s` instead of the hard-coded `gemma-4-12b-it`.
 
 ## Configuration
 
