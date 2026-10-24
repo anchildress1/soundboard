@@ -14,7 +14,7 @@ description: 'Task list for the Gemini API swap'
 
 **Gates**:
 
-- **G2** (T001) blocks every US1 task. Nothing in US1 starts until G2 has passed and its chosen configuration is written into the docs.
+- **G2** (T001) blocks Phase 2 and everything after it. Phase 2 removes exports that today's callers import, so the code goes red as soon as it starts, and it isn't green again until the analyst G2 is meant to gate has been built.
 - **FR-023** (T045) blocks every deployment, including hosted validation. Local work is not blocked.
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -27,27 +27,38 @@ description: 'Task list for the Gemini API swap'
 
 ## Phase 1: Setup
 
-**Purpose**: The G2 gate, plus dependency and config changes.
+**Purpose**: The G2 gate, the docs agents work from, and dependency and config changes.
 
 - [ ] T001 👤 Run gate G2 (research R14, FR-022):
   - **Videos:** 3–5 of Nathan's real uploads.
   - **Configurations:** A, B and C, using the exact R3 clip encoding profile.
   - **Scoring:** score each window against the Gemma baseline for genre terms, instruments, vocals and quality flags.
   - **Record:** the per-video, per-configuration table in specs/002-gemini-api/research.md R14, with tokens, latency and actual spend.
-  - **If B or C wins:** update the analyst defaults (model, `mediaResolution`, `thinkingLevel`), R5, R6 and SC-006 math in spec.md, plan.md, data-model.md, contracts/model-client.md and quickstart.md before T015.
+  - **If B or C wins:** before T002, update the analyst defaults (model, `mediaResolution`, `thinkingLevel`) and the analyst's minimum call budget (8 s), plus R5, R6 and the SC-006 math, in spec.md, plan.md, data-model.md, contracts/model-client.md and quickstart.md.
   - **If nothing passes:** stop and reopen the spec.
   - **Keep the Gemma endpoint** until the baseline is captured.
-- [ ] T002 👤 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add ai@7.0.148 @ai-sdk/google@4.0.102` (research R2)
-- [ ] T003 [P] 👤 Config in .env.example and service.yaml:
+- [ ] T002 Update docs/prd.md (FR-016) before any behavior code; the constitution treats code that disagrees with the PRD as a stop:
+  - The provider and model lines (T001's analyst choice).
+  - The "audio stays in the project" line and the third-party-inference non-goal.
+  - System Design and cost.
+  - Wait names and the model label.
+- [ ] T003 Update AGENTS.md (AI-only, directives only) before any code task, so agents don't follow Gemma rules:
+  - Replace the Model architecture line with Gemini API via `src/lib/server/ai/model.ts`.
+  - Replace the Gemma call settings (temperature 0.2, `max_tokens`, `reasoning_content`, 29.5 s windows) with the per-agent R5 settings and 60 s windows.
+  - Replace "scaled to zero (429), loading" with `model busy` / `model quota spent`.
+  - Replace `llama-server` in the mock list with Gemini HTTP.
+  - In the E2E lines, add the window-media fake and replace the "waking model" stop with `model busy`.
+- [ ] T004 👤 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add ai@7.0.148 @ai-sdk/google@4.0.102` (research R2)
+- [ ] T005 [P] 👤 Config in .env.example and service.yaml:
   - Remove `MODEL_URL`.
   - Add `GEMINI_API_KEY`, from Secret Manager `soundboard-gemini-api-key` in service.yaml.
   - Add `GEMINI_ANALYST_MODEL` (default `gemini-3.8-flash`, or T001's choice) and `GEMINI_PICK_MODEL` (default `gemini-4-argon`).
-- [ ] T004 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
-- [ ] T005 [P] 👤 In playwright.config.ts:
+- [ ] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
+- [ ] T007 [P] 👤 In playwright.config.ts:
   - Delete the `node tests/e2e/fakes/model.ts` webServer on port 4174 and the `MODEL_URL` env.
   - Add `--import ./tests/e2e/fakes/gemini.ts` to the preview server's Node command.
   - Set a dummy `GEMINI_API_KEY`, never a real one.
-- [ ] T006 [P] 👤 Remove the `model-image` target and its `.PHONY` entry from Makefile, and remove the `keep-model-2` rule from cleanup-policy.json.
+- [ ] T008 [P] 👤 Remove the `model-image` target and its `.PHONY` entry from Makefile, and remove the `keep-model-2` rule from cleanup-policy.json.
 
 ---
 
@@ -55,16 +66,18 @@ description: 'Task list for the Gemini API swap'
 
 **Purpose**: The new client, request types, waits and tracing that every agent compiles against.
 
-**⚠️ CRITICAL**: No user story work starts until this phase passes `make ai-checks`.
+**Blocked by**: T001.
 
-- [ ] T007 [P] In src/lib/server/core/env.ts:
+**⚠️ Red tree**: T010 and T012 remove `ModelWaking`, `modelStatus` and the old waits, which `pipeline.ts` and `brand.ts` still import. Those modules and their tests stay red until T021, T025 and T031. Full `make ai-checks` passes only at the end of US3.
+
+- [ ] T009 [P] In src/lib/server/core/env.ts:
   - Drop `modelUrl`.
   - Add `geminiApiKey()` (required), `analystModel()` (default `gemini-3.8-flash`) and `pickModel()` (default `gemini-4-argon`).
   - Tests in tests/unit/lib/server/core/env.test.ts: defaults, overrides, missing key throws.
-- [ ] T008 [P] In src/lib/types.ts:
+- [ ] T010 [P] In src/lib/types.ts:
   - In `Wait`, remove `waking model` and `waiting on another run`; add `model busy` and `model quota spent`.
   - Add `model: string` to `JobView`.
-- [ ] T009 Rewrite the model request types and spans in src/lib/server/core/tracing.ts:
+- [ ] T011 Rewrite the model request types and spans in src/lib/server/core/tracing.ts:
   - Replace `ChatMessage[]` with the data-model types. `Part` is `text | image {data: base64, mime_type} | video {data: Uint8Array, mime_type, start, end}`. Add `Turn {role: 'user' | 'assistant', parts}` and `ModelRequest {system, turns}`.
   - Provider: `gen_ai.provider.name = 'gcp.gemini'`.
   - Per-call model on both `chatSpan` and `invokeAgent`; drop `MODEL_NAME`.
@@ -74,7 +87,7 @@ description: 'Task list for the Gemini API swap'
     - Captured exceptions exclude SDK request bodies, headers and media-bearing causes. Safe messages still pass `scrubUrl`.
   - Telemetry never replaces or mutates the thrown error.
   - Tests in tests/unit/lib/server/core/tracing.test.ts and tests/helpers/agent-span.ts.
-- [ ] T010 Rewrite src/lib/server/ai/model.ts to [contracts/model-client.md](contracts/model-client.md):
+- [ ] T012 Rewrite src/lib/server/ai/model.ts to [contracts/model-client.md](contracts/model-client.md):
   - **Exports:** `Agent`, `ModelBusy`, `ModelQuotaSpent` (with `until`), `chat`, `chatJson`, `stepDeadline`, `modelFor`.
   - **Client:** `createGoogle({ apiKey })`. Every call goes through `gemini.interactions(modelFor(agent))`.
   - **Call settings:**
@@ -96,21 +109,16 @@ description: 'Task list for the Gemini API swap'
     - Record each failed attempt's raw text, finish reason and usage on the span.
   - **Remove** `modelStatus`, `ModelStatus`, `ModelWaking`, `SchemaName`, `TEMPERATURE` and `MAX_TOKENS`.
   - **Tests** in tests/unit/lib/server/ai/model.test.ts: every Unit bullet in quickstart.md that names the client.
-- [ ] T011 [P] Create tests/e2e/fakes/gemini.ts:
+- [ ] T013 [P] Create tests/e2e/fakes/gemini.ts:
   - A Node preload that wraps `globalThis.fetch`. It returns a 429 `RESOURCE_EXHAUSTED` fixture for `generativelanguage.googleapis.com` and throws on any other Gemini request it doesn't handle.
   - Delete tests/e2e/fakes/model.ts.
-- [ ] T012 Update tests/helpers/pipeline.ts: replace the `llama-server` `fetch` stubs with Gemini Interactions HTTP fixtures (success, unparsed, 429 busy, 429 per-day, 503, 400). Every pipeline, short and brand test uses them.
-- [ ] T013 Add a claim-guarded chunk reset to `releaseJob` in src/lib/server/jobs/jobs.ts:
+- [ ] T014 Update tests/helpers/pipeline.ts: replace the `llama-server` `fetch` stubs with Gemini Interactions HTTP fixtures (success, unparsed, 429 busy, 429 per-day, 503, 400). Every pipeline, short and brand test uses them.
+- [ ] T015 [P] Add a claim-guarded chunk reset to `releaseJob` in src/lib/server/jobs/jobs.ts:
   - The new operation sets `jobs.chunks` to empty in the same transaction as the state patch.
   - It applies only when the claim token and the claimed state still match. An ordinary `JobPatch` still can't clear `chunks`.
   - Tests in tests/unit/lib/server/jobs/jobs.test.ts: a matching claim clears both chunks and state; a stolen claim or a concurrent discard changes neither; a transaction failure rolls both back.
-- [ ] T014 In src/lib/server/media/ffmpeg.ts:
-  - Set `WINDOW_SEC = 60`.
-  - Delete `FRAMES_PER_WINDOW`, `extractWindow`, `splitJpegs` and the `Window` type.
-  - Keep `chunkCount` as `max(1, ceil((duration − 1) / 60))`.
-  - Tests in tests/unit/lib/server/media/ffmpeg.test.ts: 60 → 1, 60.5 → 1, 61.5 → 2, 900 → 15.
 
-**Checkpoint**: `make ai-checks` passes with every agent compiling against `ModelRequest`.
+**Checkpoint**: T009–T015 pass their own unit tests.
 
 ---
 
@@ -118,11 +126,14 @@ description: 'Task list for the Gemini API swap'
 
 **Goal**: Prep, one 60 s inline clip per analyze step, and the pick, all on Gemini, ending at review with today's outputs.
 
-**Independent Test**: Unit and E2E: analyze reaches the model call through the faked window module, and the pipeline tests drive a job to review on HTTP fixtures. After FR-023, run a 3-minute and a 15-minute video on the deployed app with the Vertex endpoint deleted.
+**Independent Test**: Unit and E2E: analyze reaches the model call through the faked window module, and the pipeline tests drive a job to review on HTTP fixtures. After FR-023, run a 3-minute and a 15-minute video on the deployed app, with no Vertex call anywhere in the request path.
 
-**Blocked by**: T001 (G2).
-
-- [ ] T015 [US1] Create src/lib/server/media/window.ts:
+- [ ] T016 [US1] In src/lib/server/media/ffmpeg.ts:
+  - Set `WINDOW_SEC = 60`.
+  - Delete `FRAMES_PER_WINDOW`, `extractWindow`, `splitJpegs` and the `Window` type.
+  - Keep `chunkCount` as `max(1, ceil((duration − 1) / 60))`.
+  - Tests in tests/unit/lib/server/media/ffmpeg.test.ts: 60 → 1, 60.5 → 1, 61.5 → 2, 900 → 15.
+- [ ] T017 [US1] Create src/lib/server/media/window.ts:
   - **`cutWindowClip(url, startSec, endSec, deadline)`:**
     - Reads the GCS source by signed URL, keeping the `https,tls,tcp` protocol whitelist.
     - Encodes H.264/AAC MP4: within 640×360, aspect ratio and rotation kept, even dimensions, at most 30 fps, video maxrate 600 kbit/s with a 1200 kbit buffer, AAC 96 kbit/s stereo at 48 kHz, faststart.
@@ -136,37 +147,38 @@ description: 'Task list for the Gemini API swap'
     - A timeout kills ffmpeg and deletes the file.
     - Incomplete output fails.
     - The encode args match the profile.
-- [ ] T016 [P] [US1] Create tests/e2e/fakes/window.ts: `cutWindowClip` writes a few dummy bytes to a temp file; `measureWindow` returns fixed `Measurements`. Same exports as window.ts.
-- [ ] T017 [US1] Rewrite src/lib/server/ai/chunk-analyst.ts:
+- [ ] T018 [P] [US1] Create tests/e2e/fakes/window.ts: `cutWindowClip` writes a few dummy bytes to a temp file; `measureWindow` returns fixed `Measurements`. Same exports as window.ts.
+- [ ] T019 [US1] Rewrite src/lib/server/ai/chunk-analyst.ts:
   - Build a `ModelRequest` with one inline `video/mp4` part (the clip, with `start`/`end`), plus the window's ffmpeg measurements, song title and notes.
   - No image or audio parts.
   - After the re-ask is exhausted, store `numerics.ts`-stripped raw text on the chunk.
   - Tests in tests/unit/lib/server/ai/chunk-analyst.test.ts.
-- [ ] T018 [P] [US1] Rewrite src/lib/server/ai/smart-pick.ts:
+- [ ] T020 [P] [US1] Rewrite src/lib/server/ai/smart-pick.ts:
   - Build a `ModelRequest` from #20's `candidateLists`, with thumbnails as `image` parts and the re-ask as an `assistant` turn.
+  - Take the caller's `deadline` and pass it to `chatJson`; never start a fresh one.
   - A null value after exhaustion fails the step.
   - Keep the R4 candidate-only rule and `ARTIST_VOICE` unchanged.
   - Tests in tests/unit/lib/server/ai/smart-pick.test.ts.
-- [ ] T019 [US1] Rework analyze in src/lib/server/pipeline/pipeline.ts:
-  - **Deadline:** one 110 s `stepDeadline()` from claimed-step entry, with the last 5 s reserved for cleanup and persistence.
+- [ ] T021 [US1] Rework analyze and pick in src/lib/server/pipeline/pipeline.ts:
+  - **Deadline:** analyze and pick each start one 110 s `stepDeadline()` on claimed-step entry, with the last 5 s reserved for cleanup and persistence. The pick's re-ask shares it.
   - **Order:** compatibility check → `limited()` → `cutWindowClip` → `measureWindow` → `chatJson`.
   - **Cleanup:** delete the temp file in `finally`. Never save a partial chunk.
-  - **Compatibility reset:** a stored `chunkCount` ≠ `chunkCount(sourceDurationSec)` calls T013's reset. That means `PREP`, `chunkIndex: 0`, cleared error and failure fields, and empty chunks, with no ffmpeg or provider call.
+  - **Compatibility reset:** a stored `chunkCount` ≠ `chunkCount(sourceDurationSec)` calls T015's reset. That means `PREP`, `chunkIndex: 0`, cleared error and failure fields, and empty chunks, with no ffmpeg or provider call.
   - **Removed:** the `modelWait`/`NEEDS_MODEL` pre-flight.
   - **Tests** in tests/unit/lib/server/pipeline/pipeline.test.ts:
     - The order above.
     - Deletion when the call throws.
     - Reset under a matching vs. a stolen claim.
     - One simulated clock covers cut, measure and inference, and no helper renews the deadline.
-- [ ] T020 [US1] In src/lib/server/jobs/view.ts, set `JobView.model` from current config:
+- [ ] T022 [US1] In src/lib/server/jobs/view.ts, set `JobView.model` from current config:
   - Analyst during `PREP`/`ANALYZE`, picker otherwise and for Shorts.
   - For `FAILED`, pick the role from `failedState`.
   - Tests in tests/unit/lib/server/jobs/view.test.ts, including a config change while viewing an old result.
-- [ ] T021 [P] [US1] Render the model label in src/lib/components/Track.svelte and src/routes/jobs/[id]/+page.svelte:
+- [ ] T023 [P] [US1] Render the model label in src/lib/components/Track.svelte and src/routes/jobs/[id]/+page.svelte:
   - Show `Configured analyst: <model>` or `Configured picker: <model>`, separate from `Total model time: <seconds>s`.
   - Remove stale Gemma comments and copy.
   - Tests in tests/unit/lib/components/Track.test.ts and tests/unit/routes/jobs/[id]/page.test.ts.
-- [ ] T022 [US1] Add an E2E analyze spec in tests/e2e/pipeline.spec.ts: a seeded prepared job runs analyze through the faked window module to the model call. Give it its own job IDs per Playwright project in tests/e2e/fakes/fixtures.ts.
+- [ ] T024 [US1] Add an E2E analyze spec in tests/e2e/pipeline.spec.ts: a seeded prepared job runs analyze through the faked window module to the model call. Give it its own job IDs per Playwright project in tests/e2e/fakes/fixtures.ts.
 
 **Checkpoint**: A job goes from prep to review on HTTP fixtures; E2E reaches the model call.
 
@@ -178,16 +190,16 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: Force each response at the `fetch` boundary during analyze and during pick. The step returns the wait, finished chunks remain, `consecutiveFailures` doesn't change, and the job continues once the fixture answers.
 
-- [ ] T023 [US2] Map the waits in src/lib/server/pipeline/pipeline.ts:
+- [ ] T025 [US2] Map the waits in src/lib/server/pipeline/pipeline.ts:
   - `ModelBusy` → `model busy`. Keep finished work and leave `consecutiveFailures` alone.
   - `ModelQuotaSpent` → set `limitUntil = until` and return `model quota spent`.
   - Apply the job cooldown before analyze, pick and hook side effects. Clear an expired model limit when work resumes.
   - 400, 403 and 500 count toward the existing two-strike `FAILED` path.
   - Tests in tests/unit/lib/server/pipeline/pipeline.test.ts.
-- [ ] T024 [P] [US2] Add plain-label text for `model busy` and `model quota spent` in src/lib/status.ts and remove the old waits. Tests in tests/unit/lib/status.test.ts.
-- [ ] T025 [P] [US2] Make src/lib/driver.ts keep calling on `model busy` and `model quota spent`. Tests in tests/unit/lib/driver.test.ts.
-- [ ] T026 [P] [US2] Update the wait responses in tests/unit/routes/api/jobs/[id]/step/server.test.ts.
-- [ ] T027 [US2] In tests/e2e/pipeline.spec.ts (and tests/e2e/short.spec.ts for the hook), check that analyze and pick show `model busy` from the T011 preload on desktop Chrome and Pixel 7, and that no `waking model` text remains.
+- [ ] T026 [P] [US2] Add plain-label text for `model busy` and `model quota spent` in src/lib/status.ts and remove the old waits. Tests in tests/unit/lib/status.test.ts.
+- [ ] T027 [P] [US2] Make src/lib/driver.ts keep calling on `model busy` and `model quota spent`. Tests in tests/unit/lib/driver.test.ts.
+- [ ] T028 [P] [US2] Update the wait responses in tests/unit/routes/api/jobs/[id]/step/server.test.ts.
+- [ ] T029 [US2] In tests/e2e/pipeline.spec.ts (and tests/e2e/short.spec.ts for the hook), check that analyze and pick show `model busy` from the T013 preload on desktop Chrome and Pixel 7, and that no `waking model` text remains.
 
 **Checkpoint**: SC-005 holds: no forced rate limit fails a job.
 
@@ -199,26 +211,27 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: Make a Short from a reviewed job and propose a brand guide as the artist-linked user, on HTTP fixtures. Re-pick avoids skipped hooks.
 
-- [ ] T028 [US3] Rework the hook pick in src/lib/server/pipeline/short.ts:
+- [ ] T030 [US3] Rework the hook step in src/lib/server/pipeline/short.ts:
+  - **Deadline:** one 110 s `stepDeadline()` on claimed-step entry. Loudness, the hook pick with its re-ask, and the existing render reserves all fit inside it; nothing renews it.
   - Build the `ModelRequest` with the re-ask as an `assistant` turn.
   - New Shorts and every `HOOK` retry or re-pick compare the parent's stored chunk count with `chunkCount(sourceDurationSec)`, not the Short job's default count. A mismatch takes "new upload required" before the hook pick.
   - An existing absolute cut may still render, re-cut, review and publish.
   - A null value after exhaustion fails the step.
   - Tests in tests/unit/lib/server/pipeline/short.test.ts.
-- [ ] T029 [P] [US3] Rework src/lib/server/artist/brand.ts:
+- [ ] T031 [P] [US3] Rework src/lib/server/artist/brand.ts:
   - Build a `ModelRequest` with thumbnails as `image` parts.
   - `ModelBusy` → `{ wait: 'model busy' }`; `ModelQuotaSpent` → `{ wait: 'model quota spent' }`; nothing persisted.
   - Exhaustion returns the existing retryable error. Remove `modelStatus`.
   - Tests in tests/unit/lib/server/artist/brand.test.ts.
-- [ ] T030 [US3] In src/routes/api/brand/propose/+server.ts and src/routes/brand/+page.svelte:
+- [ ] T032 [US3] In src/routes/api/brand/propose/+server.ts and src/routes/brand/+page.svelte:
   - Pass both waits through.
   - The page keeps polling on `model busy` and stops on `model quota spent`.
   - Remove the waking-model copy.
   - Tests in tests/unit/routes/api/brand/propose/server.test.ts and tests/unit/routes/brand/page.test.ts.
-- [ ] T031 [P] [US3] In src/lib/components/Short.svelte, show `Configured picker: <model>` and the new wait text, and drop the Gemma copy. Tests in tests/unit/lib/components/Short.test.ts.
-- [ ] T032 [US3] Update tests/e2e/brand.spec.ts for `model busy` via the preload. Add a Short from a job with a mismatched chunk count to tests/e2e/short.spec.ts: it shows "new upload required".
+- [ ] T033 [P] [US3] In src/lib/components/Short.svelte, show `Configured picker: <model>` and the new wait text, and drop the Gemma copy. Tests in tests/unit/lib/components/Short.test.ts.
+- [ ] T034 [US3] Update tests/e2e/brand.spec.ts for `model busy` via the preload. Add a Short from a job with a mismatched chunk count to tests/e2e/short.spec.ts: it shows "new upload required".
 
-**Checkpoint**: Shorts and the brand guide work on fixtures; old-window Shorts are refused.
+**Checkpoint**: Shorts and the brand guide work on fixtures; old-window Shorts are refused. `make ai-checks` passes.
 
 ---
 
@@ -228,11 +241,11 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: `deploy.sh` has no model-endpoint step. The removal sweep is empty. After FR-023 and teardown, the Vertex endpoint and model lists show nothing for Soundboard.
 
-- [ ] T033 [US4] Delete model/ (including model/Dockerfile) and build-model.sh.
-- [ ] T034 [US4] 👤 In deploy.sh:
+- [ ] T035 [US4] 👤 Delete model/ (including model/Dockerfile) and build-model.sh.
+- [ ] T036 [US4] 👤 In deploy.sh:
   - Remove the model image build, the endpoint create/deploy, the `aiplatform` invoke role binding and `MODEL_URL`.
   - Sync `GEMINI_API_KEY` from `.env` to Secret Manager `soundboard-gemini-api-key` like the other app secrets, never echoing it.
-- [ ] T035 [US4] Run the removal sweep: `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` must return nothing. Fix what remains, including the meta description in src/routes/+layout.svelte ("self-hosted Gemma 4").
+- [ ] T037 [US4] Run the removal sweep: `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` must return nothing. Fix what remains, including the meta description in src/routes/+layout.svelte ("self-hosted Gemma 4").
 
 **Checkpoint**: The repo carries no GPU path.
 
@@ -240,22 +253,16 @@ description: 'Task list for the Gemini API swap'
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-**Purpose**: The FR-016/FR-018 docs, final validation and the gates before and after deploy.
+**Purpose**: The rest of the FR-016/FR-018 docs, final validation and the gates before and after deploy.
 
-- [ ] T036 [P] Update src/routes/privacy/+page.svelte (FR-018):
+- [ ] T038 [P] Update src/routes/privacy/+page.svelte (FR-018):
   - Name paid-tier Gemini as the processor of video clips and YouTube metadata, and Sentry as the processor of text traces.
   - Explain that `store: false` turns off interaction storage only, that implicit caching happens, and that abuse logs are kept up to 55 days.
   - Say that authorized Google staff may review flagged prompts, that a deletion request can't reach Google's abuse-monitoring copy, and what Sentry's actual retention is.
   - Say content is not used to improve Google products.
   - No zero-retention claim, no cache expiry.
   - Tests in tests/unit/routes/privacy.test.ts.
-- [ ] T037 [P] Update docs/prd.md (FR-016): the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, wait names and the model label.
-- [ ] T038 [P] Update README.md for the same FR-016 lines.
-- [ ] T039 [P] Update AGENTS.md (AI-only, directives only):
-  - Replace the Model architecture line with Gemini API via `src/lib/server/ai/model.ts`.
-  - Replace the Gemma call settings (temperature 0.2, `max_tokens`, `reasoning_content`, 29.5 s windows) with the per-agent R5 settings and 60 s windows.
-  - Replace "scaled to zero (429), loading" with `model busy` / `model quota spent`.
-  - Replace `llama-server` in the mock list and the E2E line with Gemini HTTP and the window fake.
+- [ ] T039 [P] Update README.md for the same FR-016 lines as T002.
 - [ ] T040 [P] Update docs/youtube-audit/architecture.md and docs/youtube-audit/user-flows.md:
   - Show Gemini in the diagram and data flow.
   - Cover implicit caching, the 55-day abuse log, full-text Sentry retention and the approval gate.
@@ -268,10 +275,16 @@ description: 'Task list for the Gemini API swap'
 - [ ] T045 👤 FR-023 gate:
   - Record YouTube's approval reference, date and scope.
   - Record the actual Sentry plan, billing model and retention for errors, full spans and sampled spans.
+  - Confirm the Gemini project bills on the paid tier, not the free tier (FR-002).
   - Record any restrictions.
   - Put it all under "Manual: deployment gate" in specs/002-gemini-api/quickstart.md (SC-010).
   - No deploy before this. A narrower or contrary approval reopens the spec.
-- [ ] T046 👤 After T045, run quickstart "Manual: deployed" steps 1–5: deploy, the 3- and 15-minute runs including the first and last windows of a 2 GB source, the pick checks, a Short and a brand guide, `/privacy`, and Sentry text with no media.
+- [ ] T046 👤 After T045, run quickstart "Manual: deployed" steps 1–5:
+  - Deploy.
+  - The 3- and 15-minute runs, including the first and last windows of a 2 GB source.
+  - The pick checks, a Short and a brand guide, and `/privacy`.
+  - Sentry text with no media.
+  - Read the 15-minute job's actual Gemini cost from billing and confirm it's under SC-006's $0.50.
 - [ ] T047 👤 After T046 (and T001's baseline), run the one-time GPU teardown in quickstart step 6. Then confirm the endpoint and model lists are empty and GPU spend is $0 the next full week (SC-001).
 
 ---
@@ -280,38 +293,39 @@ description: 'Task list for the Gemini API swap'
 
 ### Phase Dependencies
 
-- **Setup (Phase 1)**: T002–T006 can start now. T001 runs alongside them and blocks only US1.
-- **Foundational (Phase 2)**: needs T002 and T003. It blocks every story.
-- **US1 (Phase 3)**: needs Phase 2 and T001.
-- **US2 (Phase 4)**: needs Phase 2. T023 edits pipeline.ts after T019; run US1 first or merge carefully.
-- **US3 (Phase 5)**: needs Phase 2. Independent of US1 and US2 apart from shared test helpers.
-- **US4 (Phase 6)**: T033 and T034 need only Phase 1. T035 runs after US1–US3.
-- **Polish (Phase 7)**: T036–T041 can start any time after Phase 2. T042–T044 need all stories. T045 → T046 → T047, strictly in that order.
+- **Setup (Phase 1)**: T001 first. T002 and T003 follow T001. T004–T008 can start any time.
+- **Foundational (Phase 2)**: needs T001–T005. It blocks every story and leaves the tree red (see Phase 2).
+- **US1 (Phase 3)**: needs Phase 2.
+- **US2 (Phase 4)**: needs US1. T025 edits the same pipeline.ts code as T021.
+- **US3 (Phase 5)**: needs Phase 2. The tree is green only after US1, US2 and US3 are all done.
+- **US4 (Phase 6)**: T035 and T036 need only Phase 1. T037 runs after US3.
+- **Polish (Phase 7)**: T038–T041 can start any time after Phase 2. T042–T044 need all stories. T045 → T046 → T047, strictly in that order.
 
 ### Within Phases
 
-- T009 → T010 → T012 (helpers use the client and span shapes).
-- T013 and T014 → T019.
-- T004 → T016 → T022. T005 and T011 → T022, T027 and T032.
-- T015 → T017 → T019.
+- T011 → T012 → T014 (helpers use the client and span shapes).
+- T015 and T016 → T021.
+- T006 → T018 → T024. T007 and T013 → T024, T029 and T034.
+- T017 → T019 → T021.
 
 ### Parallel Opportunities
 
-- Phase 1: T003, T004, T005 and T006 together.
-- Phase 2: T007, T008 and T011 together, then T013 and T014 alongside T009/T010.
-- US1: T016 and T018 alongside T015/T017. T021 once T020 lands.
-- US2: T024, T025 and T026 together.
-- US3: T029 and T031 alongside T028.
-- Polish: T036–T040 together.
+- Phase 1: T002 and T003 together after T001; T005–T008 together, any time.
+- Phase 2: T009, T010, T013 and T015 together; T011 → T012 → T014 alongside.
+- US1: T018 and T020 alongside T017/T019. T023 once T022 lands.
+- US2: T026, T027 and T028 together.
+- US3: T031 and T033 alongside T030.
+- Polish: T038–T041 together.
 
 ---
 
 ## Parallel Example: Phase 2
 
 ```bash
-Task: "env.ts gemini settings + tests (T007)"
-Task: "types.ts waits and JobView.model (T008)"
-Task: "tests/e2e/fakes/gemini.ts preload (T011)"
+Task: "env.ts gemini settings + tests (T009)"
+Task: "types.ts waits and JobView.model (T010)"
+Task: "tests/e2e/fakes/gemini.ts preload (T013)"
+Task: "releaseJob chunk reset + tests (T015)"
 ```
 
 ---
@@ -320,14 +334,15 @@ Task: "tests/e2e/fakes/gemini.ts preload (T011)"
 
 ### MVP (US1 + US2)
 
-1. Phase 1, with G2 (T001) run in parallel.
-2. Phase 2, then `make ai-checks`.
+1. G2 (T001), then the PRD and AGENTS.md (T002, T003) and config.
+2. Phase 2. Only its own unit tests pass here.
 3. US1, then US2. Both are P1: without the busy wait, any provider blip fails a job.
-4. **Stop and validate** locally on fixtures. No deploy; FR-023 still applies.
+4. US3, so the tree is green again and `make ai-checks` passes.
+5. **Stop and validate** locally on fixtures. No deploy; FR-023 still applies.
 
 ### Incremental
 
-1. US3 (Shorts and brand), then US4 (removal).
+1. US4 (removal).
 2. Polish docs and validation.
 3. T045 approval → T046 deployed checks → T047 teardown.
 
@@ -335,6 +350,6 @@ Task: "tests/e2e/fakes/gemini.ts preload (T011)"
 
 ## Notes
 
-- Commit after each task or logical group, on `002-gemini-api`.
-- G2 can change analyst defaults; T001 updates the docs before any US1 code reads them.
+- Commit after each task or logical group, on `002-gemini-api`. Commits made while the tree is red pass the hooks (format, lint, secret scan) but not `make ai-checks`.
+- G2 can change analyst defaults; T001 updates the docs before T002 writes them into the PRD.
 - Never write Nathan's surname in fixtures, prompts, tests or docs.

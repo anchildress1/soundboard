@@ -124,7 +124,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
   - Both go to the unparsed path: one re-ask while budget allows, then return raw text (empty for the second). The analyst stores stripped raw text; pick/hook turn exhaustion into an ordinary failed step and brand returns its retryable error. All attempts retain raw text in the chat span; no new database diagnostic field.
 - **Re-ask budget:** a re-ask starts only when the time left is at least that agent's minimum call budget. An aborted call is a `TimeoutError`, which is a hard failure.
   - The budgets are G1's p95: analyst ≈ 8 s (inline 60 s clip), smart pick 33 s, hook pick 35 s. Brand uses the smart-pick budget.
-- **Analyze order:** `limited()` → `cutWindowClip` → `measureWindow` → the call.
+- **Analyze order:** chunk-count compatibility reset (data-model "Window") → `limited()` → `cutWindowClip` → `measureWindow` → the call.
   - `limited()` skips the provider during a spent quota.
   - The clip and measurements read the same window by signed URL.
 - **Step budget:** one `stepDeadline()` starts at claimed-step entry, not inside each helper. Reserve the final 5 s of its 110 s for process termination, temp cleanup and persistence; cut gets at most 45 s and measurement at most 20 s, each clipped to the remaining work budget. Model calls and re-asks share what remains; never reset the deadline. Prep probing/measurement and existing hook/render reserves must also fit their step budget.

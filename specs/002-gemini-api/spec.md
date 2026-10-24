@@ -50,7 +50,7 @@ Nathan uploads a video and types the song title. The status page runs prep, one 
 
 **Why this priority**: This is the product. Everything else is cleanup around it.
 
-**Independent Test**: Run a 3-minute and a 15-minute video end to end on the deployed app with the Vertex endpoint deleted. Both reach review; every hashtag and tag is in the job's candidate lists; no model-emitted loudness number appears.
+**Independent Test**: Run a 3-minute and a 15-minute video end to end on the deployed app, with no Vertex call anywhere in the request path. The endpoint itself is deleted afterwards (User Story 4). Both reach review; every hashtag and tag is in the job's candidate lists; no model-emitted loudness number appears.
 
 **Acceptance Scenarios**:
 
