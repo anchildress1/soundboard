@@ -38,7 +38,7 @@ body {
 }
 
 a {
-  color: var(--info);
+  color: inherit;
 }
 
 .btn {
@@ -53,12 +53,15 @@ a {
   min-height: 44px;
 }
 
-.btn {
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+/* Motion is opt-in, so reduced-motion users get none. */
+@media (prefers-reduced-motion: no-preference) {
+  .btn {
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
 }
 
 .btn:not([disabled]):hover {
@@ -180,8 +183,10 @@ a {
 }
 
 /* Sections rise in on load, a beat apart. */
-main > * {
-  animation: rise 0.45s ease-out both;
+@media (prefers-reduced-motion: no-preference) {
+  main > * {
+    animation: rise 0.45s ease-out both;
+  }
 }
 
 main > :nth-child(2) {
@@ -200,15 +205,5 @@ main > :nth-child(n + 4) {
   from {
     opacity: 0;
     transform: translateY(10px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
   }
 }

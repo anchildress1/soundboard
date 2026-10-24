@@ -86,10 +86,6 @@
     line-height: 1.5;
   }
 
-  a {
-    color: var(--ink);
-  }
-
   form {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

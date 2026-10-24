@@ -108,8 +108,21 @@
       var(--ground) 61px 63px
     );
     opacity: 0.9;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
     /* VHS tracking: the gaps in the smear drift slowly sideways. */
-    animation: tracking 9s linear infinite;
+    .smear::after {
+      animation: tracking 9s linear infinite;
+    }
+
+    .wordmark {
+      animation: flicker-on 1.4s ease-out both;
+    }
+
+    .skip {
+      transition: top 0.15s ease;
+    }
   }
 
   /*
@@ -142,12 +155,10 @@
     text-shadow:
       0 0 18px rgba(255, 79, 216, 0.55),
       0 0 2px rgba(255, 79, 216, 0.9);
-    animation: flicker-on 1.4s ease-out both;
     letter-spacing: 0.01em;
   }
 
   .wordmark a {
-    color: inherit;
     text-decoration: none;
   }
 
@@ -217,7 +228,6 @@
     color: var(--ground);
     font: 900 13px/1 var(--display);
     text-decoration: none;
-    transition: top 0.15s ease;
   }
 
   .skip:focus {
