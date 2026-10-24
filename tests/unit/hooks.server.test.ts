@@ -291,6 +291,7 @@ const PATHS = [...new Set(ROUTES)];
 const EXEMPT = [
   '/',
   '/privacy',
+  '/terms',
   '/auth/login',
   '/auth/callback',
   '/auth/logout',

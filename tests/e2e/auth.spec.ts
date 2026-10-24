@@ -2,6 +2,32 @@ import { expect, test } from '@playwright/test';
 import { sessionCookie, signIn, USER_A, USER_B } from './session';
 
 test.describe('signed out', () => {
+  test('opens public terms from the footer without cookies or horizontal overflow', async ({
+    page,
+    context,
+    request,
+  }) => {
+    const response = await request.get('/terms', { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(response.headers()['set-cookie']).toBeUndefined();
+
+    await page.goto('/');
+    await page.getByRole('contentinfo').getByRole('link', { name: 'Terms of Service' }).click();
+    await expect(page).toHaveURL('/terms');
+    await expect(page).toHaveTitle('Terms of Service · Soundboard');
+    await expect(
+      page.getByRole('heading', { name: 'Terms of Service', exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'YouTube Terms of Service' })).toHaveAttribute(
+      'href',
+      'https://www.youtube.com/t/terms',
+    );
+    expect(await context.cookies()).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      page.viewportSize()!.width,
+    );
+  });
+
   test('opens the privacy policy from the footer without signing in', async ({ page, context }) => {
     await page.goto('/');
     const footer = page.getByRole('contentinfo');
@@ -112,15 +138,20 @@ test('a client navigation home after the session ends drops the signed-in layout
   await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
 });
 
-test('opens privacy after a session ends without retaining signed-in controls', async ({
-  page,
-}) => {
-  await signIn(page, USER_B);
-  await page.goto('/');
-  await page.context().clearCookies();
-  await page.getByRole('contentinfo').getByRole('link', { name: 'Privacy policy' }).click();
-  await expect(page).toHaveURL('/privacy');
-  await expect(page.getByRole('heading', { name: 'Privacy policy', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
-});
+for (const [name, path] of [
+  ['Privacy policy', '/privacy'],
+  ['Terms of Service', '/terms'],
+] as const) {
+  test(`opens ${name} after a session ends without retaining signed-in controls`, async ({
+    page,
+  }) => {
+    await signIn(page, USER_B);
+    await page.goto('/');
+    await page.context().clearCookies();
+    await page.getByRole('contentinfo').getByRole('link', { name }).click();
+    await expect(page).toHaveURL(path);
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+  });
+}

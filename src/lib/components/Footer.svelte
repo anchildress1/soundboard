@@ -13,7 +13,10 @@
     >
     by <b>Ashley Childress</b>
   </p>
-  <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
+  <div class="legal">
+    <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
+    <a href={resolve('/terms')} data-sveltekit-reload>Terms of Service</a>
+  </div>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). -->
     <a
@@ -102,6 +105,13 @@
 
   p {
     margin: 0;
+  }
+
+  .legal {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 14px;
   }
 
   b {
