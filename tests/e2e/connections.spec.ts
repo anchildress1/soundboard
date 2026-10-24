@@ -13,6 +13,7 @@ const youtube = (page: Page) => page.getByRole('region', { name: 'YouTube' });
 test('the header links Connections, which shows the connected channel', async ({ page }) => {
   await signIn(page, USER_A);
   await page.goto('/');
+  await page.getByRole('banner').getByRole('button', { name: 'Menu' }).click();
   await page.getByRole('banner').getByRole('link', { name: 'Connections' }).click();
   await expect(page).toHaveURL('/connections');
   await expect(youtube(page)).toContainText('Connected to Flies Like Robots.');

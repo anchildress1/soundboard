@@ -16,11 +16,11 @@
   );
 </script>
 
-<div class="heard">
+<div class="heard panel">
   <h2>What the model heard</h2>
   {#if tags.length > 0}
     <ul>
-      {#each tags as tag (tag)}<li>{tag}</li>{/each}
+      {#each tags as tag (tag)}<li class="chip">{tag}</li>{/each}
     </ul>
   {:else}
     <p>Tags appear as each chunk is analyzed.</p>
@@ -32,18 +32,13 @@
 
 <style>
   .heard {
-    border-left: 3px solid var(--orange);
-    padding: 10px 14px;
-    background: var(--panel);
+    display: grid;
+    gap: 10px;
     min-width: 0;
   }
 
   h2 {
-    margin: 0 0 6px;
-    font: 900 12px/1 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--orange);
+    font: 600 16px/1.4 var(--font-body);
   }
 
   ul {
@@ -52,41 +47,19 @@
     list-style: none;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 8px;
-    font: 500 12px/1.2 var(--mono);
-    color: var(--ink);
-  }
-
-  li {
-    padding: 5px 8px;
-    background: var(--well);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    li {
-      animation: pop 0.3s ease-out both;
-    }
-  }
-
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: scale(0.9);
-    }
+    gap: 8px;
   }
 
   p {
-    margin: 8px 0 0;
+    font-size: 14px;
     color: var(--muted);
-    font-size: 13px;
   }
 
   .ffmpeg {
-    font: 500 12px/1.4 var(--mono);
-    color: var(--ink);
+    font-variant-numeric: tabular-nums;
   }
 
   .ffmpeg span {
-    color: var(--muted);
+    font-weight: 600;
   }
 </style>

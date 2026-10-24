@@ -90,14 +90,31 @@ const SHORT: Short = {
   modelMs: 6000,
 };
 
-/** A video in review with its chunks and pick, ready for a Short. */
+/** A video in review with its chunks and pick. */
 const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2, 3, 4].map(chunk) });
+
+/** A video already on YouTube: the Short is offered only once the release is approved. */
+const uploaded = (id: string, patch: Partial<JobDoc> = {}) => ({
+  ...reviewed(id),
+  job: job(id, {
+    state: 'VERIFIED',
+    destination: { channelId: CHANNEL_A, channelTitle: 'Flies Like Robots' },
+    finalFields: {
+      title: PICK.title,
+      description: PICK.description,
+      hashtags: PICK.hashtags,
+      tags: PICK.tags,
+    },
+    videoId: `${id}-video`,
+    ...patch,
+  }),
+});
 
 const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   ...['chromium', 'mobile'].flatMap((project) => {
     const id = `e2e-short-paused-${project}`;
     return [
-      { ...reviewed(id), job: job(id, { shortId: `${id}-short` }) },
+      uploaded(id, { shortId: `${id}-short` }),
       {
         job: job(`${id}-short`, {
           parentId: id,
@@ -118,8 +135,9 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
       },
     ];
   }),
-  ...['e2e-tabs', 'e2e-make-chromium', 'e2e-make-mobile'].map(reviewed),
-  { ...reviewed('e2e-cut'), job: job('e2e-cut', { shortId: 'e2e-cut-short' }) },
+  reviewed('e2e-tabs'),
+  ...['e2e-make-chromium', 'e2e-make-mobile'].map((id) => uploaded(id)),
+  uploaded('e2e-cut', { shortId: 'e2e-cut-short' }),
   {
     job: job('e2e-cut-short', {
       parentId: 'e2e-cut',

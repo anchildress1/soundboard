@@ -121,6 +121,12 @@ describe('brand page: reviewing a proposal', () => {
     expect(screen.queryByLabelText(/^Statement/)).toBeNull();
   });
 
+  it('marks the proposal as waiting on a decision and tags each approved rule', () => {
+    setup({ approved: stored('APPROVED'), proposal: stored('PROPOSED') });
+    expect(screen.getByText('Needs your decision')).toHaveAttribute('data-tone', 'attention');
+    expect(screen.getByText(GUIDE.drop[0]!).querySelector('.chip')).toHaveTextContent('Drop');
+  });
+
   it('blocks approval of an invalid edit and says why', async () => {
     setup({ proposal: stored('PROPOSED') });
     await fireEvent.input(screen.getByLabelText(/^Statement/), { target: { value: '  ' } });

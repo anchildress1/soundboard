@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { resolve } from '$app/paths';
   import { approveBrand, discardBrandProposal, proposeBrand } from '$lib/api';
   import {
     BRAND_THUMBNAILS,
@@ -19,9 +20,9 @@
   let { data }: { data: PageData } = $props();
 
   const LISTS = [
-    { key: 'keep', label: 'Keep' },
-    { key: 'fix', label: 'Fix' },
-    { key: 'drop', label: 'Drop' },
+    { key: 'keep', label: 'Keep', tone: 'ok' },
+    { key: 'fix', label: 'Fix', tone: 'warn' },
+    { key: 'drop', label: 'Drop', tone: 'err' },
   ] as const;
   type Draft = { statement: string; keep: string; fix: string; drop: string };
 
@@ -125,154 +126,183 @@
 <svelte:head><title>Brand guide · Soundboard</title></svelte:head>
 
 <main>
-  <section class="current" aria-labelledby="current">
-    <h2 id="current">Approved guide <span>smart pick follows this</span></h2>
-    {#if approved}
-      <p class="statement">{approved.statement}</p>
-      {#each LISTS as list (list.key)}
-        {#if approved[list.key].length > 0}
-          <h3>{list.label}</h3>
-          <ul>
-            {#each approved[list.key] as rule, i (i)}<li>{rule}</li>{/each}
-          </ul>
-        {/if}
-      {/each}
-      <p class="meta">
-        From {approved.basedOn.length} uploads · approved {new Date(
-          approved.approvedAt ?? approved.createdAt,
-        ).toLocaleDateString()}
-      </p>
-    {:else}
-      <p class="note">None yet. Smart pick follows the recent uploads until one is approved.</p>
-    {/if}
-  </section>
+  <a class="back" href={resolve('/')}>Releases</a>
+  <div class="intro">
+    <h1>Brand guide</h1>
+    <p class="help">
+      Read from your latest {BRAND_VIDEOS} uploads and {BRAND_THUMBNAILS} thumbnails: one statement, then
+      rules to keep, fix, or drop. The approved guide shapes every pick.
+    </p>
+  </div>
 
-  {#if draft}
-    <form class="label" onsubmit={approve} aria-label="Proposed guide">
-      <h2>Proposal <span>edit, then approve</span></h2>
-      <div class="field">
-        <label for="statement"
-          >Statement <span>{draft.statement.length}/{STATEMENT_MAX}</span></label
-        >
-        <textarea id="statement" rows="4" bind:value={draft.statement} disabled={busy}></textarea>
+  <div class="guides">
+    <section class="panel" aria-labelledby="current">
+      <div class="head">
+        <h2 id="current">Approved</h2>
+        {#if approved}<span class="chip" data-tone="ok">Smart pick follows this</span>{/if}
       </div>
-      {#each LISTS as list (list.key)}
-        <div class="field">
-          <label for={list.key}
-            >{list.label}
-            <span>one rule per line · up to {RULES_MAX} · {RULE_MAX} chars each</span></label
-          >
-          <textarea id={list.key} rows="4" bind:value={draft[list.key]} disabled={busy}></textarea>
+      {#if approved}
+        <p class="statement">{approved.statement}</p>
+        <ul class="rules">
+          {#each LISTS as list (list.key)}
+            {#each approved[list.key] as rule, i (i)}
+              <li><span class="chip" data-tone={list.tone}>{list.label}</span>{rule}</li>
+            {/each}
+          {/each}
+        </ul>
+        <p class="help">
+          From {approved.basedOn.length} uploads · approved {new Date(
+            approved.approvedAt ?? approved.createdAt,
+          ).toLocaleDateString()}
+        </p>
+      {:else}
+        <p class="help">None yet. Smart pick follows the recent uploads until one is approved.</p>
+      {/if}
+    </section>
+
+    {#if draft}
+      <form class="panel proposal" onsubmit={approve} aria-label="Proposed guide">
+        <div class="head">
+          <h2>Proposal</h2>
+          <span class="chip" data-tone="attention">Needs your decision</span>
         </div>
-      {/each}
-      <div class="actions">
-        <button class="btn ghost" type="button" disabled={busy} onclick={discard}>Discard</button>
-        <button class="btn ghost" type="button" disabled={busy} onclick={propose}
-          >{busy ? proposing : 'Propose again'}</button
-        >
-        <button class="btn primary" type="submit" disabled={busy || Boolean(problem)}
-          >Approve</button
-        >
-      </div>
-      <p class="toast" aria-live="polite">{message || problem || ''}</p>
-    </form>
-  {:else}
-    <div class="label">
-      <h2>Proposal</h2>
-      <p class="note">
-        Reads the latest {BRAND_VIDEOS} uploads and {BRAND_THUMBNAILS} thumbnails, then proposes a statement
-        with keep, fix, and drop rules.
-      </p>
-      <div class="actions">
-        <button class="btn primary" type="button" disabled={busy} onclick={propose}
-          >{busy ? proposing : 'Propose'}</button
-        >
-      </div>
-      <p class="toast" aria-live="polite">{message}</p>
-    </div>
-  {/if}
+        <div class="field">
+          <label for="statement"
+            >Statement <span>{draft.statement.length} / {STATEMENT_MAX}</span></label
+          >
+          <textarea id="statement" rows="4" bind:value={draft.statement} disabled={busy}></textarea>
+        </div>
+        {#each LISTS as list (list.key)}
+          <div class="field">
+            <label for={list.key}
+              >{list.label}
+              <span>one rule per line · up to {RULES_MAX} · {RULE_MAX} chars each</span></label
+            >
+            <textarea id={list.key} rows="3" bind:value={draft[list.key]} disabled={busy}
+            ></textarea>
+          </div>
+        {/each}
+        <div class="actions">
+          <button class="btn danger small" type="button" disabled={busy} onclick={discard}
+            >Discard</button
+          >
+          <button class="btn small" type="button" disabled={busy} onclick={propose}
+            >{busy ? proposing : 'Propose again'}</button
+          >
+          <button class="btn primary" type="submit" disabled={busy || Boolean(problem)}
+            >Approve</button
+          >
+        </div>
+        <p class="help">Approving replaces the guide in use. Discarding keeps it.</p>
+        <p class="toast err" aria-live="polite">{message || problem || ''}</p>
+      </form>
+    {:else}
+      <section class="panel" aria-labelledby="proposal">
+        <h2 id="proposal">Proposal</h2>
+        <p class="help">
+          Propose reads what's already on the channel and writes one statement with rules. Nothing
+          changes on YouTube; you approve or discard it here.
+        </p>
+        <div class="actions">
+          <button class="btn primary" type="button" disabled={busy} onclick={propose}
+            >{busy ? proposing : 'Propose'}</button
+          >
+        </div>
+        <p class="toast err" aria-live="polite">{message}</p>
+      </section>
+    {/if}
+  </div>
 </main>
 
 <style>
   main {
+    width: 100%;
+    max-width: var(--measure-page);
+    margin: 0 auto;
+    padding: 40px var(--gutter) 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .back {
+    align-self: flex-start;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .intro {
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: 20px;
+    gap: 6px;
+  }
+
+  .intro p {
+    max-width: 64ch;
+    font-size: 16px;
+  }
+
+  .guides {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    gap: 24px;
     align-items: start;
   }
 
-  @media (max-width: 820px) {
-    main {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .current,
-  .label {
+  .panel {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     min-width: 0;
+    padding: 24px;
   }
 
-  h2,
-  h3 {
-    margin: 0;
-    font: 900 12px/1 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--magenta);
+  .proposal {
+    border-color: var(--attention);
   }
 
-  h3 {
-    color: var(--ink);
-  }
-
-  h2 span {
-    font: 500 11px/1 var(--mono);
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--muted);
-    margin-left: 6px;
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
   }
 
   .statement {
-    margin: 0;
-    line-height: 1.5;
+    font-size: 17px;
   }
 
-  ul {
+  .rules {
     margin: 0;
-    padding-left: 18px;
-    font-size: 14px;
-    line-height: 1.5;
+    padding: 0;
+    list-style: none;
   }
 
-  .note,
-  .meta {
-    margin: 0;
-    font-size: 13px;
-    color: var(--muted);
+  .rules li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    font-size: 15px;
   }
 
-  .meta {
-    font-family: var(--mono);
-    font-size: 11px;
+  .rules .chip {
+    flex: none;
+    min-width: 52px;
+    justify-content: center;
   }
 
   .actions {
     display: flex;
-    justify-content: flex-end;
     flex-wrap: wrap;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
+    padding-top: 12px;
     border-top: 1px solid var(--line);
-    padding-top: 16px;
   }
 
-  .toast {
-    font: 500 12px/1.4 var(--mono);
-    color: var(--red-text);
-    min-height: 1.4em;
-    margin: 0;
+  .actions .primary {
+    margin-left: auto;
   }
 </style>

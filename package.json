@@ -57,10 +57,8 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
-    "@fontsource/inter": "5.3.0",
-    "@fontsource/jetbrains-mono": "5.3.0",
-    "@fontsource/mr-dafoe": "5.3.0",
-    "@fontsource/rubik": "5.3.0",
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
+    "@fontsource-variable/onest": "5.3.1",
     "@google-cloud/kms": "6.2.1",
     "@google-cloud/storage": "8.2.0",
     "@sentry/sveltekit": "11.4.0",

@@ -1,151 +1,255 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { onDestroy } from 'svelte';
-  import { ApiError, createJob } from '$lib/api';
-  import Heard from '$lib/components/Heard.svelte';
-  import JobList from '$lib/components/JobList.svelte';
-  import Monitor from '$lib/components/Monitor.svelte';
   import SignInNotice from '$lib/components/SignInNotice.svelte';
-  import { setPending } from '$lib/pending';
-  import { TITLE_MAX } from '$lib/metadata';
+  import { groupReleases, STATE_LABELS } from '$lib/release';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
-  const maxMinutes = 15;
-
-  let file = $state<File | null>(null);
-  let objectUrl = $state<string | null>(null);
-  let duration = $state(0);
-  let songTitle = $state('');
-  let notes = $state('');
-  let busy = $state(false);
-  let message = $state('');
-
-  const tooLong = $derived(duration > maxMinutes * 60);
-  const picked = $derived(Boolean(file) && duration > 0 && songTitle.trim().length > 0);
-  const canStart = $derived(picked && !tooLong && !busy);
-
-  const pick = (event: Event) => {
-    const input = event.currentTarget as HTMLInputElement;
-    const chosen = input.files?.[0] ?? null;
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-    file = chosen;
-    duration = 0;
-    message = '';
-    // The monitor plays the local file at once, while the upload runs.
-    objectUrl = chosen ? URL.createObjectURL(chosen) : null;
-  };
-
-  const start = async (event: SubmitEvent) => {
-    event.preventDefault();
-    if (!file || !objectUrl || !canStart) return;
-    busy = true;
-    message = '';
-    // Browsers report an empty type for some containers; the URL is signed with this exact value.
-    const contentType = file.type || 'video/mp4';
-    try {
-      const { id, uploadUrl } = await createJob({
-        songTitle: songTitle.trim(),
-        notes: notes.trim(),
-        filename: file.name,
-        size: file.size,
-        durationSec: duration,
-        contentType,
-      });
-      setPending(id, { file, uploadUrl, objectUrl, contentType });
-      objectUrl = null;
-      await goto(resolve('/jobs/[id]', { id }));
-    } catch (error) {
-      message = error instanceof ApiError ? error.message : 'Could not start the run.';
-      busy = false;
-    }
-  };
-
-  onDestroy(() => {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-  });
+  const releases = $derived(groupReleases(data.jobs));
 </script>
 
 {#if data.user}
-  <main>
-    <section class="tape" aria-label="The video">
-      <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
-      <Heard tags={[]} measurements={null} />
-    </section>
-
-    <div class="side">
-      <form class="label" onsubmit={start} aria-label="Start a run">
-        <div class="field" class:err={tooLong}>
-          <label for="video">Video <span>up to {maxMinutes} min</span></label>
-          <input id="video" type="file" accept="video/*" onchange={pick} disabled={busy} />
-          {#if tooLong}<span class="msg">This video runs over {maxMinutes} minutes.</span>{/if}
-        </div>
-        <div class="field">
-          <label for="song">Song title <span>required</span></label>
-          <input
-            id="song"
-            bind:value={songTitle}
-            maxlength={TITLE_MAX}
-            autocomplete="off"
-            required
-            disabled={busy}
-          />
-        </div>
-        <div class="field">
-          <label for="notes">Notes <span>optional</span></label>
-          <textarea id="notes" rows="3" bind:value={notes} maxlength="1000" disabled={busy}
-          ></textarea>
-        </div>
-        <div class="actions">
-          <button class="btn primary" type="submit" disabled={!canStart}
-            >{busy ? 'Starting' : 'Analyze'}</button
+  <main class="home">
+    {#if data.jobs.length === 0}
+      <section class="panel lead" aria-labelledby="first-heading">
+        <p class="kicker">Up next</p>
+        <h1 id="first-heading">Upload your first video</h1>
+        <p class="help">Here's the whole loop. It walks you through one step at a time.</p>
+        <ol>
+          <li>Pick the video and type the song title.</li>
+          <li>The model listens and drafts a title, description, and tags.</li>
+          <li>You keep each one, fix it, or ask for another draft.</li>
+          <li>It uploads as Private and checks YouTube really has it.</li>
+        </ol>
+        <a class="btn primary" href={resolve('/new')}>Start</a>
+      </section>
+    {:else}
+      <h1 class="visually-hidden">Releases</h1>
+      {#if releases.next}
+        <section class="panel lead needs-you" aria-labelledby="next-heading">
+          <p class="kicker">Up next</p>
+          <h2 id="next-heading">Review the draft for {releases.next.songTitle}</h2>
+          <p class="help">
+            The title, description, and tags are drafted. Keep, fix, or redraft each one, then
+            approve the upload.
+          </p>
+          <a
+            class="btn primary"
+            href={resolve('/jobs/[id]', { id: releases.next.id })}
+            aria-label="Continue {releases.next.songTitle}">Continue</a
           >
-        </div>
-        <p class="toast" aria-live="polite">{message}</p>
-      </form>
-      <JobList jobs={data.jobs} />
-    </div>
+        </section>
+      {/if}
+
+      {#each releases.running as job (job.id)}
+        <section class="running" aria-label={job.songTitle}>
+          <div>
+            <h2>{job.songTitle}</h2>
+            <p class="help">
+              <span class="dot" data-tone="running"></span>
+              {STATE_LABELS[job.state].text} · nothing to do yet
+            </p>
+          </div>
+          <a
+            class="btn small"
+            href={resolve('/jobs/[id]', { id: job.id })}
+            aria-label="Watch {job.songTitle}">Watch</a
+          >
+        </section>
+      {/each}
+
+      <div class="start">
+        <a class="btn" class:primary={!releases.next} href={resolve('/new')}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          Start a new release
+        </a>
+        <span class="help">Pick a video, type the song title. That's it.</span>
+      </div>
+
+      {#if releases.earlier.length > 0}
+        <section class="earlier" aria-labelledby="earlier-heading">
+          <h2 id="earlier-heading" class="kicker">Earlier</h2>
+          <ul>
+            {#each releases.earlier as job (job.id)}
+              {@const state = STATE_LABELS[job.state]}
+              <li>
+                <span class="title">{job.songTitle}</span>
+                <span class="state"
+                  ><span class="dot" data-tone={state.tone}></span>{state.text}</span
+                >
+                <a
+                  class="btn small"
+                  href={resolve('/jobs/[id]', { id: job.id })}
+                  aria-label="Open {job.songTitle}">Open</a
+                >
+              </li>
+            {/each}
+          </ul>
+          <p class="help">Media is kept 7 days; everything you approved is kept.</p>
+        </section>
+      {/if}
+    {/if}
   </main>
 {:else}
-  <SignInNotice />
+  <main class="sign-in">
+    <div class="intro">
+      <h1>Sign in to Soundboard</h1>
+      <p class="help">
+        Upload a finished music video. The model drafts the title, description, and tags. You
+        approve them, and it uploads as Private and reads the upload back to verify it.
+      </p>
+    </div>
+    <SignInNotice />
+    <div class="panel">
+      <!-- A full page load: the login route redirects off-site to Google. -->
+      <a class="btn primary" href={resolve('/auth/login')} data-sveltekit-reload
+        >Continue with Google</a
+      >
+      <p class="help">
+        Signing in also connects your YouTube channel with upload and read access. Uploads go to the
+        channel of the Google account you sign in with.
+      </p>
+    </div>
+  </main>
 {/if}
 
 <style>
   main {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    gap: 20px;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: 100%;
+    max-width: calc(var(--measure-page) + 2 * var(--gutter));
+    margin: 0 auto;
+    padding: 40px var(--gutter) 64px;
   }
 
-  @media (max-width: 820px) {
-    main {
-      grid-template-columns: 1fr;
+  .lead {
+    display: grid;
+    gap: 14px;
+    justify-items: start;
+    padding: 28px;
+    border-radius: 16px;
+  }
+
+  .needs-you {
+    border-color: var(--attention);
+  }
+
+  .needs-you .kicker {
+    color: var(--attention);
+  }
+
+  .lead h2 {
+    font-size: clamp(24px, 4.5vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+
+  ol {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding-left: 20px;
+  }
+
+  .running {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+  }
+
+  .running h2,
+  .title {
+    font: 600 16px/1.4 var(--font-body);
+    overflow-wrap: anywhere;
+  }
+
+  .running .help,
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .start {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+  }
+
+  .start svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+  }
+
+  .earlier {
+    display: grid;
+    gap: 10px;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px 16px;
+    padding: 12px 20px;
+  }
+
+  li + li {
+    border-top: 1px solid var(--line);
+  }
+
+  .state {
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  /* Phones: the state drops under the title; the button keeps its row. */
+  @media (width < 560px) {
+    li {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .state {
+      grid-row: 2;
     }
   }
 
-  .tape,
-  .side,
-  .label {
-    display: flex;
-    flex-direction: column;
+  .sign-in {
+    max-width: calc(440px + 2 * var(--gutter));
+    justify-content: center;
+    flex: 1;
+  }
+
+  .intro {
+    display: grid;
+    gap: 10px;
+  }
+
+  .sign-in .panel {
+    display: grid;
     gap: 14px;
-    min-width: 0;
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    border-top: 1px solid var(--line);
-    padding-top: 16px;
-  }
-
-  .toast {
-    font: 500 12px/1.4 var(--mono);
-    color: var(--red-text);
-    min-height: 1.4em;
-    margin: 0;
+    padding: 24px;
   }
 </style>
