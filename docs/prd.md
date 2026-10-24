@@ -141,7 +141,7 @@
 - The status page drives the run: it calls the next step until the job reaches review.
 - The home page lists only the signed-in user's jobs: the newest one in review up next, then running ones, then the rest, newest first, each with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
 - Resume depends on the seven-day media lifecycle. Missing media gets a clear new-upload requirement; saved metadata stays visible.
-- [ ] Chunk N/M or a named wait ("waking model", "waiting on another run") is always on screen.
+- [ ] "Window n of m" or a named wait ("Waking the model", "Waiting on another release") is always on screen.
 - [ ] Reloading the page resumes from the next unfinished step.
 - [ ] A step's claim on the job expires after 3 minutes, so an aborted request frees the job.
 

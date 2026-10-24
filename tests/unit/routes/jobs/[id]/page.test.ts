@@ -228,9 +228,8 @@ describe('job page: working screens', () => {
   it('shows chunk progress, what it heard, and drives the next step with the job trace', async () => {
     fetchMock.mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 }, { chunks: [chunk(0)] }));
-    expect(chip()).toHaveTextContent('Chunk 2 / 5');
+    expect(chip()).toHaveTextContent('Window 2 of 5');
     expect(heading('Listening to the video')).toBeInTheDocument();
-    expect(screen.getByText(/^Window 2 of 5\./)).toBeInTheDocument();
     expect(screen.getByText('Step 2 of 8 · Listening')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to releases from PeekaBoo' })).toHaveAttribute(
       'href',
@@ -250,8 +249,9 @@ describe('job page: working screens', () => {
       .mockResolvedValueOnce(json(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: WAKING })))
       .mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
-    await waitFor(() => expect(chip()).toHaveTextContent(WAKING));
-    expect(heading('Waking the model')).toBeInTheDocument();
+    // The headline names the wait once; the status row keeps showing progress.
+    await waitFor(() => expect(heading('Waking the model')).toBeInTheDocument());
+    expect(chip()).toHaveTextContent('Window 1 of 5');
   });
 
   it('streams playback from the signed URL', () => {
@@ -480,7 +480,7 @@ describe('job page: end states', () => {
     setup(view({ state: 'FAILED', failedState: 'ANALYZE', chunkIndex: 2, error: 'boom' }));
     expect(button('Discard')).toBeEnabled();
     await fireEvent.click(button('Retry'));
-    await waitFor(() => expect(chip()).toHaveTextContent('Chunk 3 / 5'));
+    await waitFor(() => expect(chip()).toHaveTextContent('Window 3 of 5'));
     expect(paths().slice(0, 2)).toEqual(['/api/jobs/j1/retry', STEP_PATH]);
   });
 
@@ -557,7 +557,7 @@ describe('job page: paused publish', () => {
     expect(within(panel).getByLabelText('Video link')).toBeEnabled();
     expect(within(panel).getByRole('button', { name: 'Confirm video' })).toBeDisabled();
     expect(button('Discard')).toBeEnabled();
-    expect(chip()).toHaveTextContent('upload outcome unknown');
+    expect(chip()).toHaveTextContent('Upload outcome unknown');
     expect(heading('Upload paused')).toBeInTheDocument();
   });
 

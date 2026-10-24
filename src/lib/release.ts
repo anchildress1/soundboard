@@ -1,3 +1,4 @@
+import { WAIT_TEXT } from './status';
 import type { JobState, JobView } from './types';
 
 /** The release as the user walks it: one screen, one decision, one primary button per step. */
@@ -115,27 +116,27 @@ export function workCopy({ job, wait }: JobView): { title: string; body: string 
   switch (wait) {
     case 'waking model':
       return {
-        title: 'Waking the model',
+        title: WAIT_TEXT[wait],
         body: 'It sleeps when nobody is using it and takes about a minute to start. ' + leave,
       };
     case 'waiting on another run':
       return {
-        title: 'Waiting on another release',
+        title: WAIT_TEXT[wait],
         body: 'One release runs at a time. Yours starts when the other one finishes.',
       };
     case 'step running in another tab':
       return {
-        title: 'Running in another tab',
+        title: WAIT_TEXT[wait],
         body: 'This release is open somewhere else. This page picks up when that step finishes.',
       };
     case 'waiting on YouTube':
-      return { title: 'Waiting on YouTube', body: 'This page checks again on its own.' };
+      return { title: WAIT_TEXT[wait], body: 'This page checks again on its own.' };
     case 'reconnect YouTube':
     case 'upload outcome unknown':
       return { title: 'Upload paused', body: 'It needs you before it can go on.' };
     case 'Daily upload limit reached. Try tomorrow.':
       return {
-        title: 'Daily upload limit reached',
+        title: WAIT_TEXT[wait],
         body: "YouTube's limit resets tomorrow. Everything you approved is kept.",
       };
   }
@@ -148,10 +149,7 @@ export function workCopy({ job, wait }: JobView): { title: string; body: string 
     case 'PREP':
       return { title: 'Measuring the audio', body: leave };
     case 'ANALYZE':
-      return {
-        title: 'Listening to the video',
-        body: `Window ${Math.min(job.chunkIndex + 1, job.chunkCount)} of ${job.chunkCount}. ${leave}`,
-      };
+      return { title: 'Listening to the video', body: leave };
     case 'PUBLISHING':
       return {
         title: 'Uploading to YouTube',

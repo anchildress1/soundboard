@@ -14,6 +14,7 @@
   } from '$lib/brand';
   import pRetry, { AbortError } from 'p-retry';
   import { POLL_BACKOFF, Waiting } from '$lib/retry';
+  import { WAIT_TEXT } from '$lib/status';
   import type { Wait } from '$lib/types';
   import type { PageData } from './$types';
 
@@ -58,7 +59,7 @@
       : null,
   );
   const problem = $derived(guide ? guideError(guide) : null);
-  const proposing = $derived(wait ?? 'Reading uploads');
+  const proposing = $derived(wait ? WAIT_TEXT[wait] : 'Reading uploads');
 
   /** A loading or busy model answers with a wait at once; keep asking until it takes the call. */
   const propose = async () => {

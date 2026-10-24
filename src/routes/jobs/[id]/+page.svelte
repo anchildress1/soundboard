@@ -54,7 +54,6 @@
   let drivingShort: string | null = null;
 
   const job = $derived(view.job);
-  const status = $derived(jobStatus(view, view.wait, uploadPct));
   const working = $derived(modelWorking(view));
   const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
   const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
@@ -71,6 +70,9 @@
   );
   const approved = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const paused = $derived(publishPaused(view));
+  // The headline already names a wait, so the status row shows the state's progress instead. A
+  // paused upload has none to show, so the row names what it's waiting on.
+  const status = $derived(jobStatus(view, paused ? view.wait : undefined, uploadPct));
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
   const current = $derived(stepIndex(job.state, reviewStep, job.failedState));
   const work = $derived(workCopy(view));

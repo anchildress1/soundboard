@@ -71,7 +71,7 @@ describe('brand page: proposing', () => {
     setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'waking model' })).toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Waking the model' })).toBeDisabled(),
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);

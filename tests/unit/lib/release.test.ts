@@ -139,20 +139,11 @@ describe('workCopy', () => {
   const view = (state: JobState, wait?: Wait): JobView =>
     ({ job: { state, chunkIndex: 5, chunkCount: 9 }, chunks: [], pick: null, wait }) as never;
 
-  it('names the chunk being listened to', () => {
+  it('says it is listening and leaves the window count to the status row', () => {
     expect(workCopy(view('ANALYZE'))).toEqual({
       title: 'Listening to the video',
-      body: 'Window 6 of 9. Nothing for you to do yet. Leave if you like; Home brings you back.',
+      body: 'Nothing for you to do yet. Leave if you like; Home brings you back.',
     });
-  });
-
-  it('never counts past the last window', () => {
-    const last = {
-      job: { state: 'ANALYZE', chunkIndex: 9, chunkCount: 9 },
-      chunks: [],
-      pick: null,
-    };
-    expect(workCopy(last as never).body).toMatch(/^Window 9 of 9\./);
   });
 
   it('warns not to leave while the browser is still uploading', () => {

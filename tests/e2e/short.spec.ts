@@ -113,7 +113,7 @@ test.describe('the Short', () => {
       job: { state: 'HOOK', error: null },
     });
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Is this the hook?');
-    await expect(theShort(page).getByRole('status')).toHaveText(/waking model/i);
+    await expect(theShort(page).getByRole('status')).toHaveText('Waking the model');
     await expect(page.getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
   });
 

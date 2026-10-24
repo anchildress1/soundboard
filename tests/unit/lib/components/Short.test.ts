@@ -110,7 +110,7 @@ describe('Short: running', () => {
 
   it('shows the named wait while the model wakes', () => {
     setup({ view: view('HOOK', { hook: null }, {}, { wait: 'waking model' }) });
-    expect(screen.getByRole('status')).toHaveTextContent('waking model');
+    expect(screen.getByRole('status')).toHaveTextContent('Waking the model');
   });
 });
 

@@ -112,7 +112,7 @@ flowchart LR
   APP -. "gen_ai spans" .-> S
 ```
 
-- The app runs on Cloud Run with no GPU. The model runs on a Vertex AI dedicated endpoint, which the app calls with its service account. Both run at most one instance and scale to zero when idle; the first call to a sleeping model wakes it, and the page shows "waking model" until it answers.
+- The app runs on Cloud Run with no GPU. The model runs on a Vertex AI dedicated endpoint, which the app calls with its service account. Both run at most one instance and scale to zero when idle; the first call to a sleeping model wakes it, and the page shows "Waking the model" until it answers.
 - The model costs about $0.81/hour while its replica is up (`g2-standard-4` with the L4) and nothing while scaled to zero. A wake bills at least 5 minutes.
 - The status page runs the pipeline one step per request (prep, one chunk at a time, then the draft; a Short adds a hook pick and a render). Reloading the page resumes from the next unfinished step.
 - The full design is in [docs/prd.md](docs/prd.md).
