@@ -1,69 +1,91 @@
-# YouTube audit user flows
+# YouTube audit user flow
 
-These diagrams describe the current repository implementation.
-
-## Sign-in and YouTube connection
+Current implementation: sign-in through private upload verification.
 
 ```mermaid
 %%{init: {"theme": "default"}}%%
-flowchart TD
-  accTitle: Soundboard sign-in and connection flow
-  accDescr: The artist can read the public privacy policy before signing in. Google sign-in requests identity and YouTube permissions. The server validates identity and app access before creating a session. Incomplete YouTube consent permits sign-in but blocks upload approval. The artist can reconnect or disconnect on the Connections page.
+sequenceDiagram
+  autonumber
+  accTitle: Soundboard artist sign-in, review and private upload
+  accDescr: The artist signs in and grants Google and YouTube consent, uploads a finished video directly to Cloud Storage, and keeps the page open to drive analysis steps. Soundboard uses Gemma and genre research to draft metadata. The artist reviews and approves a private YouTube upload, which Soundboard verifies through videos.list. Alternative paths cover incomplete consent, a busy model and an unknown upload outcome.
 
-  HOME["Public home page<br/>Privacy policy in footer"] --> LOGIN["Sign in with Google"]
-  LOGIN --> GOOGLE["Google identity and YouTube consent"]
-  GOOGLE --> ACCESS{"Valid identity and<br/>allowed app access?"}
-  ACCESS -->|"No"| DENY["Show sign-in error<br/>No app access"]
-  ACCESS -->|"Yes"| SESSION["Create signed session<br/>Show only this user's jobs"]
-  SESSION --> GRANT{"Usable grant, required scopes<br/>and own channel confirmed?"}
-  GRANT -->|"Yes"| CONNECTED["Connected<br/>Approval available"]
-  GRANT -->|"No"| LIMITED["Signed in<br/>Reconnect required before approval"]
-  LIMITED --> RECONNECT["Connections: Connect or Reconnect"]
-  RECONNECT --> CHECK["Validate callback and same account<br/>Confirm channel and grant"]
-  CHECK --> GRANT
-  CONNECTED --> DISCONNECT["Connections: Disconnect"]
-  DISCONNECT --> PAUSE["Revoke the grant at Google<br/>Remove stored connection<br/>Pause unfinished uploads and verification"]
-  PAUSE --> RECONNECT
+  actor Artist
+  participant App as Soundboard
+  participant Google as Google OAuth
+  participant Storage as Cloud Storage
+  participant Model as Gemma on Vertex AI
+  participant YouTube as YouTube Data API
+
+  Artist->>App: Sign in with Google
+  App-->>Artist: Redirect to Google
+  Artist->>Google: Sign in and choose permissions
+  Google-->>App: Authorization callback
+  App->>Google: Validate identity and exchange code
+  Google-->>App: Identity and granted permissions
+  Note over App: Check app access before creating a session
+  alt YouTube consent incomplete
+    App-->>Artist: Signed in; reconnect required before approval
+    Artist->>App: Connect or Reconnect on Connections
+    App-->>Artist: Redirect to Google consent
+    Artist->>Google: Grant missing YouTube permissions
+    Google-->>App: Authorization callback
+    App->>Google: Exchange code and validate grant
+    Google-->>App: Required permissions and usable grant
+  else YouTube consent complete
+    App-->>Artist: Signed in
+  end
+  App->>YouTube: channels.list with artist OAuth
+  YouTube-->>App: Confirm own channel
+  Note over App: Store refresh token encrypted with Cloud KMS
+
+  Artist->>App: Choose video, enter song title, click Analyze
+  App-->>Artist: Job and signed upload URL
+  Artist->>Storage: Browser uploads video directly
+  Storage-->>Artist: Upload complete
+  Artist->>App: Page requests prep step
+  App->>Storage: Read source through signed URL
+  Storage-->>App: Media stream
+  App->>App: ffmpeg probes video and measures audio
+
+  loop Page requests steps until all analysis windows finish
+    Artist->>App: Page requests next analyze step
+    App->>Model: Check readiness
+    alt Model busy, loading or scaled to zero
+      Model-->>App: Not ready
+      App-->>Artist: Show wait reason; page retries later
+    else Model ready
+      App->>Storage: Read current window
+      Storage-->>App: Media stream
+      App->>Model: Window audio, frames and measurements
+      Model-->>App: Perceptual analysis
+      App-->>Artist: Save and show progress
+    end
+  end
+
+  Artist->>App: Page requests pick step
+  App->>YouTube: search.list for genre; videos.list for details
+  YouTube-->>App: Genre evidence
+  Note over App: Separate per-video candidate lists; timestamp research
+  App->>Model: Analysis, genre evidence and artist identity
+  Model-->>App: Draft title, description and tags
+  App-->>Artist: Editable draft, destination channel, private visibility
+  Artist->>App: Review, edit and Approve & upload
+  App->>App: Validate fields and grant; pin approved channel
+  Artist->>App: Page requests upload step
+  App->>Storage: Stream approved source video
+  Storage-->>App: Media stream
+  App->>YouTube: videos.insert, resumable, private, artist OAuth
+  alt Upload outcome unknown
+    App-->>Artist: Pause; check YouTube Studio and supply URL or discard
+    Note over Artist,YouTube: Validate supplied video's ownership before resuming verification; never blindly re-upload
+  else Video ID returned
+    YouTube-->>App: Video ID; claimed complete
+    Artist->>App: Page requests verification step
+    App->>YouTube: videos.list with owner's grant
+    YouTube-->>App: Upload status and video details
+    App-->>Artist: Verified · private when read-back confirms success
+  end
 ```
 
-## Analyze, review and upload
-
-```mermaid
-%%{init: {"theme": "default"}}%%
-flowchart TD
-  accTitle: Soundboard video and Short approval flow
-  accDescr: The artist supplies a finished video and song title. Browser-driven steps analyze media and retrieve genre evidence before drafting metadata. The artist edits, reruns, discards or approves. Approval validates metadata and pins the destination channel. The app uploads privately and verifies through videos.list. Shorts receive separate review and approval. Unknown upload outcomes require reconciliation instead of an automatic duplicate upload.
-
-  START["Choose finished video<br/>Enter song title; notes optional"] --> GCS["Upload directly to Cloud Storage"]
-  GCS --> PREP["Probe video and measure audio with ffmpeg"]
-  PREP --> ANALYZE["Analyze one audio and frame window per step"]
-  ANALYZE --> READY{"Model available?"}
-  READY -->|"No"| WAIT["Show wait reason<br/>Page retries the unfinished step"]
-  WAIT --> ANALYZE
-  READY -->|"Yes; more windows remain"| ANALYZE
-  READY -->|"Yes; windows complete"| RESEARCH["Fetch genre evidence and artist identity<br/>Keep per-video candidate lists separate"]
-  RESEARCH --> DRAFT["Draft title, description and candidate-only tags"]
-  DRAFT --> REVIEW["Artist reviews and edits<br/>Show destination channel and private visibility"]
-  REVIEW -->|"Re-run"| DRAFT
-  REVIEW -->|"Discard"| STOP["Stop this job"]
-  REVIEW -->|"Approve and upload"| VALIDATE["Check ownership, connection and metadata<br/>Save approved fields and destination channel"]
-  VALIDATE --> UPLOAD["videos.insert<br/>Resumable private upload from Cloud Storage"]
-  UPLOAD --> OUTCOME{"Upload outcome?"}
-  OUTCOME -->|"Video ID returned"| READBACK["videos.list<br/>Read back with the owner's grant"]
-  READBACK --> VERIFIED{"Upload verified?"}
-  VERIFIED -->|"Not yet"| RETRY["Preserve video ID<br/>Retry verification; do not re-upload"]
-  RETRY --> READBACK
-  VERIFIED -->|"Yes"| DONE["Verified and private<br/>Open video on YouTube"]
-  OUTCOME -->|"Unknown"| RECONCILE["Pause; open YouTube Studio<br/>Artist supplies video URL or discards"]
-  RECONCILE -->|"URL belongs to approved channel"| READBACK
-  RECONCILE -->|"Discard"| STOP
-
-  REVIEW -->|"Make a Short"| SHORT["Pick hook and render 9:16 clip<br/>Artist reviews clip and its metadata separately"]
-  SHORT -->|"Re-cut or re-pick"| SHORT
-  SHORT -->|"Approve Short"| VALIDATE
-```
-
-- Reloading resumes saved progress; the page must remain open to drive current pipeline steps.
-- Lost or revoked YouTube access pauses publishing until the same channel reconnects.
-- Upload verification does not make a video public; the artist controls publication in YouTube.
-- Bandcamp copy is available to copy and paste; Soundboard does not post it.
+- The page drives steps; reload resumes saved progress.
+- A Short requires its own review and approval, then uses the same private upload and read-back flow.
