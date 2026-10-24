@@ -163,9 +163,15 @@
     }
   };
 
+  /** Rooms stay mounted so their edits survive a trip away; a hidden one must not keep playing. */
+  const enter = (next: typeof room) => {
+    for (const video of document.querySelectorAll('video')) if (!video.paused) video.pause();
+    room = next;
+  };
+
   const makeShort = async () => {
     await actShort('short');
-    if (shortView) room = 'short';
+    if (shortView) enter('short');
   };
 
   const act = async (name: Exclude<ActionName, 'recut' | 'short'>, body: unknown = {}) => {
@@ -262,7 +268,7 @@
       class="back"
       type="button"
       onclick={() => {
-        room = 'release';
+        enter('release');
         shortMessage = '';
       }}
     >
@@ -270,34 +276,38 @@
     </button>
   {/if}
 
-  {#if room === 'short' && shortView}
-    <div class="intro">
-      <h1>Is this the hook?</h1>
-      <p class="help">
-        A vertical cut from the video's strongest moment, with its own approval and upload.
-      </p>
+  {#if shortView}
+    <div class="room" hidden={room !== 'short'}>
+      <div class="intro">
+        <h1>Is this the hook?</h1>
+        <p class="help">
+          A vertical cut from the video's strongest moment, with its own approval and upload.
+        </p>
+      </div>
+      <Short
+        view={shortView}
+        src={shortSrc}
+        busy={shortBusy}
+        message={room === 'short' ? shortMessage : ''}
+        serverErrors={shortErrors}
+        approveTo={data.approveTo}
+        expired={data.shortExpired && shortView.job.id === data.short?.job.id}
+        onrecut={(cut) => actShort('recut', cut)}
+        onapprove={(f) =>
+          actShort('approve', {
+            ...f,
+            pickVersion: shortView?.pick?.version,
+            channelId: data.approveTo?.channelId,
+          })}
+        onrerun={() => actShort('rerun')}
+        ondiscard={() => actShort('discard')}
+        onretry={() => actShort('retry')}
+        onconfirm={(url) => actShort('confirm-upload', { url })}
+      />
     </div>
-    <Short
-      view={shortView}
-      src={shortSrc}
-      busy={shortBusy}
-      message={shortMessage}
-      serverErrors={shortErrors}
-      approveTo={data.approveTo}
-      expired={data.shortExpired && shortView.job.id === data.short?.job.id}
-      onrecut={(cut) => actShort('recut', cut)}
-      onapprove={(f) =>
-        actShort('approve', {
-          ...f,
-          pickVersion: shortView?.pick?.version,
-          channelId: data.approveTo?.channelId,
-        })}
-      onrerun={() => actShort('rerun')}
-      ondiscard={() => actShort('discard')}
-      onretry={() => actShort('retry')}
-      onconfirm={(url) => actShort('confirm-upload', { url })}
-    />
-  {:else if room === 'bandcamp' && fields && view.pick}
+  {/if}
+
+  {#if room === 'bandcamp' && fields && view.pick}
     <div class="intro">
       <h1>Copy these into Bandcamp</h1>
       <p class="help">Bandcamp has no upload API for artists, so this is copy and paste.</p>
@@ -309,145 +319,161 @@
       tags={fields.tags}
       ondone={(d) => (bandcampDone = d)}
     />
-  {:else if job.state === 'REVIEW' && fields && view.pick}
-    {@const pick = view.pick}
-    {#key pick.version}
-      <Review
-        {fields}
-        {pick}
-        candidates={job.hashtagCandidates ?? []}
-        destination={data.approveTo}
-        draft={draftKey(job.id, pick.version)}
-        {busy}
-        {serverErrors}
-        bind:step={reviewStep}
-        onapprove={(f) =>
-          act('approve', {
-            ...f,
-            pickVersion: pick.version,
-            channelId: data.approveTo?.channelId,
-          })}
-        onrerun={() => {
-          // The new pick opens on its title, not the screen the re-run came from.
-          reviewStep = 'title';
-          act('rerun');
-        }}
-        ondiscard={() => act('discard')}
-      />
-    {/key}
-  {:else if job.state === 'VERIFIED'}
-    <div class="intro">
-      <span class="chip" data-tone="ok">Verified · private</span>
-      <h1>It's on your channel</h1>
-      <p class="help">
-        Read back from YouTube.
-        {#if job.videoId}<a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
-            >youtu.be/{job.videoId}</a
-          >{/if}
-        Private until you publish it there.
-      </p>
-    </div>
-  {:else if job.state === 'FAILED'}
-    <div class="intro">
-      <h1>This step failed</h1>
-      <p class="help">Everything before it is kept. Retry picks up at the step that failed.</p>
-    </div>
-    <div class="actions">
-      <button class="btn danger" type="button" disabled={busy} onclick={() => act('discard')}
-        >Discard</button
-      >
-      <button class="btn primary" type="button" disabled={busy} onclick={() => act('retry')}
-        >Retry</button
-      >
-    </div>
-  {:else if job.state === 'DISCARDED'}
-    <div class="intro">
-      <h1>This release was discarded</h1>
-      <p class="help">Nothing more happens to it. Anything already on YouTube stays there.</p>
-    </div>
-  {:else}
-    <div class="intro">
-      <h1>{work.title}</h1>
-      <p class="help">{work.body}</p>
-    </div>
-    <Monitor
-      src={localUrl ?? data.playbackUrl}
-      filename={job.filename}
-      width={job.probe?.width}
-      height={job.probe?.height}
-    />
-    <div class="panel">
-      <Track {status} {model} />
-    </div>
-    {#if !approved}
-      <Heard tags={heardTags(view)} measurements={job.measurements} />
-    {:else if job.finalFields}
-      <p class="help">Uploading as <strong>{job.finalFields.title}</strong>, Private.</p>
-    {/if}
-    <UploadRecovery {view} {busy} onconfirm={(url) => act('confirm-upload', { url })} />
-    {#if paused}
+  {/if}
+
+  <div class="room" hidden={room !== 'release'}>
+    {#if job.state === 'REVIEW' && fields && view.pick}
+      {@const pick = view.pick}
+      {#key pick.version}
+        <Review
+          {fields}
+          {pick}
+          candidates={job.hashtagCandidates ?? []}
+          destination={data.approveTo}
+          draft={draftKey(job.id, pick.version)}
+          {busy}
+          {serverErrors}
+          bind:step={reviewStep}
+          onapprove={(f) =>
+            act('approve', {
+              ...f,
+              pickVersion: pick.version,
+              channelId: data.approveTo?.channelId,
+            })}
+          onrerun={() => {
+            // The new pick opens on its title, not the screen the re-run came from.
+            reviewStep = 'title';
+            act('rerun');
+          }}
+          ondiscard={() => act('discard')}
+        />
+      {/key}
+    {:else if job.state === 'VERIFIED'}
+      <div class="intro">
+        <span class="chip" data-tone="ok">Verified · private</span>
+        <h1>It's on your channel</h1>
+        <p class="help">
+          Read back from YouTube.
+          {#if job.videoId}<a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
+              >youtu.be/{job.videoId}</a
+            >{/if}
+          Private until you publish it there.
+        </p>
+      </div>
+    {:else if job.state === 'FAILED'}
+      <div class="intro">
+        <h1>This step failed</h1>
+        <p class="help">Everything before it is kept. Retry picks up at the step that failed.</p>
+      </div>
       <div class="actions">
         <button class="btn danger" type="button" disabled={busy} onclick={() => act('discard')}
           >Discard</button
         >
-      </div>
-    {/if}
-  {/if}
-
-  {#if room === 'release' && approved && fields && view.pick}
-    <section class="offers" aria-labelledby="offers-heading">
-      <h2 id="offers-heading">Up next, if you want</h2>
-      {#if shortView}
-        <button class="offer" type="button" onclick={() => (room = 'short')}>
-          <span>
-            <strong>{shortView.job.state === 'VERIFIED' ? 'Your Short' : 'Finish the Short'}</strong
-            >
-            <span class="help"
-              >{shortView.job.state === 'VERIFIED'
-                ? 'Uploaded and verified.'
-                : 'Its own review and upload.'}</span
-            >
-          </span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-        </button>
-      {:else}
-        <button
-          class="offer"
-          type="button"
-          disabled={shortBusy || tooShortForShort}
-          onclick={makeShort}
+        <button class="btn primary" type="button" disabled={busy} onclick={() => act('retry')}
+          >Retry</button
         >
+      </div>
+    {:else if job.state === 'DISCARDED'}
+      <div class="intro">
+        <h1>This release was discarded</h1>
+        <p class="help">Nothing more happens to it. Anything already on YouTube stays there.</p>
+      </div>
+    {:else}
+      <div class="intro">
+        <h1>{work.title}</h1>
+        <p class="help">{work.body}</p>
+      </div>
+      <Monitor
+        src={localUrl ?? data.playbackUrl}
+        filename={job.filename}
+        width={job.probe?.width}
+        height={job.probe?.height}
+      />
+      <div class="panel">
+        <Track {status} {model} />
+      </div>
+      {#if !approved}
+        <Heard tags={heardTags(view)} measurements={job.measurements} />
+      {:else if job.finalFields}
+        <p class="help">Uploading as <strong>{job.finalFields.title}</strong>, Private.</p>
+      {/if}
+      <UploadRecovery {view} {busy} onconfirm={(url) => act('confirm-upload', { url })} />
+      {#if paused}
+        <div class="actions">
+          <button class="btn danger" type="button" disabled={busy} onclick={() => act('discard')}
+            >Discard</button
+          >
+        </div>
+      {/if}
+    {/if}
+
+    {#if approved && fields && view.pick}
+      <section class="offers" aria-labelledby="offers-heading">
+        <h2 id="offers-heading">Up next, if you want</h2>
+        {#if shortView}
+          <button class="offer" type="button" onclick={() => enter('short')}>
+            <span>
+              <strong
+                >{shortView.job.state === 'VERIFIED' ? 'Your Short' : 'Finish the Short'}</strong
+              >
+              <span class="help"
+                >{shortView.job.state === 'VERIFIED'
+                  ? 'Uploaded and verified.'
+                  : 'Its own review and upload.'}</span
+              >
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        {:else}
+          <button
+            class="offer"
+            type="button"
+            disabled={shortBusy || tooShortForShort}
+            onclick={makeShort}
+          >
+            <span>
+              <strong>Make a Short from the hook</strong>
+              <span class="help"
+                >{tooShortForShort
+                  ? `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`
+                  : 'A vertical cut of the strongest moment, with its own approval.'}</span
+              >
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        {/if}
+        <button class="offer" type="button" onclick={() => enter('bandcamp')}>
           <span>
-            <strong>Make a Short from the hook</strong>
+            <strong>Put it on Bandcamp</strong>
             <span class="help"
-              >{tooShortForShort
-                ? `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`
-                : 'A vertical cut of the strongest moment, with its own approval.'}</span
+              >{bandcampDone
+                ? 'Every field copied.'
+                : 'Copy the drafted fields into Bandcamp.'}</span
             >
           </span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
         </button>
-      {/if}
-      <button class="offer" type="button" onclick={() => (room = 'bandcamp')}>
-        <span>
-          <strong>Put it on Bandcamp</strong>
-          <span class="help"
-            >{bandcampDone ? 'Every field copied.' : 'Copy the drafted fields into Bandcamp.'}</span
-          >
-        </span>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-      </button>
-      {#if job.state === 'VERIFIED'}
-        <a class="btn" href={resolve('/')}>I'm done for now</a>
-      {/if}
-      <p class="toast" aria-live="polite">{room === 'release' ? shortMessage : ''}</p>
-    </section>
-  {/if}
+        {#if job.state === 'VERIFIED'}
+          <a class="btn" href={resolve('/')}>I'm done for now</a>
+        {/if}
+        <p class="toast" aria-live="polite">{room === 'release' ? shortMessage : ''}</p>
+      </section>
+    {/if}
+  </div>
 
   <p class="toast" aria-live="polite">{message}</p>
 </main>
 
 <style>
+  /* The wrapper only hides a room; its children keep the page's column gap. */
+  .room {
+    display: contents;
+  }
+
+  .room[hidden] {
+    display: none;
+  }
+
   .step {
     display: flex;
     flex-direction: column;

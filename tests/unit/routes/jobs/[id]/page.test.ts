@@ -1079,6 +1079,26 @@ describe('job page: Short room', () => {
     ]);
   });
 
+  it("keeps the Short's edits through a trip back to the release", async () => {
+    fetchMock.mockImplementation(hang);
+    await openShort(shortView('REVIEW', {}, { playbackUrl: URL_A }));
+    const title = screen.getByRole('textbox', { name: /Title/ });
+    await fireEvent.input(title, { target: { value: 'Hook cut' } });
+    await fireEvent.click(button(BACK_TO_RELEASE));
+    await fireEvent.click(shortOffer());
+    expect(screen.getByRole('textbox', { name: /Title/ })).toHaveValue('Hook cut');
+  });
+
+  it('pauses a playing video when its room is left', async () => {
+    fetchMock.mockImplementation(hang);
+    const { container } = await openShort(shortView('REVIEW', {}, { playbackUrl: URL_A }));
+    const video = container.querySelector('video')!;
+    Object.defineProperty(video, 'paused', { value: false });
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {});
+    await fireEvent.click(button(BACK_TO_RELEASE));
+    expect(pause).toHaveBeenCalledOnce();
+  });
+
   it('keeps parent and Short recovery fields apart across rooms', async () => {
     fetchMock.mockImplementation(hang);
     setup(
@@ -1099,6 +1119,12 @@ describe('job page: Short room', () => {
     expect(shortInput.id).not.toBe(input.id);
     const ids = Array.from(document.querySelectorAll('[id]'), (element) => element.id);
     expect(new Set(ids).size).toBe(ids.length);
+    // Each room keeps what was typed into it.
+    await fireEvent.input(shortInput, { target: { value: 'https://youtu.be/short-video' } });
+    await fireEvent.click(button(BACK_TO_RELEASE));
+    expect(input).toHaveValue('https://youtu.be/parent-video');
+    await fireEvent.click(shortOffer());
+    expect(shortInput).toHaveValue('https://youtu.be/short-video');
   });
 
   it('re-cuts, then plays the new render', async () => {
