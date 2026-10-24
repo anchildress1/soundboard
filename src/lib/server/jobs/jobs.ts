@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
-import { db, type Database, type Tx } from '$lib/server/core/db';
+import { query, type Tx } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
 import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
@@ -103,16 +103,18 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
 
 export async function createJob(input: NewJob, id = newJobId()): Promise<JobDoc> {
   const doc = newJobDoc(input, id);
-  await db().insert(jobs).values(jobRow(doc));
+  await query((tx) => tx.insert(jobs).values(jobRow(doc)));
   return doc;
 }
 
 export async function getJob(id: string): Promise<JobDoc | null> {
-  const [row] = await db().select().from(jobs).where(eq(jobs.id, id));
-  return row ? hydrateJob(row, db()) : null;
+  return await query(async (tx) => {
+    const [row] = await tx.select().from(jobs).where(eq(jobs.id, id));
+    return row ? hydrateJob(row, tx) : null;
+  });
 }
 
-async function hydrateJob(row: typeof jobs.$inferSelect, q: Database | Tx): Promise<JobDoc> {
+async function hydrateJob(row: typeof jobs.$inferSelect, q: Tx): Promise<JobDoc> {
   const doc = fromRow(row);
   const audience = await readAudience(row.id, q);
   const draft = (row.picks as StoredPick[]).at(-1);
@@ -129,17 +131,19 @@ export type JobListItem = { id: string; songTitle: string; state: JobState; crea
 
 /** The user's newest 20 root jobs; Shorts are reached through their video. */
 export async function listJobs(uid: string): Promise<JobListItem[]> {
-  const rows = await db()
-    .select({
-      id: jobs.id,
-      songTitle: sql<string>`${jobs.data}->>'songTitle'`,
-      state: jobs.state,
-      createdAt: jobs.createdAt,
-    })
-    .from(jobs)
-    .where(and(eq(jobs.ownerUid, uid), isNull(jobs.parentId)))
-    .orderBy(desc(jobs.createdAt))
-    .limit(20);
+  const rows = await query((tx) =>
+    tx
+      .select({
+        id: jobs.id,
+        songTitle: sql<string>`${jobs.data}->>'songTitle'`,
+        state: jobs.state,
+        createdAt: jobs.createdAt,
+      })
+      .from(jobs)
+      .where(and(eq(jobs.ownerUid, uid), isNull(jobs.parentId)))
+      .orderBy(desc(jobs.createdAt))
+      .limit(20),
+  );
   return rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.getTime(),
@@ -153,15 +157,17 @@ export async function listJobs(uid: string): Promise<JobListItem[]> {
  */
 export async function claimJob(id: string): Promise<{ token: string; job: JobDoc } | null> {
   const token = randomBytes(16).toString('hex');
-  const [row] = await db()
-    .update(jobs)
-    .set({
-      claimToken: token,
-      claimUntil: sql`now() + ${CLAIM_TTL_MS}::int * interval '1 millisecond'`,
-    })
-    .where(and(eq(jobs.id, id), or(isNull(jobs.claimUntil), lt(jobs.claimUntil, sql`now()`))))
-    .returning();
-  return row ? { token, job: await hydrateJob(row, db()) } : null;
+  return await query(async (tx) => {
+    const [row] = await tx
+      .update(jobs)
+      .set({
+        claimToken: token,
+        claimUntil: sql`now() + ${CLAIM_TTL_MS}::int * interval '1 millisecond'`,
+      })
+      .where(and(eq(jobs.id, id), or(isNull(jobs.claimUntil), lt(jobs.claimUntil, sql`now()`))))
+      .returning();
+    return row ? { token, job: await hydrateJob(row, tx) } : null;
+  });
 }
 
 export type StoredPick = Pick & { skipped: boolean };
@@ -212,7 +218,7 @@ export async function releaseJob(
   writes: { pick?: Pick; chunk?: Chunk; alsoWrite?: (tx: Tx) => Promise<void> } = {},
 ): Promise<boolean> {
   const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
-  return db().transaction(async (tx) => {
+  return await query(async (tx) => {
     const [kept] = await tx
       .update(jobs)
       .set({ ...jobSet(patch), ...released })
@@ -237,10 +243,14 @@ export async function releaseJob(
 
 /** Records when the first upload initiation was about to go out; later calls keep that time. */
 export async function markUploadStarted(id: string): Promise<void> {
-  await db()
-    .update(jobs)
-    .set({ uploadStartedAt: sql`coalesce(${jobs.uploadStartedAt}, now())` })
-    .where(eq(jobs.id, id));
+  const written = await query((tx) =>
+    tx
+      .update(jobs)
+      .set({ uploadStartedAt: sql`coalesce(${jobs.uploadStartedAt}, now())` })
+      .where(eq(jobs.id, id))
+      .returning({ id: jobs.id }),
+  );
+  if (written.length === 0) throw new Error('Job is no longer writable.');
 }
 
 /**
@@ -248,10 +258,14 @@ export async function markUploadStarted(id: string): Promise<void> {
  * Unconditional on the claim: the marker must exist whenever final bytes may have been sent.
  */
 export async function markFinalChunk(id: string): Promise<void> {
-  await db()
-    .update(jobs)
-    .set({ finalChunkAt: sql`coalesce(${jobs.finalChunkAt}, now())` })
-    .where(eq(jobs.id, id));
+  const written = await query((tx) =>
+    tx
+      .update(jobs)
+      .set({ finalChunkAt: sql`coalesce(${jobs.finalChunkAt}, now())` })
+      .where(eq(jobs.id, id))
+      .returning({ id: jobs.id }),
+  );
+  if (written.length === 0) throw new Error('Job is no longer writable.');
 }
 
 /** Moves the job to a new state only if it is still in one of `from`; false when it already moved. */
@@ -260,16 +274,20 @@ export async function transitionJob(
   from: readonly JobState[],
   patch: JobPatch,
 ): Promise<boolean> {
-  const moved = await db()
-    .update(jobs)
-    .set(jobSet(patch))
-    .where(and(eq(jobs.id, id), inArray(jobs.state, [...from])))
-    .returning({ id: jobs.id });
+  const moved = await query((tx) =>
+    tx
+      .update(jobs)
+      .set(jobSet(patch))
+      .where(and(eq(jobs.id, id), inArray(jobs.state, [...from])))
+      .returning({ id: jobs.id }),
+  );
   return moved.length > 0;
 }
 
 export async function listChunks(id: string): Promise<Chunk[]> {
-  const [row] = await db().select({ chunks: jobs.chunks }).from(jobs).where(eq(jobs.id, id));
+  const [row] = await query((tx) =>
+    tx.select({ chunks: jobs.chunks }).from(jobs).where(eq(jobs.id, id)),
+  );
   return (row?.chunks as Chunk[] | undefined) ?? [];
 }
 
@@ -282,7 +300,7 @@ export async function skipAndRepick(
   version: number | null,
   alsoWrite: (tx: Tx) => Promise<void> = async () => {},
 ): Promise<boolean> {
-  return db().transaction(async (tx) => {
+  return await query(async (tx) => {
     const moved = await tx
       .update(jobs)
       .set(jobSet({ state: 'PICK', consecutiveFailures: 0, error: null }))
@@ -301,17 +319,17 @@ export async function skipAndRepick(
   });
 }
 
-async function readPicks(q: Database | Tx, id: string): Promise<StoredPick[]> {
+async function readPicks(q: Tx, id: string): Promise<StoredPick[]> {
   const [row] = await q.select({ picks: jobs.picks }).from(jobs).where(eq(jobs.id, id));
   return (row?.picks as StoredPick[] | undefined) ?? [];
 }
 
 export async function listPicks(id: string): Promise<StoredPick[]> {
-  return readPicks(db(), id);
+  return await query((tx) => readPicks(tx, id));
 }
 
 export async function latestPick(id: string): Promise<StoredPick | null> {
-  return (await readPicks(db(), id)).at(-1) ?? null;
+  return (await query((tx) => readPicks(tx, id))).at(-1) ?? null;
 }
 
 /** The stored pick of one version, read inside the caller's transaction. */
@@ -417,7 +435,7 @@ export async function createShort(
   states: readonly JobState[],
   id = newJobId(),
 ): Promise<ShortStart> {
-  return db().transaction(async (tx) => {
+  return await query(async (tx) => {
     const current = await lockJob(tx, parent.id);
     if (!current || !states.includes(current.state)) return null;
     if (current.shortId && (await isLive(tx, current.shortId))) return { id: current.shortId };

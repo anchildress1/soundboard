@@ -5,4 +5,4 @@ import { SEED } from './fixtures';
 
 await seed(SEED);
 
-export { db, resetDb } from '../../helpers/db';
+export { db, query, resetDb } from '../../helpers/db';

@@ -29,6 +29,13 @@
       "when": 1792701339248,
       "tag": "0003_fresh_genre_evidence_view",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792876500264,
+      "tag": "0004_tenant_rls",
+      "breakpoints": true
     }
   ]
 }

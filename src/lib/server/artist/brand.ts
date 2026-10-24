@@ -13,7 +13,7 @@ import type { Wait } from '$lib/types';
 import { ActionError } from '$lib/server/core/errors';
 import { required } from '$lib/server/core/env';
 import { and, eq } from 'drizzle-orm';
-import { db, type Database, type Tx } from '$lib/server/core/db';
+import { query, type Tx } from '$lib/server/core/db';
 import { artistMemory } from '$lib/server/core/schema';
 import { ARTIST_ID, memoryOf } from './memory';
 import { chatJson, ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
@@ -135,11 +135,13 @@ type Slot = 'approved' | 'proposal';
 const slot = (name: Slot) => and(memoryOf('brand'), eq(artistMemory.key, name));
 
 async function read(name: Slot): Promise<StoredBrand | null> {
-  const [row] = await db().select({ data: artistMemory.data }).from(artistMemory).where(slot(name));
+  const [row] = await query((tx) =>
+    tx.select({ data: artistMemory.data }).from(artistMemory).where(slot(name)),
+  );
   return (row?.data as StoredBrand | undefined) ?? null;
 }
 
-async function write(tx: Database | Tx, name: Slot, data: StoredBrand): Promise<void> {
+async function write(tx: Tx, name: Slot, data: StoredBrand): Promise<void> {
   await tx
     .insert(artistMemory)
     .values({ artistId: ARTIST_ID, kind: 'brand', key: name, data })
@@ -211,7 +213,7 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
     createdAt: Date.now(),
     approvedAt: null,
   };
-  await write(db(), 'proposal', proposal);
+  await query((tx) => write(tx, 'proposal', proposal));
   return { proposal };
 }
 
@@ -236,7 +238,7 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
   };
   const problem = guideError(guide);
   if (problem) throw new ActionError(422, problem);
-  return db().transaction(async (tx) => {
+  return await query(async (tx) => {
     const [row] = await tx
       .select({ data: artistMemory.data })
       .from(artistMemory)
@@ -262,5 +264,5 @@ export async function approveBrand(input: unknown): Promise<StoredBrand> {
 
 /** Drops the pending proposal; the approved guide, if any, stays. */
 export async function discardBrandProposal(): Promise<void> {
-  await db().delete(artistMemory).where(slot('proposal'));
+  await query((tx) => tx.delete(artistMemory).where(slot('proposal')));
 }

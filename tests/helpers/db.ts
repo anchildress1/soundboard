@@ -6,7 +6,8 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { resolve } from 'node:path';
-import type { Database } from '$lib/server/core/db';
+import type { Database, Tx } from '$lib/server/core/db';
+import { currentIdentity } from '$lib/server/core/identity';
 import * as schema from '$lib/server/core/schema';
 
 // Resolved from the working directory, not this file: vitest and the Playwright web server both
@@ -17,6 +18,18 @@ await migrate(database, { migrationsFolder: resolve('drizzle') });
 
 export function db(): Database {
   return database;
+}
+
+/** Seeds/assertions stay privileged; request-scoped operations exercise the runtime policies. */
+export function query<T>(operation: (tx: Tx) => Promise<T>): Promise<T> {
+  const uid = currentIdentity();
+  return database.transaction(async (tx) => {
+    if (uid) {
+      await tx.execute(sql`set local role soundboard_app`);
+      await tx.execute(sql`select set_config('app.user_sub', ${uid}, true)`);
+    }
+    return operation(tx);
+  });
 }
 
 /** The raw PGlite under `db()`, for code that speaks pg's `query(text, params)`. */

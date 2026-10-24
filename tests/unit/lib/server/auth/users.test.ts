@@ -132,7 +132,7 @@ describe('admit (open mode)', () => {
 });
 
 describe('admit: concurrent first sign-ins of one account', () => {
-  // Counts the rows each bind updates, so the test proves both sign-ins took the bind path.
+  // A returning sign-in must not rewrite the account's first binding.
   beforeEach(async () => {
     await db().execute(sql`create temp table binds (uid text)`);
     await db().execute(
@@ -163,7 +163,7 @@ describe('admit: concurrent first sign-ins of one account', () => {
       expect.objectContaining({ uid: NATHAN, artistId: 'flr' }),
       expect.objectContaining({ uid: NATHAN, artistId: 'flr' }),
     ]);
-    expect(await binds()).toEqual([{ uid: NATHAN }, { uid: NATHAN }]);
+    expect(await binds()).toEqual([{ uid: NATHAN }]);
     expect(await allUsers()).toHaveLength(1);
   });
 
@@ -177,7 +177,7 @@ describe('admit: concurrent first sign-ins of one account', () => {
       expect.objectContaining({ uid: OTHER }),
       expect.objectContaining({ uid: OTHER }),
     ]);
-    expect(await binds()).toHaveLength(2);
+    expect(await binds()).toEqual([{ uid: OTHER }]);
     expect(await allUsers()).toHaveLength(1);
   });
 

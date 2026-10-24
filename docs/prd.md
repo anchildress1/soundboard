@@ -174,7 +174,9 @@
 - Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
-- The database has no client access: only the app (pooled URL from Secret Manager), migrations (direct URL), and the invite script (either URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
+- The database has no client access: only the app (restricted pooled URL from Secret Manager), migrations, and the invite script (owner's direct URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
+- All five application tables enforce row-level security. The app connects as the non-owner `soundboard_app` role, which cannot bypass RLS; each short database transaction uses the verified Google `sub`, and missing identity denies access.
+- Migrations and operator invites use separate privileged credentials. Account activation, artist assignment, and existing identity bindings cannot be changed by ordinary app queries; sign-in binds an account through a restricted database function.
 - [ ] A user's token and jobs are reachable only from that user's session.
 
 **R11 · Sentry agent tracing**

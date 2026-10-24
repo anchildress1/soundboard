@@ -29,3 +29,19 @@ pnpm dlx neon@8.10.3 triggers create \
 - Child branches inherit schedules disabled; confirm the trigger is enabled on the deployment branch.
 - Verify an actual invocation in Neon logs and confirm its response reports a deletion count. An unsuccessful run returns HTTP 500 and must be investigated.
 - Local tests prove SQL deletion and request handling, not that a remote schedule has been provisioned.
+
+## Database roles
+
+- Run migrations with the owner credential in `DATABASE_URL_UNPOOLED`; never derive it from the restricted runtime URL.
+- The invite script also reads `DATABASE_URL_UNPOOLED`; ordinary app credentials cannot invite, revoke, reactivate, or list other accounts.
+- The app's `DATABASE_URL` must log in as `soundboard_app`, which owns no objects and has no role memberships or RLS bypass; an incorrectly privileged runtime connection fails closed.
+- After switching the runtime, disable old owner-credential versions of its secret; secret access otherwise includes those historical versions.
+- Deploy `genrecleanup` with both `DATABASE_URL` and `DATABASE_URL_UNPOOLED` overridden to the branch's `soundboard_cleanup` credential; never leave the injected owner credential as its runtime connection.
+- `soundboard_cleanup` can read only expired job IDs and retrieval times and delete those rows; it cannot read evidence, jobs, connections, or artist memory.
+- RLS hides expired evidence through both the base table and the invoker-security freshness view. A restricted save function refreshes owned research without exposing expired rows.
+- Test both branches using their actual runtime logins: no subject sees no rows, user A cannot read or mutate B's rows, revoked users lose access, and cleanup preserves fresh evidence.
+
+## Deployment freeze
+
+- After the authorized restoration to Git `main` plus RLS on 2026-10-24, all further deployments require explicit operator authorization, including rollbacks and Neon function deployments.
+- The Google audit's estimated date, a PR approval, or a merge does not lift the freeze.

@@ -1,6 +1,16 @@
 export const DELETE_EXPIRED_GENRE_EVIDENCE =
   "delete from job_audience where retrieved_at <= now() - interval '30 days' returning job_id";
 
+export const CHECK_CLEANUP_ROLE = `
+  select current_user = 'soundboard_cleanup' and session_user = 'soundboard_cleanup'
+    and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
+    and not exists (select 1 from pg_catalog.pg_auth_members m where m.member = r.oid)
+    and not exists (select 1 from pg_catalog.pg_shdepend d
+      where d.refclassid = 'pg_catalog.pg_authid'::regclass
+        and d.refobjid = r.oid and d.deptype = 'o') as allowed
+  from pg_catalog.pg_roles r where r.rolname = current_user
+`;
+
 export type CleanupConnection = {
   connect(): Promise<unknown>;
   query(statement: string): Promise<{ rows: unknown[] }>;
@@ -24,6 +34,9 @@ export async function handleGenreCleanup(
   try {
     client = connection();
     await client.connect();
+    const role = await client.query(CHECK_CLEANUP_ROLE);
+    if ((role.rows[0] as { allowed?: unknown } | undefined)?.allowed !== true)
+      throw new Error('Cleanup requires the unprivileged soundboard_cleanup login.');
     const result = await client.query(DELETE_EXPIRED_GENRE_EVIDENCE);
     response = Response.json({ deleted: result.rows.length });
   } catch {

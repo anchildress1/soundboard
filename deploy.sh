@@ -161,8 +161,12 @@ gcloud secrets describe DATABASE_URL --project "$GCP_PROJECT_ID" &> /dev/null ||
   exit 1
 }
 grant_secret DATABASE_URL "serviceAccount:${SERVICE_ACCOUNT}"
-# drizzle-kit on the deploying machine reads it too, for migrations.
-grant_secret DATABASE_URL "${DEPLOYER_TYPE}:${DEPLOYER}"
+# The runtime cannot read the owner credential used by migrations and operator commands.
+gcloud secrets describe DATABASE_URL_UNPOOLED --project "$GCP_PROJECT_ID" &> /dev/null || {
+  echo "Error: secret 'DATABASE_URL_UNPOOLED' is missing; create it with the main branch's owner URL." >&2
+  exit 1
+}
+grant_secret DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
 
 # Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
 # image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
@@ -309,12 +313,11 @@ else
   gcloud builds submit . --tag "$APP_IMAGE" --project "$GCP_PROJECT_ID"
 fi
 
-# Migrate before the new revision takes traffic. Neon's pooler can break migrations, so drizzle-kit
-# gets the direct URL: the same string without "-pooler" in the host. Never echoed or written to disk.
+# Migrations need the owner's direct URL; the runtime credential cannot alter the schema.
 # A separate assignment so set -e stops the deploy when the secret read fails.
-migrate_url="$(gcloud secrets versions access latest --secret DATABASE_URL \
+migrate_url="$(gcloud secrets versions access latest --secret DATABASE_URL_UNPOOLED \
   --project "$GCP_PROJECT_ID")"
-DATABASE_URL_UNPOOLED="${migrate_url/-pooler./.}" pnpm exec drizzle-kit migrate
+DATABASE_URL_UNPOOLED="$migrate_url" pnpm exec drizzle-kit migrate
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT

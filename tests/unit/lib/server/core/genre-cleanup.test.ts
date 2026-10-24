@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CHECK_CLEANUP_ROLE,
   DELETE_EXPIRED_GENRE_EVIDENCE,
   handleGenreCleanup,
   type CleanupConnection,
@@ -16,7 +17,15 @@ const triggerRequest = (scheduledAt = '2099-01-01T00:00:00Z') =>
 
 const driver = () => ({
   connect: vi.fn(async () => undefined),
-  query: vi.fn<(statement: string) => Promise<{ rows: unknown[] }>>(async () => ({ rows: [] })),
+  query: vi.fn<(statement: string) => Promise<{ rows: unknown[] }>>(async (statement) => ({
+    rows: statement === CHECK_CLEANUP_ROLE ? [{ allowed: true }] : [],
+  })),
+  end: vi.fn(async () => undefined),
+});
+
+const databaseDriver = () => ({
+  connect: vi.fn(async () => undefined),
+  query: vi.fn((statement: string) => client().query(statement)),
   end: vi.fn(async () => undefined),
 });
 
@@ -60,11 +69,7 @@ describe('handleGenreCleanup', () => {
       })),
     });
     const database = client();
-    const connection = {
-      connect: vi.fn(async () => undefined),
-      query: vi.fn((statement: string) => database.query(statement)),
-      end: vi.fn(async () => undefined),
-    } satisfies CleanupConnection;
+    const connection = databaseDriver() satisfies CleanupConnection;
     const factory = vi.fn(() => connection);
     // A transaction fixes Postgres now() so the exact 30-day boundary is repeatable.
     await database.exec('begin');
@@ -75,6 +80,7 @@ describe('handleGenreCleanup', () => {
           ('boundary', now() - interval '30 days', '{}'),
           ('fresh', now() - interval '29 days', '{}')
       `);
+      await database.exec('set local session authorization soundboard_cleanup');
 
       const response = await handleGenreCleanup(triggerRequest(), factory);
 
@@ -82,8 +88,13 @@ describe('handleGenreCleanup', () => {
       expect(await response.json()).toEqual({ deleted: 2 });
       expect(factory).toHaveBeenCalledOnce();
       expect(connection.connect).toHaveBeenCalledOnce();
-      expect(connection.query).toHaveBeenCalledExactlyOnceWith(DELETE_EXPIRED_GENRE_EVIDENCE);
+      expect(connection.query.mock.calls).toEqual([
+        [CHECK_CLEANUP_ROLE],
+        [DELETE_EXPIRED_GENRE_EVIDENCE],
+      ]);
       expect(connection.end).toHaveBeenCalledOnce();
+      // PGlite's RESET SESSION AUTHORIZATION keeps the current identity.
+      await database.exec('set session authorization postgres');
       expect((await database.query('select job_id from job_audience')).rows).toEqual([
         { job_id: 'fresh' },
       ]);
@@ -93,20 +104,100 @@ describe('handleGenreCleanup', () => {
         { id: 'fresh' },
       ]);
 
+      await database.exec('set local session authorization soundboard_cleanup');
       const repeated = await handleGenreCleanup(triggerRequest('1900-01-01T00:00:00Z'), factory);
       expect(repeated.status).toBe(200);
       expect(await repeated.json()).toEqual({ deleted: 0 });
       expect(connection.end).toHaveBeenCalledTimes(2);
     } finally {
       await database.exec('rollback');
+      await database.exec('set session authorization postgres');
     }
   });
 
-  it.each(['connect', 'query'] as const)(
+  it.each([
+    { label: 'missing row', rows: [] },
+    { label: 'missing allowed field', rows: [{}] },
+    { label: 'null row', rows: [null] },
+    { label: 'unsafe role', rows: [{ allowed: false }] },
+    { label: 'string allowed value', rows: [{ allowed: 'true' }] },
+    { label: 'numeric allowed value', rows: [{ allowed: 1 }] },
+  ])('closes without deleting when role validation returns $label', async ({ rows }) => {
+    const connection = driver();
+    connection.query.mockResolvedValueOnce({ rows });
+
+    const response = await handleGenreCleanup(triggerRequest(), () => connection);
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe('Genre evidence cleanup failed');
+    expect(connection.connect).toHaveBeenCalledOnce();
+    expect(connection.query).toHaveBeenCalledExactlyOnceWith(CHECK_CLEANUP_ROLE);
+    expect(connection.end).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { label: 'owner login', statements: [] },
+    { label: 'owner login using SET ROLE', statements: ['set local role soundboard_cleanup'] },
+    {
+      label: 'another restricted login',
+      statements: ['set local session authorization soundboard_app'],
+    },
+    ...['superuser', 'bypassrls', 'createrole', 'createdb', 'replication'].map((privilege) => ({
+      label: privilege,
+      statements: [
+        `alter role soundboard_cleanup ${privilege}`,
+        'set local session authorization soundboard_cleanup',
+      ],
+    })),
+    {
+      label: 'role membership',
+      statements: [
+        'grant soundboard_app to soundboard_cleanup',
+        'set local session authorization soundboard_cleanup',
+      ],
+    },
+    {
+      label: 'object ownership',
+      statements: [
+        'create table public.cleanup_guard_owned (id integer)',
+        'alter table public.cleanup_guard_owned owner to soundboard_cleanup',
+        'set local session authorization soundboard_cleanup',
+      ],
+    },
+  ])(
+    'rejects an actual database connection with $label before deletion',
+    async ({ statements }) => {
+      const database = client();
+      const connection = databaseDriver();
+      await database.exec('begin');
+      try {
+        for (const statement of statements) await database.exec(statement);
+
+        const response = await handleGenreCleanup(triggerRequest(), () => connection);
+
+        expect(response.status).toBe(500);
+        expect(await response.text()).toBe('Genre evidence cleanup failed');
+        expect(connection.connect).toHaveBeenCalledOnce();
+        expect(connection.query).toHaveBeenCalledExactlyOnceWith(CHECK_CLEANUP_ROLE);
+        expect(connection.end).toHaveBeenCalledOnce();
+      } finally {
+        await database.exec('rollback');
+        await database.exec('set session authorization postgres');
+      }
+    },
+  );
+
+  it.each(['connect', 'role check', 'delete'] as const)(
     'closes the connection and hides database errors when %s fails',
     async (operation) => {
       const connection = driver();
-      connection[operation].mockRejectedValueOnce(new Error('private connection details'));
+      const error = new Error('private connection details');
+      if (operation === 'connect') connection.connect.mockRejectedValueOnce(error);
+      else if (operation === 'role check') connection.query.mockRejectedValueOnce(error);
+      else
+        connection.query
+          .mockResolvedValueOnce({ rows: [{ allowed: true }] })
+          .mockRejectedValueOnce(error);
 
       const response = await handleGenreCleanup(triggerRequest(), () => connection);
 
@@ -115,7 +206,13 @@ describe('handleGenreCleanup', () => {
       expect(connection.connect).toHaveBeenCalledOnce();
       expect(connection.end).toHaveBeenCalledOnce();
       if (operation === 'connect') expect(connection.query).not.toHaveBeenCalled();
-      else expect(connection.query).toHaveBeenCalledExactlyOnceWith(DELETE_EXPIRED_GENRE_EVIDENCE);
+      else if (operation === 'role check')
+        expect(connection.query).toHaveBeenCalledExactlyOnceWith(CHECK_CLEANUP_ROLE);
+      else
+        expect(connection.query.mock.calls).toEqual([
+          [CHECK_CLEANUP_ROLE],
+          [DELETE_EXPIRED_GENRE_EVIDENCE],
+        ]);
     },
   );
 
@@ -127,7 +224,10 @@ describe('handleGenreCleanup', () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe('Genre evidence cleanup connection failed');
-    expect(connection.query).toHaveBeenCalledExactlyOnceWith(DELETE_EXPIRED_GENRE_EVIDENCE);
+    expect(connection.query.mock.calls).toEqual([
+      [CHECK_CLEANUP_ROLE],
+      [DELETE_EXPIRED_GENRE_EVIDENCE],
+    ]);
     expect(connection.end).toHaveBeenCalledOnce();
   });
 
