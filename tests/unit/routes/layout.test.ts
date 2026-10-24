@@ -56,6 +56,11 @@ describe('layout', () => {
     });
     expect(privacy).toHaveAttribute('href', '/privacy');
     expect(privacy).toHaveAttribute('data-sveltekit-reload');
+    const terms = within(screen.getByRole('contentinfo')).getByRole('link', {
+      name: 'Terms of Service',
+    });
+    expect(terms).toHaveAttribute('href', '/terms');
+    expect(terms).toHaveAttribute('data-sveltekit-reload');
   });
 
   it("links Ashley's site and socials in the footer, opening new tabs", () => {

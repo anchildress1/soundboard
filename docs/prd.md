@@ -147,7 +147,7 @@
 
 **R8 · Sign-in**
 
-- Signed out, the home page shows sign-in; `/privacy` is public through the shared footer. Other app pages lead home and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
+- Signed out, the home page shows sign-in; `/privacy` and `/terms` are public through the shared footer. Other app pages lead home and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
 - One Google consent screen grants identity plus YouTube upload and read access, offline, so sign-in also connects the user's channel.
 - While invite gating is enabled, only active invitations get a session; anyone else sees "not invited" and no session, user record or token is retained. One setting opens signup later; accounts that sign up while it's open stay on the allowlist until revoked.
 - First redemption atomically binds a normalized invited email to the verified Google account ID. Later email changes preserve that binding; another account cannot claim the old email's invitation or artist link.
@@ -260,7 +260,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Signed-in home:** own jobs, newest first, with title, state and a continuation link; no other user's work.
 - **Header:** one aligned row: the user's channel handle and video and subscriber counts, Connections, Brand guide (artist-linked user only), and Sign out. A "not invited" or "sign-in expired" notice shows under the header on the sign-in view.
 - **Connections:** one row per platform with Connected as … / Not connected and Connect, Reconnect, Disconnect. YouTube only for now.
-- **Footer:** artist and Ashley credits, a public Privacy policy link, then icon links to Ashley's site and socials. No DEV challenge credit. Neutral colors only.
+- **Footer:** artist and Ashley credits, public Privacy policy and Terms of Service links, then icon links to Ashley's site and socials. No DEV challenge credit. Neutral colors only.
 - **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
 - **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
 - **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.

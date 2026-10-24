@@ -63,6 +63,7 @@ const session: Handle = async ({ event, resolve }) => {
 const OPEN = new Set([
   '/',
   '/privacy',
+  '/terms',
   '/auth/login',
   '/auth/callback',
   '/auth/logout',
