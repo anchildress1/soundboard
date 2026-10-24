@@ -13,6 +13,9 @@
 
   let menu = $state<HTMLElement>();
   const artist = $derived(data.user?.artistId === 'flr');
+  // Exact counts as YouTube returns them: rounding would be a number derived from its statistics.
+  const count = (n: number, noun: string) =>
+    `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`;
 
   /** The popover outlives client-side navigation, so following one of its links closes it. */
   const closeOnLink = (event: MouseEvent) => {
@@ -35,12 +38,20 @@
   <header>
     <a class="wordmark" href={resolve('/')}><span aria-hidden="true"></span>Soundboard</a>
     {#if data.user}
-      <div class="account">
-        {#if data.channel?.handle}<span class="chip handle">{data.channel.handle}</span>{/if}
-        <button class="btn small menu-button" type="button" popovertarget="menu" aria-label="Menu">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-        </button>
-      </div>
+      {#if data.channel}
+        <p class="channel">
+          <b>{data.channel.handle}</b>
+          <span class="num"
+            >{count(data.channel.videoCount, 'video')} · {count(
+              data.channel.subscriberCount,
+              'subscriber',
+            )}</span
+          >
+        </p>
+      {/if}
+      <button class="btn small menu-button" type="button" popovertarget="menu" aria-label="Menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      </button>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <nav id="menu" aria-label="Menu" popover bind:this={menu} onclick={closeOnLink}>
         <a href={resolve('/connections')}>Connections</a>
@@ -74,9 +85,10 @@
   header {
     position: relative;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 4px 16px;
     min-height: 60px;
     padding: 8px var(--gutter);
     border-bottom: 1px solid var(--line);
@@ -100,18 +112,38 @@
     background: var(--signal);
   }
 
-  .account {
+  /* Phones give the channel its own row under the wordmark; wider screens keep one row. */
+  .channel {
+    order: 1;
+    flex-basis: 100%;
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
     min-width: 0;
+    margin: 0 0 4px;
+    font-size: 13px;
+    line-height: 1.2;
   }
 
-  .handle {
-    min-width: 0;
+  .channel b,
+  .channel span {
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .channel span {
+    color: var(--muted);
+  }
+
+  @media (width >= 640px) {
+    .channel {
+      order: 0;
+      flex-basis: auto;
+      margin: 0 0 0 auto;
+    }
   }
 
   .menu-button {

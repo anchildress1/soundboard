@@ -253,7 +253,7 @@ Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmW
 - **New release:** its own page: pick the finished video, the song title, and optional notes, then Start the release.
 - **Home, signed out:** "Sign in to Soundboard" and one Continue with Google button. A "not invited" or "sign-in expired" notice shows above it.
 - **Home, signed in:** the newest release that needs review sits on top as Up next with one Continue button. Running releases follow with "nothing to do yet" and a Watch link. Everything else is under Earlier with its state. New release is the primary action only when nothing is up next. No releases yet: a short explanation of the loop and Start.
-- **Header:** the wordmark, the connected channel's handle, and a Menu: Connections, Brand guide and Settings (artist-linked user only), and Sign out.
+- **Header:** the wordmark, the connected channel's handle with its exact video and subscriber counts (on its own row on phones), and a Menu: Connections, Brand guide and Settings (artist-linked user only), and Sign out.
 - **Connections:** YouTube with Connected as … / Not connected and Connect, Reconnect, Disconnect. Bandcamp is listed as copy and paste with nothing to connect; Instagram and TikTok as coming later, with no controls.
 - **Settings:** Peer influence lists the five roles and the source each uses by default. No sliders until fanbase learning ships (spec 006).
 - **Not found / errors:** the status, a plain explanation, and a link home.

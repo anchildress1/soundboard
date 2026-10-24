@@ -83,10 +83,15 @@ describe('layout', () => {
     expect(nav.closest('footer')).not.toBeNull();
   });
 
-  it("shows the connected channel's handle, without counts", () => {
-    setup({ channel, user: NATHAN });
+  it("shows the connected channel's handle with its exact counts", () => {
+    setup({ channel: { ...channel, subscriberCount: 12_345 }, user: NATHAN });
     expect(screen.getByText(HANDLE).closest('header')).not.toBeNull();
-    expect(screen.queryByText(/videos|subs/)).toBeNull();
+    expect(screen.getByText('12 videos · 12,345 subscribers')).toBeInTheDocument();
+  });
+
+  it('counts one video and one subscriber in the singular', () => {
+    setup({ channel: { ...channel, videoCount: 1, subscriberCount: 1 }, user: NATHAN });
+    expect(screen.getByText('1 video · 1 subscriber')).toBeInTheDocument();
   });
 
   it('renders without a channel', () => {
