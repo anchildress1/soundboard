@@ -173,7 +173,13 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
 
 // Picking for user B, unlinked: no catalog read, and the cached genre search means no YouTube call.
 const PICKING = ['e2e-pick-chromium', 'e2e-pick-mobile'].map((id) => ({
-  job: job(id, { ownerUid: USER_B.uid, artistId: null, state: 'PICK', pickVersion: null }),
+  job: job(id, {
+    ownerUid: USER_B.uid,
+    artistId: null,
+    songTitle: 'Vaporgram',
+    state: 'PICK',
+    pickVersion: null,
+  }),
   pick: null,
   chunks: [0, 1, 2].map(chunk),
 }));

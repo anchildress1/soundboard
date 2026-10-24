@@ -56,10 +56,14 @@ test.describe('job list', () => {
     await signIn(page, USER_B);
     await page.goto('/');
     const runs = page.getByRole('region', { name: 'Your runs' });
-    await expect(runs.getByRole('listitem')).toHaveCount(1);
-    await expect(runs.getByRole('listitem')).toContainText('Vaporgram');
-    await expect(runs.getByRole('listitem')).toContainText('Needs review');
-    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    // User B's review job and the two pick jobs pipeline.spec drives; none of user A's PeekaBoo.
+    await expect(runs.getByRole('listitem')).toHaveCount(3);
+    for (const run of await runs.getByRole('listitem').all()) {
+      await expect(run).toContainText('Vaporgram');
+    }
+    const review = runs.getByRole('listitem').filter({ hasText: 'Needs review' });
+    await expect(review).toHaveCount(1);
+    await review.getByRole('link', { name: 'Continue Vaporgram' }).click();
     await expect(page).toHaveURL('/jobs/e2e-b-review');
     await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
   });
@@ -67,10 +71,14 @@ test.describe('job list', () => {
   test('sends a client navigation home once the session is gone', async ({ page }) => {
     await signIn(page, USER_B);
     await page.goto('/');
-    const runs = page.getByRole('region', { name: 'Your runs' });
-    await expect(runs.getByRole('link', { name: 'Continue Vaporgram' })).toBeVisible();
+    const link = page
+      .getByRole('region', { name: 'Your runs' })
+      .getByRole('listitem')
+      .filter({ hasText: 'Needs review' })
+      .getByRole('link', { name: 'Continue Vaporgram' });
+    await expect(link).toBeVisible();
     await page.context().clearCookies();
-    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await link.click();
     await expect(page).toHaveURL('/');
     await expect(page.getByLabel(/^Title/)).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
