@@ -136,7 +136,7 @@ export type ChatResult = ChatReply & { ms: number };
  * One schema-constrained call. A reply that can't be parsed comes back with its raw text and finish
  * reason rather than throwing; busy and quota answers throw typed errors.
  */
-export async function chat(
+export function chat(
   request: ModelRequest,
   agent: Agent,
   schema: Record<string, unknown>,

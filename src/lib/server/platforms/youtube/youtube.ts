@@ -295,7 +295,7 @@ export const finalChunk = (offset: number, total: number): boolean =>
 export type ChunkResult = { done: true; videoId: string } | { done: false; next: number };
 
 const nextFromRange = (range: string | null) => {
-  const end = range?.match(/bytes=\d+-(\d+)/)?.[1];
+  const end = /bytes=\d+-(\d+)/.exec(range ?? '')?.[1];
   return end === undefined ? 0 : Number(end) + 1;
 };
 

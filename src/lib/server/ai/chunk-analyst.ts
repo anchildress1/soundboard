@@ -95,7 +95,7 @@ export function buildChunkRequest(input: WindowInput): ModelRequest {
  * Runs one window's clip through the chunk analyst. A reply that never parses is kept as
  * numerics-stripped raw text.
  */
-export async function analyzeChunk(
+export function analyzeChunk(
   input: WindowInput & { index: number },
   deadline: number,
 ): Promise<Chunk> {

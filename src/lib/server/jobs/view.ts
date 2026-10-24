@@ -7,8 +7,9 @@ import { getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
 
 /** Loads the caller's own job; anyone else's, or any job when signed out, reads as missing. */
 export async function authorizedJob(id: string, uid: string | undefined): Promise<JobDoc> {
-  const job = uid ? await getJob(id) : null;
-  if (!job || job.ownerUid !== uid) error(404, 'Job not found');
+  if (!uid) error(404, 'Job not found');
+  const job = await getJob(id);
+  if (job?.ownerUid !== uid) error(404, 'Job not found');
   return job;
 }
 
