@@ -142,7 +142,7 @@ docs/youtube-audit/architecture.md, docs/youtube-audit/user-flows.md   # FR-016:
 8. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (Gemini preload, window media); prepare deployment changes without deploying.
 9. **Docs:** PRD, AGENTS.md, README, the privacy page, the YouTube audit docs (the constitution is already at 2.0.0).
 10. **Approval gate FR-023:** record YouTube approval reference/scope and the actual Sentry retention; no feature deployment before this, including hosted validation.
-11. **After approval:** deployed manual checks, then the one-time teardown.
+11. **At the combined release, after approval:** deployed manual checks. No standalone deploy of this feature. The one-time teardown runs any time; the GPU version is never redeployed.
 
 ## Complexity Tracking
 

@@ -241,11 +241,11 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: `deploy.sh` has no model-endpoint step. The removal sweep is empty. After FR-023 and teardown, the Vertex endpoint and model lists show nothing for Soundboard.
 
-- [ ] T035 [US4] 👤 Delete model/ (including model/Dockerfile) and build-model.sh.
-- [ ] T036 [US4] 👤 In deploy.sh:
+- [x] T035 [US4] 👤 Delete model/ (including model/Dockerfile) and build-model.sh.
+- [x] T036 [US4] 👤 In deploy.sh:
   - Remove the model image build, the endpoint create/deploy, the `aiplatform` invoke role binding and `MODEL_URL`.
   - Sync `GEMINI_API_KEY` from `.env` to Secret Manager `soundboard-gemini-api-key` like the other app secrets, never echoing it.
-- [ ] T037 [US4] Run the removal sweep: `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` must return nothing. Fix what remains, including the meta description in src/routes/+layout.svelte ("self-hosted Gemma 4").
+- [x] T037 [US4] Run the removal sweep: `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` must return nothing. Fix what remains, including the meta description in src/routes/+layout.svelte ("self-hosted Gemma 4").
 
 **Checkpoint**: The repo carries no GPU path.
 
@@ -254,6 +254,8 @@ description: 'Task list for the Gemini API swap'
 ## Phase 7: Polish & Cross-Cutting Concerns
 
 **Purpose**: The rest of the FR-016/FR-018 docs, final validation and the gates before and after deploy.
+
+**No standalone deploy**: 002 ships in the next combined release, after Google approves the request (FR-023). Building continues meanwhile; T045 and T046 run at that release and block nothing here. The GPU version is never redeployed, so T047 doesn't wait on either.
 
 - [ ] T038 [P] Update src/routes/privacy/+page.svelte (FR-018):
   - Name paid-tier Gemini as the processor of video clips and YouTube metadata, and Sentry as the processor of text traces.
@@ -279,13 +281,13 @@ description: 'Task list for the Gemini API swap'
   - Record any restrictions.
   - Put it all under "Manual: deployment gate" in specs/002-gemini-api/quickstart.md (SC-010).
   - No deploy before this. A narrower or contrary approval reopens the spec.
-- [ ] T046 👤 After T045, run quickstart "Manual: deployed" steps 1–5:
+- [ ] T046 👤 At the combined release, after T045, run quickstart "Manual: deployed" steps 1–5:
   - Deploy.
   - The 3- and 15-minute runs, including the first and last windows of a 2 GB source.
   - The pick checks, a Short and a brand guide, and `/privacy`.
   - Sentry text with no media.
   - Read the 15-minute job's actual Gemini cost from billing and confirm it's under SC-006's $0.50.
-- [ ] T047 👤 After T046, run the one-time GPU teardown in quickstart step 6. Then confirm the endpoint and model lists are empty and GPU spend is $0 the next full week (SC-001).
+- [ ] T047 👤 Any time, run the one-time GPU teardown in quickstart step 6. Then confirm the endpoint and model lists are empty and GPU spend is $0 the next full week (SC-001).
 
 ---
 
@@ -299,7 +301,7 @@ description: 'Task list for the Gemini API swap'
 - **US2 (Phase 4)**: needs US1. T025 edits the same pipeline.ts code as T021.
 - **US3 (Phase 5)**: needs Phase 2. The tree is green only after US1, US2 and US3 are all done.
 - **US4 (Phase 6)**: T035 and T036 need only Phase 1. T037 runs after US3.
-- **Polish (Phase 7)**: T038–T041 can start any time after Phase 2. T042–T044 need all stories. T045 → T046 → T047, strictly in that order.
+- **Polish (Phase 7)**: T038–T041 can start any time after Phase 2. T042–T044 need all stories. T045 → T046 at the combined release. T047 any time.
 
 ### Within Phases
 
@@ -344,7 +346,7 @@ Task: "releaseJob chunk reset + tests (T015)"
 
 1. US4 (removal).
 2. Polish docs and validation.
-3. T045 approval → T046 deployed checks → T047 teardown.
+3. At the combined release: T045 approval → T046 deployed checks. T047 teardown any time.
 
 ---
 

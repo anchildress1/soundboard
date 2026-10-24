@@ -150,7 +150,7 @@ describe('scrubSpan', () => {
   });
 
   it('leaves spans without credentials unchanged', () => {
-    const span = { name: 'chat gemma-4-12b-it', attributes: { 'gen_ai.agent.name': 'smart-pick' } };
+    const span = { name: 'chat gemini-4-argon', attributes: { 'gen_ai.agent.name': 'smart-pick' } };
     expect(scrubSpan(structuredClone(span))).toEqual(span);
   });
 });

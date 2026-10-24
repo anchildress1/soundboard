@@ -21,7 +21,7 @@
   <link rel="preload" href={wordmarkFont} as="font" type="font/woff2" crossorigin="anonymous" />
   <meta
     name="description"
-    content="Release agent for Flies Like Robots: self-hosted Gemma 4 watches and listens to a music video, then drafts and verifies the YouTube upload."
+    content="Release agent for Flies Like Robots: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
   />
 </svelte:head>
 

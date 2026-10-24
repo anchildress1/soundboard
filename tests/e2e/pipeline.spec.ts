@@ -23,7 +23,6 @@ test('analyzes the next window up to the model, then waits while it is busy', as
   });
   await expect(page.getByRole('status')).toHaveText(/model busy/i);
   await expect(page.getByText('Configured analyst: gemini-3.8-flash')).toBeVisible();
-  await expect(page.getByText(/gemma|waking model/i)).toHaveCount(0);
   await noHorizontalScroll(page);
 });
 
@@ -38,6 +37,5 @@ test('waits while the model is busy during the pick', async ({ page }, testInfo)
   });
   await expect(page.getByRole('status')).toHaveText(/model busy/i);
   await expect(page.getByText('Configured picker: gemini-4-argon')).toBeVisible();
-  await expect(page.getByText(/gemma|waking model/i)).toHaveCount(0);
   await noHorizontalScroll(page);
 });

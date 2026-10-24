@@ -71,9 +71,10 @@ Expected:
 - **Blocked until approval:** record the YouTube approval reference, date and scope covering disclosed Gemini processing/storage and Sentry text retention; submission or owner risk acceptance is not approval.
 - Record the actual Sentry subscription, billing model and retention for errors, full spans and sampled spans; shorter retention is optional, not a substitute for approval.
 - G2 passed on 2026-10-24 with configuration A (research R14). The Gemma baseline is captured, so the teardown no longer waits on it.
-- No hosted validation deployment, traffic change or GPU teardown before approval. Local mock tests and approved local gates can proceed.
+- No standalone deploy: this feature ships in the next combined release, after approval. No hosted validation deployment or traffic change before then. Local mock tests and approved local gates can proceed.
+- The GPU teardown doesn't wait on approval: the GPU version is never redeployed.
 
-## Manual: deployed, only after approval
+## Manual: deployed, at the combined release after approval
 
 1. Put `GEMINI_API_KEY` in `.env`, then `./deploy.sh`. Expected: `soundboard-gemini-api-key` is in Secret Manager, no Vertex step runs.
 2. Upload a 3-minute video and a 15-minute video. Both reach review with chunk N/M shown and every step under about 2 minutes, including seeking/cutting/measurement/inference on Cloud Run (SC-002, SC-003). Include first and last windows of a 2 GB, 15-minute source; inspect portrait/high-frame-rate/noisy inputs, verify complete clip duration/audio and size guards, and force timeout cleanup. Check pick and hook latency against G1 budgets.
@@ -81,7 +82,7 @@ Expected:
 4. Make a Short and propose a brand guide. Both complete.
    - Open `/privacy`: it names the Gemini API (SC-008).
 5. In Sentry, all agents show text diagnostics including a forced failed parse, but no media bytes, credentials or signed-URL queries (SC-007). The job remains one trace with actual per-call models, and no duplicate AI SDK span. Confirm the retention and privacy disclosure match the approved deployment evidence.
-6. One-time teardown of the GPU deployment (FR-014):
+6. One-time teardown of the GPU deployment (FR-014), any time; it doesn't wait on steps 1–5:
    ```bash
    gcloud ai endpoints list --region us-central1 --project "$GCP_PROJECT_ID"   # find soundboard-model
    gcloud ai endpoints undeploy-model <endpoint-id> --deployed-model-id <id> --region us-central1 --project "$GCP_PROJECT_ID"
