@@ -85,7 +85,7 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
 const SHORT: Short = {
   sourceDurationSec: 140,
   reframe: 'blur',
-  hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
+  hook: { window: 1, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
   skipped: [],
   renders: 1,
   modelMs: 6000,
@@ -141,6 +141,8 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
     chunks: [0, 1, 2].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
+  // Analyzed in 29.5 s windows before spec 002: five for 140 s, not chunkCount(140) = 3.
+  { ...reviewed('e2e-stale'), job: job('e2e-stale', { chunkCount: 5, chunkIndex: 5 }) },
   // Paused with the upload outcome unknown: its steps make no YouTube call.
   ...['e2e-paused-chromium', 'e2e-paused-mobile'].map((id) => ({
     job: job(id, {

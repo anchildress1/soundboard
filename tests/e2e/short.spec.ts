@@ -123,6 +123,20 @@ test.describe('Short tab', () => {
     await expect(shortPanel(page).getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
   });
 
+  test('refuses a Short of a video analyzed by an older version', async ({ page }) => {
+    await page.goto('/jobs/e2e-stale');
+    await tab(page, 'Short').click();
+    const make = page.waitForResponse((response) => response.url().endsWith('/short'));
+    await shortPanel(page).getByRole('button', { name: 'Make a Short' }).click();
+    expect((await make).status()).toBe(409);
+    await expect(
+      shortPanel(page).getByText(
+        'This video was analyzed by an older version. Upload it again to make a Short.',
+      ),
+    ).toBeVisible();
+    await expect(shortPanel(page).getByRole('button', { name: 'Make a Short' })).toBeEnabled();
+  });
+
   test('reviews a cut Short in a 9:16 frame with an accessible cut form', async ({ page }) => {
     await page.goto('/jobs/e2e-cut');
     await tab(page, 'Short').click();
