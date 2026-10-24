@@ -33,7 +33,7 @@ Neither is needed now that clips go inline. Both bindings were removed on 2026-1
 
 ```bash
 make ai-checks   # format, lint, typecheck, unit tests (coverage floors), build
-pnpm test:e2e    # desktop Chrome + Pixel 7, E2E_FAKES=1
+make e2e        # desktop Chrome + Pixel 7; fake provider HTTP and window media, no ffmpeg
 ```
 
 Expected:
@@ -45,31 +45,42 @@ Expected:
   - A 429 with a `PerDay` `QuotaFailure` (in `data.error.details`, or `responseBody` as the fallback) → `ModelQuotaSpent`; any other 429 and 503 → `ModelBusy`; 400, 403 and 500 → `Error`.
   - A re-ask with less time left than the agent's minimum call budget isn't started; the raw text is kept.
   - Analyze calls `cutWindowClip` before `measureWindow`, and the clip's temp file is deleted even when the call throws.
-  - Brand propose returns `model quota spent`, and the page stops polling on it.
+  - Brand propose returns `model quota spent` on a per-day 429, and the page stops polling on it.
   - The client is built with `createGoogle`, and the system prompt goes out as `instructions`.
   - `NoObjectGeneratedError`, `NoOutputGeneratedError`, `incomplete` status and empty text → one re-ask, then raw.
   - A spent deadline throws before the call.
   - The analyst sends one inline `video/mp4` part (the window clip), and no image or audio parts.
   - Windows are 60 s; a 15-minute video gives 15 chunks.
+  - An incompatible analyze step clears the actual `jobs.chunks` array and resets index/error/failure state in the same claim-guarded transaction as `PREP`; no ffmpeg or provider call. A stolen claim or concurrent discard changes neither chunks nor state; a transaction failure rolls both back. The next prep computes the new count.
   - Smart pick and brand still send thumbnails as `image` parts.
   - Pipeline: `ModelBusy` mid-analyze or mid-pick returns `model busy`, keeps finished chunks, and leaves `consecutiveFailures` unchanged. `ModelQuotaSpent` sets `limitUntil`, and later steps wait without calling the provider. Two real failures still set `FAILED`.
   - Tracing: provider `gcp.gemini`, per-call model on both `chat` and `invoke_agent` spans, video redacted to `{type, mime, bytes, clip}` with no data.
-  - View: `model` is the analyst model during `PREP`/`ANALYZE` and the pick model after.
-  - YouTube data stays out of Sentry (FR-017):
-    - Pick, hook and brand spans (inputs, raw replies, the finalized pick and re-ask assistant turns), the `hashtag_search` tool result and captured errors contain no YouTube-sourced titles, descriptions, tags or thumbnails, and no copied tags or hashtags, only `{source, chars}` and `{mime, bytes, source}` placeholders.
-    - The song title and notes are still recorded.
-  - The privacy page names the Gemini API as a processor of video clips and YouTube metadata (FR-018).
-- **E2E:** analyze and Short steps show `model busy` from the faked client, after the clip cut runs on the generated fixture video. No `waking model` text remains.
+  - View: labels explicitly say `Configured analyst` or `Configured picker`, including failed-state role selection, and total time is separate. Changing config while viewing an old Gemma result never claims Gemini generated it.
+  - Text diagnostics: every agent's prompt, reply, reasoning, assistant re-ask and failed parse text is present on the manual spans; there is no per-agent `recordText` switch. Media bytes, credentials and signed-URL queries remain absent from spans and captured exceptions.
+  - Typed error flow: busy/quota exceptions retain their class and reset time through trace capture; malformed SDK outputs still enter the one-re-ask path. No raw SDK request body or media-bearing cause is captured.
+  - Parse exhaustion: analyst persists stripped raw text; pick/hook use the two-strike failure path, brand returns its retryable error, and their raw text remains in traces rather than new database fields.
+  - The privacy page names both processors and discloses implicit caching, the 55-day abuse log/human review/deletion limits and actual Sentry retention (FR-018).
+  - A clip at the 8,000,000-byte limit is accepted; one byte over is rejected before the file is read or the provider called.
+  - One simulated clock/deadline covers cut, measurement and inference: timeout/cancellation terminates ffmpeg, removes its file and saves no partial chunk; no call starts without its minimum budget and no helper renews the 110 s deadline.
+  - Window counts skip a sub-second tail: 60 s → 1, 60.5 s → 1, 61.5 s → 2, 900 s → 15. New Shorts and existing `HOOK` retries/re-picks check parent compatibility; existing absolute cuts can render/re-cut/publish without reinterpreting old indices.
+- **E2E:** analyze reaches the model call through the faked window module and shows `model busy` from the HTTP preload; pick and Short steps show the same. The real SDK/client runs; no live Gemini, no ffmpeg. No `waking model` text remains.
 - **Removal sweep:** `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` returns nothing. `model/` and `build-model.sh` are gone.
 
-## Manual: deployed
+## Manual: deployment gate (FR-023)
+
+- **Blocked until approval:** record the YouTube approval reference, date and scope covering disclosed Gemini processing/storage and Sentry text retention; submission or owner risk acceptance is not approval.
+- Record the actual Sentry subscription, billing model and retention for errors, full spans and sampled spans; shorter retention is optional, not a substitute for approval.
+- G2 remains pending (research R14): run the real-music comparison with the bounded encoding profile before analyst implementation; preserve Gemma until any needed baseline is captured.
+- No hosted validation deployment, traffic change or GPU teardown before approval. Local mock tests and approved local gates can proceed.
+
+## Manual: deployed, only after approval
 
 1. Put `GEMINI_API_KEY` in `.env`, then `./deploy.sh`. Expected: `soundboard-gemini-api-key` is in Secret Manager, no Vertex step runs.
-2. Upload a 3-minute video and a 15-minute video. Both reach review with chunk N/M shown and every step under about 2 minutes, including the clip cut on Cloud Run (SC-002, SC-003). Check real pick and hook latency against the G1 budgets.
+2. Upload a 3-minute video and a 15-minute video. Both reach review with chunk N/M shown and every step under about 2 minutes, including seeking/cutting/measurement/inference on Cloud Run (SC-002, SC-003). Include first and last windows of a 2 GB, 15-minute source; inspect portrait/high-frame-rate/noisy inputs, verify complete clip duration/audio and size guards, and force timeout cleanup. Check pick and hook latency against G1 budgets.
 3. Check the pick: every hashtag and tag is from the candidates, and there are no loudness numbers in the text (SC-004).
 4. Make a Short and propose a brand guide. Both complete.
    - Open `/privacy`: it names the Gemini API (SC-008).
-5. In Sentry, a pick's spans show placeholders where the candidate lists, top videos and recent uploads were, and no YouTube text (SC-007). The job is one trace, with `chat gemini-3.8-flash` and `chat gemini-4-argon` spans and no media or signed-URL queries (SC-007). There's no second `gen_ai.generate_content` span from the AI SDK.
+5. In Sentry, all agents show text diagnostics including a forced failed parse, but no media bytes, credentials or signed-URL queries (SC-007). The job remains one trace with actual per-call models, and no duplicate AI SDK span. Confirm the retention and privacy disclosure match the approved deployment evidence.
 6. One-time teardown of the GPU deployment (FR-014):
    ```bash
    gcloud ai endpoints list --region us-central1 --project "$GCP_PROJECT_ID"   # find soundboard-model
