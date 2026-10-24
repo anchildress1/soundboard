@@ -26,4 +26,18 @@ test.describe('brand guide', () => {
     await expect(page.getByRole('heading', { name: /Approved guide/ })).toBeVisible();
     await expect(page.getByRole('main').getByRole('link', { name: /connect/i })).toHaveCount(0);
   });
+
+  test('waits on a busy model and keeps asking, storing no proposal', async ({ page }) => {
+    await signIn(page, USER_A);
+    await page.goto('/brand');
+    const proposals = () =>
+      page.waitForResponse((response) => response.url().endsWith('/api/brand/propose'));
+    const first = proposals();
+    await page.getByRole('button', { name: 'Propose' }).click();
+    // The preload answers the brand model call with a 429 after the upload reads.
+    expect(await (await first).json()).toEqual({ wait: 'model busy' });
+    await expect(page.getByRole('button', { name: 'model busy' })).toBeDisabled();
+    expect(await (await proposals()).json()).toEqual({ wait: 'model busy' });
+    await expect(page.getByLabel(/^Statement/)).toHaveCount(0);
+  });
 });

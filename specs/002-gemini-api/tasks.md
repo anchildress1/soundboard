@@ -199,7 +199,7 @@ description: 'Task list for the Gemini API swap'
 - [x] T026 [P] [US2] Add plain-label text for `model busy` and `model quota spent` in src/lib/status.ts and remove the old waits. Tests in tests/unit/lib/status.test.ts.
 - [x] T027 [P] [US2] Make src/lib/driver.ts keep calling on `model busy` and `model quota spent`. Tests in tests/unit/lib/driver.test.ts.
 - [x] T028 [P] [US2] Update the wait responses in tests/unit/routes/api/jobs/[id]/step/server.test.ts.
-- [ ] T029 [US2] In tests/e2e/pipeline.spec.ts (and tests/e2e/short.spec.ts for the hook), check that analyze and pick show `model busy` from the T013 preload on desktop Chrome and Pixel 7, and that no `waking model` text remains.
+- [x] T029 [US2] In tests/e2e/pipeline.spec.ts (and tests/e2e/short.spec.ts for the hook), check that analyze and pick show `model busy` from the T013 preload on desktop Chrome and Pixel 7, and that no `waking model` text remains.
 
 **Checkpoint**: SC-005 holds: no forced rate limit fails a job.
 
@@ -211,25 +211,25 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: Make a Short from a reviewed job and propose a brand guide as the artist-linked user, on HTTP fixtures. Re-pick avoids skipped hooks.
 
-- [ ] T030 [US3] Rework the hook step in src/lib/server/pipeline/short.ts:
+- [x] T030 [US3] Rework the hook step in src/lib/server/pipeline/short.ts:
   - **Deadline:** one 110 s `stepDeadline()` on claimed-step entry. Loudness, the hook pick with its re-ask, and the existing render reserves all fit inside it; nothing renews it.
   - Build the `ModelRequest` with the re-ask as an `assistant` turn.
   - New Shorts and every `HOOK` retry or re-pick compare the parent's stored chunk count with `chunkCount(sourceDurationSec)`, not the Short job's default count. A mismatch takes "new upload required" before the hook pick.
   - An existing absolute cut may still render, re-cut, review and publish.
   - A null value after exhaustion fails the step.
   - Tests in tests/unit/lib/server/pipeline/short.test.ts.
-- [ ] T031 [P] [US3] Rework src/lib/server/artist/brand.ts:
+- [x] T031 [P] [US3] Rework src/lib/server/artist/brand.ts:
   - Build a `ModelRequest` with thumbnails as `image` parts.
   - `ModelBusy` → `{ wait: 'model busy' }`; `ModelQuotaSpent` → `{ wait: 'model quota spent' }`; nothing persisted.
   - Exhaustion returns the existing retryable error. Remove `modelStatus`.
   - Tests in tests/unit/lib/server/artist/brand.test.ts.
-- [ ] T032 [US3] In src/routes/api/brand/propose/+server.ts and src/routes/brand/+page.svelte:
+- [x] T032 [US3] In src/routes/api/brand/propose/+server.ts and src/routes/brand/+page.svelte:
   - Pass both waits through.
   - The page keeps polling on `model busy` and stops on `model quota spent`.
   - Remove the waking-model copy.
   - Tests in tests/unit/routes/api/brand/propose/server.test.ts and tests/unit/routes/brand/page.test.ts.
-- [ ] T033 [P] [US3] In src/lib/components/Short.svelte, show `Configured picker: <model>` and the new wait text, and drop the Gemma copy. Tests in tests/unit/lib/components/Short.test.ts.
-- [ ] T034 [US3] Update tests/e2e/brand.spec.ts for `model busy` via the preload. Add a Short from a job with a mismatched chunk count to tests/e2e/short.spec.ts: it shows "new upload required".
+- [x] T033 [P] [US3] In src/lib/components/Short.svelte, show `Configured picker: <model>` and the new wait text, and drop the Gemma copy. Tests in tests/unit/lib/components/Short.test.ts.
+- [x] T034 [US3] Update tests/e2e/brand.spec.ts for `model busy` via the preload. Add a Short from a job with a mismatched chunk count to tests/e2e/short.spec.ts: it shows "new upload required".
 
 **Checkpoint**: Shorts and the brand guide work on fixtures; old-window Shorts are refused. `make ai-checks` passes.
 
