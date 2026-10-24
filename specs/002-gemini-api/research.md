@@ -21,8 +21,8 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 
 ## R2 · SDK and API surface
 
-- **Versions:** latest as of 2026-10-22, which is fine for the alpha. Inline file parts, `store` and per-agent options were checked in the `@ai-sdk/google` 4.0.102 source and on the wire in G1.
-- **Decision:** AI SDK `ai` 7.0.148 with the `@ai-sdk/google` 4.0.102 provider, calling `google.interactions(modelId)` through `generateText` and `Output.object({ schema: jsonSchema(...) })`. No other Google AI SDK.
+- **Versions:** latest as of 2026-10-24 (pinned in T004), which is fine for the alpha. G1 and G2 ran on 7.0.148 and 4.0.102. Inline file parts, `store` and per-agent options were checked in the `@ai-sdk/google` 4.0.105 source and on the wire in G1.
+- **Decision:** AI SDK `ai` 7.0.153 with the `@ai-sdk/google` 4.0.105 provider, calling `google.interactions(modelId)` through `generateText` and `Output.object({ schema: jsonSchema(...) })`. No other Google AI SDK.
 - **Rationale:**
   - **Model swap is configuration.** A provider is one import plus a model id. Picks, hook and brand can move to another provider with no agent changes.
   - **Agent work later** builds on the same SDK's tools and `ToolLoopAgent`, not a second framework.

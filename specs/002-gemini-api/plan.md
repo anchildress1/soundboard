@@ -20,7 +20,7 @@ Replace `llama-server` + Gemma 4 on the Vertex L4 endpoint with the Gemini API t
 
 **Primary Dependencies**:
 
-- New: `ai` 7.0.148 and `@ai-sdk/google` 4.0.102 for every model call (research R2)
+- New: `ai` 7.0.153 and `@ai-sdk/google` 4.0.105 for every model call (research R2)
 - Existing, kept: SvelteKit 2 / Svelte 5, `google-auth-library` 11.1.0 (sign-in only), `@sentry/sveltekit` 11.4.0, `p-retry` 8.0.1 (parse re-ask only)
 - Removed from runtime: the model container (`model/Dockerfile`, `build-model.sh`)
 

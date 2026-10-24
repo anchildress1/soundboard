@@ -1,5 +1,4 @@
-# Cloud Run service: one app instance, no GPU. The model runs on a Vertex AI endpoint; deploy.sh
-# renders its invoke URL into MODEL_URL.
+# Cloud Run service: one app instance, no GPU. Models run on the Gemini API.
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
@@ -24,8 +23,10 @@ spec:
           ports:
             - containerPort: 8080
           env:
-            - name: MODEL_URL
-              value: ${MODEL_URL}
+            - name: GEMINI_ANALYST_MODEL
+              value: gemini-3.8-flash
+            - name: GEMINI_PICK_MODEL
+              value: gemini-4-argon
             - name: GCP_PROJECT_ID
               value: ${GCP_PROJECT_ID}
             - name: GCS_BUCKET
@@ -54,6 +55,9 @@ spec:
             - name: YOUTUBE_API_KEY
               valueFrom:
                 secretKeyRef: { name: soundboard-youtube-api-key, key: latest }
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: soundboard-gemini-api-key, key: latest }
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: DATABASE_URL, key: latest }

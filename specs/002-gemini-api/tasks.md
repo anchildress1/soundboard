@@ -48,17 +48,17 @@ description: 'Task list for the Gemini API swap'
   - Replace "scaled to zero (429), loading" with `model busy` / `model quota spent`.
   - Replace `llama-server` in the mock list with Gemini HTTP.
   - In the E2E lines, add the window-media fake and replace the "waking model" stop with `model busy`.
-- [ ] T004 👤 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add ai@7.0.148 @ai-sdk/google@4.0.102` (research R2)
-- [ ] T005 [P] 👤 Config in .env.example and service.yaml:
+- [x] T004 👤 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add ai@7.0.153 @ai-sdk/google@4.0.105` (research R2)
+- [x] T005 [P] 👤 Config in .env.example and service.yaml:
   - Remove `MODEL_URL`.
   - Add `GEMINI_API_KEY`, from Secret Manager `soundboard-gemini-api-key` in service.yaml.
   - Add `GEMINI_ANALYST_MODEL` (default `gemini-3.8-flash`, or T001's choice) and `GEMINI_PICK_MODEL` (default `gemini-4-argon`).
-- [ ] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
-- [ ] T007 [P] 👤 In playwright.config.ts:
+- [x] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
+- [x] T007 [P] 👤 In playwright.config.ts:
   - Delete the `node tests/e2e/fakes/model.ts` webServer on port 4174 and the `MODEL_URL` env.
   - Add `--import ./tests/e2e/fakes/gemini.ts` to the preview server's Node command.
   - Set a dummy `GEMINI_API_KEY`, never a real one.
-- [ ] T008 [P] 👤 Remove the `model-image` target and its `.PHONY` entry from Makefile, and remove the `keep-model-2` rule from cleanup-policy.json.
+- [x] T008 [P] 👤 Remove the `model-image` target and its `.PHONY` entry from Makefile, and remove the `keep-model-2` rule from cleanup-policy.json.
 
 ---
 

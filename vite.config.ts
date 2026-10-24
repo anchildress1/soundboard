@@ -18,15 +18,19 @@ const e2eFakes =
       }
     : undefined;
 
-// The app's database module can't be swapped by `resolve.alias`: SvelteKit's `$lib` alias rewrites
-// the specifier first. Matching the resolved file catches every import of it.
-const dbModule = fileURLToPath(new URL('src/lib/server/core/db.ts', import.meta.url));
-const e2eDb: Plugin = {
-  name: 'e2e-db',
+// App modules can't be swapped by `resolve.alias`: SvelteKit's `$lib` alias rewrites the specifier
+// first. Matching the resolved file catches every import of it. Window media is faked because E2E
+// runs no ffmpeg.
+const appFakes = new Map([
+  [fileURLToPath(new URL('src/lib/server/core/db.ts', import.meta.url)), fake('db')],
+  [fileURLToPath(new URL('src/lib/server/media/window.ts', import.meta.url)), fake('window')],
+]);
+const e2eModules: Plugin = {
+  name: 'e2e-modules',
   enforce: 'pre',
   async resolveId(id, importer) {
     const resolved = await this.resolve(id, importer, { skipSelf: true });
-    return resolved?.id === dbModule ? fake('db') : null;
+    return (resolved && appFakes.get(resolved.id)) ?? null;
   },
 };
 
@@ -42,7 +46,7 @@ export default defineConfig({
       telemetry: false,
     }),
     sveltekit(),
-    ...(e2eFakes ? [e2eDb] : []),
+    ...(e2eFakes ? [e2eModules] : []),
   ],
   resolve: e2eFakes,
 });

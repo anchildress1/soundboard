@@ -22,18 +22,14 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'node tests/e2e/fakes/model.ts',
-      url: 'http://127.0.0.1:4174/ready',
-      reuseExistingServer: false,
-    },
-    {
-      command: 'pnpm build && pnpm preview',
+      // The preload answers Gemini HTTP inside the preview server, so the real SDK and client run.
+      command: "pnpm build && NODE_OPTIONS='--import ./tests/e2e/fakes/gemini.ts' pnpm preview",
       url: 'http://localhost:4173',
       reuseExistingServer: false,
-      // Fake Google Cloud clients and database seeded with fixture jobs (vite.config.ts).
+      // Fake Google Cloud clients, window media and database seeded with fixture jobs (vite.config.ts).
       env: {
         E2E_FAKES: '1',
-        MODEL_URL: 'http://127.0.0.1:4174',
+        GEMINI_API_KEY: 'e2e-not-a-key',
         GCP_PROJECT_ID: 'e2e',
         GCS_BUCKET: 'e2e',
         SESSION_SECRET: 'e2e-session-secret',
