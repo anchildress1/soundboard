@@ -59,5 +59,6 @@ describe('genre evidence migration', () => {
     } finally {
       await database.close();
     }
-  });
+    // Boots its own PGlite in the test body; under the full parallel coverage run that alone passes 5 s.
+  }, 30_000);
 });
