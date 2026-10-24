@@ -70,10 +70,10 @@ test.describe('destination tabs', () => {
     );
     await page.goto('/jobs/e2e-analyzing');
     expect(await (await step).json()).toMatchObject({
-      wait: 'waking model',
+      wait: 'model busy',
       job: { state: 'ANALYZE', error: null },
     });
-    await expect(page.getByText('waking model')).toBeVisible();
+    await expect(page.getByText('model busy')).toBeVisible();
     await expect(page.getByRole('tablist')).toHaveCount(0);
   });
 });
@@ -114,12 +114,12 @@ test.describe('Short tab', () => {
       (response) => response.request().method() === 'POST' && response.url().endsWith('/step'),
     );
     await shortPanel(page).getByRole('button', { name: 'Make a Short' }).click();
-    // The test model's health endpoint returns 503, so no hook or media call starts.
+    // The preload answers the hook pick with a 429 before any media call starts.
     expect(await (await step).json()).toMatchObject({
-      wait: 'waking model',
+      wait: 'model busy',
       job: { state: 'HOOK', error: null },
     });
-    await expect(shortPanel(page).getByRole('status')).toHaveText(/waking model/i);
+    await expect(shortPanel(page).getByRole('status')).toHaveText(/model busy/i);
     await expect(shortPanel(page).getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
   });
 

@@ -7,7 +7,8 @@ import { ActionError } from '$lib/server/core/errors';
 import {
   approveBrand,
   approvedBrand,
-  buildBrandMessages,
+  BRAND_SCHEMA,
+  buildBrandRequest,
   cleanGuide,
   discardBrandProposal,
   getBrand,
@@ -19,9 +20,20 @@ import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { artistMemory } from '$lib/server/core/schema';
 import { memoryOf } from '$lib/server/artist/memory';
-import { clearStatsCache, type CatalogVideo } from '$lib/server/platforms/youtube/youtube';
+import {
+  clearStatsCache,
+  type CatalogVideo,
+  type Thumbnail,
+} from '$lib/server/platforms/youtube/youtube';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { seed, truncate } from '../../../../helpers/db';
+import {
+  busy429,
+  geminiError,
+  interaction,
+  perDay429,
+  unavailable503,
+} from '../../../../helpers/gemini';
 
 type Slot = 'proposal' | 'approved';
 
@@ -65,25 +77,27 @@ let uploads: string[];
 
 const on = (test: RegExp, reply: Reply) => routes.unshift([test, reply]);
 const called = (test: RegExp) => calls.filter((c) => test.test(c.url));
-const chatBody = () =>
-  JSON.parse(String(called(/chat\/completions$/)[0]!.init.body)) as {
-    messages: { content: string | { type: string }[] }[];
+const GEMINI = /generativelanguage\.googleapis\.com\/v1beta\/interactions$/;
+const geminiBody = () =>
+  JSON.parse(String(called(GEMINI)[0]!.init.body)) as {
+    model: string;
+    store: boolean;
+    input: { type: string; content: { type: string }[] }[];
+    response_format: unknown;
+    generation_config: { max_output_tokens: number; thinking_level: string };
   };
-const completion = (content: string) =>
-  json({ choices: [{ message: { content } }], usage: { total_tokens: 1 } });
 
 beforeEach(async () => {
   vi.stubEnv('YOUTUBE_API_KEY', 'key');
   vi.stubEnv('FLR_CHANNEL_ID', 'UCflr');
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
   await truncate();
   resetClients();
   clearStatsCache();
   uploads = Array.from({ length: 35 }, (_, i) => `v${i + 1}`);
   calls = [];
   routes = [
-    [/\/health$/, () => json({ status: 'ok' })],
-    [/\/slots$/, () => json([{ is_processing: false }])],
-    [/chat\/completions$/, () => completion(JSON.stringify(GUIDE))],
+    [GEMINI, () => interaction(JSON.stringify(GUIDE))],
     [
       /youtube\/v3\/channels\?/,
       () => json({ items: [{ contentDetails: { relatedPlaylists: { uploads: 'UUflr' } } }] }),
@@ -172,11 +186,12 @@ describe('cleanGuide', () => {
   });
 });
 
-describe('buildBrandMessages', () => {
+describe('buildBrandRequest', () => {
+  const THUMB: Thumbnail = { data: 'AA', mime_type: 'image/jpeg' };
   const video = (
     id: string,
-    thumbnail: string | null,
-  ): CatalogVideo & { thumbnail: string | null } => ({
+    thumbnail: Thumbnail | null,
+  ): CatalogVideo & { thumbnail: Thumbnail | null } => ({
     videoId: id,
     title: `Song ${id}`,
     description: 'x'.repeat(500),
@@ -188,21 +203,21 @@ describe('buildBrandMessages', () => {
     thumbnail,
   });
 
+  const userParts = (request: ReturnType<typeof buildBrandRequest>) =>
+    request.turns[0]!.parts as { type: string; text?: string }[];
+
   it('shortens descriptions and sends thumbnails as image parts', () => {
-    const [, user] = buildBrandMessages([
-      video('a', 'data:image/jpeg;base64,AA'),
-      video('b', null),
-    ]);
-    const parts = user!.content as { type: string; text?: string }[];
+    const request = buildBrandRequest([video('a', THUMB), video('b', null)]);
+    expect(request.system).toContain('recognizable as one channel');
+    const parts = userParts(request);
     const uploads = (JSON.parse(parts[0]!.text!) as { uploads: { description: string }[] }).uploads;
     expect(uploads).toHaveLength(2);
     expect(uploads[0]!.description.length).toBeLessThan(500);
-    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1);
+    expect(parts.filter((p) => p.type === 'image')).toEqual([{ type: 'image', ...THUMB }]);
   });
 
   const sentTags = (tags: string[]) => {
-    const [, user] = buildBrandMessages([{ ...video('a', null), tags }]);
-    const text = (user!.content as { text: string }[])[0]!.text;
+    const text = userParts(buildBrandRequest([{ ...video('a', null), tags }]))[0]!.text!;
     return (JSON.parse(text) as { uploads: { tags: string[] }[] }).uploads[0]!.tags;
   };
 
@@ -227,37 +242,37 @@ describe('buildBrandMessages', () => {
   });
 
   it('sends text only when no thumbnail loaded', () => {
-    const [, user] = buildBrandMessages([video('a', null)]);
-    expect(user!.content).toHaveLength(1);
+    expect(userParts(buildBrandRequest([video('a', null)]))).toHaveLength(1);
   });
 });
 
 describe('proposeBrand', () => {
-  it('waits without reading the channel while the model loads', async () => {
-    on(/\/health$/, () => new Response('loading', { status: 503 }));
-    expect(await proposeBrand()).toEqual({ wait: 'waking model' });
-    expect(called(/youtube/)).toHaveLength(0);
+  it.each([
+    ['a per-minute 429', busy429],
+    ['a 503', unavailable503],
+  ])('waits on %s and stores nothing', async (_, reply) => {
+    on(GEMINI, () => reply());
+    expect(await proposeBrand()).toEqual({ wait: 'model busy' });
+    expect(called(GEMINI)).toHaveLength(1);
     expect(await has('proposal')).toBe(false);
   });
 
-  it('waits while another run holds the model', async () => {
-    on(/\/slots$/, () => json([{ is_processing: true }]));
-    expect(await proposeBrand()).toEqual({ wait: 'waiting on another run' });
-    expect(called(/chat\/completions$/)).toHaveLength(0);
+  it('waits on a spent per-day quota and stores nothing', async () => {
+    on(GEMINI, () => perDay429());
+    expect(await proposeBrand()).toEqual({ wait: 'model quota spent' });
+    expect(await has('proposal')).toBe(false);
   });
 
-  it('waits when the model scales to zero after the readiness check', async () => {
-    on(
-      /chat\/completions$/,
-      () => new Response('Model is not yet ready for inference.', { status: 429 }),
-    );
-    expect(await proposeBrand()).toEqual({ wait: 'waking model' });
-    expect(await has('proposal')).toBe(false);
+  it('keeps an earlier proposal while the model is busy', async () => {
+    await put('proposal', PROPOSAL);
+    on(GEMINI, () => busy429());
+    await proposeBrand();
+    expect(await read('proposal')).toEqual(PROPOSAL);
   });
 
   it('propagates any other model error', async () => {
-    on(/chat\/completions$/, () => new Response('boom', { status: 500 }));
-    await expect(proposeBrand()).rejects.toThrow('llama-server 500: boom');
+    on(GEMINI, () => geminiError(500, 'INTERNAL'));
+    await expect(proposeBrand()).rejects.toThrow(/^Gemini 500/);
     expect(await has('proposal')).toBe(false);
   });
 
@@ -267,8 +282,14 @@ describe('proposeBrand', () => {
     const stored = (await read('proposal')) as StoredBrand;
     expect(stored.basedOn).toEqual(uploads.slice(0, 30));
     expect(called(/i\.ytimg\.com/)).toHaveLength(10);
-    const parts = chatBody().messages[1]!.content as { type: string }[];
-    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(10);
+    const body = geminiBody();
+    expect(body.input[0]!.content.filter((p) => p.type === 'image')).toHaveLength(10);
+    expect(body.store).toBe(false);
+    expect(body.generation_config).toMatchObject({
+      max_output_tokens: 8192,
+      thinking_level: 'medium',
+    });
+    expect(JSON.stringify(body.response_format)).toContain(JSON.stringify(BRAND_SCHEMA));
   });
 
   it("reads FLR's own channel by FLR_CHANNEL_ID, never a signed-in user's", async () => {
@@ -291,7 +312,7 @@ describe('proposeBrand', () => {
 
   it('records the cleaned guide, minus model audio numbers, as the agent output', async () => {
     const loud = { ...GUIDE, fix: ['Master to -14 LUFS before upload'] };
-    on(/chat\/completions$/, () => completion(JSON.stringify(loud)));
+    on(GEMINI, () => interaction(JSON.stringify(loud)));
     clearAgentSpan();
     const result = await proposeBrand();
     const [output] = agentSpanIO().output;
@@ -304,11 +325,11 @@ describe('proposeBrand', () => {
   it('409s when the channel has no uploads', async () => {
     uploads = [];
     await expect(proposeBrand()).rejects.toMatchObject({ status: 409 });
-    expect(called(/chat\/completions$/)).toHaveLength(0);
+    expect(called(GEMINI)).toHaveLength(0);
   });
 
   it('502s and stores nothing when the reply never parses', async () => {
-    on(/chat\/completions$/, () => completion('{"statement": 1}'));
+    on(GEMINI, () => interaction('{"statement": 1}'));
     clearAgentSpan();
     await expect(proposeBrand()).rejects.toMatchObject({ status: 502 });
     expect(await has('proposal')).toBe(false);

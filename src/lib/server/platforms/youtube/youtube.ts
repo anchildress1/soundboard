@@ -62,7 +62,7 @@ function pacificOffset(at: number): number {
   return wall - Math.floor(at / 1000) * 1000;
 }
 
-/** The next midnight Pacific time, when YouTube's daily quota resets. */
+/** The next midnight Pacific time, when YouTube's and Gemini's daily quotas reset. */
 export function quotaResetAt(now: number): number {
   const today = new Date(now + pacificOffset(now));
   const midnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1);
@@ -236,13 +236,16 @@ export async function searchMusicVideos(
     .filter((id): id is string => Boolean(id));
 }
 
-/** Fetches a thumbnail and returns it as a data URL, the form the model accepts images in. */
-export async function thumbnailDataUrl(url: string): Promise<string | null> {
+/** A thumbnail as the model takes images: base64 bytes and their type. */
+export type Thumbnail = { data: string; mime_type: string };
+
+/** Fetches a thumbnail for the model; null when it can't be read. */
+export async function thumbnailImage(url: string): Promise<Thumbnail | null> {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) return null;
     const type = response.headers.get('content-type') ?? 'image/jpeg';
-    return `data:${type};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}`;
+    return { data: Buffer.from(await response.arrayBuffer()).toString('base64'), mime_type: type };
   } catch {
     return null;
   }

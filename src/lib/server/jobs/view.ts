@@ -1,5 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { JobState, JobView, Pick, Wait } from '$lib/types';
+import { modelRole } from '$lib/status';
+import { analystModel, pickModel } from '$lib/server/core/env';
 import { objectInfo, signedReadUrl } from '$lib/server/media/gcs';
 import { getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
 
@@ -63,6 +65,7 @@ export async function buildView(job: JobDoc, wait?: Wait): Promise<JobView> {
     job: toPublic(job),
     chunks,
     pick,
+    model: modelRole(job) === 'analyst' ? analystModel() : pickModel(),
     ...(wait ? { wait } : {}),
     ...(playbackUrl ? { playbackUrl } : {}),
   };

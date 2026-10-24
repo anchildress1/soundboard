@@ -1,54 +1,57 @@
 import { getTraceData, startNewTrace, startSpan, type Span } from '@sentry/sveltekit';
 
-export const MODEL_NAME = 'gemma-4-12b-it';
-export const PROVIDER = 'llama.cpp';
+/** OTel's well-known provider name for the Gemini Developer API. */
+export const PROVIDER = 'gcp.gemini';
 /** Groups every agent, model, and tool span under one pipeline in Sentry's AI views. */
 export const PIPELINE = 'soundboard';
 
 export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-pick';
 export type AgentSpan = Span;
 
-type Part =
+export type Part =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
-  | { type: 'input_audio'; input_audio: { data: string; format: string } };
+  /** Base64 image, such as a thumbnail. */
+  | { type: 'image'; data: string; mime_type: string }
+  /** One window's inline clip; `start` and `end` are source seconds. */
+  | { type: 'video'; data: Uint8Array; mime_type: string; start: number; end: number };
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string | Part[] };
+/** `assistant` turns carry an earlier answer for a re-ask; nothing is stored provider-side. */
+export type Turn = { role: 'user' | 'assistant'; parts: Part[] };
 
-const dataUrlMime = (url: string) => /^data:([^;,]+)/.exec(url)?.[1] ?? 'unknown';
+export type ModelRequest = { system: string; turns: Turn[] };
+
 const base64Bytes = (b64: string) => {
   const padding = b64.endsWith('==') ? 2 : Number(b64.endsWith('='));
   return Math.floor((b64.length * 3) / 4) - padding;
 };
 
+function redactPart(part: Part) {
+  if (part.type === 'text') return { type: 'text', content: part.text };
+  if (part.type === 'image') {
+    return { type: 'image', mime: part.mime_type, bytes: base64Bytes(part.data) };
+  }
+  return {
+    type: 'video',
+    mime: part.mime_type,
+    bytes: part.data.byteLength,
+    clip: `${part.start}s–${part.end}s`,
+  };
+}
+
 /**
- * Replaces audio and image payloads with `{type, mime, bytes}` placeholders, so media never reaches
- * Sentry while the shape of the request stays visible.
+ * Replaces image and video payloads with placeholders, so media never reaches Sentry while the
+ * shape of the request and all of its text stay visible.
  */
-export function redactMessages(messages: ChatMessage[]): unknown[] {
-  return messages.map((message) => ({
-    role: message.role,
-    parts:
-      typeof message.content === 'string'
-        ? [{ type: 'text', content: message.content }]
-        : message.content.map((part) => {
-            if (part.type === 'text') return { type: 'text', content: part.text };
-            if (part.type === 'image_url') {
-              const url = part.image_url.url;
-              const b64 = url.slice(url.indexOf(',') + 1);
-              return { type: 'image', mime: dataUrlMime(url), bytes: base64Bytes(b64) };
-            }
-            return {
-              type: 'audio',
-              mime: `audio/${part.input_audio.format}`,
-              bytes: base64Bytes(part.input_audio.data),
-            };
-          }),
-  }));
+export function redactTurns(turns: Turn[]): unknown[] {
+  return turns.map((turn) => ({ role: turn.role, parts: turn.parts.map(redactPart) }));
 }
 
 /** `invoke_agent` span; model and tool spans started inside become its children. */
-export function invokeAgent<T>(agent: AgentName, fn: (span: Span) => Promise<T>): Promise<T> {
+export function invokeAgent<T>(
+  agent: AgentName,
+  model: string,
+  fn: (span: Span) => Promise<T>,
+): Promise<T> {
   return startSpan(
     {
       op: 'gen_ai.invoke_agent',
@@ -57,7 +60,7 @@ export function invokeAgent<T>(agent: AgentName, fn: (span: Span) => Promise<T>)
         'gen_ai.operation.name': 'invoke_agent',
         'gen_ai.agent.name': agent,
         'gen_ai.pipeline.name': PIPELINE,
-        'gen_ai.request.model': MODEL_NAME,
+        'gen_ai.request.model': model,
         'gen_ai.provider.name': PROVIDER,
       },
     },
@@ -66,11 +69,11 @@ export function invokeAgent<T>(agent: AgentName, fn: (span: Span) => Promise<T>)
 }
 
 export type Usage = {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  prompt_tokens_details?: { cached_tokens?: number };
-  completion_tokens_details?: { reasoning_tokens?: number };
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
 };
 
 export type ChatReply = {
@@ -81,24 +84,21 @@ export type ChatReply = {
   responseId: string | null;
 };
 
-const textParts = (messages: ChatMessage[]) =>
-  (redactMessages(messages) as { parts: unknown[] }[]).flatMap((m) => m.parts);
-
-/** System prompt as `gen_ai.system_instructions`, the rest of the redacted request as input. */
-function messageAttributes(messages: ChatMessage[]): Record<string, string> {
-  const system = messages.filter((m) => m.role === 'system');
-  const rest = messages.filter((m) => m.role !== 'system');
+/** System prompt as `gen_ai.system_instructions`, the redacted turns as input. */
+function requestAttributes(request: ModelRequest): Record<string, string> {
   return {
-    ...(system.length > 0
-      ? { 'gen_ai.system_instructions': JSON.stringify(textParts(system)) }
+    ...(request.system
+      ? {
+          'gen_ai.system_instructions': JSON.stringify([{ type: 'text', content: request.system }]),
+        }
       : {}),
-    'gen_ai.input.messages': JSON.stringify(redactMessages(rest)),
+    'gen_ai.input.messages': JSON.stringify(redactTurns(request.turns)),
   };
 }
 
 /** The agent's task on its `invoke_agent` span; Sentry shows an agent's input only from here. */
-export function agentInput(span: AgentSpan, messages: ChatMessage[]): void {
-  span.setAttributes(messageAttributes(messages));
+export function agentInput(span: AgentSpan, request: ModelRequest): void {
+  span.setAttributes(requestAttributes(request));
 }
 
 /** The agent's final answer on its `invoke_agent` span. */
@@ -109,28 +109,31 @@ export function agentOutput(span: AgentSpan, content: string): void {
   );
 }
 
+const optionalCount = (key: string, value: number | undefined) =>
+  value === undefined ? {} : { [key]: value };
+
 /**
- * `chat` span: system prompt as `gen_ai.system_instructions`, the rest of the redacted request as
- * input, the reply and its think block as output, plus finish reason and token counts.
+ * `chat` span: system prompt, redacted turns, the reply and its reasoning, finish reason, and token
+ * counts. A reply that later fails to parse is still recorded here; a thrown error passes through
+ * untouched.
  */
 export function chatSpan<T extends ChatReply>(
-  messages: ChatMessage[],
-  params: { agent: AgentName; temperature: number; maxTokens: number },
+  request: ModelRequest,
+  params: { agent: AgentName; model: string; maxTokens: number },
   fn: () => Promise<T>,
 ): Promise<T> {
   return startSpan(
     {
       op: 'gen_ai.chat',
-      name: `chat ${MODEL_NAME}`,
+      name: `chat ${params.model}`,
       attributes: {
         'gen_ai.operation.name': 'chat',
         'gen_ai.provider.name': PROVIDER,
-        'gen_ai.request.model': MODEL_NAME,
+        'gen_ai.request.model': params.model,
         'gen_ai.agent.name': params.agent,
         'gen_ai.pipeline.name': PIPELINE,
-        'gen_ai.request.temperature': params.temperature,
         'gen_ai.request.max_tokens': params.maxTokens,
-        ...messageAttributes(messages),
+        ...requestAttributes(request),
       },
     },
     async (span) => {
@@ -141,7 +144,7 @@ export function chatSpan<T extends ChatReply>(
         { type: 'text', content: result.content },
       ];
       span.setAttributes({
-        'gen_ai.response.model': MODEL_NAME,
+        'gen_ai.response.model': params.model,
         'gen_ai.output.messages': JSON.stringify([
           {
             role: 'assistant',
@@ -151,18 +154,11 @@ export function chatSpan<T extends ChatReply>(
         ]),
         ...(result.finishReason ? { 'gen_ai.response.finish_reasons': [result.finishReason] } : {}),
         ...(result.responseId ? { 'gen_ai.response.id': result.responseId } : {}),
-        'gen_ai.usage.input_tokens': usage.prompt_tokens ?? 0,
-        'gen_ai.usage.output_tokens': usage.completion_tokens ?? 0,
-        'gen_ai.usage.total_tokens': usage.total_tokens ?? 0,
-        ...(usage.prompt_tokens_details?.cached_tokens !== undefined
-          ? { 'gen_ai.usage.cache_read.input_tokens': usage.prompt_tokens_details.cached_tokens }
-          : {}),
-        ...(usage.completion_tokens_details?.reasoning_tokens !== undefined
-          ? {
-              'gen_ai.usage.reasoning.output_tokens':
-                usage.completion_tokens_details.reasoning_tokens,
-            }
-          : {}),
+        'gen_ai.usage.input_tokens': usage.inputTokens ?? 0,
+        'gen_ai.usage.output_tokens': usage.outputTokens ?? 0,
+        'gen_ai.usage.total_tokens': usage.totalTokens ?? 0,
+        ...optionalCount('gen_ai.usage.cache_read.input_tokens', usage.cachedInputTokens),
+        ...optionalCount('gen_ai.usage.reasoning.output_tokens', usage.reasoningTokens),
       });
       return result;
     },

@@ -24,6 +24,7 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
     state: 'REVIEW',
     object: `uploads/${id}`,
     probe: PROBE,
+    chunkCount: 3,
     hashtagCandidates: ['#synthwave'],
     pickVersion: 1,
     trace: { sentryTrace: 't', baggage: 'b' },

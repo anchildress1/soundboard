@@ -70,14 +70,14 @@ description: 'Task list for the Gemini API swap'
 
 **⚠️ Red tree**: T010 and T012 remove `ModelWaking`, `modelStatus` and the old waits, which `pipeline.ts` and `brand.ts` still import. Those modules and their tests stay red until T021, T025 and T031. Full `make ai-checks` passes only at the end of US3.
 
-- [ ] T009 [P] In src/lib/server/core/env.ts:
+- [x] T009 [P] In src/lib/server/core/env.ts:
   - Drop `modelUrl`.
   - Add `geminiApiKey()` (required), `analystModel()` (default `gemini-3.8-flash`) and `pickModel()` (default `gemini-4-argon`).
   - Tests in tests/unit/lib/server/core/env.test.ts: defaults, overrides, missing key throws.
-- [ ] T010 [P] In src/lib/types.ts:
+- [x] T010 [P] In src/lib/types.ts:
   - In `Wait`, remove `waking model` and `waiting on another run`; add `model busy` and `model quota spent`.
   - Add `model: string` to `JobView`.
-- [ ] T011 Rewrite the model request types and spans in src/lib/server/core/tracing.ts:
+- [x] T011 Rewrite the model request types and spans in src/lib/server/core/tracing.ts:
   - Replace `ChatMessage[]` with the data-model types. `Part` is `text | image {data: base64, mime_type} | video {data: Uint8Array, mime_type, start, end}`. Add `Turn {role: 'user' | 'assistant', parts}` and `ModelRequest {system, turns}`.
   - Provider: `gen_ai.provider.name = 'gcp.gemini'`.
   - Per-call model on both `chatSpan` and `invokeAgent`; drop `MODEL_NAME`.
@@ -87,7 +87,7 @@ description: 'Task list for the Gemini API swap'
     - Captured exceptions exclude SDK request bodies, headers and media-bearing causes. Safe messages still pass `scrubUrl`.
   - Telemetry never replaces or mutates the thrown error.
   - Tests in tests/unit/lib/server/core/tracing.test.ts and tests/helpers/agent-span.ts.
-- [ ] T012 Rewrite src/lib/server/ai/model.ts to [contracts/model-client.md](contracts/model-client.md):
+- [x] T012 Rewrite src/lib/server/ai/model.ts to [contracts/model-client.md](contracts/model-client.md):
   - **Exports:** `Agent`, `ModelBusy`, `ModelQuotaSpent` (with `until`), `chat`, `chatJson`, `stepDeadline`, `modelFor`.
   - **Client:** `createGoogle({ apiKey })`. Every call goes through `gemini.interactions(modelFor(agent))`.
   - **Call settings:**
@@ -109,11 +109,11 @@ description: 'Task list for the Gemini API swap'
     - Record each failed attempt's raw text, finish reason and usage on the span.
   - **Remove** `modelStatus`, `ModelStatus`, `ModelWaking`, `SchemaName`, `TEMPERATURE` and `MAX_TOKENS`.
   - **Tests** in tests/unit/lib/server/ai/model.test.ts: every Unit bullet in quickstart.md that names the client.
-- [ ] T013 [P] Create tests/e2e/fakes/gemini.ts:
+- [x] T013 [P] Create tests/e2e/fakes/gemini.ts:
   - A Node preload that wraps `globalThis.fetch`. It returns a 429 `RESOURCE_EXHAUSTED` fixture for `generativelanguage.googleapis.com` and throws on any other Gemini request it doesn't handle.
   - Delete tests/e2e/fakes/model.ts.
-- [ ] T014 Update tests/helpers/pipeline.ts: replace the `llama-server` `fetch` stubs with Gemini Interactions HTTP fixtures (success, unparsed, 429 busy, 429 per-day, 503, 400). Every pipeline, short and brand test uses them.
-- [ ] T015 [P] Add a claim-guarded chunk reset to `releaseJob` in src/lib/server/jobs/jobs.ts:
+- [x] T014 Update tests/helpers/pipeline.ts: replace the `llama-server` `fetch` stubs with Gemini Interactions HTTP fixtures (success, unparsed, 429 busy, 429 per-day, 503, 400). Every pipeline, short and brand test uses them.
+- [x] T015 [P] Add a claim-guarded chunk reset to `releaseJob` in src/lib/server/jobs/jobs.ts:
   - The new operation sets `jobs.chunks` to empty in the same transaction as the state patch.
   - It applies only when the claim token and the claimed state still match. An ordinary `JobPatch` still can't clear `chunks`.
   - Tests in tests/unit/lib/server/jobs/jobs.test.ts: a matching claim clears both chunks and state; a stolen claim or a concurrent discard changes neither; a transaction failure rolls both back.
@@ -128,12 +128,12 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: Unit and E2E: analyze reaches the model call through the faked window module, and the pipeline tests drive a job to review on HTTP fixtures. After FR-023, run a 3-minute and a 15-minute video on the deployed app, with no Vertex call anywhere in the request path.
 
-- [ ] T016 [US1] In src/lib/server/media/ffmpeg.ts:
+- [x] T016 [US1] In src/lib/server/media/ffmpeg.ts:
   - Set `WINDOW_SEC = 60`.
   - Delete `FRAMES_PER_WINDOW`, `extractWindow`, `splitJpegs` and the `Window` type.
   - Keep `chunkCount` as `max(1, ceil((duration − 1) / 60))`.
   - Tests in tests/unit/lib/server/media/ffmpeg.test.ts: 60 → 1, 60.5 → 1, 61.5 → 2, 900 → 15.
-- [ ] T017 [US1] Create src/lib/server/media/window.ts:
+- [x] T017 [US1] Create src/lib/server/media/window.ts:
   - **`cutWindowClip(url, startSec, endSec, deadline)`:**
     - Reads the GCS source by signed URL, keeping the `https,tls,tcp` protocol whitelist.
     - Encodes H.264/AAC MP4: within 640×360, aspect ratio and rotation kept, even dimensions, at most 30 fps, video maxrate 600 kbit/s with a 1200 kbit buffer, AAC 96 kbit/s stereo at 48 kHz, faststart.
@@ -147,19 +147,19 @@ description: 'Task list for the Gemini API swap'
     - A timeout kills ffmpeg and deletes the file.
     - Incomplete output fails.
     - The encode args match the profile.
-- [ ] T018 [P] [US1] Create tests/e2e/fakes/window.ts: `cutWindowClip` writes a few dummy bytes to a temp file; `measureWindow` returns fixed `Measurements`. Same exports as window.ts.
-- [ ] T019 [US1] Rewrite src/lib/server/ai/chunk-analyst.ts:
+- [x] T018 [P] [US1] Create tests/e2e/fakes/window.ts: `cutWindowClip` writes a few dummy bytes to a temp file; `measureWindow` returns fixed `Measurements`. Same exports as window.ts.
+- [x] T019 [US1] Rewrite src/lib/server/ai/chunk-analyst.ts:
   - Build a `ModelRequest` with one inline `video/mp4` part (the clip, with `start`/`end`), plus the window's ffmpeg measurements, song title and notes.
   - No image or audio parts.
   - After the re-ask is exhausted, store `numerics.ts`-stripped raw text on the chunk.
   - Tests in tests/unit/lib/server/ai/chunk-analyst.test.ts.
-- [ ] T020 [P] [US1] Rewrite src/lib/server/ai/smart-pick.ts:
+- [x] T020 [P] [US1] Rewrite src/lib/server/ai/smart-pick.ts:
   - Build a `ModelRequest` from #20's `candidateLists`, with thumbnails as `image` parts and the re-ask as an `assistant` turn.
   - Take the caller's `deadline` and pass it to `chatJson`; never start a fresh one.
   - A null value after exhaustion fails the step.
   - Keep the R4 candidate-only rule and `ARTIST_VOICE` unchanged.
   - Tests in tests/unit/lib/server/ai/smart-pick.test.ts.
-- [ ] T021 [US1] Rework analyze and pick in src/lib/server/pipeline/pipeline.ts:
+- [x] T021 [US1] Rework analyze and pick in src/lib/server/pipeline/pipeline.ts:
   - **Deadline:** analyze and pick each start one 110 s `stepDeadline()` on claimed-step entry, with the last 5 s reserved for cleanup and persistence. The pick's re-ask shares it.
   - **Order:** compatibility check → `limited()` → `cutWindowClip` → `measureWindow` → `chatJson`.
   - **Cleanup:** delete the temp file in `finally`. Never save a partial chunk.
@@ -170,15 +170,15 @@ description: 'Task list for the Gemini API swap'
     - Deletion when the call throws.
     - Reset under a matching vs. a stolen claim.
     - One simulated clock covers cut, measure and inference, and no helper renews the deadline.
-- [ ] T022 [US1] In src/lib/server/jobs/view.ts, set `JobView.model` from current config:
+- [x] T022 [US1] In src/lib/server/jobs/view.ts, set `JobView.model` from current config:
   - Analyst during `PREP`/`ANALYZE`, picker otherwise and for Shorts.
   - For `FAILED`, pick the role from `failedState`.
   - Tests in tests/unit/lib/server/jobs/view.test.ts, including a config change while viewing an old result.
-- [ ] T023 [P] [US1] Render the model label in src/lib/components/Track.svelte and src/routes/jobs/[id]/+page.svelte:
+- [x] T023 [P] [US1] Render the model label in src/lib/components/Track.svelte and src/routes/jobs/[id]/+page.svelte:
   - Show `Configured analyst: <model>` or `Configured picker: <model>`, separate from `Total model time: <seconds>s`.
   - Remove stale Gemma comments and copy.
   - Tests in tests/unit/lib/components/Track.test.ts and tests/unit/routes/jobs/[id]/page.test.ts.
-- [ ] T024 [US1] Add an E2E analyze spec in tests/e2e/pipeline.spec.ts: a seeded prepared job runs analyze through the faked window module to the model call. Give it its own job IDs per Playwright project in tests/e2e/fakes/fixtures.ts.
+- [x] T024 [US1] Add an E2E analyze spec in tests/e2e/pipeline.spec.ts: a seeded prepared job runs analyze through the faked window module to the model call. Give it its own job IDs per Playwright project in tests/e2e/fakes/fixtures.ts.
 
 **Checkpoint**: A job goes from prep to review on HTTP fixtures; E2E reaches the model call.
 
@@ -190,15 +190,15 @@ description: 'Task list for the Gemini API swap'
 
 **Independent Test**: Force each response at the `fetch` boundary during analyze and during pick. The step returns the wait, finished chunks remain, `consecutiveFailures` doesn't change, and the job continues once the fixture answers.
 
-- [ ] T025 [US2] Map the waits in src/lib/server/pipeline/pipeline.ts:
+- [x] T025 [US2] Map the waits in src/lib/server/pipeline/pipeline.ts:
   - `ModelBusy` → `model busy`. Keep finished work and leave `consecutiveFailures` alone.
   - `ModelQuotaSpent` → set `limitUntil = until` and return `model quota spent`.
   - Apply the job cooldown before analyze, pick and hook side effects. Clear an expired model limit when work resumes.
   - 400, 403 and 500 count toward the existing two-strike `FAILED` path.
   - Tests in tests/unit/lib/server/pipeline/pipeline.test.ts.
-- [ ] T026 [P] [US2] Add plain-label text for `model busy` and `model quota spent` in src/lib/status.ts and remove the old waits. Tests in tests/unit/lib/status.test.ts.
-- [ ] T027 [P] [US2] Make src/lib/driver.ts keep calling on `model busy` and `model quota spent`. Tests in tests/unit/lib/driver.test.ts.
-- [ ] T028 [P] [US2] Update the wait responses in tests/unit/routes/api/jobs/[id]/step/server.test.ts.
+- [x] T026 [P] [US2] Add plain-label text for `model busy` and `model quota spent` in src/lib/status.ts and remove the old waits. Tests in tests/unit/lib/status.test.ts.
+- [x] T027 [P] [US2] Make src/lib/driver.ts keep calling on `model busy` and `model quota spent`. Tests in tests/unit/lib/driver.test.ts.
+- [x] T028 [P] [US2] Update the wait responses in tests/unit/routes/api/jobs/[id]/step/server.test.ts.
 - [ ] T029 [US2] In tests/e2e/pipeline.spec.ts (and tests/e2e/short.spec.ts for the hook), check that analyze and pick show `model busy` from the T013 preload on desktop Chrome and Pixel 7, and that no `waking model` text remains.
 
 **Checkpoint**: SC-005 holds: no forced rate limit fails a job.

@@ -143,10 +143,30 @@ describe('buildView', () => {
 
   it('carries a wait reason when given one', async () => {
     const job = await createJob(input(), 'v');
-    const view = await buildView(job, 'waking model');
-    expect(view.wait).toBe('waking model');
+    const view = await buildView(job, 'model busy');
+    expect(view.wait).toBe('model busy');
     expect(view.pick).toBeNull();
     expect(view.chunks).toEqual([]);
+  });
+
+  it('names the configured analyst while windows are analyzed, the picker after', async () => {
+    const job = await createJob(input(), 'v');
+    expect((await buildView({ ...job, state: 'ANALYZE' })).model).toBe('gemini-3.8-flash');
+    expect((await buildView({ ...job, state: 'REVIEW' })).model).toBe('gemini-4-argon');
+    const failed = { ...job, state: 'FAILED' as const };
+    expect((await buildView({ ...failed, failedState: 'PREP' })).model).toBe('gemini-3.8-flash');
+    expect((await buildView({ ...failed, failedState: 'PICK' })).model).toBe('gemini-4-argon');
+    expect((await buildView({ ...job, state: 'HOOK', short: SHORT })).model).toBe('gemini-4-argon');
+  });
+
+  it('reads the model config on every view, even for an earlier result', async () => {
+    const job = await createJob(input(), 'v');
+    await seedPicks('v', 1);
+    const done = { ...job, state: 'REVIEW' as const };
+    vi.stubEnv('GEMINI_PICK_MODEL', 'gemini-4-argon-next');
+    expect((await buildView(done)).model).toBe('gemini-4-argon-next');
+    vi.stubEnv('GEMINI_PICK_MODEL', undefined);
+    expect((await buildView(done)).model).toBe('gemini-4-argon');
   });
 
   it('reads only the job it was given', async () => {

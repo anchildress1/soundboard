@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { kmsKey, modelUrl, optional, required, signupMode } from '$lib/server/core/env';
+import {
+  analystModel,
+  geminiApiKey,
+  kmsKey,
+  optional,
+  pickModel,
+  required,
+  signupMode,
+} from '$lib/server/core/env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -37,15 +45,33 @@ describe('optional', () => {
   });
 });
 
-describe('modelUrl', () => {
-  it('defaults to a local llama-server', () => {
-    vi.stubEnv('MODEL_URL', undefined);
-    expect(modelUrl()).toBe('http://127.0.0.1:8081');
+describe('geminiApiKey', () => {
+  it('returns GEMINI_API_KEY', () => {
+    vi.stubEnv('GEMINI_API_KEY', 'key-1');
+    expect(geminiApiKey()).toBe('key-1');
   });
 
-  it('honours MODEL_URL', () => {
-    vi.stubEnv('MODEL_URL', 'http://model.test:9000');
-    expect(modelUrl()).toBe('http://model.test:9000');
+  it('throws when unset or empty', () => {
+    vi.stubEnv('GEMINI_API_KEY', undefined);
+    expect(() => geminiApiKey()).toThrow('Missing required env var GEMINI_API_KEY');
+    vi.stubEnv('GEMINI_API_KEY', '');
+    expect(() => geminiApiKey()).toThrow(/GEMINI_API_KEY/);
+  });
+});
+
+describe('model names', () => {
+  it('default when unset or empty, as .env.example leaves them', () => {
+    vi.stubEnv('GEMINI_ANALYST_MODEL', undefined);
+    vi.stubEnv('GEMINI_PICK_MODEL', '');
+    expect(analystModel()).toBe('gemini-3.8-flash');
+    expect(pickModel()).toBe('gemini-4-argon');
+  });
+
+  it('honour overrides', () => {
+    vi.stubEnv('GEMINI_ANALYST_MODEL', 'gemini-3.5-flash-lite');
+    vi.stubEnv('GEMINI_PICK_MODEL', 'gemini-3.8-flash');
+    expect(analystModel()).toBe('gemini-3.5-flash-lite');
+    expect(pickModel()).toBe('gemini-3.8-flash');
   });
 });
 

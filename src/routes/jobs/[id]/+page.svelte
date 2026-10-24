@@ -16,7 +16,14 @@
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
   import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
+  import {
+    heardTags,
+    jobStatus,
+    modelLabel,
+    modelSeconds,
+    modelWorking,
+    publishPaused,
+  } from '$lib/status';
   import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
   import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
   import type { PageData } from './$types';
@@ -52,7 +59,7 @@
   const status = $derived(jobStatus(view, view.wait, uploadPct));
   const working = $derived(modelWorking(view));
   const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
-  const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
+  const model = $derived(modelLabel(view));
   const fields = $derived<PickFields | null>(
     job.finalFields ??
       (view.pick
@@ -238,7 +245,7 @@
       width={job.probe?.width}
       height={job.probe?.height}
     />
-    <Track {status} {model} />
+    <Track {status} {model} {seconds} />
     <Heard tags={heardTags(view)} measurements={job.measurements} />
   </section>
 

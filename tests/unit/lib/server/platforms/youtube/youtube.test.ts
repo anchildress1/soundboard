@@ -11,7 +11,7 @@ import {
   searchMusicVideos,
   sourceRange,
   startResumableUpload,
-  thumbnailDataUrl,
+  thumbnailImage,
   UPLOAD_CHUNK_BYTES,
   uploadChunk,
   uploadFailure,
@@ -294,29 +294,32 @@ describe('searchMusicVideos', () => {
   });
 });
 
-describe('thumbnailDataUrl', () => {
-  it('returns a base64 data URL with the response type', async () => {
+describe('thumbnailImage', () => {
+  it('returns the base64 bytes with the response type', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } }),
     );
-    expect(await thumbnailDataUrl('https://i.ytimg.com/x.png')).toBe('data:image/png;base64,AQID');
+    expect(await thumbnailImage('https://i.ytimg.com/x.png')).toEqual({
+      data: 'AQID',
+      mime_type: 'image/png',
+    });
   });
 
   it('defaults the type to image/jpeg', async () => {
     const response = new Response(new Uint8Array([255]));
     response.headers.delete('content-type');
     fetchMock.mockResolvedValueOnce(response);
-    expect(await thumbnailDataUrl('u')).toBe('data:image/jpeg;base64,/w==');
+    expect(await thumbnailImage('u')).toEqual({ data: '/w==', mime_type: 'image/jpeg' });
   });
 
   it('returns null for a non-ok response', async () => {
     fetchMock.mockResolvedValueOnce(new Response('nope', { status: 404 }));
-    expect(await thumbnailDataUrl('u')).toBeNull();
+    expect(await thumbnailImage('u')).toBeNull();
   });
 
   it('returns null when the fetch throws', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network'));
-    expect(await thumbnailDataUrl('u')).toBeNull();
+    expect(await thumbnailImage('u')).toBeNull();
   });
 });
 

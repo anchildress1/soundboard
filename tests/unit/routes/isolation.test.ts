@@ -102,6 +102,7 @@ beforeEach(async () => {
       state: 'REVIEW',
       object: `uploads/${id}`,
       probe: PROBE,
+      chunkCount: 3,
       pickVersion: 1,
     });
     await seed({ jobs: [{ ...jobRow(video), picks: [{ version: 1, title: id }] }] });

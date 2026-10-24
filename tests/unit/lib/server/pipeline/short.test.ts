@@ -3,18 +3,21 @@ import { EventEmitter } from 'node:events';
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, seedJob, USERS } from '../../../../helpers/pipeline';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
+import { interaction, unavailable503 } from '../../../../helpers/gemini';
 import { span, startSpan } from '../../../../mocks/sentry';
+import { ModelBusy, stepDeadline } from '$lib/server/ai/model';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
 import type { JobDoc } from '$lib/server/jobs/jobs';
 import {
-  buildHookMessages,
+  buildHookRequest,
+  HOOK_SCHEMA,
   hookStep,
   isRawHook,
   MIN_RISE_LU,
@@ -22,6 +25,7 @@ import {
   renderStep,
   runHook,
   settleHook,
+  STALE_ANALYSIS,
   type HookContext,
 } from '$lib/server/pipeline/short';
 import type { Chunk, Short } from '$lib/types';
@@ -89,20 +93,28 @@ const step = (from: number, to: number, at: number) => {
 };
 
 const fetchMock = vi.fn<typeof fetch>();
-const completion = (content: string) =>
-  new Response(
-    JSON.stringify({ choices: [{ message: { content } }], usage: { total_tokens: 3 } }),
-    { headers: { 'content-type': 'application/json' } },
+const hookReply = (hook: unknown) => interaction(JSON.stringify(hook));
+type Turn = { type: string; content: { type: string; text?: string }[] };
+const sentBodies = () =>
+  fetchMock.mock.calls.map(
+    ([, init]) =>
+      JSON.parse(String(init?.body)) as {
+        model: string;
+        input: Turn[];
+        store: boolean;
+        response_format: unknown;
+        generation_config: { max_output_tokens: number; thinking_level: string };
+      },
   );
-const chatBodies = () =>
-  fetchMock.mock.calls
-    .filter(([url]) => String(url).endsWith('/v1/chat/completions'))
-    .map(([, init]) => JSON.parse(String(init?.body)) as { messages: { content: unknown }[] });
+const userText = (request: ReturnType<typeof buildHookRequest>) => {
+  const [part] = request.turns[0]!.parts;
+  return part!.type === 'text' ? part!.text : '';
+};
 
 const chunk = (index: number, lufs: number | null = -14): Chunk => ({
   index,
-  startSec: index * 29.5,
-  durationSec: 29.5,
+  startSec: index * 60,
+  durationSec: 60,
   measurements: {
     integratedLufs: lufs,
     truePeakDbtp: -1,
@@ -129,7 +141,7 @@ const ctx = (patch: Partial<HookContext> = {}): HookContext => ({
   songTitle: 'PeekaBoo',
   notes: '',
   sourceDurationSec: 180,
-  chunks: [0, 1, 2, 3, 4, 5].map((i) => chunk(i)),
+  chunks: [0, 1, 2].map((i) => chunk(i)),
   skipped: [],
   ...patch,
 });
@@ -160,19 +172,24 @@ function shortJob(patch: Partial<JobDoc> = {}, short: Partial<Short> = {}): JobD
   });
 }
 
+/** Gives the source video `count` analyzed windows; a count off its 60 s windows is stale. */
 const seedChunks = (count: number) =>
   db()
     .update(jobs)
-    .set({ chunks: Array.from({ length: count }, (_, i) => chunk(i)) })
+    .set({
+      chunks: Array.from({ length: count }, (_, i) => chunk(i)),
+      data: sql`${jobs.data} || jsonb_build_object('chunkCount', ${count}::int)`,
+    })
     .where(eq(jobs.id, 'p1'));
 
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
   resetClients();
   await truncate();
   await seed(USERS);
-  await seedJob({ id: 'p1', state: 'REVIEW' });
+  await seedJob({ id: 'p1', state: 'REVIEW', chunkCount: 3 });
   h.objects.clear();
   h.upload.mockReset();
   h.upload.mockImplementation(async (_path: string, { destination }: { destination: string }) => {
@@ -217,17 +234,17 @@ describe('isRawHook', () => {
 
 describe('settleHook', () => {
   it('keeps a valid pick as is', () => {
-    expect(settleHook({ window: 2, lengthSec: 30, reason: 'Chorus.' }, ctx())).toEqual({
-      window: 2,
+    expect(settleHook({ window: 1, lengthSec: 30, reason: 'Chorus.' }, ctx())).toEqual({
+      window: 1,
       lengthSec: 30,
       reason: 'Chorus.',
     });
   });
 
   it('rounds and clamps the window to the analyzed windows', () => {
-    expect(settleHook({ window: 9, lengthSec: 30, reason: '' }, ctx()).window).toBe(5);
+    expect(settleHook({ window: 9, lengthSec: 30, reason: '' }, ctx()).window).toBe(2);
     expect(settleHook({ window: -3, lengthSec: 30, reason: '' }, ctx()).window).toBe(0);
-    expect(settleHook({ window: 1.6, lengthSec: 30, reason: '' }, ctx()).window).toBe(2);
+    expect(settleHook({ window: 0.6, lengthSec: 30, reason: '' }, ctx()).window).toBe(1);
   });
 
   it('clamps the length to 15–60 s, and to the source for a short video', () => {
@@ -238,14 +255,15 @@ describe('settleHook', () => {
   });
 
   it("caps a late window's length at what's left of the source from its start", () => {
-    // Window 5 starts at 147.5 s of 180: 32.5 s of room, so the cut can start inside it.
-    expect(settleHook({ window: 5, lengthSec: 60, reason: '' }, ctx()).lengthSec).toBe(32.5);
-    expect(settleHook({ window: 5, lengthSec: 20, reason: '' }, ctx()).lengthSec).toBe(20);
+    // Window 2 starts at 120 s of 150: 30 s of room, so the cut can start inside it.
+    const late = ctx({ sourceDurationSec: 150 });
+    expect(settleHook({ window: 2, lengthSec: 60, reason: '' }, late).lengthSec).toBe(30);
+    expect(settleHook({ window: 2, lengthSec: 20, reason: '' }, late).lengthSec).toBe(20);
   });
 
   it('keeps the 15 s minimum for a window in the last 15 s of the source', () => {
-    const tail = ctx({ sourceDurationSec: 155, chunks: [0, 1, 2, 3, 4, 5].map((i) => chunk(i)) });
-    expect(settleHook({ window: 5, lengthSec: 60, reason: '' }, tail).lengthSec).toBe(15);
+    const tail = ctx({ sourceDurationSec: 130 });
+    expect(settleHook({ window: 2, lengthSec: 60, reason: '' }, tail).lengthSec).toBe(15);
   });
 
   it('strips model-emitted loudness numbers from the reason', () => {
@@ -258,14 +276,15 @@ describe('settleHook', () => {
   });
 });
 
-describe('buildHookMessages', () => {
+describe('buildHookRequest', () => {
   it('sends text only: rules plus each window with its ffmpeg loudness', () => {
-    const [system, user] = buildHookMessages(ctx({ notes: NOTES }));
-    expect(system!.role).toBe('system');
-    expect(system!.content).toContain('15 to 60 seconds');
-    expect(system!.content).not.toContain('skippedHooks');
-    expect(typeof user!.content).toBe('string');
-    const context = JSON.parse(user!.content as string) as {
+    const request = buildHookRequest(ctx({ notes: NOTES }));
+    expect(request.system).toContain('15 to 60 seconds');
+    expect(request.system).not.toContain('skippedHooks');
+    expect(request.turns).toHaveLength(1);
+    expect(request.turns[0]!.role).toBe('user');
+    expect(request.turns[0]!.parts.map((p) => p.type)).toEqual(['text']);
+    const context = JSON.parse(userText(request)) as {
       artistNotes: string;
       durationSec: number;
       windows: { window: number; at: number; integratedLufs?: number; visual: string }[];
@@ -273,23 +292,23 @@ describe('buildHookMessages', () => {
     };
     expect(context.artistNotes).toBe(NOTES);
     expect(context.durationSec).toBe(180);
-    expect(context.windows.map((w) => w.window)).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(context.windows[2]).toMatchObject({ at: 59, integratedLufs: -14 });
+    expect(context.windows.map((w) => w.window)).toEqual([0, 1, 2]);
+    expect(context.windows[2]).toMatchObject({ at: 120, integratedLufs: -14 });
     expect(context.windows[2]!.visual).toContain('chorus');
     expect(context.skippedHooks).toBeUndefined();
   });
 
   it('names the length bounds and the skipped hooks on a re-pick', () => {
-    const [system, user] = buildHookMessages(
+    const request = buildHookRequest(
       ctx({
         sourceDurationSec: 30,
         chunks: [chunk(0, null)],
         skipped: [{ window: 0, lengthSec: 20 }],
       }),
     );
-    expect(system!.content).toContain('15 to 30 seconds');
-    expect(system!.content).toContain('skippedHooks were rejected');
-    const context = JSON.parse(user!.content as string) as {
+    expect(request.system).toContain('15 to 30 seconds');
+    expect(request.system).toContain('skippedHooks were rejected');
+    const context = JSON.parse(userText(request)) as {
       windows: { integratedLufs?: number }[];
       skippedHooks: unknown;
       artistNotes?: string;
@@ -301,58 +320,67 @@ describe('buildHookMessages', () => {
 });
 
 describe('runHook', () => {
-  it('returns the settled pick and the model time', async () => {
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'Chorus.' })),
-    );
-    const result = await runHook(ctx());
+  it('returns the settled pick and the model time from one hook-pick call', async () => {
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'Chorus.' }));
+    const result = await runHook(ctx(), stepDeadline());
     expect(result?.hook).toEqual({ window: 2, lengthSec: 30, reason: 'Chorus.' });
-    const [body] = chatBodies();
-    expect(body).toMatchObject({
-      temperature: 0.2,
-      max_tokens: 2048,
-      response_format: { type: 'json_schema', json_schema: { name: 'hook_pick', strict: true } },
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/v1beta\/interactions$/);
+    const [body] = sentBodies();
+    expect(body!.store).toBe(false);
+    expect(body!.generation_config).toMatchObject({
+      max_output_tokens: 8192,
+      thinking_level: 'low',
+    });
+    expect(JSON.stringify(body!.response_format)).toContain(JSON.stringify(HOOK_SCHEMA));
+  });
+
+  it('asks again once, after its own answer, when the pick repeats a skipped hook', async () => {
+    const repeat = { window: 2, lengthSec: 30, reason: 'a' };
+    fetchMock
+      .mockResolvedValueOnce(hookReply(repeat))
+      .mockResolvedValueOnce(hookReply({ window: 1, lengthSec: 20, reason: 'b' }));
+    const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }), stepDeadline());
+    expect(result?.hook?.window).toBe(1);
+    const [assistant, user] = sentBodies()[1]!.input.slice(-2);
+    expect(assistant).toMatchObject({
+      type: 'model_output',
+      content: [{ type: 'text', text: JSON.stringify(repeat) }],
+    });
+    expect(user).toEqual({
+      type: 'user_input',
+      content: [{ type: 'text', text: 'That repeats a skipped hook. Pick a different one.' }],
     });
   });
 
-  it('asks again once when the pick repeats a skipped hook', async () => {
-    fetchMock
-      .mockResolvedValueOnce(completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })))
-      .mockResolvedValueOnce(completion(JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })));
-    const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }));
-    expect(result?.hook?.window).toBe(4);
-    const second = chatBodies()[1]!;
-    expect(second.messages.at(-1)!.content).toBe(
-      'That repeats a skipped hook. Pick a different one.',
-    );
-  });
-
   it('gives up when the retry repeats a skipped hook too', async () => {
-    fetchMock.mockImplementation(async () =>
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })),
-    );
-    const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }));
+    fetchMock.mockImplementation(async () => hookReply({ window: 2, lengthSec: 30, reason: 'a' }));
+    const result = await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }), stepDeadline());
     expect(result).toEqual({ hook: null, ms: expect.any(Number) });
-    expect(chatBodies()).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('counts a clamped repeat as a repeat', async () => {
-    fetchMock.mockImplementation(async () =>
-      completion(JSON.stringify({ window: 7, lengthSec: 90, reason: 'a' })),
-    );
-    expect((await runHook(ctx({ skipped: [{ window: 5, lengthSec: 32.5 }] })))?.hook).toBeNull();
+    fetchMock.mockImplementation(async () => hookReply({ window: 7, lengthSec: 90, reason: 'a' }));
+    const skipped = [{ window: 2, lengthSec: 60 }];
+    expect((await runHook(ctx({ skipped }), stepDeadline()))?.hook).toBeNull();
   });
 
   it('returns null when the reply never parses', async () => {
-    fetchMock.mockImplementation(async () => completion('not json'));
-    expect(await runHook(ctx())).toBeNull();
+    fetchMock.mockImplementation(async () => interaction('not json'));
+    expect(await runHook(ctx(), stepDeadline())).toBeNull();
+  });
+
+  it('starts no call once the deadline is too close', async () => {
+    await expect(runHook(ctx(), Date.now() + 1_000)).rejects.toThrow('ran out of time');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('records the text-only request and the settled hook on the agent span', async () => {
     fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 9, lengthSec: 90, reason: 'Drop at -6 LUFS.' })),
+      hookReply({ window: 9, lengthSec: 90, reason: 'Drop at -6 LUFS.' }),
     );
-    const result = await runHook(ctx(), undefined, span as never);
+    const result = await runHook(ctx(), stepDeadline(), span as never);
     const { input, output } = agentSpanIO();
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).toContain('PeekaBoo');
@@ -363,33 +391,31 @@ describe('runHook', () => {
 
   it('records the first request only, not the repeat nudge', async () => {
     fetchMock
-      .mockResolvedValueOnce(completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'a' })))
-      .mockResolvedValueOnce(completion(JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })));
-    await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }), undefined, span as never);
+      .mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'a' }))
+      .mockResolvedValueOnce(hookReply({ window: 1, lengthSec: 20, reason: 'b' }));
+    await runHook(ctx({ skipped: [{ window: 2, lengthSec: 30 }] }), stepDeadline(), span as never);
     const { input, output } = agentSpanIO();
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).not.toContain('repeats a skipped hook');
-    expect(output).toEqual([JSON.stringify({ window: 4, lengthSec: 20, reason: 'b' })]);
+    expect(output).toEqual([JSON.stringify({ window: 1, lengthSec: 20, reason: 'b' })]);
   });
 
   it('records no answer when the reply never parses', async () => {
-    fetchMock.mockImplementation(async () => completion('not json'));
-    await runHook(ctx(), undefined, span as never);
+    fetchMock.mockImplementation(async () => interaction('not json'));
+    await runHook(ctx(), stepDeadline(), span as never);
     expect(agentSpanIO().input).toHaveLength(1);
     expect(agentSpanIO().output).toEqual([]);
   });
 
   it('records nothing without a span', async () => {
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
-    );
-    await runHook(ctx());
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'x' }));
+    await runHook(ctx(), stepDeadline());
     expect(agentSpanIO()).toEqual({ input: [], output: [] });
   });
 
-  it('propagates a model server error', async () => {
-    fetchMock.mockResolvedValueOnce(new Response('overloaded', { status: 503 }));
-    await expect(runHook(ctx())).rejects.toThrow('llama-server 503');
+  it('propagates a busy model', async () => {
+    fetchMock.mockImplementation(async () => unavailable503());
+    await expect(runHook(ctx(), stepDeadline())).rejects.toThrow(ModelBusy);
   });
 });
 
@@ -470,12 +496,11 @@ describe('placeCut', () => {
 
 describe('hookStep', () => {
   it('asks the model for the hook, places the start from loudness, and moves to RENDER', async () => {
-    await seedChunks(6);
+    await seedChunks(3);
     h.objects.add('uploads/p1');
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: CHORUS })),
-    );
-    const patch = await hookStep(shortJob());
+    runs.loudness = { stderr: step(57, 122, 70) };
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 1, lengthSec: 30, reason: CHORUS }));
+    const patch = await hookStep(shortJob(), stepDeadline());
     expect(patch).toMatchObject({
       state: 'RENDER',
       consecutiveFailures: 0,
@@ -484,33 +509,42 @@ describe('hookStep', () => {
         reframe: 'blur',
         renders: 0,
         skipped: [],
-        hook: { window: 2, startSec: 70, lengthSec: 30, reason: CHORUS },
+        hook: { window: 1, startSec: 70, lengthSec: 30, reason: CHORUS },
       },
     });
     expect(patch.short!.modelMs).toBeGreaterThanOrEqual(0);
     const args = h.spawn.mock.calls[0]![1] as string[];
-    expect(args[args.indexOf('-ss') + 1]).toBe('56.000');
-    expect(args[args.indexOf('-t') + 1]).toBe('34.500');
+    expect(args[args.indexOf('-ss') + 1]).toBe('57.000');
+    expect(args[args.indexOf('-t') + 1]).toBe('65.000');
     expect(args[args.indexOf('-i') + 1]).toContain('/uploads/p1?sig=read');
     const agent = startSpan.mock.calls.find(
       ([o]) => (o as { name: string }).name === 'invoke_agent hook-pick',
     );
     expect(agent).toBeDefined();
     expect(agentSpanIO().output).toEqual([
-      JSON.stringify({ window: 2, lengthSec: 30, reason: CHORUS }),
+      JSON.stringify({ window: 1, lengthSec: 30, reason: CHORUS }),
     ]);
   });
 
-  it('adds each re-pick to the model time already spent on the Short', async () => {
+  it('fails at HOOK for a video analyzed at another window length, before any model call', async () => {
+    // Six 29.5 s windows of a 180 s video: their indices would place the hook at the wrong time.
     await seedChunks(6);
+    const patch = await hookStep(shortJob(), stepDeadline());
+    expect(patch).toMatchObject({ state: 'FAILED', failedState: 'HOOK', error: STALE_ANALYSIS });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.spawn).not.toHaveBeenCalled();
+  });
+
+  it('adds each re-pick to the model time already spent on the Short', async () => {
+    await seedChunks(3);
     let calls = 0;
     fetchMock.mockImplementation(async () => {
       calls++;
       // Timers can fire a millisecond early by Date.now, so sleep well past the asserted 5 ms.
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' }));
+      return hookReply({ window: 2, lengthSec: 30, reason: 'x' });
     });
-    const patch = await hookStep(shortJob({}, { modelMs: 40_000 }));
+    const patch = await hookStep(shortJob({}, { modelMs: 40_000 }), stepDeadline());
     expect(calls).toBe(1);
     expect(patch.short!.modelMs).toBeGreaterThanOrEqual(40_005);
     expect(patch.short!.modelMs).toBeLessThan(41_000);
@@ -519,10 +553,8 @@ describe('hookStep', () => {
   it('scans from zero and stops at the end for the first and only window', async () => {
     await seedChunks(1);
     runs.loudness = { stderr: step(0, 30, 8) };
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 0, lengthSec: 20, reason: 'Riff.' })),
-    );
-    const patch = await hookStep(shortJob({}, { sourceDurationSec: 30 }));
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 0, lengthSec: 20, reason: 'Riff.' }));
+    const patch = await hookStep(shortJob({}, { sourceDurationSec: 30 }), stepDeadline());
     expect(patch.short!.hook).toEqual({ window: 0, startSec: 8, lengthSec: 20, reason: 'Riff.' });
     const args = h.spawn.mock.calls[0]![1] as string[];
     expect(args[args.indexOf('-ss') + 1]).toBe('0.000');
@@ -530,31 +562,33 @@ describe('hookStep', () => {
   });
 
   it("throws when the source video's analysis is gone", async () => {
-    await expect(hookStep(shortJob())).rejects.toThrow("The source video's analysis is gone.");
+    await expect(hookStep(shortJob(), stepDeadline())).rejects.toThrow(
+      "The source video's analysis is gone.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('throws for a Short with no parent video', async () => {
-    await seedChunks(6);
-    await expect(hookStep(shortJob({ parentId: null }))).rejects.toThrow(
+    await seedChunks(3);
+    await expect(hookStep(shortJob({ parentId: null }), stepDeadline())).rejects.toThrow(
       "The source video's analysis is gone.",
     );
   });
 
   it('throws when the model reply never parses', async () => {
-    await seedChunks(6);
-    fetchMock.mockImplementation(async () => completion('{"window": "two"}'));
-    await expect(hookStep(shortJob())).rejects.toThrow('The model reply did not parse as a hook.');
+    await seedChunks(3);
+    fetchMock.mockImplementation(async () => interaction('{"window": "two"}'));
+    await expect(hookStep(shortJob(), stepDeadline())).rejects.toThrow(
+      'The model reply did not parse as a hook.',
+    );
     expect(h.spawn).not.toHaveBeenCalled();
   });
 
   it('fails at HOOK for good when the retry repeats a skipped hook too', async () => {
-    await seedChunks(6);
-    fetchMock.mockImplementation(async () =>
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
-    );
+    await seedChunks(3);
+    fetchMock.mockImplementation(async () => hookReply({ window: 2, lengthSec: 30, reason: 'x' }));
     const skipped = [{ window: 2, lengthSec: 30 }];
-    const patch = await hookStep(shortJob({}, { skipped, modelMs: 40_000 }));
+    const patch = await hookStep(shortJob({}, { skipped, modelMs: 40_000 }), stepDeadline());
     expect(patch).toMatchObject({
       state: 'FAILED',
       failedState: 'HOOK',
@@ -567,59 +601,57 @@ describe('hookStep', () => {
   });
 
   it('starts a long cut from a late window inside that window', async () => {
-    await seedChunks(6);
-    runs.loudness = { stderr: step(144.5, 180, 165) };
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 5, lengthSec: 60, reason: 'Outro.' })),
-    );
-    const { hook } = (await hookStep(shortJob())).short!;
-    expect(hook).toMatchObject({ window: 5, startSec: 147.5, lengthSec: 32.5 });
-    expect(hook!.startSec).toBeGreaterThanOrEqual(5 * 29.5);
-    expect(hook!.startSec + hook!.lengthSec).toBeLessThanOrEqual(180);
+    await seedChunks(3);
+    runs.loudness = { stderr: step(117, 150, 135) };
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 60, reason: 'Outro.' }));
+    const { hook } = (await hookStep(shortJob({}, { sourceDurationSec: 150 }), stepDeadline()))
+      .short!;
+    expect(hook).toMatchObject({ window: 2, startSec: 120, lengthSec: 30 });
+    expect(hook!.startSec + hook!.lengthSec).toBeLessThanOrEqual(150);
   });
 
-  it('leaves the loudness pass its whole time limit: no model retry that would eat into it', async () => {
-    await seedChunks(6);
+  it('leaves the loudness pass its whole time limit: no model re-ask that would eat into it', async () => {
+    await seedChunks(3);
     let clock = 1_000_000;
     const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
     onTestFinished(() => now.mockRestore());
-    // The first reply lands 65 s in and doesn't parse. 110 s budget − 35 s reserve − 65 s leaves
-    // 10 s, under the 15 s a retry needs; a 15 s reserve would have left 30 s and retried.
+    // The first reply lands 45 s in and doesn't parse. 110 s budget − 35 s reserve − 45 s leaves
+    // 30 s, under the 35 s a hook call needs; a 15 s reserve would have left 50 s and re-asked.
     fetchMock.mockImplementation(async () => {
-      clock += 65_000;
-      return completion('not json');
+      clock += 45_000;
+      return interaction('not json');
     });
-    await expect(hookStep(shortJob())).rejects.toThrow('The model reply did not parse as a hook.');
-    expect(chatBodies()).toHaveLength(1);
+    await expect(hookStep(shortJob(), stepDeadline())).rejects.toThrow(
+      'The model reply did not parse as a hook.',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('propagates a failed loudness pass', async () => {
-    await seedChunks(6);
+    await seedChunks(3);
     runs.loudness = { stderr: 'Server returned 403 Forbidden', code: 1 };
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
-    );
-    await expect(hookStep(shortJob())).rejects.toThrow('ffmpeg exited 1');
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'x' }));
+    await expect(hookStep(shortJob(), stepDeadline())).rejects.toThrow('ffmpeg exited 1');
   });
 
   it('refuses a job that is not a Short, or has no source', async () => {
-    await expect(hookStep(shortJob({ short: null }))).rejects.toThrow('Not a Short job.');
-    await seedChunks(6);
-    fetchMock.mockResolvedValueOnce(
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
+    await expect(hookStep(shortJob({ short: null }), stepDeadline())).rejects.toThrow(
+      'Not a Short job.',
     );
-    await expect(hookStep(shortJob({ sourceObject: null }))).rejects.toThrow(
+    await seedChunks(3);
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'x' }));
+    await expect(hookStep(shortJob({ sourceObject: null }), stepDeadline())).rejects.toThrow(
       'The Short has no source video.',
     );
   });
 });
 
 describe('renderStep', () => {
-  const HOOK = { window: 2, startSec: 70, lengthSec: 30, reason: 'Chorus.' };
+  const HOOK = { window: 1, startSec: 70, lengthSec: 30, reason: 'Chorus.' };
   /** The render writes a real temp file, so the test can see it is cleaned up. */
   const writesFile = (args: string[]) => writeFileSync(args.at(-1)!, 'mp4');
 
-  it('splits one step budget across render, upload, and read-back', async () => {
+  it("renders in what the step's deadline leaves after the upload and read-back", async () => {
     runs.render.onRun = writesFile;
     const clock = 1_000_000;
     const now = vi.spyOn(Date, 'now').mockReturnValue(clock);
@@ -628,20 +660,21 @@ describe('renderStep', () => {
       now.mockRestore();
       timeout.mockRestore();
     });
-    await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }));
-    // 110 s budget: 20 s for the upload and 10 s for the read-back leave 80 s to render.
-    expect(timeout.mock.calls).toEqual([[80_000], [10_000]]);
+    // 60 s left in the step: 20 s for the upload and 10 s for the read-back leave 30 s to render.
+    await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }), clock + 60_000);
+    expect(timeout.mock.calls).toEqual([[30_000], [10_000]]);
     expect(h.upload).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ timeout: 20_000 }),
     );
-    const total = timeout.mock.calls.reduce((sum, [ms]) => sum + ms, 20_000);
-    expect(total).toBeLessThanOrEqual(110_000);
   });
 
   it('renders to a temp file, uploads it to a fresh object, reads it back, and moves to REVIEW', async () => {
     runs.render.onRun = writesFile;
-    const patch = await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, reframe: 'crop' }));
+    const patch = await renderStep(
+      shortJob({ state: 'RENDER' }, { hook: HOOK, reframe: 'crop' }),
+      stepDeadline(),
+    );
     expect(patch).toMatchObject({
       state: 'REVIEW',
       object: 'uploads/s1-1',
@@ -669,7 +702,10 @@ describe('renderStep', () => {
   });
 
   it('numbers each re-render, so the player never shows a cached earlier cut', async () => {
-    const patch = await renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK, renders: 1 }));
+    const patch = await renderStep(
+      shortJob({ state: 'RENDER' }, { hook: HOOK, renders: 1 }),
+      stepDeadline(),
+    );
     expect(patch.object).toBe('uploads/s1-2');
     expect(patch.short!.renders).toBe(2);
   });
@@ -677,30 +713,30 @@ describe('renderStep', () => {
   it('fails and cleans up the temp file when the upload is refused', async () => {
     runs.render.onRun = writesFile;
     h.upload.mockRejectedValueOnce(new Error('403 Forbidden'));
-    await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
-      '403 Forbidden',
-    );
+    await expect(
+      renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }), stepDeadline()),
+    ).rejects.toThrow('403 Forbidden');
     expect(existsSync(join(tmpdir(), RENDER_FILE))).toBe(false);
   });
 
   it('fails when the render reads back without playable video', async () => {
     runs.probe = { stdout: JSON.stringify({ format: {}, streams: [] }) };
-    await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
-      'The rendered Short has no playable video.',
-    );
+    await expect(
+      renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }), stepDeadline()),
+    ).rejects.toThrow('The rendered Short has no playable video.');
   });
 
   it('propagates an ffmpeg failure without uploading, and cleans up a partial file', async () => {
     runs.render = { stderr: 'Conversion failed!', code: 1, onRun: writesFile };
-    await expect(renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }))).rejects.toThrow(
-      'ffmpeg exited 1: Conversion failed!',
-    );
+    await expect(
+      renderStep(shortJob({ state: 'RENDER' }, { hook: HOOK }), stepDeadline()),
+    ).rejects.toThrow('ffmpeg exited 1: Conversion failed!');
     expect(h.upload).not.toHaveBeenCalled();
     expect(existsSync(join(tmpdir(), RENDER_FILE))).toBe(false);
   });
 
   it('refuses a Short without a hook', async () => {
-    await expect(renderStep(shortJob({ state: 'RENDER' }))).rejects.toThrow(
+    await expect(renderStep(shortJob({ state: 'RENDER' }), stepDeadline())).rejects.toThrow(
       'The Short has no hook to cut.',
     );
     expect(h.spawn).not.toHaveBeenCalled();

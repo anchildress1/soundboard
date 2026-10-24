@@ -119,8 +119,8 @@ export type Short = {
 };
 
 export type Wait =
-  | 'waking model'
-  | 'waiting on another run'
+  | 'model busy'
+  | 'model quota spent'
   | 'step running in another tab'
   | 'waiting on YouTube'
   | 'reconnect YouTube'
@@ -159,6 +159,8 @@ export type JobView = {
   job: PublicJob;
   chunks: Chunk[];
   pick: Pick | null;
+  /** The configured model for the job's current role, not the model that produced past results. */
+  model: string;
   wait?: Wait;
   /** Signed playback URL of a rendered Short. */
   playbackUrl?: string;

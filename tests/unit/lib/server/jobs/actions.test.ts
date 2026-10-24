@@ -2,6 +2,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jobs/actions';
+import { STALE_ANALYSIS } from '$lib/server/pipeline/short';
 import { ActionError } from '$lib/server/core/errors';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
@@ -656,7 +657,7 @@ describe('makeShort', () => {
   const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
 
   it("starts a Short whose pick is the video's recommendation on screen", async () => {
-    const job = await makeJob({ picks: 2, patch: { probe: PROBE } });
+    const job = await makeJob({ picks: 2, patch: { probe: PROBE, chunkCount: 3 } });
     const id = await makeShort(job);
     const short = (await getJob(id))!;
     expect(short).toMatchObject({
@@ -677,7 +678,10 @@ describe('makeShort', () => {
       hashtags: [SYNTHWAVE_TAG],
       tags: ['synthwave'],
     };
-    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, finalFields: final } });
+    const job = await makeJob({
+      state: 'VERIFIED',
+      patch: { probe: PROBE, chunkCount: 3, finalFields: final },
+    });
     const id = await makeShort(job);
     const [stored] = await listPicks(id);
     expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
@@ -687,14 +691,18 @@ describe('makeShort', () => {
     const job = await makeJob({
       owner: USER_A,
       state: 'VERIFIED',
-      patch: { probe: PROBE, destination: { channelId: CHANNEL_A, channelTitle: 'FLR' } },
+      patch: {
+        probe: PROBE,
+        chunkCount: 3,
+        destination: { channelId: CHANNEL_A, channelTitle: 'FLR' },
+      },
     });
     const short = (await getJob(await makeShort(job)))!;
     expect(short).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr', destination: null });
   });
 
   it('starts from fields approved after the caller read the video', async () => {
-    const stale = await makeJob({ patch: { probe: PROBE } });
+    const stale = await makeJob({ patch: { probe: PROBE, chunkCount: 3 } });
     const final = {
       title: 'Approved',
       description: 'Mine. #synthwave',
@@ -707,7 +715,7 @@ describe('makeShort', () => {
   });
 
   it('refuses once storage has deleted the video, starting no Short', async () => {
-    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE } });
+    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, chunkCount: 3 } });
     deleted.add(job.object);
     const error = await rejection(makeShort(job));
     expect([error.status, error.message]).toEqual([
@@ -719,13 +727,15 @@ describe('makeShort', () => {
   });
 
   it('returns the live Short instead of starting another', async () => {
-    const job = await makeJob({ patch: { probe: PROBE } });
+    const job = await makeJob({ patch: { probe: PROBE, chunkCount: 3 } });
     const first = await makeShort(job);
     expect(await makeShort((await getJob('job1'))!)).toBe(first);
   });
 
   it('refuses a video under 15 seconds and accepts one of exactly 15', async () => {
-    const short = await makeJob({ patch: { probe: { ...PROBE, durationSec: 14.9 } } });
+    const short = await makeJob({
+      patch: { probe: { ...PROBE, durationSec: 14.9 }, chunkCount: 1 },
+    });
     const error = await rejection(makeShort(short));
     expect([error.status, error.message]).toEqual([
       409,
@@ -736,14 +746,21 @@ describe('makeShort', () => {
     expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
   });
 
+  it('refuses a video analyzed at another window length, starting no Short', async () => {
+    const job = await makeJob({ patch: { probe: PROBE, chunkCount: 6 } });
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([409, STALE_ANALYSIS]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+  });
+
   it('refuses a video still being analyzed', async () => {
-    const job = await makeJob({ state: 'ANALYZE', patch: { probe: PROBE } });
+    const job = await makeJob({ state: 'ANALYZE', patch: { probe: PROBE, chunkCount: 3 } });
     const error = await rejection(makeShort(job));
     expect([error.status, error.message]).toEqual([409, 'Not allowed while the job is ANALYZE.']);
   });
 
   it('refuses a Short of a Short', async () => {
-    const job = await makeJob({ patch: { probe: PROBE } });
+    const job = await makeJob({ patch: { probe: PROBE, chunkCount: 3 } });
     const short = (await getJob(await makeShort(job)))!;
     const error = await rejection(makeShort({ ...short, state: 'REVIEW' }));
     expect([error.status, error.message]).toEqual([409, "A Short can't be cut from a Short."]);
@@ -757,14 +774,14 @@ describe('makeShort', () => {
   });
 
   it('refuses a video with no recommendation', async () => {
-    const job = await makeJob({ picks: 0, patch: { probe: PROBE } });
+    const job = await makeJob({ picks: 0, patch: { probe: PROBE, chunkCount: 3 } });
     expect((await rejection(makeShort(job))).message).toBe(
       'This video has no recommendation to start from.',
     );
   });
 
   it('refuses when the video moved on before the transaction', async () => {
-    const job = await makeJob({ patch: { probe: PROBE } });
+    const job = await makeJob({ patch: { probe: PROBE, chunkCount: 3 } });
     await patchJob({ state: 'DISCARDED' });
     expect((await rejection(makeShort(job))).message).toBe(
       'The video moved on before the Short could start.',

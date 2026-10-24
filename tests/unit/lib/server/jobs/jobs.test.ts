@@ -383,6 +383,72 @@ describe('claimJob / releaseJob', () => {
     expect(await claimRow('j')).toEqual({ token: null, until: null });
   });
 
+  describe('clearChunks', () => {
+    const RESET: JobPatch = { state: 'PREP', chunkIndex: 0, error: null, consecutiveFailures: 0 };
+
+    /** An ANALYZE job with two stored chunks, claimed. */
+    async function analyzing() {
+      await createJob(input, 'j');
+      const first = (await claimJob('j'))!;
+      await releaseJob(
+        'j',
+        first.token,
+        'AWAITING_UPLOAD',
+        { state: 'ANALYZE', chunkIndex: 1 },
+        {
+          chunk: chunk(0),
+        },
+      );
+      const second = (await claimJob('j'))!;
+      await releaseJob('j', second.token, 'ANALYZE', { chunkIndex: 2 }, { chunk: chunk(1) });
+      return (await claimJob('j'))!;
+    }
+
+    it('empties the chunks with the state patch for the holder', async () => {
+      const { token } = await analyzing();
+      expect(await releaseJob('j', token, 'ANALYZE', RESET, { clearChunks: true })).toBe(true);
+      expect(await getJob('j')).toMatchObject({ state: 'PREP', chunkIndex: 0 });
+      expect(await listChunks('j')).toEqual([]);
+    });
+
+    it('changes neither chunks nor state for a stolen claim', async () => {
+      const stale = await analyzing();
+      await expireClaim('j');
+      await claimJob('j');
+      expect(await releaseJob('j', stale.token, 'ANALYZE', RESET, { clearChunks: true })).toBe(
+        false,
+      );
+      expect(await getJob('j')).toMatchObject({ state: 'ANALYZE', chunkIndex: 2 });
+      expect(await listChunks('j')).toEqual([chunk(0), chunk(1)]);
+    });
+
+    it('changes neither chunks nor state after a concurrent discard', async () => {
+      const { token } = await analyzing();
+      await patch('j', { state: 'DISCARDED' });
+      expect(await releaseJob('j', token, 'ANALYZE', RESET, { clearChunks: true })).toBe(false);
+      expect((await getJob('j'))?.state).toBe('DISCARDED');
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+
+    it('rolls back both when the transaction fails', async () => {
+      const { token } = await analyzing();
+      await expect(
+        releaseJob('j', token, 'ANALYZE', RESET, {
+          clearChunks: true,
+          alsoWrite: () => Promise.reject(new Error('write failed')),
+        }),
+      ).rejects.toThrow('write failed');
+      expect(await getJob('j')).toMatchObject({ state: 'ANALYZE', chunkIndex: 2 });
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+
+    it('is the only way to empty chunks: a plain patch leaves them', async () => {
+      const { token } = await analyzing();
+      expect(await releaseJob('j', token, 'ANALYZE', RESET)).toBe(true);
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+  });
+
   it(REFUSES_MISSING, async () => {
     expect(await releaseJob('ghost', 't', 'PREP')).toBe(false);
   });

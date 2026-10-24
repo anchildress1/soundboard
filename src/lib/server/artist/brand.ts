@@ -16,11 +16,22 @@ import { and, eq } from 'drizzle-orm';
 import { query, type Tx } from '$lib/server/core/db';
 import { artistMemory } from '$lib/server/core/schema';
 import { ARTIST_ID, memoryOf } from './memory';
-import { chatJson, ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
+import { chatJson, ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '$lib/server/ai/model';
 import { stripDeep } from '$lib/server/ai/numerics';
 import { isString, isStrings, shape } from '$lib/server/ai/shape';
-import { agentInput, agentOutput, invokeAgent, type ChatMessage } from '$lib/server/core/tracing';
-import { recentVideos, thumbnailDataUrl, type CatalogVideo } from '$lib/server/platforms/youtube';
+import {
+  agentInput,
+  agentOutput,
+  invokeAgent,
+  type ModelRequest,
+  type Part,
+} from '$lib/server/core/tracing';
+import {
+  recentVideos,
+  thumbnailImage,
+  type CatalogVideo,
+  type Thumbnail,
+} from '$lib/server/platforms/youtube';
 
 const DESCRIPTION_CHARS = 200;
 /** Uploads carry 14 to 44 tags each; uncapped, they filled the 8K context and cut off the reply. */
@@ -74,31 +85,32 @@ const RULES = [
   `At most ${RULES_MAX} short rules per list. Base every rule on the uploads; do not invent facts.`,
 ].join('\n');
 
-export function buildBrandMessages(
-  videos: (CatalogVideo & { thumbnail: string | null })[],
-): ChatMessage[] {
+export function buildBrandRequest(
+  videos: (CatalogVideo & { thumbnail: Thumbnail | null })[],
+): ModelRequest {
   const uploads = videos.map((v) => ({
     title: v.title,
     description: v.description.slice(0, DESCRIPTION_CHARS),
     tags: leadingTags(v.tags),
     publishedAt: v.publishedAt,
   }));
-  const thumbnails = videos
-    .map((v) => v.thumbnail)
-    .filter((t): t is string => Boolean(t))
-    .map((url) => ({ type: 'image_url' as const, image_url: { url } }));
-  return [
-    { role: 'system', content: RULES },
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: JSON.stringify({ uploads }) },
-        ...(thumbnails.length > 0
-          ? [{ type: 'text' as const, text: 'Thumbnails of the newest uploads:' }, ...thumbnails]
-          : []),
-      ],
-    },
-  ];
+  const thumbnails = videos.flatMap((v): Part[] =>
+    v.thumbnail ? [{ type: 'image', ...v.thumbnail }] : [],
+  );
+  return {
+    system: RULES,
+    turns: [
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: JSON.stringify({ uploads }) },
+          ...(thumbnails.length > 0
+            ? [{ type: 'text' as const, text: 'Thumbnails of the newest uploads:' }, ...thumbnails]
+            : []),
+        ],
+      },
+    ],
+  };
 }
 
 const clip = (text: string, max: number) => text.trim().slice(0, max).trim();
@@ -169,14 +181,11 @@ export async function approvedBrand(): Promise<BrandGuide | null> {
 }
 
 /**
- * Proposes a guide from the latest uploads. A loading or busy model returns a wait at once, as
- * pipeline steps do; the page calls again.
+ * Proposes a guide from the latest uploads. A busy model or a spent quota returns its wait at once,
+ * as pipeline steps do, and saves nothing; the page calls again on `model busy`.
  */
 export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: StoredBrand }> {
   const deadline = stepDeadline();
-  const status = await modelStatus();
-  if (status === 'loading') return { wait: 'waking model' };
-  if (status === 'busy') return { wait: 'waiting on another run' };
 
   const videos = await recentVideos(required('FLR_CHANNEL_ID'), BRAND_VIDEOS);
   if (videos.length === 0)
@@ -185,24 +194,25 @@ export async function proposeBrand(): Promise<{ wait: Wait } | { proposal: Store
     videos.map(async (v, i) => ({
       ...v,
       thumbnail:
-        i < BRAND_THUMBNAILS && v.thumbnailUrl ? await thumbnailDataUrl(v.thumbnailUrl) : null,
+        i < BRAND_THUMBNAILS && v.thumbnailUrl ? await thumbnailImage(v.thumbnailUrl) : null,
     })),
   );
 
-  const guide = await invokeAgent('brand-guide', async (span) => {
+  const guide = await invokeAgent('brand-guide', modelFor('brand-guide'), async (span) => {
     span.setAttribute('brand.video_count', videos.length);
-    const messages = buildBrandMessages(withThumbs);
-    agentInput(span, messages);
-    const { value } = await chatJson(messages, 'brand_guide', BRAND_SCHEMA, isBrandGuide, deadline);
+    const request = buildBrandRequest(withThumbs);
+    agentInput(span, request);
+    const { value } = await chatJson(request, 'brand-guide', BRAND_SCHEMA, isBrandGuide, deadline);
     if (!value) return null;
     const cleaned = cleanGuide(value);
     agentOutput(span, JSON.stringify(cleaned));
     return cleaned;
   }).catch((error: unknown) => {
-    if (error instanceof ModelWaking) return 'waking' as const;
+    if (error instanceof ModelBusy) return { wait: 'model busy' } as const;
+    if (error instanceof ModelQuotaSpent) return { wait: 'model quota spent' } as const;
     throw error;
   });
-  if (guide === 'waking') return { wait: 'waking model' };
+  if (guide && 'wait' in guide) return guide;
   if (!guide)
     throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
 

@@ -2,7 +2,7 @@
   import { timecode } from '$lib/format';
   import type { FieldErrors } from '$lib/metadata';
   import { cutErrors, lengthBounds, tenth } from '$lib/short';
-  import { jobStatus, modelSeconds, publishPaused } from '$lib/status';
+  import { jobStatus, modelLabel, modelSeconds, publishPaused } from '$lib/status';
   import type { Destination, JobView, PickFields, Reframe } from '$lib/types';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
@@ -49,7 +49,7 @@
   const hook = $derived(short.hook);
   const status = $derived(jobStatus(view, view.wait));
   const seconds = $derived(modelSeconds(view));
-  const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
+  const model = $derived(modelLabel(view));
   const editable = $derived(job.state === 'REVIEW');
   const done = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const fields = $derived<PickFields | null>(
@@ -112,7 +112,7 @@
       height={job.probe?.height}
       vertical
     />
-    <Track {status} {model} />
+    <Track {status} {model} {seconds} />
 
     {#if hook}
       <section class="cut" aria-labelledby="short-cut-heading">

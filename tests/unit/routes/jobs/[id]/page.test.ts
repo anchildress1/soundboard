@@ -7,7 +7,7 @@ import Page from '$routes/jobs/[id]/+page.svelte';
 
 const BRAND_CHECK = 'Keeps the naming pattern.';
 const PLAYBACK_URL = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
-const WAKING = 'waking model';
+const BUSY = 'model busy';
 const STEP_PATH = '/api/jobs/j1/step';
 const NEEDS_REVIEW = 'Needs review';
 const CHECK_FIRST = 'Check before uploading';
@@ -90,6 +90,7 @@ const view = (patch: Partial<PublicJob> = {}, extra: Partial<JobView> = {}): Job
   job: job(patch),
   chunks: [],
   pick: null,
+  model: 'gemini-4-argon',
   ...extra,
 });
 
@@ -182,21 +183,21 @@ describe('job page: status chip', () => {
       fetchMock.mockImplementation(hang);
       setup(view({ state: 'PICK' }, { pick: PICK, chunks: [chunk(0)] }));
       // A re-run keeps the earlier pick's 12s and counts the new call on top.
-      expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 16s')).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(3000);
-      expect(screen.getByText('gemma-4-12b-it · 19s')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 19s')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not count while the model is loading', async () => {
+  it('does not count while the model is busy', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       fetchMock.mockImplementation(hang);
-      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: WAKING }));
+      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: BUSY }));
       await vi.advanceTimersByTimeAsync(3000);
-      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 4s')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -204,9 +205,15 @@ describe('job page: status chip', () => {
 
   it('shows chunk progress and drives the next step with the job trace', async () => {
     fetchMock.mockImplementation(hang);
-    setup(view({ state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 }, { chunks: [chunk(0)] }));
+    setup(
+      view(
+        { state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 },
+        { chunks: [chunk(0)], model: 'gemini-3.8-flash' },
+      ),
+    );
     expect(chip()).toHaveTextContent('Chunk 2 / 5');
-    expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
+    expect(screen.getByText('Configured analyst: gemini-3.8-flash')).toBeInTheDocument();
+    expect(screen.getByText('Total model time: 4s')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'PeekaBoo' })).toBeInTheDocument();
     expect(screen.getByText('synthwave')).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -218,10 +225,10 @@ describe('job page: status chip', () => {
 
   it('shows a named wait from the step', async () => {
     fetchMock
-      .mockResolvedValueOnce(json(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: WAKING })))
+      .mockResolvedValueOnce(json(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: BUSY })))
       .mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
-    await waitFor(() => expect(chip()).toHaveTextContent(WAKING));
+    await waitFor(() => expect(chip()).toHaveTextContent(BUSY));
   });
 
   it('reads "Needs review" with the recommendation and does not drive', async () => {
@@ -231,7 +238,8 @@ describe('job page: status chip', () => {
     expect(screen.getByText('Silence 80.0s to 83.0s')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: CHECK_FIRST })).toBeInTheDocument();
     expect(screen.queryByText(BRAND_CHECK)).toBeNull();
-    expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
+    expect(screen.getByText('Configured picker: gemini-4-argon')).toBeInTheDocument();
+    expect(screen.getByText('Total model time: 16s')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /YouTube/ })).toHaveTextContent('To do');
     await fireEvent.click(screen.getByRole('tab', { name: /Bandcamp/ }));
     expect(screen.getByRole('region', { name: 'Bandcamp' })).toBeVisible();
@@ -716,6 +724,7 @@ const shortView = (
   }),
   chunks: [],
   pick: PICK,
+  model: 'gemini-4-argon',
   ...extra,
 });
 

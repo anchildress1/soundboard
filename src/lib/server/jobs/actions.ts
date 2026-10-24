@@ -28,6 +28,7 @@ import {
 } from '$lib/server/platforms/youtube';
 import { ActionError } from '$lib/server/core/errors';
 import { objectInfo } from '$lib/server/media/gcs';
+import { STALE_ANALYSIS, staleAnalysis } from '$lib/server/pipeline/short';
 
 function requireState(job: JobDoc, states: JobState[]): void {
   if (!states.includes(job.state))
@@ -332,6 +333,7 @@ export async function makeShort(job: JobDoc): Promise<string> {
   if (!canCutShort(job.probe.durationSec)) {
     throw new ActionError(409, `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`);
   }
+  if (staleAnalysis(job, job.probe.durationSec)) throw new ActionError(409, STALE_ANALYSIS);
   // The Short renders from this video's upload, which the bucket's 7-day lifecycle deletes.
   if (!(await objectInfo(job.object))) {
     throw new ActionError(409, 'This video is gone from storage. Upload it again to make a Short.');

@@ -1,7 +1,11 @@
 <script lang="ts">
   import type { Status } from '$lib/status';
 
-  let { status, model }: { status: Status; model: string } = $props();
+  let {
+    status,
+    model,
+    seconds = null,
+  }: { status: Status; model: string; seconds?: number | null } = $props();
 </script>
 
 <div class="track">
@@ -15,7 +19,10 @@
   >
     <i style:--p="{status.progress}%"></i>
   </div>
-  <span class="model">{model}</span>
+  <span class="model">
+    <span>{model}</span>
+    {#if seconds}<span>Total model time: {seconds}s</span>{/if}
+  </span>
 </div>
 
 <style>
@@ -26,6 +33,24 @@
     align-items: center;
     font: 500 12px/1 var(--mono);
     color: var(--muted);
+  }
+
+  .model {
+    display: grid;
+    gap: 4px;
+    justify-items: end;
+  }
+
+  /* The configured model name is too long to share a phone row with the chip and bar. */
+  @media (width < 640px) {
+    .track {
+      grid-template-columns: auto 1fr;
+    }
+
+    .model {
+      grid-column: 1 / -1;
+      justify-items: start;
+    }
   }
 
   .bar {

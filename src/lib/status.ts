@@ -1,5 +1,5 @@
 import { percent } from './format';
-import type { JobState, JobView, Wait } from './types';
+import type { JobState, JobView, PublicJob, Wait } from './types';
 
 export type Tone = 'info' | 'warn' | 'ok' | 'err';
 export type Status = { tone: Tone; text: string; progress: number };
@@ -43,6 +43,18 @@ export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
   if (wait) return { tone: 'info', text: wait, progress: runningProgress(view) };
   return LABELS[view.job.state](view, uploadPct);
 }
+
+/** The model role the job's current work uses; a failed job counts as the step it failed at. */
+export function modelRole(
+  job: Pick<PublicJob, 'state' | 'failedState' | 'short'>,
+): 'analyst' | 'picker' {
+  if (job.short) return 'picker';
+  const state = job.state === 'FAILED' ? (job.failedState ?? 'PREP') : job.state;
+  return state === 'PREP' || state === 'ANALYZE' ? 'analyst' : 'picker';
+}
+
+/** Names the configured model, never the one that produced earlier results. */
+export const modelLabel = (view: JobView) => `Configured ${modelRole(view.job)}: ${view.model}`;
 
 /** Whether publishing is paused for owner action and can be discarded. */
 export function publishPaused({ job, wait }: JobView): boolean {
@@ -91,7 +103,7 @@ export function modelWorking(view: JobView): boolean {
 
 /**
  * Seconds the model has spent on this job (every chunk plus the current pick), for the
- * `gemma-4-12b-it · 52s` label. `runningMs` adds the call still in flight so the label keeps counting.
+ * `Total model time` label. `runningMs` adds the call still in flight so the label keeps counting.
  * A Short counts only its hook pick: its pick is the video's, copied.
  */
 export function modelSeconds(view: JobView, runningMs = 0): number | null {

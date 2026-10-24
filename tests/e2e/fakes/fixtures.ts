@@ -28,8 +28,8 @@ const PICK: Pick = {
 
 const chunk = (index: number): Chunk => ({
   index,
-  startSec: index * 29.5,
-  durationSec: 29.5,
+  startSec: index * 60,
+  durationSec: index === 2 ? 20 : 60,
   measurements: {
     integratedLufs: -14,
     truePeakDbtp: -1.2,
@@ -59,8 +59,9 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
     state: 'REVIEW',
     object: `uploads/${id}`,
     probe: PROBE,
-    chunkCount: 5,
-    chunkIndex: 5,
+    // chunkCount(140) under 60 s windows; any other count sends an analyzing job back to prep.
+    chunkCount: 3,
+    chunkIndex: 3,
     consecutiveFailures: 0,
     hashtagCandidates: [SYNTHWAVE, RETROWAVE],
     audience: {
@@ -91,7 +92,7 @@ const SHORT: Short = {
 };
 
 /** A video in review with its chunks and pick, ready for a Short. */
-const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2, 3, 4].map(chunk) });
+const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2].map(chunk) });
 
 const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   ...['chromium', 'mobile'].flatMap((project) => {
@@ -137,7 +138,7 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   {
     job: job('e2e-b-review', { ownerUid: USER_B.uid, artistId: null, songTitle: 'Vaporgram' }),
     pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
-    chunks: [0, 1, 2, 3, 4].map(chunk),
+    chunks: [0, 1, 2].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
   // Paused with the upload outcome unknown: its steps make no YouTube call.
@@ -155,14 +156,27 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
       finalChunkAt: 2,
     }),
     pick: PICK,
-    chunks: [0, 1, 2, 3, 4].map(chunk),
+    chunks: [0, 1, 2].map(chunk),
   })),
-  ...['e2e-analyzing', 'e2e-signout-chromium', 'e2e-signout-mobile'].map((id) => ({
+  ...[
+    'e2e-analyzing',
+    'e2e-analyze-chromium',
+    'e2e-analyze-mobile',
+    'e2e-signout-chromium',
+    'e2e-signout-mobile',
+  ].map((id) => ({
     job: job(id, { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
     chunks: [chunk(0)],
   })),
 ];
+
+// Picking for user B, unlinked: no catalog read, and the cached genre search means no YouTube call.
+const PICKING = ['e2e-pick-chromium', 'e2e-pick-mobile'].map((id) => ({
+  job: job(id, { ownerUid: USER_B.uid, artistId: null, state: 'PICK', pickVersion: null }),
+  pick: null,
+  chunks: [0, 1, 2].map(chunk),
+}));
 
 /** One signed-up user per YouTube status that isn't connected, uid `uid-<status>`. */
 export const BROKEN_STATUSES = ['missing_scopes', 'no_channel', 'revoked'] as const;
@@ -187,12 +201,12 @@ export const SEED: Seed = {
       updatedAt: new Date(0),
     })),
   ],
-  jobs: JOBS.map(({ job, pick, chunks }) => ({
+  jobs: [...JOBS, ...PICKING].map(({ job, pick, chunks }) => ({
     ...jobRow(job),
     picks: pick ? [{ ...pick, skipped: false }] : [],
     chunks,
   })),
-  jobAudience: JOBS.flatMap(({ job }) =>
+  jobAudience: [...JOBS, ...PICKING].flatMap(({ job }) =>
     job.audience
       ? [{ jobId: job.id, retrievedAt: new Date(job.audience.retrievedAt), evidence: job.audience }]
       : [],

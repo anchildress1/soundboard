@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { existsSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { seed, truncate, vanishOnUpdate } from '../../../../helpers/db';
@@ -10,10 +11,8 @@ import {
   CHANNEL_A,
   child,
   REFRESH_A,
-  completion,
   defaultHandlers,
   headers,
-  JPEG,
   jobDoc,
   json,
   MEASURE_STDERR,
@@ -28,7 +27,15 @@ import {
   type Handler,
   type Run,
 } from '../../../../helpers/pipeline';
-import { captureException, captureMessage } from '../../../../mocks/sentry';
+import {
+  badRequest400,
+  busy429,
+  geminiError,
+  interaction,
+  perDay429,
+  unavailable503,
+} from '../../../../helpers/gemini';
+import { captureException, captureMessage, span, startSpan } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
 import { withIdentity } from '$lib/server/core/identity';
@@ -38,9 +45,9 @@ import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jo
 import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
 import { saveAudience } from '$lib/server/jobs/audience';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
+import { HOOK_SCHEMA } from '$lib/server/pipeline/short';
 import { clearStatsCache, quotaResetAt } from '$lib/server/platforms/youtube/youtube';
 
-const WAKING = 'waking model';
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';
 const WAITING_ON_YOUTUBE = 'waiting on YouTube';
@@ -94,7 +101,13 @@ vi.mock('google-auth-library', () => ({
 
 vi.mock('node:child_process', () => ({ spawn: h.spawn }));
 
-let tools: { probe: Run; measure: Run; window: Run };
+let tools: { probe: Run; measure: Run; clip: Run; range: Run };
+/** Order of the media and model calls a step makes. */
+const events: string[] = [];
+/** Simulated time each media call takes. */
+let mediaMs = { cut: 0, measure: 0 };
+let clock: number | null = null;
+const CLIP = Buffer.from('window-clip-mp4');
 
 let handlers: Handler[];
 const calls: { url: string; init: RequestInit }[] = [];
@@ -102,10 +115,16 @@ const calls: { url: string; init: RequestInit }[] = [];
 /** Later registrations win over the defaults. */
 const on = (test: RegExp, reply: Handler['reply']) => handlers.unshift({ test, reply });
 const called = (test: RegExp) => calls.filter((c) => test.test(c.url));
+const GEMINI = /generativelanguage\.googleapis\.com\/v1beta\/interactions$/;
 const chatBodies = () =>
-  called(/\/v1\/chat\/completions$/).map(
-    (c) => JSON.parse(String(c.init.body)) as Record<string, unknown>,
-  );
+  called(GEMINI).map((c) => JSON.parse(String(c.init.body)) as Record<string, unknown>);
+const clipPaths = () =>
+  (h.spawn.mock.calls as [string, string[]][])
+    .map(([, args]) => args.at(-1)!)
+    .filter((path) => path.endsWith('.mp4'));
+const advance = (ms: number) => {
+  if (clock !== null) clock += ms;
+};
 
 const put = (patch: Partial<JobDoc> = {}) => seedJob(patch);
 const saved = async () => (await getJob('j1'))!;
@@ -148,6 +167,8 @@ const FIELDS = {
   tags: ['a'],
 };
 const PROBE = { durationSec: 40, width: 1920, height: 1080, hasAudio: true };
+/** Two 60 s windows: 0–60 and 60–100. */
+const PROBE_100 = { ...PROBE, durationSec: 100 };
 const MEASURED = {
   integratedLufs: -13.8,
   truePeakDbtp: -0.4,
@@ -164,6 +185,7 @@ beforeEach(async () => {
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'cid');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'secret');
   vi.stubEnv('KMS_KEY', 'projects/p/locations/l/keyRings/r/cryptoKeys/k');
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
   resetClients();
   await truncate();
   await seed(USERS);
@@ -174,12 +196,26 @@ beforeEach(async () => {
   tools = {
     probe: { stdout: probeJson(95) },
     measure: { stderr: MEASURE_STDERR },
-    window: { stdout: Buffer.from('RIFFwav'), fd3: JPEG, stderr: MEASURE_STDERR },
+    clip: {},
+    range: { stderr: MEASURE_STDERR },
   };
+  events.length = 0;
+  mediaMs = { cut: 0, measure: 0 };
+  clock = null;
   h.spawn.mockReset();
   h.spawn.mockImplementation((command: string, args: string[]) => {
     if (command === 'ffprobe') return child(tools.probe);
-    return child(args.includes('-ss') ? tools.window : tools.measure);
+    const out = args.at(-1)!;
+    if (out.endsWith('.mp4')) {
+      events.push('cut');
+      advance(mediaMs.cut);
+      if (!tools.clip.code) writeFileSync(out, CLIP);
+      return child(tools.clip);
+    }
+    if (!args.includes('-ss')) return child(tools.measure);
+    events.push('measure');
+    advance(mediaMs.measure);
+    return child(tools.range);
   });
   handlers = defaultHandlers();
   calls.length = 0;
@@ -188,6 +224,7 @@ beforeEach(async () => {
     vi.fn(async (input: string | URL, init: RequestInit = {}) => {
       const url = String(input);
       calls.push({ url, init });
+      if (GEMINI.test(url)) events.push('model');
       const handler = handlers.find((x) => x.test.test(url));
       if (!handler) throw new Error(`unexpected fetch ${url}`);
       return handler.reply(url, init);
@@ -196,6 +233,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -225,37 +263,6 @@ describe('runStep: states the page does not drive', () => {
       expect(h.spawn).not.toHaveBeenCalled();
     },
   );
-});
-
-describe('runStep: model readiness', () => {
-  it('returns "waking model" while /health answers 503, without claiming the job', async () => {
-    on(/\/health$/, () => new Response('loading', { status: 503 }));
-    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(result).toEqual({ wait: WAKING });
-    expect(await claimToken()).toBeNull();
-    expect((await saved()).consecutiveFailures).toBe(0);
-    expect(h.spawn).not.toHaveBeenCalled();
-  });
-
-  it('treats a refused connection as loading', async () => {
-    on(/\/health$/, () => Promise.reject(new TypeError('ECONNREFUSED')));
-    expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
-  });
-
-  it('returns "waiting on another run" when every slot is processing', async () => {
-    on(/\/slots$/, () => json([{ is_processing: true }]));
-    const result = await runStep(await pickJob());
-    expect(result).toEqual({ wait: 'waiting on another run' });
-    expect(await claimToken()).toBeNull();
-    expect((await saved()).state).toBe('PICK');
-  });
-
-  it('skips the model check for steps that only run ffmpeg', async () => {
-    on(/\/health$/, () => new Response('', { status: 503 }));
-    await runStep(await put({ state: 'PREP' }));
-    expect(called(/\/health$/)).toHaveLength(0);
-    expect((await saved()).state).toBe('ANALYZE');
-  });
 });
 
 describe('runStep: claims', () => {
@@ -296,7 +303,7 @@ describe('runStep: PREP', () => {
       ...MEASURED,
       silences: [{ start: 80, end: 83 }],
     });
-    expect(job.chunkCount).toBe(4);
+    expect(job.chunkCount).toBe(2);
     expect(job.chunkIndex).toBe(0);
     expect(job.contentType).toBe('video/quicktime');
     expect(job.consecutiveFailures).toBe(0);
@@ -337,7 +344,7 @@ describe('runStep: PREP', () => {
     tools.probe = { stdout: probeJson(MAX_MINUTES * 60) };
     await runStep(await put({ state: 'PREP' }));
     expect((await saved()).state).toBe('ANALYZE');
-    expect((await saved()).chunkCount).toBe(Math.ceil((900 - 1) / 29.5));
+    expect((await saved()).chunkCount).toBe(15);
   });
 
   it(`refuses a video past ${MAX_MINUTES} minutes`, async () => {
@@ -356,59 +363,155 @@ describe('runStep: PREP', () => {
 });
 
 describe('runStep: ANALYZE', () => {
+  const analyzeJob = (patch: Partial<JobDoc> = {}) =>
+    put({ state: 'ANALYZE', probe: PROBE_100, chunkCount: 2, chunkIndex: 0, ...patch });
+
   it('stores no chunk when the job was discarded mid-analysis', async () => {
-    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 });
-    on(/v1\/chat\/completions$/, async () => {
+    const job = await analyzeJob();
+    on(GEMINI, async () => {
       await patchJob({ state: 'DISCARDED' });
-      return completion(JSON.stringify(ANALYSIS));
+      return interaction(JSON.stringify(ANALYSIS));
     });
     await runStep(job);
     expect((await saved()).state).toBe('DISCARDED');
     expect(await chunkAt(0)).toBeUndefined();
   });
 
-  it('saves the chunk and advances to the next window', async () => {
-    const result = await runStep(
-      await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 0 }),
-    );
+  it('cuts, measures, then asks the analyst, sending the clip inline and deleting it', async () => {
+    const result = await runStep(await analyzeJob());
     expect(result).toEqual({});
+    expect(events).toEqual(['cut', 'measure', 'model']);
     expect(await saved()).toMatchObject({
       state: 'ANALYZE',
       chunkIndex: 1,
       consecutiveFailures: 0,
     });
     const chunk = (await chunkAt(0))!;
-    expect(chunk).toMatchObject({ index: 0, startSec: 0, durationSec: 29.5, raw: null });
+    expect(chunk).toMatchObject({ index: 0, startSec: 0, durationSec: 60, raw: null });
+    expect(chunk.measurements).toMatchObject({ integratedLufs: -13.8, truePeakDbtp: -0.4 });
     expect(chunk.analysis).toEqual(ANALYSIS);
-    const body = chatBodies()[0]!;
-    expect(body.temperature).toBeCloseTo(0.2);
-    expect(body.max_tokens).toBeGreaterThanOrEqual(2048);
+    const body = chatBodies()[0] as {
+      model: string;
+      input: { content: { type: string; data?: string }[] }[];
+    };
+    expect(body.model).toBe('gemini-3.8-flash');
+    const video = body.input[0]!.content.find((c) => c.type === 'video')!;
+    expect(video.data).toBe(CLIP.toString('base64'));
+    expect(JSON.stringify(body)).not.toContain('storage.googleapis.com');
+    expect(clipPaths()).toHaveLength(1);
+    expect(existsSync(clipPaths()[0]!)).toBe(false);
   });
 
   it('moves to PICK after the last chunk, cutting the short tail window', async () => {
-    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2, chunkIndex: 1 });
+    const job = await analyzeJob({ chunkIndex: 1 });
     await setChunks('j1', [{ index: 0 }]);
     await runStep(job);
     expect(await saved()).toMatchObject({ state: 'PICK', chunkIndex: 2 });
-    expect(await chunkAt(1)).toMatchObject({
-      index: 1,
-      startSec: 29.5,
-      durationSec: 10.5,
+    expect(await chunkAt(1)).toMatchObject({ index: 1, startSec: 60, durationSec: 40 });
+    for (const [, args] of h.spawn.mock.calls as [string, string[]][]) {
+      expect(args[args.indexOf('-ss') + 1]).toBe('60.000');
+      expect(args[args.indexOf('-t') + 1]).toBe('40.000');
+    }
+  });
+
+  it('deletes the clip and saves no chunk when the model call throws', async () => {
+    on(GEMINI, () => badRequest400());
+    await runStep(await analyzeJob());
+    expect(events).toEqual(['cut', 'measure', 'model']);
+    expect(await saved()).toMatchObject({
+      state: 'ANALYZE',
+      chunkIndex: 0,
+      consecutiveFailures: 1,
     });
-    const args = h.spawn.mock.calls[0]![1] as string[];
-    expect(args[args.indexOf('-ss') + 1]).toBe('29.500');
-    expect(args[args.indexOf('-t') + 1]).toBe('10.500');
+    expect((await saved()).error).toMatch(/^Gemini 400/);
+    expect(await chunkAt(0)).toBeUndefined();
+    expect(existsSync(clipPaths()[0]!)).toBe(false);
+  });
+
+  it('deletes the clip when the window measurement fails, asking no model', async () => {
+    tools.range = { code: 1, stderr: 'measure broke' };
+    await runStep(await analyzeJob());
+    expect(events).toEqual(['cut', 'measure']);
+    expect((await saved()).error).toMatch(/ffmpeg exited 1/);
+    expect(existsSync(clipPaths()[0]!)).toBe(false);
+  });
+
+  it('shares one step deadline across cut, measure and the model call', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    clock = NOON_PACIFIC;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock!);
+    mediaMs = { cut: 90_000, measure: 10_000 };
+    await runStep(await analyzeJob());
+    // 110 s budget less the 5 s reserve: the cut gets its 45 s cap, the measure the 15 s left.
+    expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([45_000, 15_000]);
+    // 5 s remain, under the analyst's 8 s minimum: no model call, a counted failure.
+    expect(events).toEqual(['cut', 'measure']);
+    expect(await saved()).toMatchObject({
+      consecutiveFailures: 1,
+      error: 'The step ran out of time for the model.',
+    });
+    expect(existsSync(clipPaths()[0]!)).toBe(false);
+  });
+
+  it('makes the model call while the shared deadline still has room', async () => {
+    clock = NOON_PACIFIC;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock!);
+    mediaMs = { cut: 40_000, measure: 40_000 };
+    await runStep(await analyzeJob());
+    expect(events).toEqual(['cut', 'measure', 'model']);
+    expect((await saved()).chunkIndex).toBe(1);
+  });
+
+  it('sends a job counted under another window length back to PREP, clearing its chunks', async () => {
+    const job = await analyzeJob({
+      chunkCount: 4,
+      chunkIndex: 2,
+      consecutiveFailures: 1,
+      error: 'x',
+    });
+    await setChunks('j1', [{ index: 0 }, { index: 1 }]);
+    expect(await runStep(job)).toEqual({});
+    expect(await saved()).toMatchObject({
+      state: 'PREP',
+      chunkIndex: 0,
+      consecutiveFailures: 0,
+      error: null,
+    });
+    expect((await arrays()).chunks).toEqual([]);
+    expect(h.spawn).not.toHaveBeenCalled();
+    expect(chatBodies()).toHaveLength(0);
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('keeps the chunks when another worker took the claim before the reset landed', async () => {
+    const job = await analyzeJob({ chunkCount: 4, chunkIndex: 2 });
+    await setChunks('j1', [{ index: 0 }, { index: 1 }]);
+    startSpan.mockImplementationOnce(async (_options, fn) => {
+      await db().update(jobs).set({ claimToken: 'other' }).where(eq(jobs.id, 'j1'));
+      return fn(span);
+    });
+    await runStep(job);
+    expect(await saved()).toMatchObject({ state: 'ANALYZE', chunkIndex: 2 });
+    expect((await arrays()).chunks).toHaveLength(2);
+    expect(captureMessage).toHaveBeenCalledWith(
+      'Step result dropped: the claim lapsed or the job moved on',
+      expect.anything(),
+    );
   });
 
   /** Second window of three, with the first already analyzed. */
   const analyzing = async () => {
-    const job = await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, chunkIndex: 1 });
+    const job = await analyzeJob({
+      probe: { ...PROBE, durationSec: 150 },
+      chunkCount: 3,
+      chunkIndex: 1,
+    });
     await setChunks('j1', [{ index: 0 }]);
     return job;
   };
 
   it("stores an ffmpeg failure without the signed URL's signature", async () => {
-    tools.window = {
+    tools.clip = {
       code: 1,
       stderr:
         'https://storage.googleapis.com/bkt/uploads/j1?X-Goog-Signature=abc123: 403 Forbidden',
@@ -420,7 +523,7 @@ describe('runStep: ANALYZE', () => {
   });
 
   it('counts one thrown step, keeps the state, and fails on the second in a row', async () => {
-    tools.window = { code: 1, stderr: 'boom\nmoov atom not found' };
+    tools.clip = { code: 1, stderr: 'boom\nmoov atom not found' };
     await runStep(await analyzing());
     expect(await saved()).toMatchObject({
       state: 'ANALYZE',
@@ -440,42 +543,14 @@ describe('runStep: ANALYZE', () => {
     expect(await chunkAt(0)).toBeDefined();
   });
 
-  it('waits without a failure when the model scales to zero mid-step', async () => {
-    on(
-      /chat\/completions$/,
-      () => new Response('Model is not yet ready for inference.', { status: 429 }),
-    );
-    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(result).toEqual({ wait: WAKING });
-    expect(await saved()).toMatchObject({
-      state: 'ANALYZE',
-      chunkIndex: 0,
-      consecutiveFailures: 0,
-      error: null,
-    });
-    expect(await chunkAt(0)).toBeUndefined();
-    expect(captureException).not.toHaveBeenCalled();
-  });
-
-  it('counts a quota 429 as a failure and reports it', async () => {
-    on(/chat\/completions$/, () => new Response('Quota exceeded', { status: 429 }));
-    const result = await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
-    expect(result).toEqual({});
-    expect(await saved()).toMatchObject({ state: 'ANALYZE', consecutiveFailures: 1 });
-    expect((await saved()).error).toBe('llama-server 429: Quota exceeded');
-    expect(captureException).toHaveBeenCalledOnce();
-  });
-
   it('resets the failure count after a step succeeds', async () => {
-    await runStep(
-      await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 3, consecutiveFailures: 1 }),
-    );
+    await runStep(await analyzeJob({ consecutiveFailures: 1 }));
     expect(await saved()).toMatchObject({ consecutiveFailures: 0, error: null, chunkIndex: 1 });
   });
 
   it('keeps the raw reply when the model never returns valid JSON', async () => {
-    on(/chat\/completions$/, () => completion('not json'));
-    await runStep(await put({ state: 'ANALYZE', probe: PROBE, chunkCount: 2 }));
+    on(GEMINI, () => interaction('not json'));
+    await runStep(await analyzeJob());
     expect(await chunkAt(0)).toMatchObject({ analysis: null, raw: 'not json' });
     expect((await saved()).chunkIndex).toBe(1);
   });
@@ -483,8 +558,8 @@ describe('runStep: ANALYZE', () => {
 
 const chunkDoc = (index: number) => ({
   index,
-  startSec: index * 29.5,
-  durationSec: 29.5,
+  startSec: index * 60,
+  durationSec: 60,
   measurements: MEASURED,
   analysis: ANALYSIS,
   raw: null,
@@ -493,8 +568,9 @@ const chunkDoc = (index: number) => ({
 
 const context = () => {
   const body = chatBodies().at(-1)!;
-  const messages = body.messages as { content: { type: string; text?: string }[] }[];
-  return JSON.parse(messages[1]!.content[0]!.text!) as {
+  const input = body.input as { content: { type: string; text?: string }[] }[];
+  // The provider joins adjacent text parts, so the thumbnail caption follows the context's line.
+  return JSON.parse(input[0]!.content[0]!.text!.split('\n')[0]!) as {
     artist: string | null;
     facts: { key: string }[];
     feedback: unknown[];
@@ -693,7 +769,7 @@ describe("runStep: PICK with Nathan's memory", () => {
   });
 
   it('counts an unparseable recommendation as a failure', async () => {
-    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
+    on(GEMINI, () => interaction(BAD_PICK_JSON));
     await runStep(await pickJob());
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect((await saved()).error).toBe('The model reply did not parse as a recommendation.');
@@ -702,7 +778,7 @@ describe("runStep: PICK with Nathan's memory", () => {
 
   it('reports the original model error to Sentry, not the evidence-carrying wrapper', async () => {
     captureException.mockClear();
-    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
+    on(GEMINI, () => interaction(BAD_PICK_JSON));
     await runStep(await pickJob());
     expect(captureException).toHaveBeenCalledTimes(1);
     const [reported, context] = captureException.mock.calls[0]!;
@@ -713,7 +789,7 @@ describe("runStep: PICK with Nathan's memory", () => {
   });
 
   it('keeps the genre search when the model fails, so the retry does not search again', async () => {
-    on(/chat\/completions$/, () => completion(BAD_PICK_JSON));
+    on(GEMINI, () => interaction(BAD_PICK_JSON));
     await runStep(await pickJob());
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
     expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
@@ -722,25 +798,118 @@ describe("runStep: PICK with Nathan's memory", () => {
       '#newmusic',
     ]);
 
-    on(/chat\/completions$/, () => completion(JSON.stringify(RAW_PICK)));
+    on(GEMINI, () => interaction(JSON.stringify(RAW_PICK)));
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+  });
+});
+
+describe('runStep: model waits', () => {
+  const MODEL_BUSY = 'model busy';
+  const QUOTA_SPENT = 'model quota spent';
+  /** The second of two windows, with the first already analyzed. */
+  const analyzeJob = async (patch: Partial<JobDoc> = {}) => {
+    const job = await put({
+      state: 'ANALYZE',
+      probe: PROBE_100,
+      chunkCount: 2,
+      chunkIndex: 1,
+      ...patch,
+    });
+    await setChunks('j1', [{ index: 0 }]);
+    return job;
+  };
+  const hookJob = async (patch: Partial<JobDoc> = {}) => {
+    await put({ id: 'p1', state: 'REVIEW' });
+    return put({ id: 'h1', state: 'HOOK', parentId: 'p1', sourceObject: SOURCE_OBJECT, ...patch });
+  };
+
+  it.each([
+    ['a per-minute 429', busy429],
+    ['a 503', unavailable503],
+  ])('waits on %s during analyze, keeping finished chunks and the streak', async (_, reply) => {
+    on(GEMINI, () => reply());
+    const job = await analyzeJob({ consecutiveFailures: 1, error: 'earlier' });
+    expect(await runStep(job)).toEqual({ wait: MODEL_BUSY });
+    expect(await saved()).toMatchObject({
+      state: 'ANALYZE',
+      chunkIndex: 1,
+      consecutiveFailures: 1,
+      error: 'earlier',
+      limitUntil: null,
+    });
+    expect((await arrays()).chunks).toEqual([{ index: 0 }]);
+    expect(existsSync(clipPaths()[0]!)).toBe(false);
+    expect(captureException).not.toHaveBeenCalled();
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('continues once the model answers again', async () => {
+    on(GEMINI, () => busy429());
+    await runStep(await analyzeJob());
+    handlers.shift();
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'PICK', chunkIndex: 2 });
+  });
+
+  it('waits on a busy pick and keeps the genre search, so the retry does not search again', async () => {
+    on(GEMINI, () => busy429());
+    expect(await runStep(await pickJob({ consecutiveFailures: 1 }))).toEqual({ wait: MODEL_BUSY });
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect((await saved()).audience?.candidateLists).toHaveLength(1);
+    expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
+    handlers.shift();
     await runStep(await saved());
     expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
   });
 
-  it('keeps the genre search and waits when the model scales to zero mid-pick', async () => {
-    on(
-      /chat\/completions$/,
-      () => new Response('Model is not yet ready for inference.', { status: 429 }),
-    );
-    expect(await runStep(await pickJob())).toEqual({ wait: WAKING });
-    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
-    expect((await saved()).audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual([
-      SYNTHWAVE,
-      RETROWAVE,
-      '#newmusic',
-    ]);
+  it('holds a spent per-day quota until the Pacific midnight reset, with no media or model call', async () => {
+    vi.setSystemTime(NOON_PACIFIC);
+    on(GEMINI, () => perDay429());
+    expect(await runStep(await analyzeJob())).toEqual({ wait: QUOTA_SPENT });
+    expect(await saved()).toMatchObject({
+      state: 'ANALYZE',
+      consecutiveFailures: 0,
+      limitUntil: quotaResetAt(NOON_PACIFIC),
+    });
     expect(captureException).not.toHaveBeenCalled();
+
+    h.spawn.mockClear();
+    calls.length = 0;
+    expect(await runStep(await saved())).toEqual({ wait: QUOTA_SPENT });
+    expect(h.spawn).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('holds pick and hook before any catalog, search or model call', async () => {
+    const until = Date.now() + 60_000;
+    expect(await runStep(await pickJob({ limitUntil: until }))).toEqual({ wait: QUOTA_SPENT });
+    expect(await runStep(await hookJob({ limitUntil: until }))).toEqual({
+      wait: QUOTA_SPENT,
+    });
+    expect(calls).toHaveLength(0);
+    expect(h.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['analyze', analyzeJob, 'PICK'],
+    ['pick', pickJob, 'REVIEW'],
+  ] as const)('clears a passed limit once the %s answers', async (_, seed, next) => {
+    await runStep(await seed({ limitUntil: Date.now() - 1 }));
+    expect(await saved()).toMatchObject({ state: next, limitUntil: null });
+  });
+
+  it.each([400, 403, 500])('counts a Gemini %i toward the two-strike failure', async (status) => {
+    on(GEMINI, () => geminiError(status, 'ERROR'));
+    await runStep(await pickJob());
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect((await saved()).error).toMatch(new RegExp(`^Gemini ${status}`));
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PICK' });
+    expect(captureException).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1728,20 +1897,11 @@ describe('runStep: claim safety', () => {
     expect(chatBodies()).toHaveLength(0);
   });
 
-  it('waits on a loading model when the claimed state is ahead of the snapshot', async () => {
-    const stale = await put({ state: 'PREP' });
-    await patchJob({ state: 'ANALYZE', chunkCount: 2 });
-    on(/127\.0\.0\.1:8081\/health$/, () => new Response('loading', { status: 503 }));
-    expect(await runStep(stale)).toEqual({ wait: WAKING });
-    expect(await saved()).toMatchObject({ state: 'ANALYZE' });
-    expect(chatBodies()).toHaveLength(0);
-  });
-
   it('drops the step result when the job was discarded mid-step', async () => {
     const job = await pickJob();
-    on(/v1\/chat\/completions$/, async () => {
+    on(GEMINI, async () => {
       await patchJob({ state: 'DISCARDED' });
-      return completion(JSON.stringify(RAW_PICK));
+      return interaction(JSON.stringify(RAW_PICK));
     });
     await runStep(job);
     expect((await saved()).state).toBe('DISCARDED');
@@ -1759,8 +1919,7 @@ describe('runStep: Short', () => {
     renders: 0,
     modelMs: 0,
   };
-  const hookReply = (hook: unknown) =>
-    on(/\/v1\/chat\/completions$/, () => completion(JSON.stringify(hook)));
+  const hookReply = (hook: unknown) => on(GEMINI, () => interaction(JSON.stringify(hook)));
 
   const loudLines = (from: number, to: number, at: number) => {
     const lines: string[] = [];
@@ -1771,13 +1930,13 @@ describe('runStep: Short', () => {
   };
 
   beforeEach(async () => {
-    await put({ id: 'p1', state: 'REVIEW' });
+    await put({ id: 'p1', state: 'REVIEW', chunkCount: 3 });
     await setChunks(
       'p1',
-      Array.from({ length: 6 }, (_, i) => ({
+      Array.from({ length: 3 }, (_, i) => ({
         index: i,
-        startSec: i * 29.5,
-        durationSec: 29.5,
+        startSec: i * 60,
+        durationSec: 60,
         measurements: MEASURED,
         analysis: ANALYSIS,
         raw: null,
@@ -1797,12 +1956,12 @@ describe('runStep: Short', () => {
         });
       }
       if (args.includes('-movflags')) return child({});
-      return child({ stderr: loudLines(56, 90.5, 70) });
+      return child({ stderr: loudLines(57, 122, 70) });
     });
   });
 
   it('runs HOOK then RENDER into REVIEW, one step per call', async () => {
-    hookReply({ window: 2, lengthSec: 30, reason: 'The chorus lands.' });
+    hookReply({ window: 1, lengthSec: 30, reason: 'The chorus lands.' });
     const job = await put({
       state: 'HOOK',
       parentId: 'p1',
@@ -1814,14 +1973,14 @@ describe('runStep: Short', () => {
     expect(await runStep(job)).toEqual({});
     expect((await saved()).state).toBe('RENDER');
     expect((await saved()).short!.hook).toEqual({
-      window: 2,
+      window: 1,
       startSec: 70,
       lengthSec: 30,
       reason: 'The chorus lands.',
     });
-    expect(chatBodies().at(-1)).toMatchObject({
-      response_format: { json_schema: { name: 'hook_pick' } },
-    });
+    expect(JSON.stringify(chatBodies().at(-1)!.response_format)).toContain(
+      JSON.stringify(HOOK_SCHEMA),
+    );
 
     expect(await runStep(await saved())).toEqual({});
     expect(await saved()).toMatchObject({
@@ -1832,33 +1991,8 @@ describe('runStep: Short', () => {
     });
   });
 
-  it('waits for the model before picking the hook', async () => {
-    on(/\/health$/, () => new Response('loading', { status: 503 }));
-    const result = await runStep(
-      await put({ state: 'HOOK', parentId: 'p1', short: SHORT, sourceObject: SOURCE_OBJECT }),
-    );
-    expect(result).toEqual({ wait: WAKING });
-    expect((await saved()).state).toBe('HOOK');
-    expect(await claimToken()).toBeNull();
-  });
-
-  it('renders without waiting on the model, which it does not use', async () => {
-    on(/\/health$/, () => new Response('loading', { status: 503 }));
-    const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
-    await runStep(
-      await put({
-        state: 'RENDER',
-        parentId: 'p1',
-        short: { ...SHORT, hook },
-        sourceObject: SOURCE_OBJECT,
-      }),
-    );
-    expect(called(/\/health$/)).toHaveLength(0);
-    expect((await saved()).state).toBe('REVIEW');
-  });
-
   it('fails at HOOK after two unparsed replies in a row, ready for a retry', async () => {
-    on(/\/v1\/chat\/completions$/, () => completion('nope'));
+    on(GEMINI, () => interaction('nope'));
     await put({ state: 'HOOK', parentId: 'p1', short: SHORT, sourceObject: SOURCE_OBJECT });
     await runStep(await saved());
     expect(await saved()).toMatchObject({ state: 'HOOK', consecutiveFailures: 1 });
@@ -1874,9 +2008,7 @@ describe('runStep: Short', () => {
   });
 
   it('fails at HOOK in one step when the model keeps repeating a skipped hook', async () => {
-    on(/\/v1\/chat\/completions$/, () =>
-      completion(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })),
-    );
+    on(GEMINI, () => interaction(JSON.stringify({ window: 2, lengthSec: 30, reason: 'x' })));
     const skipped = [{ window: 2, lengthSec: 30 }];
     await put({
       state: 'HOOK',
@@ -1890,12 +2022,12 @@ describe('runStep: Short', () => {
       failedState: 'HOOK',
       error: 'The model kept picking a skipped hook.',
     });
-    expect(called(/\/v1\/chat\/completions$/)).toHaveLength(2);
+    expect(called(GEMINI)).toHaveLength(2);
   });
 
   it('fails the render when the upload to storage is refused', async () => {
     h.upload.mockRejectedValue(new Error('403 Forbidden'));
-    const hook = { window: 2, startSec: 70, lengthSec: 30, reason: 'x' };
+    const hook = { window: 1, startSec: 70, lengthSec: 30, reason: 'x' };
     const job = await put({
       state: 'RENDER',
       parentId: 'p1',

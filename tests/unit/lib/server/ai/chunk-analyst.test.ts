@@ -1,62 +1,27 @@
 // @vitest-environment node
-import { EventEmitter } from 'node:events';
-import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   analyzeChunk,
-  buildChunkMessages,
+  buildChunkRequest,
   CHUNK_SCHEMA,
   isChunkAnalysis,
 } from '$lib/server/ai/chunk-analyst';
+import { stepDeadline } from '$lib/server/ai/model';
 import type { ChunkAnalysis, Measurements } from '$lib/types';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
+import { badRequest400, busy429, interaction } from '../../../../helpers/gemini';
 import { omit } from '../../../../helpers/omit';
 
-vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
-const spawnMock = vi.mocked(spawn);
+const CLIP = new Uint8Array(Buffer.from('fake-mp4-window-clip'));
+const CLIP_B64 = Buffer.from(CLIP).toString('base64');
 
-const STDERR = `[Parsed_ebur128_0 @ 0x1] Summary:
-
-  Integrated loudness:
-    I:          -9.7 LUFS
-    Threshold: -19.7 LUFS
-
-  True peak:
-    Peak:       -0.4 dBFS
-[Parsed_astats_2 @ 0x2] Peak level dB: 0.000265
-[Parsed_astats_2 @ 0x2] Peak count: 1146.000000
-[silencedetect @ 0x3] silence_start: 4
-[silencedetect @ 0x3] silence_end: 7 | silence_duration: 3
-`;
-
-const jpeg = (i: number) => Buffer.from([0xff, 0xd8, 0xff, i, 0xff, 0xd9]);
-const WAV = Buffer.from('RIFF0000WAVEfmt fake');
-
-function ffmpegRun(code = 0) {
-  spawnMock.mockImplementationOnce((() => {
-    const stdout = new EventEmitter();
-    const stderr = new EventEmitter();
-    const fd3 = new EventEmitter();
-    const child = Object.assign(new EventEmitter(), {
-      stdout,
-      stderr,
-      stdio: [null, stdout, stderr, fd3],
-    });
-    setImmediate(() => {
-      stdout.emit('data', WAV);
-      stderr.emit('data', Buffer.from(code === 0 ? STDERR : 'Server returned 403 Forbidden'));
-      fd3.emit('data', Buffer.concat(Array.from({ length: 8 }, (_, i) => jpeg(i))));
-      child.emit('close', code);
-    });
-    return child;
-  }) as unknown as typeof spawn);
-}
-
-const completion = (content: string, status = 200) =>
-  new Response(
-    JSON.stringify({ choices: [{ message: { content, reasoning_content: '' } }], usage: {} }),
-    { status, headers: { 'content-type': 'application/json' } },
-  );
+const measurements: Measurements = {
+  integratedLufs: -9.7,
+  truePeakDbtp: -0.4,
+  peakLevelDb: 0,
+  clippedSamples: 1146,
+  silences: [{ start: 63, end: 66 }],
+};
 
 const analysis: ChunkAnalysis = {
   visual: 'Neon-lit alley, fast cuts, mastered hot at -8 LUFS.',
@@ -71,20 +36,20 @@ const analysis: ChunkAnalysis = {
 };
 
 const input = {
-  url: 'https://storage.example/uploads/j1?sig=1',
   index: 2,
-  startSec: 59,
-  durationSec: 29.5,
+  startSec: 120,
+  durationSec: 60,
   songTitle: 'PeekaBoo',
   notes: 'Nathan wants the neon look called out.',
+  measurements,
+  clip: CLIP,
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   clearAgentSpan();
-  spawnMock.mockReset();
-  vi.stubEnv('MODEL_URL', 'http://model.test');
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -94,16 +59,12 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-type Part = {
-  type: string;
-  image_url?: { url: string };
-  input_audio?: { data: string; format: string };
-  text?: string;
-};
+type Content = { type: string; text?: string; data?: string; mime_type?: string };
 const sentBody = (call = 0) =>
   JSON.parse((fetchMock.mock.calls[call]![1] as RequestInit).body as string) as {
-    messages: { role: string; content: string | Part[] }[];
-    response_format: { json_schema: { name: string; schema: unknown } };
+    model: string;
+    input: { type: string; content: Content[] }[];
+    response_format: unknown;
   };
 
 describe('isChunkAnalysis', () => {
@@ -138,99 +99,68 @@ describe('isChunkAnalysis', () => {
   });
 });
 
-describe('buildChunkMessages', () => {
-  const measurements: Measurements = {
-    integratedLufs: -9.7,
-    truePeakDbtp: -0.4,
-    peakLevelDb: 0,
-    clippedSamples: 3,
-    silences: [],
-  };
-
-  it('sends the window context, every frame as a JPEG data URL, and the WAV', () => {
-    const frames = [jpeg(1), jpeg(2)];
-    const [system, user] = buildChunkMessages({
+describe('buildChunkRequest', () => {
+  it('sends the window context and the clip as one video part, with no images or audio', () => {
+    const { system, turns } = buildChunkRequest({ ...input, notes: '' });
+    expect(system).toMatch(/Do not restate or estimate any loudness/);
+    expect(system).toMatch(/Do not transcribe lyrics/);
+    expect(turns).toHaveLength(1);
+    const [text, video] = turns[0]!.parts;
+    expect(turns[0]!.parts.map((p) => p.type)).toEqual(['text', 'video']);
+    expect(JSON.parse((text as { text: string }).text)).toEqual({
       songTitle: 'PeekaBoo',
-      notes: '',
-      startSec: 0,
-      durationSec: 29.5,
-      wav: WAV,
-      measurements,
-      frames,
-    });
-    expect(system!.role).toBe('system');
-    expect(system!.content).toMatch(/Do not restate or estimate any loudness/);
-    expect(system!.content).toMatch(/Do not transcribe lyrics/);
-    const parts = user!.content as Part[];
-    expect(parts.map((p) => p.type)).toEqual(['text', 'image_url', 'image_url', 'input_audio']);
-    const context = JSON.parse(parts[0]!.text!);
-    expect(context).toEqual({
-      songTitle: 'PeekaBoo',
-      window: { startSec: 0, durationSec: 29.5 },
+      window: { startSec: 120, durationSec: 60 },
       ffmpeg: measurements,
     });
-    expect(parts[1]!.image_url!.url).toBe(
-      `data:image/jpeg;base64,${frames[0]!.toString('base64')}`,
-    );
-    expect(parts[3]!.input_audio).toEqual({ data: WAV.toString('base64'), format: 'wav' });
+    expect(video).toEqual({
+      type: 'video',
+      data: CLIP,
+      mime_type: 'video/mp4',
+      start: 120,
+      end: 180,
+    });
   });
 
   it('includes artist notes when present', () => {
-    const [, user] = buildChunkMessages({
-      songTitle: 'S',
-      notes: 'Flies Like Robots live take',
-      startSec: 0,
-      durationSec: 1,
-      frames: [],
-      wav: Buffer.alloc(0),
-      measurements,
-    });
-    const parts = user!.content as Part[];
-    expect(JSON.parse(parts[0]!.text!).artistNotes).toBe('Flies Like Robots live take');
-    expect(parts).toHaveLength(2);
+    const [text] = buildChunkRequest({ ...input, notes: 'Flies Like Robots live take' }).turns[0]!
+      .parts;
+    expect(JSON.parse((text as { text: string }).text).artistNotes).toBe(
+      'Flies Like Robots live take',
+    );
+  });
+
+  it('ends the clip at the window end for a short last window', () => {
+    const [, video] = buildChunkRequest({ ...input, startSec: 840, durationSec: 12.5 }).turns[0]!
+      .parts;
+    expect(video).toMatchObject({ start: 840, end: 852.5 });
   });
 });
 
 describe('analyzeChunk', () => {
-  it('cuts the window, sends 8 frames and 1 audio part, and strips model numerics', async () => {
-    ffmpegRun();
-    fetchMock.mockResolvedValueOnce(completion(JSON.stringify(analysis)));
+  it('sends the clip inline to the analyst model and strips model numerics', async () => {
+    fetchMock.mockResolvedValueOnce(interaction(JSON.stringify(analysis)));
 
-    const chunk = await analyzeChunk(input);
-
-    const args = spawnMock.mock.calls[0]![1]!;
-    expect(args[args.indexOf('-ss') + 1]).toBe('59.000');
-    expect(args[args.indexOf('-t') + 1]).toBe('29.500');
-    expect(args).toContain(input.url);
+    const chunk = await analyzeChunk(input, stepDeadline());
 
     const body = sentBody();
-    expect(fetchMock.mock.calls[0]![0]).toBe('http://model.test/v1/chat/completions');
-    expect(body.response_format.json_schema).toEqual({
-      name: 'chunk_analysis',
-      strict: true,
-      schema: CHUNK_SCHEMA,
-    });
-    const parts = body.messages[1]!.content as Part[];
-    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(8);
-    expect(parts.filter((p) => p.type === 'input_audio')).toHaveLength(1);
-    expect(JSON.parse(parts[0]!.text!)).toMatchObject({
+    expect(body.model).toBe('gemini-3.8-flash');
+    expect(JSON.stringify(body.response_format)).toContain(JSON.stringify(CHUNK_SCHEMA));
+    const content = body.input[0]!.content;
+    expect(content.map((c) => c.type)).toEqual(['text', 'video']);
+    expect(content[1]).toMatchObject({ data: CLIP_B64, mime_type: 'video/mp4' });
+    expect(JSON.parse(content[0]!.text!)).toMatchObject({
       songTitle: 'PeekaBoo',
       artistNotes: input.notes,
-      window: { startSec: 59, durationSec: 29.5 },
+      window: { startSec: 120, durationSec: 60 },
       ffmpeg: { integratedLufs: -9.7, truePeakDbtp: -0.4 },
     });
 
     expect(chunk).toMatchObject({
       index: 2,
-      startSec: 59,
-      durationSec: 29.5,
+      startSec: 120,
+      durationSec: 60,
       raw: null,
-      measurements: {
-        integratedLufs: -9.7,
-        truePeakDbtp: -0.4,
-        clippedSamples: 1146,
-        silences: [{ start: 63, end: 66 }],
-      },
+      measurements,
     });
     expect(chunk.analysis).toEqual({
       visual: 'Neon-lit alley, fast cuts, mastered hot at.',
@@ -248,62 +178,56 @@ describe('analyzeChunk', () => {
   });
 
   it('keeps the raw reply, minus model numbers, when the model fails to produce valid JSON twice', async () => {
-    ffmpegRun();
     fetchMock
-      .mockResolvedValueOnce(completion('{"visual": "cut off'))
-      .mockResolvedValueOnce(completion('Sorry, -9 LUFS {not json'));
+      .mockResolvedValueOnce(interaction('{"visual": "cut off'))
+      .mockResolvedValueOnce(interaction('Sorry, -9 LUFS {not json'));
 
-    const chunk = await analyzeChunk(input);
+    const chunk = await analyzeChunk(input, stepDeadline());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(chunk.analysis).toBeNull();
     expect(chunk.raw).toBe('Sorry, {not json');
-    expect(chunk.measurements.integratedLufs).toBeCloseTo(-9.7);
+    expect(chunk.measurements).toEqual(measurements);
   });
 
-  it('recovers on the retry after one bad reply', async () => {
-    ffmpegRun();
+  it('recovers on the re-ask after one bad reply', async () => {
     fetchMock
-      .mockResolvedValueOnce(completion('{"visual":"x"}'))
-      .mockResolvedValueOnce(completion(JSON.stringify({ ...analysis, visual: 'Calm' })));
-    const chunk = await analyzeChunk(input);
+      .mockResolvedValueOnce(interaction('{"visual":"x"}'))
+      .mockResolvedValueOnce(interaction(JSON.stringify({ ...analysis, visual: 'Calm' })));
+    const chunk = await analyzeChunk(input, stepDeadline());
     expect(chunk.analysis?.visual).toBe('Calm');
     expect(chunk.raw).toBeNull();
   });
 
   it('records the redacted request and the stripped analysis on the agent span', async () => {
-    ffmpegRun();
-    fetchMock.mockResolvedValueOnce(completion(JSON.stringify(analysis)));
-    const chunk = await analyzeChunk(input);
+    fetchMock.mockResolvedValueOnce(interaction(JSON.stringify(analysis)));
+    const chunk = await analyzeChunk(input, stepDeadline());
 
     const { input: recorded, output } = agentSpanIO();
     expect(recorded).toHaveLength(1);
     const sent = recorded[0]!['gen_ai.input.messages']!;
     expect(sent).toContain('PeekaBoo');
-    expect(sent).toContain('"type":"audio"');
-    expect(sent).not.toContain(WAV.toString('base64'));
+    expect(sent).toContain('"clip":"120s–180s"');
+    expect(sent).not.toContain(CLIP_B64);
     expect(recorded[0]!['gen_ai.system_instructions']).toBeDefined();
     expect(output).toEqual([JSON.stringify(chunk.analysis)]);
   });
 
   it('records the stripped raw reply as the agent output when parsing fails', async () => {
-    ffmpegRun();
-    fetchMock.mockImplementation(async () => completion('Sorry, -9 LUFS {not json'));
-    await analyzeChunk(input);
+    fetchMock.mockImplementation(async () => interaction('Sorry, -9 LUFS {not json'));
+    await analyzeChunk(input, stepDeadline());
     expect(agentSpanIO().output).toEqual(['Sorry, {not json']);
   });
 
-  it('rejects without calling the model when ffmpeg fails', async () => {
-    ffmpegRun(1);
-    await expect(analyzeChunk(input)).rejects.toThrow(
-      'ffmpeg exited 1: Server returned 403 Forbidden',
-    );
+  it('uses the deadline it is given', async () => {
+    await expect(analyzeChunk(input, Date.now() + 1000)).rejects.toThrow('ran out of time');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects when llama-server errors', async () => {
-    ffmpegRun();
-    fetchMock.mockResolvedValueOnce(new Response('slot unavailable', { status: 503 }));
-    await expect(analyzeChunk(input)).rejects.toThrow('llama-server 503: slot unavailable');
+  it('rejects when Gemini refuses or is busy', async () => {
+    fetchMock.mockResolvedValueOnce(badRequest400());
+    await expect(analyzeChunk(input, stepDeadline())).rejects.toThrow('Gemini 400');
+    fetchMock.mockResolvedValueOnce(busy429());
+    await expect(analyzeChunk(input, stepDeadline())).rejects.toThrow('Gemini 429');
   });
 });

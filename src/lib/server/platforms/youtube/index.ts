@@ -22,7 +22,7 @@ export {
   searchMusicVideos,
   sourceRange,
   startResumableUpload,
-  thumbnailDataUrl,
+  thumbnailImage,
   uploadChunk,
   uploadFailure,
   uploadOffset,
@@ -34,6 +34,7 @@ export {
   type ChunkResult,
   type ChannelStats,
   type ReadBack,
+  type Thumbnail,
   type VideoDuration,
   type VideoOwner,
 } from './youtube';
