@@ -147,7 +147,7 @@
 
 **R8 · Sign-in**
 
-- Signed out, the home page shows sign-in; `/privacy` is public through the shared footer, alongside an official YouTube icon linked to YouTube. Other app pages lead home and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
+- Signed out, the home page shows sign-in; `/privacy` is public through the shared footer. Other app pages lead home and app data/mutation APIs return 401 without writes. `/auth/login`, `/auth/callback` and public static assets are explicit exceptions, tested independently; auth routes grant no app access until identity and invitation checks pass.
 - One Google consent screen grants identity plus YouTube upload and read access, offline, so sign-in also connects the user's channel.
 - While invite gating is enabled, only active invitations get a session; anyone else sees "not invited" and no session, user record or token is retained. One setting opens signup later; accounts that sign up while it's open stay on the allowlist until revoked.
 - First redemption atomically binds a normalized invited email to the verified Google account ID. Later email changes preserve that binding; another account cannot claim the old email's invitation or artist link.
