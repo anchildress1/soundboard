@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/anchildress1/soundboard/compare/v1.0.0...v1.1.0) (2026-10-24)
+
+
+### Features
+
+* add YouTube audit privacy and research retention ([#20](https://github.com/anchildress1/soundboard/issues/20)) ([cef38f2](https://github.com/anchildress1/soundboard/commit/cef38f297dffa8fcac4b9d4153baafb0bc3c4277))
+* google sign-in, per-user jobs, and youtube connections ([#18](https://github.com/anchildress1/soundboard/issues/18)) ([ba88563](https://github.com/anchildress1/soundboard/commit/ba885638145d1c04dfc32e3316fc9f20fad89db2))
+* **legal:** add public Terms of Service page ([#23](https://github.com/anchildress1/soundboard/issues/23)) ([41c257c](https://github.com/anchildress1/soundboard/commit/41c257c5ffa3066a05aececf0cf2fd9436dcfd11))
+
+
+### Bug Fixes
+
+* handle revoked tokens and model scale-down, and back off retries with p-retry ([#15](https://github.com/anchildress1/soundboard/issues/15)) ([f713688](https://github.com/anchildress1/soundboard/commit/f713688fca9846fc1dedc87a88044fa29da8883c))
+
 ## 1.0.0 (2026-10-05)
 
 
