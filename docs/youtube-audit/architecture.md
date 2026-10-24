@@ -8,7 +8,7 @@ This describes the repository implementation, not confirmation that every compon
 %%{init: {"theme": "default"}}%%
 flowchart TB
   accTitle: Soundboard current architecture
-  accDescr: An artist signs in with Google and uploads media directly to Cloud Storage. The browser drives one pipeline step per request to a Cloud Run app. The app runs ffmpeg, invokes self-hosted Gemma on Vertex AI, stores state in Neon, reads public YouTube data with an API key, and uploads approved videos using the artist's OAuth grant. KMS encrypts refresh tokens. Research expires through a database view; the daily cleanup function is not yet deployed.
+  accDescr: An artist signs in with Google and uploads media directly to Cloud Storage. The browser drives one pipeline step per request to a Cloud Run app. The app runs ffmpeg, invokes self-hosted Gemma on Vertex AI, stores state in Neon, reads public YouTube data with an API key, and uploads approved videos using the artist's OAuth grant. KMS encrypts refresh tokens. Research expires through a database view and a daily cleanup function.
 
   USER["Artist's browser<br/>Review, edit, approve and resume"]
   AUTH["Google OAuth<br/>Identity and YouTube consent"]
@@ -42,7 +42,7 @@ flowchart TB
   USER -->|"Browser errors and traces"| SENTRY
 
   FRESH["job_audience_fresh view<br/>Research readable only while under 30 days old"]
-  CLEAN["Daily Neon cleanup function<br/>Not deployed as of 2026-10-24"]
+  CLEAN["Daily Neon cleanup function<br/>03:00 UTC on the production branch"]
   DB --> FRESH
   FRESH -->|"All research reads"| APP
   CLEAN -.->|"Delete expired research"| DB
@@ -54,7 +54,7 @@ flowchart TB
 - Model-call traces currently record full prompt text, which includes YouTube titles, descriptions and tags. Media bytes and URL credentials are removed. Spec 002 replaces YouTube-sourced text in traces with placeholders.
 - Thumbnails are fetched from YouTube's image host only for smart pick and the brand guide, sent to the model, and not stored.
 - Header channel stats are cached in memory only and never written to the database.
-- The daily cleanup function is not yet deployed. Until it is, the fresh-evidence view hides research older than 30 days, but nothing deletes it. It will be deployed before this application is submitted.
+- The daily cleanup function runs at 03:00 UTC on the production database branch, deployed on 2026-10-24. It rejects any call that doesn't come from Neon's scheduler and can only delete research that is already past 30 days.
 
 ## Planned model provider: Gemini API (spec 002)
 
