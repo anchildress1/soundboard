@@ -1,6 +1,6 @@
 # 🎛️ Soundboard — Product Requirements
 
-- **Status:** Draft v5 · 2026-10-16 (v2: sign-in and connections, spec `specs/001-google-sign-in`)
+- **Status:** Draft v6 · 2026-10-24 (v2: sign-in and connections, spec `specs/001-google-sign-in`; Gemini API, spec `specs/002-gemini-api`)
 - **Owner:** Ashley Childress
 - **User:** Nathan / Flies Like Robots (FLR), Virginia
 - **Design:** [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg)
@@ -15,7 +15,7 @@
 - A web app that watches and listens to a music video, grounds it in the most-viewed music videos for its genre, and smart-picks one YouTube title, description (with hashtags), and tag set.
 - Nathan edits in place, re-runs the model, or approves. On approval it uploads the video as private and verifies it by reading it back.
 - It learns from every edit, re-run, and approval.
-- The model is Gemma 4 12B-it, open-weight under Apache 2.0, self-hosted on Ashley's GCP project. Nathan's audio stays there.
+- The models run on the Gemini API, paid tier: `gemini-3.8-flash` watches and hears each window, and `gemini-4-argon` writes the picks. Each window leaves Ashley's GCP project as a short clip; paid-tier content isn't used to improve Google's products.
 
 ## Principles
 
@@ -42,8 +42,7 @@
 - Downloading videos from YouTube.
 - Browser automation.
 - Collaboration: a job belongs to one user.
-- Per-artist voice, memory, and brand guide in this version; they come with spec 002.
-- Third-party inference providers.
+- Per-artist voice, memory, and brand guide in this version; they come with specs 004 and 005.
 
 ## Users
 
@@ -74,18 +73,18 @@
 - ffmpeg reads the source from GCS through a signed URL (range requests, nothing copied into RAM).
 - Prep probes duration and the displayed video size (the file's rotation applied, since phones store portrait video as rotated landscape frames) and measures the whole file: LUFS, true peak, clipping, silence.
 - A square or vertical video of 3 minutes or less adds a flag: YouTube publishes it as a Short.
-- Each analyze step seeks to its own 29.5s window (under Gemma's 30s audio cap), extracts 8 frames at 360p + 16 kHz mono WAV in memory, and measures that window.
-- One Gemma call per chunk: audio + frames + measurements + song title → visual, music, quality flags. Quality flags are unintended problems only; a deliberate glitch or distortion style is not one.
-- Call settings: temperature 0.2, `max_tokens` ≥ 2048, JSON schema. Parse `content`; `reasoning_content` is the think block.
-- When the model is scaled to zero (endpoint 429), loading (`/health` 503), or busy (`/slots` shows the slot taken), the step returns at once with a wait reason ("waking model", "waiting on another run") and the page calls again. Every step stays under about 2 minutes.
+- Each analyze step seeks to its own 60 s window and cuts it into a small clip with its sound (H.264/AAC MP4, within 640×360, at most 30 fps, at most 8,000,000 bytes) in a temp file deleted afterwards, and measures that window.
+- One analyst call per chunk: the clip + measurements + song title → visual, music, quality flags. Quality flags are unintended problems only; a deliberate glitch or distortion style is not one.
+- Call settings: JSON schema, `store: false`, no temperature; thinking level and output cap per agent (analyst: low thinking, low media resolution, 2048 tokens; picks: 8192 tokens).
+- When the provider is rate-limited or overloaded (429, 503), the step returns at once with "model busy" and the page calls again. A spent daily quota returns "model quota spent" and no provider call runs until the reset. Every step stays under about 2 minutes, one 110 s budget shared by media work, model calls and retries.
 - [ ] Model-emitted dB/LUFS numbers are stripped.
-- [ ] Per-chunk timeout 90s, counted after the model is up. A parse failure retries once, then keeps the raw text.
-- [ ] Two consecutive chunk failures set `FAILED`; finished chunks stay visible. Loading and busy count as waits.
+- [ ] Per-call timeout 90 s, within the step's budget. A parse failure retries once, then keeps the raw text.
+- [ ] Two consecutive chunk failures set `FAILED`; finished chunks stay visible. Busy and quota count as waits.
 - [ ] Retry on a `FAILED` job resumes at the failed chunk.
 
 **R4 · Smart pick**
 
-- Chunk results + audience evidence + FLR's 3 most recent videos (identity only; 3 keeps the pick inside the model's 8K context) + Nathan's feedback → one `title, description, hashtags[], tags[], brandCheck`.
+- Chunk results + audience evidence + FLR's 3 most recent videos (identity only) + Nathan's feedback → one `title, description, hashtags[], tags[], brandCheck`.
 - `flags[]` are never the model's. The server builds them from ffmpeg's measurements, the Short notice, and the windows' own quality flags, each once. A free-form flag field let the model restate the video's look as problems.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, `order=viewCount`, `maxResults=50`, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length. One search page, with no pagination or refill.
@@ -98,13 +97,13 @@
   - Research is stored separately in `job_audience` with its original retrieval time. All evidence reads use `job_audience_fresh`, whose database predicate excludes rows at least 30 days old; a daily Neon Function deletes expired rows even without app activity. Retries and Shorts never extend the retrieval time. Re-picking after expiry fetches fresh research.
   - After expiry, existing drafts retain only their selected tags and hashtags for approval validation; the full research pool is unavailable.
 - FLR's recent uploads supply identity only: credit lines (his full name included) and how the artist is named. Their structure, tags, and hashtags are not copied.
-- Every run reads as Nathan until spec 002 makes voice per artist: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
+- Every run reads as Nathan until spec 005 makes voice per artist: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
 - The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
 - The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
-- Thumbnails go to the model as base64 data URLs.
+- Thumbnails go to the model as inline images.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.
 - [ ] Every hashtag in the description and every tag is in the job's candidate lists.
 - [ ] No tag contains the song title.
@@ -141,7 +140,7 @@
 - The status page drives the run: it calls the next step until the job reaches review.
 - The home page lists only the signed-in user's jobs, newest first, with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
 - Resume depends on the seven-day media lifecycle. Missing media gets a clear new-upload requirement; saved metadata stays visible.
-- [ ] Chunk N/M or a named wait ("waking model", "waiting on another run") is always on screen.
+- [ ] Chunk N/M or a named wait ("model busy", "model quota spent") is always on screen.
 - [ ] Reloading the page resumes from the next unfinished step.
 - [ ] A step's claim on the job expires after 3 minutes, so an aborted request frees the job.
 
@@ -171,7 +170,7 @@
 
 - Every job belongs to the user who made it; anyone else gets not-found.
 - User-specific caches and credentials are isolated by user and, where needed, channel. Check ownership before issuing a signed media URL; already-issued URLs retain their bounded expiry after sign-out.
-- Until spec 002, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
+- Until spec 004, there's one artist profile (FLR). Only the user linked to it reads or writes its memory and recent-video identity, or opens the brand guide. Other users' picks run without artist memory or identity, and their feedback stays on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
 - The database has no client access: only the app (restricted pooled URL from Secret Manager), migrations, and the invite script (owner's direct URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
@@ -183,9 +182,9 @@
 
 - SDK: `@sentry/sveltekit` 11.4.0.
 - One job = one trace. Job creation saves `sentry-trace` and `baggage` on the job doc. The status page renders them as `<meta>` tags, so the browser continues the job's trace and every step request carries it. Reloads land in the same trace.
-- Each model call is an `invoke_agent` span (`chunk-analyst` or `smart-pick`) wrapping a `chat gemma-4-12b-it` span with provider `llama.cpp`, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
+- Each model call is an `invoke_agent` span (`chunk-analyst`, `smart-pick`, `hook-pick` or `brand-guide`) wrapping a `chat <model>` span with provider `gcp.gemini`, the call's actual model, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
 - The hashtag search is an `execute_tool hashtag_search` span inside `smart-pick`, with the query and candidate count.
-- Audio and images are recorded as placeholders, keeping Nathan's audio out of Sentry.
+- Video and images are recorded as placeholders (type, MIME, bytes, and the clip's time range), keeping Nathan's media out of Sentry. Prompt, reply and reasoning text are kept for every agent; credentials and signed-URL queries are scrubbed.
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
 - Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
@@ -198,7 +197,7 @@
 
 - A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request from a video in review or later. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
 - The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
-- **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
+- **hook:** one pick-model call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.
 - **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
 - **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
@@ -209,24 +208,23 @@
 
 ## System Design
 
-One Cloud Run service for the app and one Vertex AI endpoint for the model, both in Ashley's project.
+One Cloud Run service for the app in Ashley's project, and one model provider, the Gemini API.
 
-| Piece                                | Runs                                                                                                                                                                                           |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app` (Cloud Run, ingress)           | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                                                                                                           |
-| `model` (Vertex AI endpoint, one L4) | `llama-server` + Google's official Gemma 4 12B-it QAT Q4_0 GGUF + its mmproj, weights baked in and checksum-verified, port 8081 in the container; `/props` reports `vision: true, audio: true` |
+| Piece                      | Runs                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `app` (Cloud Run, ingress) | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                   |
+| Gemini API (paid tier)     | `gemini-3.8-flash` (analyst), `gemini-4-argon` (smart pick, hook pick, brand guide); set by app config |
 
 - **App service:** 2 vCPU / 8 GiB, max 1, min 0, 60-min request timeout. No GPU.
-- **Model endpoint:** a dedicated endpoint with one `g2-standard-4` replica (4 vCPU, 16 GiB, one L4), the same model image as a custom container. Invoke routes (`invokeRoutePrefix: "/*"`) pass `llama-server`'s own paths through, so the app calls `/v1/chat/completions`, `/health`, and `/slots` unchanged. The app authenticates with its service account ([custom container requirements](https://docs.cloud.google.com/vertex-ai/docs/predictions/custom-container-requirements)).
-- **Scale to zero:** `minReplicaCount: 0`, `maxReplicaCount: 1`, idle scale-down and min scale-up periods at the 5-minute floor. A request to a scaled-down endpoint gets a 429 and starts a replica; the step maps it to "waking model". The feature is Preview, needs a dedicated (not shared public) endpoint, can stock out on scale-up, and undeploys a model idle for 30 days ([autoscaling](https://docs.cloud.google.com/vertex-ai/docs/predictions/autoscaling)).
-- **Why Vertex:** Cloud Run's L4 quota for the project is 0 and two increase requests were denied. Vertex's L4 serving quota in us-central1 is 2 without a request. Audio still never leaves the project.
-- **Cost:** about $0.81/hr while a model replica is up (`g2-standard-4` online inference, L4 included), billed for at least 5 minutes per wake. The app bills only while serving. $0 when nobody visits.
+- **Model client:** the AI SDK (`ai` + `@ai-sdk/google`) through the Interactions API, in `src/lib/server/ai/model.ts` only. One authorization key from Secret Manager; model names are configuration, so a model or provider change touches only that file and config.
+- **Retention:** `store: false` turns off stored interactions. Google still keeps prompts and replies up to 55 days for abuse monitoring, where authorized staff may review flagged ones, and caches implicitly. The app requests no explicit cache, file upload or grounding.
+- **Cost:** per token, $0 idle. A 15-minute job is about $0.25 at the post-increase prices. The app bills only while serving.
 - **Storage:** one GCS bucket, `uploads/`.
 - **State:** Neon Postgres through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
 - **Region:** us-central1 for everything on Google Cloud. The database is the one exception: Neon runs in `aws-us-east-2`.
 - **Pipeline:** runs in the app container while Nathan watches. The status page calls `POST /api/jobs/{id}/step`; each call does one step and returns the job.
   - **prep:** probe and measure the whole file.
-  - **analyze:** cut and analyze one 29.5s window per call.
+  - **analyze:** cut and analyze one 60 s window per call.
   - **pick:** hashtag search, then smart pick → job to `REVIEW`.
   - **hook** (Short jobs): pick the hook window, place the cut from loudness.
   - **render** (Short jobs): cut and reframe to 9:16 into GCS → job to `REVIEW`.
@@ -248,7 +246,7 @@ Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3
 - **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and the signed-in user's channel stats from `channels.list` top right.
 - **Left pane, the tape:**
   - Video monitor (R2), with filename, resolution (short side, marked vertical when taller than wide), and timecode overlays.
-  - State chip + magenta progress bar + model label (`gemma-4-12b-it · 52s`, total model time for the job; it ticks live while the pick runs).
+  - State chip + magenta progress bar + model label (`Configured analyst: <model>` during prep and analysis, `Configured picker: <model>` after) and, separately, `Total model time: <seconds>s`, which ticks live while the pick runs. The label is the current configuration, not proof of which model made an older result.
   - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
 - **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
   - Above both tabs, "Check before uploading" lists the flags as a warning (⚠, yellow outline), since an audio or video problem matters wherever the song goes.

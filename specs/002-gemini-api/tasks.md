@@ -37,12 +37,12 @@ description: 'Task list for the Gemini API swap'
   - **If B or C wins:** before T002, update the analyst defaults (model, `mediaResolution`, `thinkingLevel`) and the analyst's minimum call budget (8 s), plus R5, R6 and the SC-006 math, in spec.md, plan.md, data-model.md, contracts/model-client.md and quickstart.md.
   - **If nothing passes:** stop and reopen the spec.
   - **Keep the Gemma endpoint** until the baseline is captured.
-- [ ] T002 Update docs/prd.md (FR-016) before any behavior code; the constitution treats code that disagrees with the PRD as a stop:
+- [x] T002 Update docs/prd.md (FR-016) before any behavior code; the constitution treats code that disagrees with the PRD as a stop:
   - The provider and model lines (T001's analyst choice).
   - The "audio stays in the project" line and the third-party-inference non-goal.
   - System Design and cost.
   - Wait names and the model label.
-- [ ] T003 Update AGENTS.md (AI-only, directives only) before any code task, so agents don't follow Gemma rules:
+- [x] T003 Update AGENTS.md (AI-only, directives only) before any code task, so agents don't follow Gemma rules:
   - Replace the Model architecture line with Gemini API via `src/lib/server/ai/model.ts`.
   - Replace the Gemma call settings (temperature 0.2, `max_tokens`, `reasoning_content`, 29.5 s windows) with the per-agent R5 settings and 60 s windows.
   - Replace "scaled to zero (429), loading" with `model busy` / `model quota spent`.

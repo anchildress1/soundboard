@@ -34,17 +34,19 @@ Audience: AI coding agents. Directives only.
 - ffmpeg and the YouTube upload read sources from GCS by signed URL.
 - NEVER buffer whole media in app memory. Stream in chunks or keep it on disk.
 - Short renders: temp file in `os.tmpdir()` → `uploadFile` → delete in `finally` → ffprobe read-back from GCS.
-- Sentry: NEVER record audio or image bytes. Use `{type, mime, bytes}` placeholders.
+- Analyst clips: temp file in `os.tmpdir()`, `stat` ≤ 8,000,000 bytes before reading, sent inline, deleted in `finally`. NEVER send the model a URL.
+- Sentry: NEVER record audio, image or video bytes. Use `{type, mime, bytes}` placeholders; video adds `clip: '<start>s–<end>s'`. Keep prompt and reply text for every agent.
 
 ## Architecture
 
 - App: one Cloud Run service, max 1 instance, no GPU.
-- Model: one Vertex AI dedicated endpoint, one `g2-standard-4` (one L4), scale to zero, max 1 replica. App → `llama-server` paths via invoke routes, service-account auth.
+- Model: Gemini API, paid tier, through the AI SDK Interactions provider. Only `src/lib/server/ai/model.ts` imports `ai` or `@ai-sdk/google`. One credential: `GEMINI_API_KEY`; NEVER add OAuth headers to model calls.
 - NEVER add other services, queues, Cloud Functions, Eventarc, or background workers. Two exceptions (constitution III): spec 006's server-side research and learning stages, and one scheduled database job that deletes expired YouTube statistics.
 - Pipeline is page-driven: one step per `POST /api/jobs/{id}/step`, each under ~2 minutes.
-- Model scaled to zero (429), loading, or busy → return a wait reason immediately. NEVER block a step on it.
+- Provider 429 or 503 → `model busy`; a per-day quota 429 → `model quota spent` with `limitUntil` set. Return the wait immediately; NEVER retry it inside a step or count it as a failure.
+- One 110 s deadline per step, started on claimed-step entry and shared by media work, model calls and the re-ask. NEVER start a fresh one in a helper.
 - Each step claims the job with one conditional `UPDATE … RETURNING` (claim token, 3-minute expiry). Release only with the matching token.
-- Gemma calls: temperature 0.2, `max_tokens` ≥ 2048, JSON schema, parse `content` (not `reasoning_content`). Audio windows: 29.5 s.
+- Model calls: JSON schema via `Output.object`, `store: false`, `maxRetries: 0`, `telemetry: { isEnabled: false }`, no temperature. Per agent: analyst `low` thinking + `mediaResolution: 'low'` + 2048 tokens; smart pick and brand `medium`, hook `low`, each 8192 tokens. Windows: 60 s.
 
 ## Stack
 
@@ -58,12 +60,12 @@ Audience: AI coding agents. Directives only.
 - Import app code via `$lib` / `$routes`. NEVER relative paths into `src/`.
 - Coverage floors: 85% lines/functions/statements, 80% branches. NEVER lower.
 - Every new module: positive, negative, error, and edge-case tests.
-- Mock at process boundaries only (GCS, KMS, `google-auth-library`, Google/YouTube HTTP via `fetch`, `llama-server`, ffmpeg). NEVER mock internal modules.
+- Mock at process boundaries only (GCS, KMS, `google-auth-library`, Google/YouTube/Gemini HTTP via `fetch`, ffmpeg). NEVER mock internal modules or the AI SDK.
 - NEVER mock the database. `$lib/server/core/db` aliases to `tests/helpers/db.ts` (PGlite, real migrations) in `vitest.config.ts`; seed rows through it.
 - `@sentry/sveltekit` is mocked globally (`tests/mocks/sentry.ts`). Assert through that mock. NEVER load the real SDK in tests.
 - E2E projects: desktop Chrome and Pixel 7. Pixel 7 is the primary path.
-- E2E builds swap the db module, KMS, and Storage for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
-- E2E has no `llama-server`: model steps end at the "waking model" wait.
+- E2E builds swap the db module, KMS, Storage, and window media (`src/lib/server/media/window.ts`) for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
+- E2E has no live model and no ffmpeg: the `tests/e2e/fakes/gemini.ts` preload answers Gemini HTTP with 429, so model steps end at the "model busy" wait.
 
 ## Workflow
 
