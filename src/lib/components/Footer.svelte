@@ -13,12 +13,7 @@
     >
     by <b>Ashley Childress</b>
   </p>
-  <div class="service-links">
-    <a class="youtube" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">
-      <img src="/youtube-icon.png" alt="YouTube" width="251" height="215" />
-    </a>
-    <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
-  </div>
+  <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). -->
     <a
@@ -112,18 +107,6 @@
   b {
     color: var(--ink);
     font-weight: 500;
-  }
-
-  .service-links {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .youtube img {
-    display: block;
-    width: 52px;
-    height: auto;
   }
 
   .artist:hover,
