@@ -952,11 +952,9 @@ describe('job page: Short room', () => {
     return rendered;
   }
 
-  it('resumes driving a running Short on reload without driving the video in review', async () => {
+  it('resumes driving a running Short on reload without driving the finished video', async () => {
     fetchMock.mockImplementation(hang);
-    setup(view({ state: 'REVIEW', shortId: 's1' }, { pick: PICK }), {
-      short: shortView('RENDER'),
-    });
+    setup(verified({ shortId: 's1' }), { short: shortView('RENDER') });
     await waitFor(() => expect(paths()).toEqual([SHORT_STEP_PATH]));
   });
 

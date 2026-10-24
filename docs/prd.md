@@ -196,7 +196,7 @@
 
 **R13 · Short**
 
-- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request from a video in review or later. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
+- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request once the video is approved. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
 - The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
 - **hook:** one Gemma call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.

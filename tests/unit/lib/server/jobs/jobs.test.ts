@@ -491,7 +491,7 @@ describe('createShort', () => {
       'p',
     );
     await patch('p', {
-      state: 'REVIEW',
+      state: 'VERIFIED',
       probe: { durationSec: 180, width: 1920, height: 1080, hasAudio: true },
       hashtagCandidates: [SYNTHWAVE],
       audience: {
@@ -575,22 +575,25 @@ describe('createShort', () => {
     expect(await createShort(job, SHORT_SOURCE_STATES, 's3')).toEqual({ id: 's3' });
   });
 
-  it('refuses a parent that left the allowed states, or is missing', async () => {
+  it('refuses a parent outside the allowed states, or missing', async () => {
     const job = await parent({ state: 'DISCARDED' });
     expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toBeNull();
     expect(await exists('s1')).toBe(false);
     expect(await createShort({ ...job, id: 'ghost' }, SHORT_SOURCE_STATES)).toBeNull();
+    // A video still in review has nothing approved to cut from.
+    await patch('p', { state: 'REVIEW' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toBeNull();
   });
 
   it('starts from the approved fields over the pick, as read inside the transaction', async () => {
-    const stale = await parent();
+    const stale = await parent({ state: 'PUBLISHING' });
     const final = {
       title: 'Approved',
       description: 'Mine.',
       hashtags: [],
       tags: ['synthwave'],
     };
-    await patch('p', { state: 'PUBLISHING', finalFields: final });
+    await patch('p', { finalFields: final });
     expect(await createShort(stale, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
     expect(await listPicks('s1')).toEqual([{ ...pick(3), ...final, version: 1, skipped: false }]);
   });

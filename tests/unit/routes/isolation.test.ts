@@ -99,7 +99,7 @@ beforeEach(async () => {
     const video = jobDoc({
       id,
       ...owner,
-      state: 'REVIEW',
+      state: 'VERIFIED',
       object: `uploads/${id}`,
       probe: PROBE,
       pickVersion: 1,
