@@ -56,6 +56,7 @@ type ModelRequest = { system: string; turns: Turn[] };
 
 - `WINDOW_SEC = 60` (was 29.5, Gemma's audio cap). Chunk count = `ceil(duration / 60)`: 15 for a 15-minute video.
 - Existing jobs aren't migrated (pre-beta). A job mid-analysis at deploy restarts from prep, which recomputes `chunkCount`.
+- A Short from a job whose stored `chunkCount` ≠ `chunkCount(sourceDurationSec)` (analyzed with 29.5 s windows) takes the "new upload required" path before the hook pick.
 - `FRAMES_PER_WINDOW` and `extractWindow` are removed. `cutWindowClip` writes the window's 360p clip to a temp file, and `measureWindow` keeps the window measurements.
 
 ## Unchanged invariants

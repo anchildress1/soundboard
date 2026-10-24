@@ -31,6 +31,12 @@
 - Q: Can YouTube API data appear in model-call traces? → A: No. Traces keep the song title, notes and model output, but YouTube-sourced text and images are replaced by placeholders, so no API data sits in a third-party store past 30 days (III.E.4).
 - Q: The pick now receives up to 10 separate candidate lists (#20). Does the latency target still hold? → A: It must. The pick is re-timed at that prompt size before the pick changes are built.
 
+### Session 2026-10-24
+
+- Q: What happens when someone makes a Short from a job analyzed before the swap (29.5 s windows), now that the hook position uses 60 s windows? → A: Refuse it. A job whose stored chunk count doesn't match its duration at 60 s windows takes the existing "new upload required" path. No schema change.
+- Q: Is Gemini on Vertex AI a zero-retention fallback if Google's 55-day abuse log counts against YouTube's 30-day limit? → A: No, so the fallback is dropped. Without a Master Agreement, Vertex logs Gemini prompts for up to 90 days. Its only 30-day "Frontier" model is an allowlisted cybersecurity variant of Argon.
+- Q: Is Flash good enough to hear the music? G1 only used a synthetic video. → A: Unproven. Gate G2 runs Flash (planned settings), Flash (default settings) and Argon on a few of Nathan's real videos, scored against today's Gemma output. The analyst is built only after it passes.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - A job reaches review with no GPU running (Priority: P1)
@@ -104,6 +110,7 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - The source object hit the 7-day delete rule: the job follows the existing "missing media, new upload required" path.
 - A provider safety block or empty reply: treated like a parse failure (retry once, keep raw text).
 - The last window is shorter than the window length: the model sees only what remains, as today.
+- A Short requested from a job analyzed before the swap (29.5 s windows): its chunk count doesn't match its duration at 60 s windows, so it takes the "new upload required" path instead of placing the hook in the wrong window.
 - A provider price change: model names are configuration, so moving the analyst to the Lite model needs no code change.
 - A pick with all 10 candidate lists full plus 5 example videos: it still meets the pick latency target, or the plan lowers its thinking level before raising any budget.
 - A failed call whose error message quotes a prompt fragment: YouTube-sourced text in it is redacted the same way as in spans.
@@ -134,11 +141,12 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - **FR-019**: YouTube API data sent to the model MUST be used for that one call only. The app MUST NOT ask the provider to store it (no interaction storage, caching, file uploads or grounding). The only provider copy MUST be Google's abuse-monitoring log, which is kept up to 55 days and used solely for policy enforcement. The app MUST keep it no longer than 30 days. Drafts informed by it MUST be new content for the requesting user's own upload, never metrics, scores or replacements for YouTube's data (III.E.4.h, per the owner's stated interpretation).
 - **FR-020**: The artist's own authorized channel data (recent videos, thumbnails) MUST be sent to the model only for that artist's own request, and MUST never be shown to another user (III.E.3.b).
 - **FR-021**: The smart pick MUST meet its latency target with the full prompt from #20: up to 10 separate candidate lists plus 5 example videos.
+- **FR-022**: Before the analyst is built, gate G2 MUST record a comparison on 3–5 of Nathan's real videos covering three configurations: Flash at the planned low media resolution and low thinking, Flash at default resolution and medium thinking, and Argon. Each is scored per window against today's Gemma analysis of the same videos for genre terms, instruments, vocals and quality flags. The analyst ships on the cheapest configuration that's at least as good as Gemma. If none is, the spec reopens.
 
 ### Key Entities
 
 - **Job**: unchanged. Nothing provider-side is stored; each window's clip is a temporary file deleted at the end of its step. Chunks keep today's shape, one per 60 s window.
-- **Model setting**: two configured model names, analyst and picker.
+- **Model setting**: two configured model names, analyst and picker. G2 (FR-022) can change the analyst's default model, media resolution and thinking level.
 
 ## Success Criteria _(mandatory)_
 
@@ -165,7 +173,7 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - Temperature and thinking level follow Gemini's guidance per agent, chosen in planning; today's 0.2 isn't kept by default.
 - Argon's intro price doubles on 2026-12-01 and Flash's on 2027-01-01. SC-006 uses the higher prices.
 - E2E keeps no live model: model steps end at a faked provider wait, as they end at "waking model" today.
-- Pre-beta: no migration of in-flight jobs. A job mid-analysis at deploy restarts from prep.
-- Google's abuse-monitoring log keeps prompts, including any YouTube API data in them, for up to 55 days. Whether a processor's own enforcement log counts toward YouTube's 30-day limit (III.E.4) is unsettled. If the audit or the owner decides it does, the client switches to Gemini on Vertex AI, which offers guaranteed zero data retention. That's a configuration change, per research R1.
+- Pre-beta: no migration of in-flight jobs. A job mid-analysis at deploy restarts from prep. A job already past analysis keeps its review, but a Short from it needs a new upload (Edge Cases).
+- Google's abuse-monitoring log keeps prompts, including any YouTube API data in them, for up to 55 days. Whether a processor's own enforcement log counts toward YouTube's 30-day limit (III.E.4) is unsettled. No fallback is planned. Vertex AI isn't one: without a Google Cloud Master Agreement it logs Gemini prompts for up to 90 days. If the audit or the owner decides the log counts, this spec reopens.
 - The owner's interpretation of III.E.4.h (drafts are new content, not derived data) is a stated position, not a YouTube ruling. The audit application describes it, and an audit answer that contradicts it reopens this spec.
 - Genre-search evidence storage (the `job_audience` table, the fresh-evidence view and the daily cleanup) shipped in #20 and is unchanged here.

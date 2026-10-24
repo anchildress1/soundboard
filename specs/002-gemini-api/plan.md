@@ -127,14 +127,15 @@ docs/prd.md, README.md, AGENTS.md, src/routes/privacy/+page.svelte, .specify/mem
 ## Delivery order
 
 1. **Gate G1:** done on 2026-10-22 (research R12). The long-file failure led to inline window clips.
-2. **Model client + tracing**, with unit tests. Agents compile against the new `ModelRequest`.
-3. **Analyst + ffmpeg `cutWindowClip` and `measureWindow`** (60 s windows).
-4. **G1 follow-up: re-time the pick at the full #20 prompt size**: done on 2026-10-23, p95 10.5 s (research R13).
-5. **Pick, hook and brand on the new client**, with YouTube-sourced parts marked and redacted.
-6. **Waits:** `model busy` and `model quota spent` through pipeline, brand, view, UI, driver tests.
-7. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (model module, storage fixture).
-8. **Docs:** PRD, AGENTS.md, README, the privacy page (the constitution is already at 2.0.0).
-9. **Deployed manual checks**, then the one-time teardown.
+2. **Gate G2: analyst quality on real music** (research R14). Blocks step 4. A pass on configuration B or C updates the analyst defaults first.
+3. **Model client + tracing**, with unit tests. Agents compile against the new `ModelRequest`.
+4. **Analyst + ffmpeg `cutWindowClip` and `measureWindow`** (60 s windows).
+5. **G1 follow-up: re-time the pick at the full #20 prompt size**: done on 2026-10-23, p95 10.5 s (research R13).
+6. **Pick, hook and brand on the new client**, with YouTube-sourced parts marked and redacted.
+7. **Waits:** `model busy` and `model quota spent` through pipeline, brand, view, UI, driver tests.
+8. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (model module, storage fixture).
+9. **Docs:** PRD, AGENTS.md, README, the privacy page (the constitution is already at 2.0.0).
+10. **Deployed manual checks**, then the one-time teardown. Teardown waits for G2 if it needs a fresh Gemma baseline.
 
 ## Complexity Tracking
 

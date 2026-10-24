@@ -14,7 +14,10 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 - **Rationale:** it hears audio and watches video in one call, so the analyst keeps today's inputs. It runs per token with no idle cost. It's a paid project, so prompts and responses are not used to improve Google's products.
 - **Alternatives:**
   - Claude: no audio input, so the analyst can't hear genre, instruments or vocals, and those genre terms seed the audience search (R4). Rejected.
-  - Gemini on Vertex AI (`enterprise: true`): same models, service-account auth. A fair second choice; switching later is a client option, not a rewrite.
+  - Gemini on Vertex AI (`enterprise: true`): same models, service-account auth. Rejected as a retention fallback (checked 2026-10-24):
+    - Without a Google Cloud Master Agreement, abuse monitoring logs Gemini prompts for up to 90 days, longer than the Developer API's 55.
+    - The 30-day tier covers only "Google Frontier Models". The only Gemini one is `gemini-4-argon-cyber-permissive`, allowlisted for defensive security work.
+    - Interactions there is Preview and `global`-endpoint only.
 
 ## R2 · SDK and API surface
 
@@ -84,6 +87,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 - **Temperature:** not sent. Interactions marks `generation_config.temperature` deprecated, and Gemini's guidance is to keep the default. AGENTS.md's "temperature 0.2" line is replaced.
 - **Thinking:** thinking tokens count against `max_output_tokens`, and the cap is a hard cutoff: it returns `incomplete` with empty or truncated output and still bills. So every Argon agent gets 8192, and cost and latency are controlled by `thinking_level` only.
 - **Analyst alternative:** `gemini-3.5-flash-lite` by setting `GEMINI_ANALYST_MODEL`. It's cheaper, but there's a risk on genre accuracy.
+- **Analyst row is provisional:** gate G2 (R14) can change its model, media resolution and thinking level.
 - **Pick alternatives:**
   - `gemini-3.1-pro-preview`: preview only, can churn. Rejected.
   - `gemini-3.8-flash` at high thinking: cheaper. Rejected per user choice.
@@ -143,7 +147,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 ## R9 · Privacy and retention
 
 - `store: false` on every interaction. Without it, interactions are stored for 55 days on the paid tier. `store: false` turns off that state storage only.
-- Abuse monitoring is separate. Google logs prompts and responses for up to 55 days, solely to enforce its Prohibited Use Policy and never for training, and `store: false` doesn't turn it off. Guaranteed zero data retention is offered only on Vertex AI. The app also uses no context caching, no file uploads and no grounding, each of which would add provider storage.
+- Abuse monitoring is separate. Google logs prompts and responses for up to 55 days, solely to enforce its Prohibited Use Policy and never for training, and `store: false` doesn't turn it off. No provider option shortens it for this project (R1). The app also uses no context caching, no file uploads and no grounding, each of which would add provider storage.
 - Paid-tier terms: content is not used to improve Google products. Abuse-monitoring logging still applies under Google's terms.
 - Sentry (see also R13 for YouTube-sourced text and images):
   - Video parts become `{type: 'video', mime, bytes, clip}`: the byte count and the `<start>s–<end>s` range, never the data.
@@ -230,7 +234,7 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
   - The Sentry paragraph also changes: YouTube-sourced text and images are replaced by placeholders.
 - **FR-019: the owner's III.E.4.h position.**
   - **Decision:** drafts informed by YouTube API data are new content for the user's own upload, not metrics, scores or replacements for YouTube data.
-  - API data is used per call only. The app asks the provider to store nothing (`store: false`, no caching, files or grounding). The only provider copy is Google's 55-day abuse-monitoring log, and whether that counts toward III.E.4 is unsettled (spec Assumptions; the fallback is Vertex AI zero retention). App storage stays under #20's 30-day view and daily cleanup.
+  - API data is used per call only. The app asks the provider to store nothing (`store: false`, no caching, files or grounding). The only provider copy is Google's 55-day abuse-monitoring log, and whether that counts toward III.E.4 is unsettled, and no fallback is planned (spec Assumptions, R1). App storage stays under #20's 30-day view and daily cleanup.
   - The YouTube audit application describes this use.
   - **Risk:** this is a stated position, not a YouTube ruling. A contrary audit answer reopens the spec.
 - **FR-020: the artist's own authorized data (III.E.3.b).**
@@ -242,3 +246,21 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
     - The prompt is 10 full candidate lists (40 tags and 30 hashtags each), 5 top videos and 3 recent uploads: about 30k input tokens each, about $0.30 total at post-increase prices.
   - **Pass:** p95 ≤ 45 s. If it fails, lower the thinking level before raising any budget.
   - **Status:** passed on 2026-10-23. All 5 runs succeeded at 12.7k input tokens (about 0.4k output) with a p95 of 10.5 s, for $0.15 in total. The smart-pick minimum call budget stays at the G1 value of 33 s, the slower of the two measurements.
+
+## R14 · Manual gate G2: analyst quality on real music (FR-022): pending
+
+- **Why:** G1 used a synthetic video (a seconds counter and a spoken "Window N"). It proved clip handling, not whether Flash hears genre, instruments and vocals. Those genre terms seed the audience search, so a weak analyst degrades every candidate list.
+- **Videos:** 3–5 of Nathan's real uploads, covering different sounds and at least one long video.
+- **Baseline:** Gemma's chunk analyses of the same videos, from stored jobs where they exist, otherwise a run on the current endpoint before teardown (FR-014). Each 60 s window is compared with the Gemma windows it covers.
+- **Configurations:**
+
+  | #   | Model              | `mediaResolution` | `thinkingLevel` |
+  | --- | ------------------ | ----------------- | --------------- |
+  | A   | `gemini-3.8-flash` | `low`             | `low`           |
+  | B   | `gemini-3.8-flash` | default           | `medium`        |
+  | C   | `gemini-4-argon`   | default           | `medium`        |
+
+- **Scoring, per window:** genre terms, instruments, vocals (present, style), and quality flags, each judged at least as good as Gemma, or worse. Nathan's own description of each song breaks ties.
+- **Pass:** the analyst ships on the cheapest configuration (A, then B, then C) that's at least as good as Gemma. A pass on B or C updates R5 and R6 before the analyst is built. If none passes, the spec reopens.
+- **Cost:** under $1 at post-increase prices (about 5.5k input tokens per window).
+- **Record:** a table here per video and configuration, with tokens and latency, like R12.
