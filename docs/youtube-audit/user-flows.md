@@ -24,7 +24,7 @@ sequenceDiagram
   Google-->>App: Identity and granted permissions
   Note over App: Check app access before creating a session
   alt YouTube consent incomplete
-    App-->>Artist: Signed in; reconnect required before approval
+    App-->>Artist: Signed in, reconnect required before approval
     Artist->>App: Connect or Reconnect on Connections
     App-->>Artist: Redirect to Google consent
     Artist->>Google: Grant missing YouTube permissions
@@ -52,7 +52,7 @@ sequenceDiagram
     App->>Model: Check readiness
     alt Model busy, loading or scaled to zero
       Model-->>App: Not ready
-      App-->>Artist: Show wait reason; page retries later
+      App-->>Artist: Show wait reason, page retries later
     else Model ready
       App->>Storage: Read current window
       Storage-->>App: Media stream
@@ -63,23 +63,23 @@ sequenceDiagram
   end
 
   Artist->>App: Page requests pick step
-  App->>YouTube: search.list for genre; videos.list for details
+  App->>YouTube: search.list for genre, videos.list for details
   YouTube-->>App: Genre evidence
-  Note over App: Separate per-video candidate lists; timestamp research
+  Note over App: Separate per-video candidate lists, timestamp research
   App->>Model: Analysis, genre evidence and artist identity
   Model-->>App: Draft title, description and tags
   App-->>Artist: Editable draft, destination channel, private visibility
   Artist->>App: Review, edit and Approve & upload
-  App->>App: Validate fields and grant; pin approved channel
+  App->>App: Validate fields and grant, pin approved channel
   Artist->>App: Page requests upload step
   App->>Storage: Stream approved source video
   Storage-->>App: Media stream
   App->>YouTube: videos.insert, resumable, private, artist OAuth
   alt Upload outcome unknown
-    App-->>Artist: Pause; check YouTube Studio and supply URL or discard
-    Note over Artist,YouTube: Validate supplied video's ownership before resuming verification; never blindly re-upload
+    App-->>Artist: Pause, check YouTube Studio and supply URL or discard
+    Note over Artist,YouTube: Validate supplied video's ownership before resuming verification, never blindly re-upload
   else Video ID returned
-    YouTube-->>App: Video ID; claimed complete
+    YouTube-->>App: Video ID, claimed complete
     Artist->>App: Page requests verification step
     App->>YouTube: videos.list with owner's grant
     YouTube-->>App: Upload status and video details
