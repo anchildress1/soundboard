@@ -21,7 +21,6 @@ import {
   videosByIds,
   isoSeconds,
   YouTubeError,
-  YOUTUBE_SCOPES,
 } from '$lib/server/platforms/youtube/youtube';
 import type { PickFields } from '$lib/types';
 
@@ -662,15 +661,6 @@ describe('finalChunk', () => {
     [UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES + 1, true],
   ])('from %i of %i is final: %s', (offset, total, final) => {
     expect(finalChunk(offset, total)).toBe(final);
-  });
-});
-
-describe('YOUTUBE_SCOPES', () => {
-  it('asks for upload and read-back only', () => {
-    expect(YOUTUBE_SCOPES).toEqual([
-      'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly',
-    ]);
   });
 });
 

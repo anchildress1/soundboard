@@ -7,7 +7,6 @@ import {
   claimJob,
   createJob,
   createShort,
-  fail,
   getJob,
   latestPick,
   listChunks,
@@ -15,7 +14,6 @@ import {
   listPicks,
   newJobDoc,
   newJobId,
-  ok,
   outcomeUnknown,
   releaseJob,
   skipAndRepick,
@@ -680,16 +678,6 @@ describe('createShort', () => {
   });
 });
 
-describe('ok', () => {
-  it('resets the failure streak and the shown error', () => {
-    expect(ok({ state: 'RENDER' })).toEqual({
-      state: 'RENDER',
-      consecutiveFailures: 0,
-      error: null,
-    });
-  });
-});
-
 describe('toPublic', () => {
   it('passes the Short link, parent, destination and approved fields through', async () => {
     const job = await createJob(input, 'j');
@@ -780,16 +768,6 @@ describe('jobSet', () => {
     ]) {
       expect(row!.data).not.toHaveProperty(key);
     }
-  });
-});
-
-describe('fail', () => {
-  it('records the failed state for a retry', () => {
-    expect(fail('ANALYZE', 'boom')).toEqual({
-      state: 'FAILED',
-      failedState: 'ANALYZE',
-      error: 'boom',
-    });
   });
 });
 

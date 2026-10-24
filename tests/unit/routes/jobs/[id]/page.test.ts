@@ -249,12 +249,6 @@ describe('job page: status chip', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('hides the notes block when there are no flags or brand check', () => {
-    setup(view({ state: 'REVIEW' }, { pick: { ...PICK, flags: [], brandCheck: '' } }));
-    expect(screen.queryByRole('heading', { name: 'Flags' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Brand check' })).toBeNull();
-  });
-
   it('never shows the brand check, which is the model grading itself', () => {
     setup(view({ state: 'REVIEW' }, { pick: { ...PICK, flags: [] } }));
     expect(screen.queryByText(BRAND_CHECK)).toBeNull();

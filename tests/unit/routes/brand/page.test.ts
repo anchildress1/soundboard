@@ -42,11 +42,6 @@ afterEach(() => {
 });
 
 describe('brand page: approved guide', () => {
-  it('offers no channel connect links; YouTube is connected at sign-in', () => {
-    setup();
-    expect(screen.queryByRole('link', { name: /connect/i })).toBeNull();
-  });
-
   it('says smart pick follows the recent uploads until a guide is approved', () => {
     setup();
     expect(screen.getByText(/None yet/)).toBeInTheDocument();

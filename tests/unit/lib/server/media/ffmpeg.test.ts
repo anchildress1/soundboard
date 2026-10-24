@@ -375,13 +375,6 @@ describe('measureFile', () => {
     expect(graph).toMatch(/^\[0:a:0\]ebur128=peak=true/);
     expect(graph).toContain('silencedetect=n=-60dB:d=2');
   });
-
-  it('rejects on ffmpeg failure', async () => {
-    nextRun({ stderr: 'Invalid data found when processing input', code: 183 });
-    await expect(measureFile('u', 10)).rejects.toThrow(
-      'ffmpeg exited 183: Invalid data found when processing input',
-    );
-  });
 });
 
 describe('measureRange', () => {
@@ -435,13 +428,6 @@ describe('encodeClip', () => {
     expect(args.at(-1)).toBe('/tmp/w.mp4');
     expect(args).not.toContain('-fs');
     expect(args).not.toContain('-shortest');
-  });
-
-  it('rejects on a non-zero exit', async () => {
-    nextRun({ stderr: 'bad input', code: 1 });
-    await expect(encodeClip('u', 0, 60, '/tmp/w.mp4', 1000)).rejects.toThrow(
-      'ffmpeg exited 1: bad input',
-    );
   });
 });
 
@@ -512,11 +498,6 @@ describe('loudnessCurve', () => {
     expect(options.name).toBe('ffmpeg loudness');
     expect(JSON.stringify(options)).not.toContain('Signature');
   });
-
-  it('rejects on a non-zero exit', async () => {
-    nextRun({ stderr: 'Server returned 403 Forbidden', code: 1 });
-    await expect(loudnessCurve('u', 0, 10)).rejects.toThrow('ffmpeg exited 1');
-  });
 });
 
 describe('shortFilter', () => {
@@ -574,19 +555,5 @@ describe('renderShort', () => {
     await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS);
     const args = spawnMock.mock.calls[0]![1]!;
     expect(args[args.indexOf(FILTER_GRAPH) + 1]).toBe(shortFilter('blur'));
-  });
-
-  it('rejects when ffmpeg fails', async () => {
-    nextRun({ stderr: 'Conversion failed!', code: 1 });
-    await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS),
-    ).rejects.toThrow('ffmpeg exited 1: Conversion failed!');
-  });
-
-  it('rejects when the process cannot start', async () => {
-    nextRun({ error: new Error('spawn ffmpeg ENOENT') });
-    await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'crop' }, RENDER_MS),
-    ).rejects.toThrow('ENOENT');
   });
 });

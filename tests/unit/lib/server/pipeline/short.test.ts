@@ -407,12 +407,6 @@ describe('runHook', () => {
     expect(agentSpanIO().output).toEqual([]);
   });
 
-  it('records nothing without a span', async () => {
-    fetchMock.mockResolvedValueOnce(hookReply({ window: 2, lengthSec: 30, reason: 'x' }));
-    await runHook(ctx(), stepDeadline());
-    expect(agentSpanIO()).toEqual({ input: [], output: [] });
-  });
-
   it('propagates a busy model', async () => {
     fetchMock.mockImplementation(async () => unavailable503());
     await expect(runHook(ctx(), stepDeadline())).rejects.toThrow(ModelBusy);

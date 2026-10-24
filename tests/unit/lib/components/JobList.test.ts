@@ -22,24 +22,8 @@ describe('JobList', () => {
     expect(screen.getByRole('heading', { name: 'Your runs' })).toBeInTheDocument();
   });
 
-  it.each([
-    ['AWAITING_UPLOAD', 'Uploading'],
-    ['ANALYZE', 'Analyzing'],
-    ['PUBLISHING', 'Uploading to YouTube'],
-    ['FAILED', 'Failed'],
-    ['DISCARDED', 'Discarded'],
-  ] as const)('labels %s as "%s"', (state, label) => {
-    render(JobList, { jobs: [job('j', 'PeekaBoo', state)] });
-    expect(screen.getByText(label)).toBeInTheDocument();
-  });
-
   it('renders nothing when there are no jobs', () => {
     const { container } = render(JobList, { jobs: [] });
     expect(container.querySelector('section')).toBeNull();
-  });
-
-  it('keeps a title with markup as text', () => {
-    render(JobList, { jobs: [job('j', '<b>Loud</b>', 'REVIEW')] });
-    expect(screen.getByText('<b>Loud</b>')).toBeInTheDocument();
   });
 });

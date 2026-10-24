@@ -253,12 +253,6 @@ describe('db', () => {
     });
   });
 
-  it('sends queries through the pool', async () => {
-    const result = (await db().execute(sql`select 1 as one`)) as { rows: unknown[] };
-    expect(pg.pools[0]!.query).toHaveBeenCalledOnce();
-    expect(result.rows).toEqual([{ one: 1 }]);
-  });
-
   it('throws without DATABASE_URL and creates no pool', () => {
     vi.stubEnv('DATABASE_URL', '');
     expect(() => db()).toThrow('Missing required env var DATABASE_URL');

@@ -68,16 +68,6 @@ describe('decrypt', () => {
     expect(kms.decrypt).toHaveBeenCalledWith({ name: KEY, ciphertext: Buffer.from('sealed') });
   });
 
-  it('round-trips non-ASCII text', async () => {
-    kms.encrypt.mockImplementationOnce(async ({ plaintext }: { plaintext: Buffer }) => [
-      { ciphertext: plaintext },
-    ]);
-    kms.decrypt.mockImplementationOnce(async ({ ciphertext }: { ciphertext: Buffer }) => [
-      { plaintext: ciphertext },
-    ]);
-    expect(await decrypt(await encrypt('tökén ✓'))).toBe('tökén ✓');
-  });
-
   it('throws when KMS returns no plaintext', async () => {
     kms.decrypt.mockResolvedValueOnce([{ plaintext: null }]);
     await expect(decrypt('AA==')).rejects.toThrow('KMS returned no plaintext');

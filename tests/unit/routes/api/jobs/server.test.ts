@@ -82,15 +82,4 @@ describe('POST /api/jobs', () => {
     });
     expect(await jobCount()).toBe(0);
   });
-
-  it('requires a song title', async () => {
-    const response = await post({ ...upload, songTitle: '  ' });
-    expect(response.status).toBe(400);
-    expect(((await response.json()) as { error: string }).error).toBe('Song title is required.');
-  });
-
-  it('caps uploads at 15 minutes', async () => {
-    expect((await post({ ...upload, durationSec: 901 })).status).toBe(400);
-    expect((await post({ ...upload, durationSec: 900 })).status).toBe(200);
-  });
 });

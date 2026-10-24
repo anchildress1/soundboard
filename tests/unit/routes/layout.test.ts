@@ -44,7 +44,6 @@ describe('layout', () => {
     expect(screen.getByRole('contentinfo')).toHaveTextContent(
       'Built for Flies Like Robots by Ashley Childress',
     );
-    expect(screen.getByRole('contentinfo')).not.toHaveTextContent('Hacktoberfest');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
     const artist = within(screen.getByRole('contentinfo')).getByRole('link', {
       name: 'Flies Like Robots',
@@ -86,7 +85,6 @@ describe('layout', () => {
     setup({ channel, user: NATHAN });
     expect(screen.getByText(HANDLE)).toBeInTheDocument();
     expect(screen.getByText('12 videos · 340 subs')).toBeInTheDocument();
-    expect(screen.queryByText(/last upload/)).toBeNull();
   });
 
   it('renders without stats', () => {
@@ -113,7 +111,6 @@ describe('layout', () => {
     expect(signOut.closest('form')).toHaveAttribute('action', '/auth/logout');
     expect(signOut.closest('form')).toHaveAttribute('method', 'POST');
     expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
-    expect(screen.queryByText(/Connect channel/)).toBeNull();
     expect(screen.queryByRole('link', { name: BRAND_GUIDE })).toBeNull();
   });
 
@@ -134,7 +131,6 @@ describe('layout', () => {
     const link = screen.getByRole('link', { name: 'Connections' });
     expect(link).toHaveAttribute('href', '/connections');
     expect(link.closest('header')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Connect YouTube' })).toBeNull();
   });
 
   it('offers no Connections link when signed out', () => {

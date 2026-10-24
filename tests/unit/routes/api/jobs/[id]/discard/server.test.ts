@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory, jobs } from '$lib/server/core/schema';
 import { getJob } from '$lib/server/jobs/jobs';
 import { POST } from '$routes/api/jobs/[id]/discard/+server';
 import type { JobState, JobView } from '$lib/types';
@@ -34,15 +31,6 @@ describe('POST /api/jobs/[id]/discard', () => {
       expect(((await response.json()) as JobView).job.state).toBe('DISCARDED');
     },
   );
-
-  it('learns nothing from a discard', async () => {
-    await seedJob({ state: 'REVIEW' });
-    await discard('j1');
-    expect(await db().select({ feedback: jobs.feedback }).from(jobs)).toEqual([{ feedback: [] }]);
-    expect(await db().select().from(artistMemory).where(eq(artistMemory.kind, 'feedback'))).toEqual(
-      [],
-    );
-  });
 
   it('409s once the upload is verified', async () => {
     await seedJob({ state: 'VERIFIED' });

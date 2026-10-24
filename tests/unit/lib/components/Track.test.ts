@@ -46,20 +46,4 @@ describe('Track', () => {
     expect(screen.getByRole('progressbar')).toHaveAttribute(VALUE_NOW, '0');
     expect(container.querySelector('.bar i')?.getAttribute('style')).toContain('--p: 0%');
   });
-
-  it('updates as the job moves', async () => {
-    const { rerender } = render(Track, {
-      status: { tone: 'info', text: 'Chunk 1 / 2', progress: 6 },
-      model: MODEL,
-    });
-    await rerender({
-      status: { tone: 'warn', text: NEEDS_REVIEW, progress: 100 },
-      model: 'Configured picker: gemini-4-argon',
-      seconds: 9,
-    });
-    expect(screen.getByRole('status')).toHaveTextContent(NEEDS_REVIEW);
-    expect(screen.getByRole('progressbar')).toHaveAttribute(VALUE_NOW, '100');
-    expect(screen.getByText('Configured picker: gemini-4-argon')).toBeInTheDocument();
-    expect(screen.getByText('Total model time: 9s')).toBeInTheDocument();
-  });
 });

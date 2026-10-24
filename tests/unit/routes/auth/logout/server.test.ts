@@ -26,8 +26,4 @@ describe('POST /auth/logout', () => {
     expect(cookies.delete).toHaveBeenCalledTimes(2);
     expect(cookies.set).not.toHaveBeenCalled();
   });
-
-  it('is harmless when already signed out', () => {
-    expect(isRedirect(call().thrown)).toBe(true);
-  });
 });

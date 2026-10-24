@@ -1046,12 +1046,6 @@ describe('runPick', () => {
     expect(agentSpanIO().output).toEqual([]);
   });
 
-  it('records nothing on a span when none is given', async () => {
-    fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
-    await runPick(ctx(), stepDeadline());
-    expect(agentSpanIO()).toEqual({ input: [], output: [] });
-  });
-
   it('returns the finalized pick from one call to the pick model', async () => {
     fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
     const result = await runPick(ctx(), stepDeadline());

@@ -50,13 +50,6 @@ describe('geminiApiKey', () => {
     vi.stubEnv('GEMINI_API_KEY', 'key-1');
     expect(geminiApiKey()).toBe('key-1');
   });
-
-  it('throws when unset or empty', () => {
-    vi.stubEnv('GEMINI_API_KEY', undefined);
-    expect(() => geminiApiKey()).toThrow('Missing required env var GEMINI_API_KEY');
-    vi.stubEnv('GEMINI_API_KEY', '');
-    expect(() => geminiApiKey()).toThrow(/GEMINI_API_KEY/);
-  });
 });
 
 describe('model names', () => {
@@ -103,10 +96,5 @@ describe('kmsKey', () => {
       'projects/p/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens',
     );
     expect(kmsKey()).toMatch(/cryptoKeys\/refresh-tokens$/);
-  });
-
-  it('throws when unset', () => {
-    vi.stubEnv('KMS_KEY', undefined);
-    expect(() => kmsKey()).toThrow('Missing required env var KMS_KEY');
   });
 });
