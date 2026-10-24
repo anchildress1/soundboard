@@ -18,7 +18,15 @@ const NO_COLOR_LITERALS = {
 
 /** @type {import('stylelint').Config} */
 export default {
-  rules: NO_COLOR_LITERALS,
+  plugins: ['stylelint-value-no-unknown-custom-properties'],
+  rules: {
+    ...NO_COLOR_LITERALS,
+    // A typo in var() fails silently in the browser, so every token must be declared somewhere.
+    'csstools/value-no-unknown-custom-properties': [
+      true,
+      { importFrom: ['src/lib/styles/tokens.css', 'src/app.css'] },
+    ],
+  },
   overrides: [
     { files: ['**/*.svelte'], customSyntax: 'postcss-html' },
     {

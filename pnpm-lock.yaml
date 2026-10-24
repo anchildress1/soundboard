@@ -272,6 +272,9 @@ importers:
       stylelint:
         specifier: ^17.16.0
         version: 17.16.0(supports-color@5.5.0)(typescript@6.0.3)
+      stylelint-value-no-unknown-custom-properties:
+        specifier: ^6.1.1
+        version: 6.1.1(stylelint@17.16.0(supports-color@5.5.0)(typescript@6.0.3))
       svelte:
         specifier: ^5.57.1
         version: 5.57.1(@typescript-eslint/types@8.71.0)
@@ -4188,6 +4191,12 @@ packages:
 
   stubs@3.0.0:
     resolution: {integrity: sha512-PdHt7hHUJKxvTCgbKX9C1V/ftOcjJQgz8BZwNfV5c4B6dcGqlpelTbJ999jBGZ2jYiPAwcX5dP6oBwVlBlUbxw==}
+
+  stylelint-value-no-unknown-custom-properties@6.1.1:
+    resolution: {integrity: sha512-eQ1zidKD5t9zMEaskjGUY4W47lH76qMlmsDSmCAPEwtaGzB4Ls7ORTfysC1D6hamp2zFC+vN1vpQ+GFz3Tw3lw==}
+    engines: {node: '>=18.12.0'}
+    peerDependencies:
+      stylelint: '>=16'
 
   stylelint@17.16.0:
     resolution: {integrity: sha512-ejlWnbJ13x1GU32+zZXa6sYQJsKKkwSdv2B4rAdO3OWdEmvhSJKcXi5pOphQYSzyaj1kXpuGJr7pcMBNfDIuPw==}
@@ -8382,6 +8391,12 @@ snapshots:
       anynum: 1.0.1
 
   stubs@3.0.0: {}
+
+  stylelint-value-no-unknown-custom-properties@6.1.1(stylelint@17.16.0(supports-color@5.5.0)(typescript@6.0.3)):
+    dependencies:
+      postcss-value-parser: 4.2.0
+      resolve: 1.22.12
+      stylelint: 17.16.0(supports-color@5.5.0)(typescript@6.0.3)
 
   stylelint@17.16.0(supports-color@5.5.0)(typescript@6.0.3):
     dependencies:

@@ -259,7 +259,7 @@ Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmW
 - **Not found / errors:** the status, a plain explanation, and a link home.
 - **Footer:** artist and Ashley credits and the license, text links to Ashley's site and socials, and the Terms of Service and Privacy policy.
 - **Phones (primary):** one column. On review screens the actions pin to the bottom, primary first and full width.
-- **Color:** one palette in `src/lib/styles/tokens.css`, the only file allowed color values: primitives first, then semantic names (`--ground`, `--panel`, `--well`, `--ink`, `--muted`, `--action`, `--attention`, `--ok`, `--warn`, `--err`). Components use semantic names only; Stylelint rejects a color literal anywhere else.
+- **Color:** one palette in `src/lib/styles/tokens.css`, the only file allowed color values: primitives first, then semantic names (`--ground`, `--panel`, `--well`, `--ink`, `--muted`, `--action`, `--attention`, `--ok`, `--warn`, `--err`). Components use semantic names only; Stylelint rejects a color literal anywhere else and any undeclared token.
 - **Accents have one job each:** cyan for actions, links, focus, and running work; magenta only for what needs Nathan; green verified, amber warnings, red errors. The cyan-to-magenta Signal Line marks the brand and the current step. Control borders meet 3:1 contrast.
 - **States:** running, needs review, verified ("Verified · private" with the video link), failed, and discarded, each as a colored dot or chip with its text.
 - **Type:** Bricolage Grotesque for headings and the wordmark, Onest for everything else, numbers in tabular figures.
