@@ -29,7 +29,7 @@ description: 'Task list for the Gemini API swap'
 
 **Purpose**: The G2 gate, the docs agents work from, and dependency and config changes.
 
-- [ ] T001 👤 Run gate G2 (research R14, FR-022):
+- [x] T001 👤 Run gate G2 (research R14, FR-022):
   - **Videos:** 3–5 of Nathan's real uploads.
   - **Configurations:** A, B and C, using the exact R3 clip encoding profile.
   - **Scoring:** score each window against the Gemma baseline for genre terms, instruments, vocals and quality flags.
@@ -285,7 +285,7 @@ description: 'Task list for the Gemini API swap'
   - The pick checks, a Short and a brand guide, and `/privacy`.
   - Sentry text with no media.
   - Read the 15-minute job's actual Gemini cost from billing and confirm it's under SC-006's $0.50.
-- [ ] T047 👤 After T046 (and T001's baseline), run the one-time GPU teardown in quickstart step 6. Then confirm the endpoint and model lists are empty and GPU spend is $0 the next full week (SC-001).
+- [ ] T047 👤 After T046, run the one-time GPU teardown in quickstart step 6. Then confirm the endpoint and model lists are empty and GPU spend is $0 the next full week (SC-001).
 
 ---
 

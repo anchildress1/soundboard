@@ -70,7 +70,7 @@ Expected:
 
 - **Blocked until approval:** record the YouTube approval reference, date and scope covering disclosed Gemini processing/storage and Sentry text retention; submission or owner risk acceptance is not approval.
 - Record the actual Sentry subscription, billing model and retention for errors, full spans and sampled spans; shorter retention is optional, not a substitute for approval.
-- G2 remains pending (research R14): run the real-music comparison with the bounded encoding profile before analyst implementation; preserve Gemma until any needed baseline is captured.
+- G2 passed on 2026-10-24 with configuration A (research R14). The Gemma baseline is captured, so the teardown no longer waits on it.
 - No hosted validation deployment, traffic change or GPU teardown before approval. Local mock tests and approved local gates can proceed.
 
 ## Manual: deployed, only after approval

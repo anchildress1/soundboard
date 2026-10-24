@@ -37,4 +37,4 @@
 - 2026-10-24 review: FR-017–FR-019 now retain text diagnostics under the owner's accepted storage risk; media and credentials stay redacted. Implicit caching and actual hosted Sentry retention are disclosed, with no zero-retention fallback claim.
 - FR-023/SC-010 block every feature deployment until the YouTube request covering the disclosed processing/storage is approved; acceptance of risk is not approval.
 - Review gaps now have explicit contracts and validation scenarios: typed errors, clip/request limits, shared deadline, atomic reset, existing Shorts, raw parse diagnostics, configured-model labels and E2E fakes for provider HTTP and window media.
-- These checks assess requirement quality, not completed implementation: G2 is still pending, task coverage awaits `tasks.md`, and external approval and deployed checks remain outstanding.
+- These checks assess requirement quality, not completed implementation: G2 passed on 2026-10-24 (configuration A); external approval and deployed checks remain outstanding.

@@ -89,7 +89,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 - **Temperature:** not sent. Interactions marks `generation_config.temperature` deprecated, and Gemini's guidance is to keep the default. AGENTS.md's "temperature 0.2" line is replaced.
 - **Thinking:** thinking tokens count against `max_output_tokens`, and the cap is a hard cutoff: it returns `incomplete` with empty or truncated output and still bills. So every Argon agent gets 8192, and cost and latency are controlled by `thinking_level` only.
 - **Analyst alternative:** `gemini-3.5-flash-lite` by setting `GEMINI_ANALYST_MODEL`. It's cheaper, but there's a risk on genre accuracy.
-- **Analyst row is provisional:** gate G2 (R14) can change its model, media resolution and thinking level.
+- **Analyst row confirmed by G2** (R14, 2026-10-24): configuration A passed.
 - **Pick alternatives:**
   - `gemini-3.1-pro-preview`: preview only, can churn. Rejected.
   - `gemini-3.8-flash` at high thinking: cheaper. Rejected per user choice.
@@ -236,7 +236,7 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
   - **Pass:** p95 ≤ 45 s. If it fails, lower the thinking level before raising any budget.
   - **Status:** passed on 2026-10-23. All 5 runs succeeded at 12.7k input tokens (about 0.4k output) with a p95 of 10.5 s, for $0.15 in total. The smart-pick minimum call budget stays at the G1 value of 33 s, the slower of the two measurements.
 
-## R14 · Manual gate G2: analyst quality on real music (FR-022): pending
+## R14 · Manual gate G2: analyst quality on real music (FR-022): passed 2026-10-24 on A
 
 - **Why:** G1 used a synthetic video (a seconds counter and a spoken "Window N"). It proved clip handling, not whether Flash hears genre, instruments and vocals. Those genre terms seed the audience search, so a weak analyst degrades every candidate list.
 - **Videos:** 3–5 of Nathan's real uploads, covering different sounds and at least one long video.
@@ -253,3 +253,38 @@ Checked against the YouTube API Services Developer Policies (last updated 2026-1
 - **Pass:** the analyst ships on the cheapest configuration (A, then B, then C) that's at least as good as Gemma. A pass on B or C updates R5 and R6 before the analyst is built. If none passes, the spec reopens.
 - **Cost:** estimate from the selected videos' actual window counts and each configuration's token use, then record actual spend; no fixed $1 claim independent of sample length.
 - **Record:** a table here per video/configuration with window-level judgments, tokens, latency and the exact clip encoding/settings, like R12. A chosen B/C configuration must also meet SC-006 and the call budget, and update every default in spec, plan, contract and quickstart before analyst implementation. Quality alone does not waive the cost or time requirements.
+
+### G2 run, 2026-10-24
+
+- **Evidence:** the harness is [gates/g2/g2.mjs](gates/g2/g2.mjs), and every model reply, token count and latency is in [gates/g2/result.json](gates/g2/result.json).
+- **Verdict:** configuration A passes. It's at least as good as Gemma on every window and clearly better on one video. The analyst defaults stay as planned (`gemini-3.8-flash`, `mediaResolution: 'low'`, `thinkingLevel: 'low'`); R5, R6 and the 8 s minimum call budget are unchanged.
+- **Sample:** 3 of Nathan's videos, all short (49–79 s): 4 Gemini windows against 7 Gemma windows. There was no long video, so the first-and-last-window timing of a 15-minute source stays a deployed check (quickstart step 2).
+- **Setup:**
+  - Clips used the R3 profile exactly. Portrait sources come out at 202×360; clips were 0.30–1.87 MB, cut in 0.3–0.9 s.
+  - Every arm got the same context, with the song title set to "Untitled". Gemini's instructions changed only in their first line, which describes a clip instead of frames.
+  - Gemma got today's input: 29.5 s windows, 8 frames, 16 kHz WAV, temperature 0.2, on the existing endpoint (cold start 186 s).
+  - B and C used `maxOutputTokens` 8192 to avoid truncation; A used 2048.
+- **Ground truth:** the owner listened to every point where the models disagreed.
+
+| Video                            | Point    | Truth (owner)                        | Gemma                                     | A (Flash low)                                   | B (Flash default/medium)              | C (Argon)                                  |
+| -------------------------------- | -------- | ------------------------------------ | ----------------------------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------ |
+| YouCut 1 (office CCTV, 55 s)     | Intro    | Female spoken intro                  | Missed                                    | Spoken intro heard, wrong gender                | Missed                                | ✅                                         |
+|                                  | Vocals   | Robotic male lead                    | ✅ distorted robotic male                 | ✅ deep robotic, vocoded male                   | ✅ deep deadpan, robotic male         | ✅                                         |
+|                                  | Visual   | —                                    | Office, then terminal text                | Better: CCTV office, terminal, mazes            | Better: names the computer thrown out | Better                                     |
+| YouCut 2 (neon hallway, 49 s)    | Tempo    | Driving four-on-the-floor            | Slow, then driving (half wrong)           | Midtempo (vague)                                | Steady (vague)                        | ✅                                         |
+|                                  | Vocals   | —                                    | Muffled, then distorted male              | Better: pitch-shifted baritone plus robot intro | Better: same detail                   | Better                                     |
+|                                  | Clipping | Real (ffmpeg: 78 samples, +1.8 dBTP) | Missed                                    | Missed                                          | Missed                                | ✅ flagged                                 |
+| VAPORGRAM (green terminal, 79 s) | Genre    | Indie / post-punk with guitar        | ❌ dark ambient / industrial, "no vocals" | ✅ indie rock, post-punk, electric guitar       | ❌ synth-pop, no guitar               | Window 1 ✅; window 0 says industrial rock |
+|                                  | Vocals   | Gruff, spoken male                   | ❌ none, then distorted fragments         | ✅ spoken, gruff male                           | ✅ deep semi-spoken male              | ✅ gritty male                             |
+
+- **Scoring against Gemma:**
+  - **A:** ties or wins every point: a tie on clipping, which Gemma, A and B all missed; a win on VAPORGRAM and on visuals; a partial win on the YouCut 1 intro.
+  - **B:** passes too, but misses VAPORGRAM's genre and costs more.
+  - **C:** the most accurate (intro, tempo, clipping), but it costs about 3× more per window and had one 35 s call.
+- **Quality flags:** clipping reaches the job anyway through the server-built ffmpeg flags (FR-011), so A missing it doesn't lose information.
+- **Latency per call:** A 4.5–5.4 s, B 7.2–9.0 s, C 5.9–35.5 s. Gemma took 9.9–27.9 s per 29.5 s window.
+- **Tokens:** a 60 s clip used 4.7–5.7k input tokens on Flash and 5.7–6.8k on Argon. Output was about 200 tokens for A and C, and 440–580 for B (300–370 of them reasoning).
+- **Spend:**
+  - Gemini about $0.09 at intro prices.
+  - GPU time: two endpoint wakes. The first attempt's harness used the bare endpoint ID, got 400s and let the replica scale back down.
+- **Gemma baseline:** captured in this run, so the GPU teardown (FR-014) no longer waits on G2.

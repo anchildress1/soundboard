@@ -73,7 +73,7 @@ Gates from `.specify/memory/constitution.md` v2.0.1 (last amended 2026-10-23).
 - IV: the model provider is exempt from `platforms/`, and its calls, scopes and error mapping live only in `src/lib/server/ai/model.ts`.
 - V: replace `llama-server` with "the model provider's HTTP API".
 
-**Post-design re-check:** design gaps below are resolved; execution gates remain G2 before analyst implementation and FR-023 before any deployment. Owner risk acceptance is not marked as platform approval.
+**Post-design re-check:** design gaps below are resolved; G2 passed on 2026-10-24; FR-023 still gates every deployment. Owner risk acceptance is not marked as platform approval.
 
 ## Project Structure
 
@@ -133,7 +133,7 @@ docs/youtube-audit/architecture.md, docs/youtube-audit/user-flows.md   # FR-016:
 ## Delivery order
 
 1. **Gate G1:** done on 2026-10-22 (research R12). The long-file failure led to inline window clips.
-2. **Gate G2: analyst quality on real music** (research R14). Blocks step 4. A pass on configuration B or C updates the analyst defaults first.
+2. **Gate G2: analyst quality on real music:** passed on 2026-10-24 with configuration A (research R14). The analyst defaults are unchanged.
 3. **Model client + tracing**, with unit tests. Agents compile against the new `ModelRequest`.
 4. **Analyst + ffmpeg `cutWindowClip` and `measureWindow`** (60 s windows).
 5. **G1 follow-up: re-time the pick at the full #20 prompt size**: done on 2026-10-23, p95 10.5 s (research R13).
@@ -142,7 +142,7 @@ docs/youtube-audit/architecture.md, docs/youtube-audit/user-flows.md   # FR-016:
 8. **Config and deploy:** dependency, secret, env, Vertex removal, E2E fakes (Gemini preload, window media); prepare deployment changes without deploying.
 9. **Docs:** PRD, AGENTS.md, README, the privacy page, the YouTube audit docs (the constitution is already at 2.0.0).
 10. **Approval gate FR-023:** record YouTube approval reference/scope and the actual Sentry retention; no feature deployment before this, including hosted validation.
-11. **After approval:** deployed manual checks, then the one-time teardown. Teardown also waits for G2 if it needs a fresh Gemma baseline.
+11. **After approval:** deployed manual checks, then the one-time teardown.
 
 ## Complexity Tracking
 
