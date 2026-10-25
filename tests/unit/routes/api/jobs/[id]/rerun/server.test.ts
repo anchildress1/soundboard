@@ -21,7 +21,7 @@ async function put(patch: Parameters<typeof seedJob>[0] = {}, withPick = true) {
   if (withPick) {
     await db()
       .update(jobs)
-      .set({ picks: [{ version: 1, title: 'First', skipped: false }] })
+      .set({ picks: [{ version: 1, title: 'First', hashtags: [], tags: [], skipped: false }] })
       .where(eq(jobs.id, 'j1'));
   }
 }

@@ -17,6 +17,8 @@ const evidence = (retrievedAt = Date.now()): AudienceEvidence => ({
   query: 'synthwave music video',
   candidateLists: [
     {
+      source: 'genre',
+      ref: 'G1',
       videoId: 'peer',
       title: 'A peer release',
       hashtags: ['#synthwave'],

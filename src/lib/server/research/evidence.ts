@@ -85,10 +85,9 @@ export async function saveEvidence(
 }
 
 /** The run's evidence while fresh, else null; only the job's owner sees it. */
-export async function readEvidence(runId: string): Promise<StoredEvidence | null> {
-  const [row] = await query((tx) =>
-    tx.select().from(jobResearch).where(eq(jobResearch.runId, runId)),
-  );
+export async function readEvidence(runId: string, q?: Tx): Promise<StoredEvidence | null> {
+  if (!q) return await query((tx) => readEvidence(runId, tx));
+  const [row] = await q.select().from(jobResearch).where(eq(jobResearch.runId, runId));
   return row ? { retrievedAt: row.retrievedAt, evidence: row.evidence as PeerEvidence } : null;
 }
 
@@ -119,10 +118,9 @@ export function resolveRef(
 }
 
 /** The artist's fresh "Not a peer" channel IDs; RLS shows only their own. */
-export async function rejectedChannels(): Promise<string[]> {
-  const rows = await query((tx) =>
-    tx.select({ channelId: peerRejections.channelId }).from(peerRejections),
-  );
+export async function rejectedChannels(q?: Tx): Promise<string[]> {
+  if (!q) return await query((tx) => rejectedChannels(tx));
+  const rows = await q.select({ channelId: peerRejections.channelId }).from(peerRejections);
   return rows.map((row) => row.channelId);
 }
 

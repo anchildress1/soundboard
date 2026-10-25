@@ -81,6 +81,14 @@ export const RAW_PICK = {
   brandCheck: 'Keeps the channel naming pattern.',
   why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  citations: { sound: [], feel: [], wording: [], discovery: [], structure: [] },
+  recommendation: {
+    approach: 'Open with the hook.',
+    intendedOutcome: 'More listeners stay to the end.',
+    follows: 'artist',
+    followsWhy: 'Only the artist’s own sources were available.',
+    evidence: [],
+  },
 };
 
 export type Handler = {
@@ -322,6 +330,7 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     trace: null,
     hashtagCandidates: null,
     audience: null,
+    candidateLists: null,
     upload: null,
     finalFields: null,
     pickVersion: null,

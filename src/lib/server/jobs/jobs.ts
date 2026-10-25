@@ -4,7 +4,12 @@ import { withArtistTag } from '#lib/metadata.js';
 import type { Chunk, JobState, Pick, PublicJob } from '#lib/types.js';
 import { query, type Tx } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
-import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
+import {
+  releaseList,
+  type AudienceEvidence,
+  type CandidateList,
+} from '#lib/server/pipeline/hashtags.js';
+import { readEvidence, rejectedChannels, withoutRejected } from '#lib/server/research/evidence.js';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 import { readAudience, saveAudience } from './audience';
 
@@ -46,6 +51,11 @@ export type JobDoc = PublicJob & {
   pickVersion: number | null;
   /** The genre search behind the pick; re-runs reuse it. */
   audience: AudienceEvidence | null;
+  /**
+   * What approval accepts: the genre lists, the fresh peer release lists of the latest pick's run
+   * minus rejected peers, and the draft's own terms once either pool is gone or lost a peer.
+   */
+  candidateLists: CandidateList[] | null;
   verifyAttempts: number;
   /** A Short job's source video object; null on video jobs. */
   sourceObject: string | null;
@@ -109,6 +119,7 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
     trace: input.trace,
     hashtagCandidates: null,
     audience: null,
+    candidateLists: null,
     upload: null,
     finalFields: null,
     pickVersion: null,
@@ -141,14 +152,44 @@ async function hydrateJob(row: typeof jobs.$inferSelect, q: Tx): Promise<JobDoc>
   const doc = fromRow(row);
   const audience = await readAudience(row.id, q);
   const draft = (row.picks as StoredPick[]).at(-1);
+  const peers = draft?.researchRunId ? await peerLists(draft.researchRunId, q) : null;
+  // The draft's own terms stay approvable once a pool is gone or a peer was dropped from it.
+  const own = draft && (!audience || peers?.lost) ? [ownList(draft)] : [];
+  const lists = [...(audience?.candidateLists ?? []), ...(peers?.lists ?? []), ...own];
   return {
     ...doc,
     audience,
-    hashtagCandidates: audience
-      ? [...new Set(audience.candidateLists.flatMap((list) => list.hashtags))]
-      : (draft?.hashtags ?? doc.finalFields?.hashtags ?? null),
+    candidateLists: lists.length > 0 ? lists : null,
+    hashtagCandidates:
+      lists.length > 0
+        ? [...new Set(lists.flatMap((list) => list.hashtags))]
+        : (doc.finalFields?.hashtags ?? null),
   };
 }
+
+/**
+ * The fresh peer release lists of a run, without the artist's rejected channels; `lost` when the
+ * evidence is gone or a rejection removed some of it.
+ */
+async function peerLists(runId: string, q: Tx): Promise<{ lists: CandidateList[]; lost: boolean }> {
+  const stored = await readEvidence(runId, q);
+  if (!stored) return { lists: [], lost: true };
+  const evidence = withoutRejected(stored.evidence, await rejectedChannels(q));
+  return {
+    lists: evidence.releases.map(releaseList),
+    lost: evidence.releases.length < stored.evidence.releases.length,
+  };
+}
+
+/** The draft's own selected terms, so a pool that expired or lost a peer doesn't strand them. */
+const ownList = (draft: StoredPick): CandidateList => ({
+  source: 'draft',
+  ref: 'draft',
+  videoId: 'draft',
+  title: draft.title,
+  hashtags: draft.hashtags,
+  tags: draft.tags.map((tag) => ({ tag })),
+});
 
 export type JobListItem = { id: string; songTitle: string; state: JobState; createdAt: number };
 
@@ -517,7 +558,17 @@ export async function createShort(
       artistName,
       fields.tags.filter((tag) => tag.toLowerCase() !== previous),
     );
-    const pick: StoredPick = { ...fields, tags, artistName, version: 1, skipped: false };
+    // The parent's evidence binding stays, so the Short approves the same peer lists until their
+    // original expiry; what the parent recommended or learned does not carry over.
+    const pick: StoredPick = {
+      ...fields,
+      tags,
+      artistName,
+      version: 1,
+      skipped: false,
+      recommendation: null,
+      outcomeRefs: {},
+    };
     await tx.insert(jobs).values({ ...jobRow(shortDoc(current, id)), picks: [pick] });
     if (current.audience) await saveAudience(tx, id, current.audience);
     await tx

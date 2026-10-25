@@ -589,6 +589,8 @@ describe('createShort', () => {
         query: 'q',
         candidateLists: [
           {
+            source: 'genre',
+            ref: 'G1',
             videoId: 'peer',
             title: 'Peer release',
             hashtags: [SYNTHWAVE],
@@ -628,7 +630,11 @@ describe('createShort', () => {
       object: 'uploads/s1',
       sourceObject: SOURCE_OBJECT,
       hashtagCandidates: [SYNTHWAVE],
-      audience: { candidateLists: [{ videoId: 'peer', tags: [{ tag: 'synthwave' }] }] },
+      audience: {
+        candidateLists: [
+          { source: 'genre', ref: 'G1', videoId: 'peer', tags: [{ tag: 'synthwave' }] },
+        ],
+      },
       pickVersion: 1,
       trace: { sentryTrace: 't-s-1', baggage: 'b' },
       shortId: null,
@@ -641,7 +647,9 @@ describe('createShort', () => {
         modelMs: 0,
       },
     });
-    expect(await listPicks('s1')).toEqual([{ ...pick(3), version: 1, skipped: false }]);
+    expect(await listPicks('s1')).toEqual([
+      { ...pick(3), version: 1, skipped: false, recommendation: null, outcomeRefs: {} },
+    ]);
     expect((await getJob('p'))!.shortId).toBe('s1');
   });
 
@@ -686,7 +694,15 @@ describe('createShort', () => {
     await patch('p', { finalFields: final });
     expect(await createShort(stale, SHORT_SOURCE_STATES, ARTIST, 's1')).toEqual({ id: 's1' });
     expect(await listPicks('s1')).toEqual([
-      { ...pick(3), ...final, tags: [ARTIST, 'synthwave'], version: 1, skipped: false },
+      {
+        ...pick(3),
+        ...final,
+        tags: [ARTIST, 'synthwave'],
+        version: 1,
+        skipped: false,
+        recommendation: null,
+        outcomeRefs: {},
+      },
     ]);
   });
 

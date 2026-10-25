@@ -97,6 +97,8 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
       query: 'synthwave music video',
       candidateLists: [
         {
+          source: 'genre',
+          ref: 'G1',
           videoId: 'peer',
           title: 'Peer release',
           hashtags: [SYNTHWAVE, RETROWAVE],

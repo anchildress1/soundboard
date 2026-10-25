@@ -49,6 +49,8 @@ const EVIDENCE: PeerEvidence = {
 const pick = (researchRunId: string | null) => ({
   version: 1,
   title: 'T',
+  hashtags: [],
+  tags: [],
   skipped: false,
   researchRunId,
 });
