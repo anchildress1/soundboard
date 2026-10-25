@@ -204,16 +204,32 @@
     }
   };
 
-  /** The browser upload landed: a few looks for the job to move on, then the steps take over. */
+  /**
+   * The browser upload landed: a few looks for the job to move on, then the steps take over. A step
+   * with no reply or a 5xx isn't a look: the link can drop right after the last byte, and nothing
+   * else would move the job on without a reload.
+   */
   const landed = async () => {
+    let looks = 0;
     try {
       await pRetry(
         async () => {
           if (stopped) throw new AbortError(new Waiting('stopped'));
           view = await step(job.id, data.trace);
-          if (view.job.state === 'AWAITING_UPLOAD') throw new Waiting('upload not landed');
+          message = view.job.error ?? '';
+          looks++;
+          if (view.job.state === 'AWAITING_UPLOAD' && looks < 5) {
+            throw new Waiting('upload not landed');
+          }
         },
-        { ...POLL_BACKOFF, retries: 4, shouldRetry: ({ error }) => error instanceof Waiting },
+        {
+          ...POLL_BACKOFF,
+          retries: Infinity,
+          onFailedAttempt: ({ error }) => {
+            if (!(error instanceof Waiting)) message = error.message;
+          },
+          shouldRetry: ({ error }) => !(error instanceof ApiError) || error.status >= 500,
+        },
       ).catch((error: unknown) => {
         if (!(error instanceof Waiting)) throw error;
       });

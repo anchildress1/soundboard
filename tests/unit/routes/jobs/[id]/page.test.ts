@@ -769,16 +769,52 @@ describe('job page: browser upload', () => {
     }
   });
 
-  it('shows a step error while looking for the upload', async () => {
-    fetchMock.mockImplementation(async (path) =>
-      String(path).endsWith('/upload-session')
-        ? json({ current: true })
-        : json({ error: 'Internal' }, 500),
+  /** Step replies in order, then none; upload-session confirms pass. */
+  const serveSteps = (...replies: (() => Promise<Response>)[]) => {
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return (replies.shift() ?? hang)();
+    });
+  };
+
+  it('asks again after a step with no reply or a 5xx, showing the error until it lands', async () => {
+    serveSteps(
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      async () => json({ error: 'Internal' }, 503),
+      async () => json(prep()),
     );
     await handedOver();
     setup(awaitingView(), { playbackUrl: null });
-    (await query()).respond(200);
-    expect(await screen.findByText('Internal')).toBeInTheDocument();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (await query()).respond(200);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByText('Failed to fetch')).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
+      expect(screen.getByText('Internal')).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout * POLL_BACKOFF.factor);
+      // Three tries to land, then the driver's first step.
+      expect(steps()).toHaveLength(4);
+      expect(chip()).toHaveTextContent('Measuring audio');
+      expect(screen.queryByText('Internal')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops looking on a 4xx step reply and shows it', async () => {
+    serveSteps(async () => json({ error: 'Not found' }, 404));
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (await query()).respond(200);
+      await vi.runAllTimersAsync();
+      expect(steps()).toHaveLength(1);
+      expect(screen.getByText('Not found')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the message an upload stopped on', async () => {
