@@ -24,11 +24,11 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
   The pick's own artist name (`Pick.artistName`) is the one tag allowed outside the candidate
   lists, exactly once.
 - UI text is plain labels. No persona or chatbot copy.
-- Description voice MUST be grounded in the artist's own writing, never invented. The only
+- Description voice MUST follow the owner's approved voice: proposed from their own writing
+  (their YouTube descriptions and Soundboard edits), then edited and approved by them. Without an
+  approved voice, drafts use generic plain-copy rules, never another artist's voice. The only
   exception is peer influence the artist explicitly chooses through saved per-role settings.
   Copied peer sentences or distinctive phrases MUST NOT appear.
-  Temporary exception, removed by spec 005: until spec 005 ships, artists without a curated
-  profile get generic voice rules (`GENERIC_VOICE`).
 - Nathan's surname MUST NOT be written in code, fixtures, prompts, commits or docs, and MUST NOT
   be filtered from runtime data.
 
@@ -38,7 +38,8 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
   background workers, with two exceptions:
   - Research and learning stages (spec 006) MAY run server-side, independent of the browser.
     Their plan chooses the mechanism.
-  - One scheduled database retention job deletes expired YouTube statistics (Platform Terms).
+  - One scheduled database retention job deletes expired YouTube data: statistics, and the
+    inputs listed on voice and brand proposals (Platform Terms).
 - Every other pipeline step advances one step per page request, each under about 2 minutes,
   claimed in a database transaction.
 - A cold or busy dependency, or a missing or revoked user grant, MUST return a wait reason
@@ -58,8 +59,6 @@ Rationale: one person watches each run; scale comes from raising instance limits
 - A shared platform interface is extracted when the second platform lands, not before.
 - Artist-specific values (name, voice, channel IDs) MUST NOT be constants in core code. They
   belong to the artist profile.
-  Temporary exception, removed by spec 005: until spec 005 ships, Nathan's `ARTIST_VOICE` and
-  credit wording stay in `smart-pick.ts`, selected by `artists.curated`.
 
 Rationale: the repo is growing to many artists and platforms. Placement rules keep each
 addition local instead of spreading through every file.
@@ -96,6 +95,8 @@ addition local instead of spreading through every file.
 - Every stored YouTube statistic, peer or the artist's own, MUST carry its retrieval time and
   MUST be kept at most 30 days. The database enforces it: statistics older than 30 days MUST be
   unreadable by the app and MUST be deleted daily, even while the app is idle.
+- YouTube data read for a proposal MUST be kept at most 30 days, enforced by the database. Only
+  artist-approved rules, holding no YouTube data, persist.
 - Until YouTube accepts the derived-metrics amendment, no number MAY be calculated from YouTube
   statistics, and no channel MAY be scored, ranked or grouped by its statistics.
 - API data MUST NOT be aggregated across different content owners.
@@ -120,4 +121,4 @@ Rationale: a policy violation can cost the API access that uploads and verificat
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 3.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-25
+**Version**: 4.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-25
