@@ -183,10 +183,16 @@ describe('accessTokenFor', () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     expect(await accessTokenFor(UID, CHANNEL, later())).toMatchObject({ token: ACCESS });
-    expect(kms.decrypt).toHaveBeenCalledWith({
-      name: 'projects/p/locations/l/keyRings/r/cryptoKeys/k',
-      ciphertext: Buffer.from('c2VhbGVk', 'base64'),
-    });
+    expect(kms.decrypt).toHaveBeenCalledWith(
+      {
+        name: 'projects/p/locations/l/keyRings/r/cryptoKeys/k',
+        ciphertext: Buffer.from('c2VhbGVk', 'base64'),
+      },
+      { timeout: expect.any(Number) },
+    );
+    const [, { timeout }] = kms.decrypt.mock.calls[0] as [unknown, { timeout: number }];
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(60_000);
     expect(oauth.options).toEqual([
       {
         clientId: 'cid',
@@ -218,6 +224,27 @@ describe('accessTokenFor', () => {
       level: 'warning',
       tags: {},
     });
+  });
+
+  it('gives up at the deadline when KMS stalls, keeping the grant and making no refresh', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockReturnValueOnce(new Promise(() => {}));
+    await expect(accessTokenFor(UID, CHANNEL, Date.now() + 30)).rejects.toBeInstanceOf(
+      DeadlineSpent,
+    );
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+    expect(oauth.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('reads a KMS refusal that lands after the deadline as out of time, not a lost grant', async () => {
+    await putConnection(UID, connected());
+    const deadline = Date.now() + 20;
+    kms.decrypt.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      throw kmsRefusal(DECRYPTION_FAILED);
+    });
+    await expect(accessTokenFor(UID, CHANNEL, deadline)).rejects.toBeInstanceOf(DeadlineSpent);
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
   });
 
   it('makes no read, decrypt or refresh once the deadline has passed', async () => {
@@ -459,6 +486,15 @@ describe('ownChannelUploads', () => {
     kms.decrypt.mockRejectedValueOnce(kmsRefusal(DECRYPTION_FAILED));
     expect(await ownChannelUploads(UID, 3, later())).toEqual({ wait: 'reconnect YouTube' });
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('waits on YouTube when KMS stalls past the deadline, keeping the grant', async () => {
+    kms.decrypt.mockReturnValueOnce(new Promise(() => {}));
+    expect(await ownChannelUploads(UID, 3, Date.now() + 30)).toEqual({
+      wait: 'waiting on YouTube',
+    });
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

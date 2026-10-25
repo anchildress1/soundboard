@@ -11,6 +11,7 @@ import {
   budgetSignal,
   ChannelMismatch,
   channelsMine,
+  DeadlineSpent,
   identityFailure,
   ownUploads,
   YOUTUBE_SCOPES,
@@ -135,8 +136,8 @@ export type Access = { token: string; refused: (jobId?: string) => Promise<void>
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
  * Google rejecting the refresh token, or KMS refusing its ciphertext, marks the connection revoked
- * and returns null. The refresh aborts at the step's `deadline`; throws `DeadlineSpent` when none is
- * left, `ChannelMismatch` when the connected channel isn't `channelId`, and on any other failure.
+ * and returns null. Decrypt and refresh stop at the step's `deadline`; throws `DeadlineSpent` when
+ * none is left, `ChannelMismatch` when the connected channel isn't `channelId`, and on any other failure.
  */
 export async function accessTokenFor(
   uid: string,
@@ -153,8 +154,10 @@ export async function accessTokenFor(
   const cipher = connection.tokenCiphertext;
   let refreshToken: string;
   try {
-    refreshToken = await decrypt(cipher);
+    refreshToken = await decrypt(cipher, { timeout: Math.max(0, deadline - Date.now()) });
   } catch (cause) {
+    // KMS ran into the step's deadline, however it said so: a wait, never a broken grant.
+    if (Date.now() >= deadline) throw new DeadlineSpent();
     if (!undecryptable(cause)) throw new Error("Couldn't unlock the YouTube grant.", { cause });
     captureMessage('YouTube grant does not decrypt', { level: 'warning' });
     await markRevoked(uid, cipher);
