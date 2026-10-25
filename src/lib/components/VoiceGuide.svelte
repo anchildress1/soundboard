@@ -29,6 +29,8 @@
   let held = $state<Wait | null>(
     guide.limitUntil !== null && guide.limitUntil > Date.now() ? 'model quota spent' : null,
   );
+  // svelte-ignore state_referenced_locally
+  let heldUntil = $state<number | null>(guide.limitUntil);
   let wait = $state<Wait | null>(null);
   let busy = $state(false);
   let message = $state('');
@@ -40,8 +42,10 @@
   const label = $derived(shown ? WAIT_TEXT[shown] : 'Reading your writing');
 
   const failed = (error: unknown, fallback: string) => {
-    if (error instanceof GuideWait) held = error.wait;
-    else message = error instanceof Error ? error.message : fallback;
+    if (error instanceof GuideWait) {
+      held = error.wait;
+      heldUntil = error.limitUntil;
+    } else message = error instanceof Error ? error.message : fallback;
   };
 
   const propose = async () => {
@@ -94,6 +98,13 @@
       busy = false;
     }
   };
+
+  // Only the quota hold ends on its own; a lost grant waits for the reconnect.
+  $effect(() => {
+    if (held !== 'model quota spent') return;
+    const timer = setTimeout(() => (held = null), Math.max(0, (heldUntil ?? 0) - Date.now()));
+    return () => clearTimeout(timer);
+  });
 
   onDestroy(() => (stopped = true));
 </script>

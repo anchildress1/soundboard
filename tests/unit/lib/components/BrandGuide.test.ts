@@ -166,3 +166,51 @@ describe('BrandGuide: proposing', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
+
+describe('BrandGuide: quota hold', () => {
+  const RESET = 60_000;
+  const propose = () => screen.getByRole('button', { name: 'Propose' });
+  const spent = () => screen.getByRole('button', { name: 'Model quota spent' });
+
+  beforeEach(() => vi.useFakeTimers());
+
+  it('re-enables Propose once the quota reset passes after load', async () => {
+    setup({ limitUntil: Date.now() + RESET });
+    expect(spent()).toBeDisabled();
+    await vi.advanceTimersByTimeAsync(RESET - 1);
+    expect(spent()).toBeDisabled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(propose()).toBeEnabled();
+  });
+
+  it('re-enables Propose once the reset a proposal answered with passes', async () => {
+    fetchMock.mockResolvedValue(
+      json({ wait: 'model quota spent', limitUntil: Date.now() + RESET }),
+    );
+    setup();
+    await fireEvent.click(propose());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spent()).toBeDisabled();
+    await vi.advanceTimersByTimeAsync(RESET);
+    expect(propose()).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not hold on a reset that already passed', async () => {
+    fetchMock.mockResolvedValue(json({ wait: 'model quota spent', limitUntil: Date.now() - 1 }));
+    setup({ limitUntil: null });
+    await fireEvent.click(propose());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(propose()).toBeEnabled();
+  });
+
+  it('keeps the reconnect hold however long it waits', async () => {
+    fetchMock.mockResolvedValue(json({ wait: 'reconnect YouTube' }));
+    setup();
+    await fireEvent.click(propose());
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+    expect(screen.getByRole('button', { name: 'Reconnect YouTube' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Reconnect YouTube' })).toBeInTheDocument();
+  });
+});
