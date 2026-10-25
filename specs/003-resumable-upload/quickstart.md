@@ -17,7 +17,7 @@ Ran against the real bucket with throwaway objects under `g1-check/`, deleted af
 | Bytes kept from a single `PUT` that died mid-way | ✅ Aborted after 1.6 s, 40,632,320 bytes were saved (256 KiB-aligned), and the rest finished from that offset (`200`). |
 | 8 MiB parts vs one `PUT`, 64 MiB, fast link      | ❌ for parts: 6.2 s vs 1.05 s (5.9×). Decision: one `PUT` per attempt (research R2).                                   |
 
-Follow-ups, ran 2026-10-22 on the same bucket and engines (research R13):
+Follow-ups, ran 2026-10-22 on the same bucket and engines (research R13). The two `ifGenerationMatch` rows tested machinery that revision 2 removed; they stay as the record.
 
 | Check                                                                                     | Result                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -27,16 +27,15 @@ Follow-ups, ran 2026-10-22 on the same bucket and engines (research R13):
 
 Not run: Gemini checks (spec 002's own gate).
 
-## Gate G2 (constitution V): open, blocks T007 and T013
+## Gate G2 (constitution V): open, blocks T011 and T017
 
-Run on the dev bucket (`GCS_BUCKET` in `.env`) with throwaway objects under `g2-check/`, deleted afterwards. Desktop Chromium, Firefox and WebKit through Playwright, from `http://localhost:5173`, plus one session from `http://localhost:5199` (not in bucket CORS). Research R13 has the fallback for each failure.
+One gate. Run on the dev bucket (`GCS_BUCKET` in `.env`) with throwaway objects under `g2-check/`, deleted afterwards. Desktop Chromium, Firefox and WebKit through Playwright, from `http://localhost:5173`.
 
-| Check                                                                                                           | Result |
-| --------------------------------------------------------------------------------------------------------------- | ------ |
-| G2.1 Status query from another client while a `PUT` is in flight: `308`, `Range` ≤ bytes sent, `PUT` ends `200` |        |
-| G2.2 `metadata.uploadGeneration` set at session creation is on the landed object                                |        |
-| G2.3 After another writer lands the object, the session's status query answers `412`, `404` or `410`            |        |
-| G2.4 A session used from `http://localhost:5199` (not in bucket CORS) still accepts `PUT`s and exposes `Range`  |        |
+| Check                                                                                                                                                                                                                                                                                                                                                             | Result |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| G2 Two clients `PUT` the same bytes from the same offset to one session at once, and a third sends a status query during it. Pass: the object lands once, byte-identical to the file (`gcloud storage hash` vs a local SHA-256), and every request either succeeds or fails with a status the uploader recovers from (`308`, `200`/`201`, `4xx`/`5xx`, status 0). |        |
+
+**If G2 fails:** a same-file pick from a stale generation gets a fresh session for a new object and restarts from 0 (research R6, R13). Record the failing status in this table, update contract and tasks to the fallback, and build nothing else.
 
 ## Automated
 
@@ -67,14 +66,14 @@ No deploy. `pnpm dev` on `http://localhost:5173` (already in bucket CORS) with t
 1. Upload the 1.2 GB file and drop the connection 20 times. It finishes with no click, and the page shows "Upload paused: no connection" on each drop. Note the wall time.
 2. Upload the 211 MB original with no drops and no throttle, on `main` and on this branch. This branch is no slower, within noise (SC-005).
 3. Open other pages in the app mid-upload, then come back. Bytes kept arriving (DevTools shows the one `PUT` still open).
-4. Close the tab mid-upload and reopen the job: it shows the saved percentage before any pick. Re-pick the same file: bytes flow again within 5 s. Reload and pick a different file: "New video: starting the upload over." and it starts from 0. Close that tab right after the last byte, before the page sees the reply, and reopen: it moves on to analysis with no pick.
+4. Close the tab mid-upload and reopen the job: it shows the saved percentage before any pick. Re-pick the same file: bytes flow again within 5 s. Reload and pick a different file: "New video: starting the upload over." and it starts from 0. Close that tab right after the last byte, before the page sees the reply, and reopen: it moves on to analysis with no pick. Then `gcloud storage ls gs://$GCS_BUCKET/uploads/<jobId>/` lists exactly one object, the one `jobs.data->>'object'` names: the sweep removed the old partial's object if it had finished.
 5. Two tabs on one job: open the second without picking. It shows "Uploading in another tab". Close the first: the second shows the file prompt.
-6. Two browsers (Chrome and Firefox) on one job: pick the same file in the second. The first stops with "The upload moved to another device or window." within 30 s, and only the second sends.
-7. Discard mid-upload with the Discard button on the working screen. `gcloud storage ls gs://$GCS_BUCKET/uploads/<jobId>` finds nothing.
+6. Two browsers (Chrome and Firefox) on one job: pick the same file in the second. The first stops with "The upload moved to another device or window." within about 40 s, and only the second sends. Then pick a different file in the first: the second stops with "A different video replaced this upload."
+7. Discard mid-upload with the Discard button on the working screen. `gcloud storage ls gs://$GCS_BUCKET/uploads/<jobId>/` finds nothing. Repeat on a job whose upload finished while its page was closed: discard keeps that one object.
 8. In Sentry (dev DSN), the breadcrumbs show amounts only. No URL carries `upload_id`, and no event holds a session URI. In the dev database, `jobs.data->'videoUpload'->>'sessionCipher'` is ciphertext, not a URL.
-9. Clean up: delete every `uploads/<jobId>` the run created and discard its jobs.
+9. Clean up: delete every `uploads/<jobId>/` prefix the run created and discard its jobs.
 
 ## Deployed only (after the next deploy, not in this run)
 
-- Start on the custom domain, re-pick on a run.app URL. It continues on the same session. G1's follow-up already showed bucket CORS decides, so this is a smoke check, not a gate.
+- Start on the custom domain, re-pick on a run.app URL. It continues on the same session: session reuse across app origins. JSON API endpoints answer CORS for any origin, and the URI's secrecy is the authorization (research R1), so this is a smoke check, not a gate.
 - `deploy.sh` applied the CORS list with `GET` only and without `x-goog-content-length-range`; Monitor playback and seeking still work.

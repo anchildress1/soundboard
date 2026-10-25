@@ -102,7 +102,7 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 
 ### Edge Cases
 
-- **Session expires (7 days, the same as the bucket's media lifetime).** The next attempt starts a fresh session from zero and says "The saved upload expired; starting again." It never fails the job for this.
+- **Session expires (7 days after it was created).** The next attempt starts a fresh session from zero and says "The saved upload expired; starting again." It never fails the job for this.
 - **A different video after a partial upload.** The old session is cancelled. The job's single file slot can't hold both.
 - **A file over 2 GB, over 15 minutes, or not a video.** It's refused with today's create messages. Storage also refuses any upload that doesn't match its declared size.
 - **Two tabs on the same job.** Only one sends. The other shows "Uploading in another tab" and takes over with the file prompt when the sender's tab closes.
@@ -128,8 +128,8 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - **FR-009**: A picked file whose sampled fingerprint (size, name, last-modified time, first and last 1 MiB, and 64 evenly spread 64 KiB samples) matches the original's MUST resume. A file that differs only between samples is treated as the same file. Any other file MUST start a new upload: the old session is cancelled, the new file is checked against today's caps, and its name, size and fingerprint are recorded. A different file MUST never be refused for being different.
 - **FR-010**: The page states and their text MUST be the list in the contract (`contracts/upload-session.md`, Page states). After a pause, `n` is what storage confirmed.
 - **FR-011**: An expired or missing session with the upload unfinished MUST start a new session from zero, with a plain message. If storage reports the upload complete, the job MUST move on without resending.
-- **FR-012**: Only one sender MUST run for a job at a time, across tabs and devices. A newer pick always wins, including the same file picked on another device; the older sender stops and offers the file prompt, and automatic retries never take the upload back.
-- **FR-013**: Discarding a job with an unfinished upload MUST stop sending and cancel its session. An object that lands for that unfinished upload anyway MUST be deleted, at once or on the job's next touch; anything missed goes with the bucket's 7-day delete rule. Discarding a job whose upload already finished MUST NOT delete its video. The working screen MUST offer Discard while the upload runs or is paused.
+- **FR-012**: Only one sender MUST keep running for a job, across tabs and devices. A newer pick always wins, including the same file picked on another device. The older sender MUST stop at its next ownership check (at most about 40 seconds later) and offer the file prompt; until then both may send the same bytes. Automatic retries, and a retried pick whose reply was lost, never take the upload back.
+- **FR-013**: Discarding a job with an unfinished upload MUST stop sending and cancel its session. An object that lands for that unfinished upload anyway MUST be deleted, at once or on the job's next touch; anything missed goes with the bucket's delete rule (7 days after that object was written, plus the rule's own delay). Discarding a job whose current upload already finished MUST NOT delete that video. The working screen MUST offer Discard while the upload runs or is paused.
 - **FR-014**: Once the object lands, it MUST NOT be overwritten, and the pipeline MUST behave exactly as today. Analysis starts from the open job page.
 - **FR-015**: Sentry MUST record upload pauses and resumes as breadcrumbs, with amounts only. No session address, no file name beyond today's, and no media.
 - **FR-016**: The upload MUST work in current Chrome, Edge, Firefox and Safari, on desktop and mobile.
@@ -138,7 +138,7 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 ### Key Entities
 
 - **Job**: gains its video upload (encrypted session, version number, size and fingerprint; owner-only, never logged), used only while the job is uploading. A new file replaces all of it. Every pick raises the version.
-- **Upload session**: one live session per job, valid up to 7 days, bound to the job's object and declared size. Storage, not the app, tracks how many bytes are saved.
+- **Upload session**: one current session per job, valid up to 7 days, writing its own object (never shared with another session) with the declared size. The job records which object is current. Storage, not the app, tracks how many bytes are saved.
 
 ## Success Criteria _(mandatory)_
 
@@ -157,6 +157,6 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - The browser can't reopen a picked file after a reload, so a lost tab means picking the file again. The user chose this over copying the file into browser storage.
 - How long a hidden tab keeps sending depends on the browser and device. The app can't extend it on the web.
 - The pipeline still advances only from the open job page.
-- The bucket's 7-day delete rule and the 7-day session life line up.
+- The session lives 7 days from its creation. The bucket's delete rule counts 7 days from when each object was written, and Google gives no fixed delay for the deletion itself. So a file finished late in a session's life outlives that week: about 14 days plus the rule's delay.
 - The 15-minute and 2 GB caps, the song-title form, and the monitor playing the local file while it uploads are unchanged.
 - The 002 model swap and the UI v2 guided release have merged. This feature builds on them: the pick happens on `/new`, and the upload is the release's first step.
