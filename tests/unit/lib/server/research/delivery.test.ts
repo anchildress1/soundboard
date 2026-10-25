@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelBusy, ModelQuotaSpent } from '#lib/server/ai/model.js';
 import { db } from '#lib/server/core/db.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
-import { jobResearch, researchRuns } from '#lib/server/core/schema.js';
+import {
+  artistGuides,
+  artistOutcomes,
+  connections,
+  jobResearch,
+  peerRejections,
+  researchRuns,
+} from '#lib/server/core/schema.js';
 import { DeadlineSpent, YouTubeError } from '#lib/server/platforms/youtube/youtube.js';
 import { RETRY_MS, type Batch, type Stage } from '#lib/server/research/batch.js';
 import { runDelivery, type Stages } from '#lib/server/research/delivery.js';
@@ -271,5 +278,211 @@ describe('runDelivery', () => {
       await runDelivery({ ...DELIVERY, seq: 1 }, returning({ done: 1, stage: 'learn', cursor: 1 }));
       expect(await stored()).toMatchObject({ consecutiveFailures: 0, error: null });
     });
+  });
+});
+
+describe('continuity and idempotency', () => {
+  const ANALYTICS = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+  const OUTCOME_ROW = {
+    videoId: 'v1',
+    publishedAt: '2026-09-01T00:00:00Z',
+    requestedStart: '2026-08-31',
+    requestedEnd: '2026-09-27',
+    coverage: 'complete',
+    metrics: { views: 5, subscribersGained: 1, subscribersLost: 0 },
+    live: { title: 'Song', description: 'Out now.', tags: [] },
+    differsFromApproved: null,
+  };
+
+  /** Every stage writes what its real counterpart does, under the run's claim. */
+  const stages: Stages = {
+    learn: async ({ run }) => {
+      const [grant] = await db()
+        .select({ at: connections.updatedAt })
+        .from(connections)
+        .where(eq(connections.uid, run.ownerUid));
+      return {
+        done: 1,
+        stage: 'discover',
+        cursor: 0,
+        writes: async (tx, token) => {
+          await tx.execute(
+            sql`select public.soundboard_save_outcomes('run-1', ${token}, ${grant!.at.toISOString()}::timestamptz, ${JSON.stringify([OUTCOME_ROW])}::jsonb)`,
+          );
+        },
+      };
+    },
+    discover: () =>
+      Promise.resolve({ done: 1, stage: 'match', cursor: 0, writes: saveEvidence('found') }),
+    match: () =>
+      Promise.resolve({
+        done: 1,
+        stage: 'releases',
+        cursor: 0,
+        writes: async (tx, token) => {
+          await tx.execute(
+            sql`select public.soundboard_refresh_rejections('run-1', ${token}, array['UCx'], array[]::text[])`,
+          );
+        },
+      }),
+    releases: () =>
+      Promise.resolve({ done: 1, stage: 'done', cursor: 0, writes: saveEvidence('releases') }),
+  };
+
+  const contents = async () => ({
+    research: await db().select().from(jobResearch),
+    outcomes: await db().select().from(artistOutcomes),
+    rejections: await db().select().from(peerRejections),
+    guides: await db().select().from(artistGuides),
+    run: await stored(),
+  });
+
+  /** The delivery a delivery enqueued, or null when it enqueued none. */
+  const nextOf = (before: number) =>
+    fetchMock.mock.calls.length > before ? (tasks().at(-1)!.delivery as typeof DELIVERY) : null;
+
+  beforeEach(async () => {
+    await db()
+      .update(connections)
+      .set({ scopes: ['openid', 'email', ANALYTICS] })
+      .where(eq(connections.uid, USER_A.uid));
+    await seed({
+      peerRejections: [
+        { artistId: USER_A.artistId, channelId: 'UCx', retrievedAt: new Date(Date.now() - 864e5) },
+      ],
+    });
+  });
+
+  it('completes every stage from deliveries alone, each writing once', async () => {
+    let next: typeof DELIVERY | null = DELIVERY;
+    const stagesSeen: string[] = [];
+    while (next) {
+      stagesSeen.push((await stored())!.stage);
+      const before = fetchMock.mock.calls.length;
+      expect(await runDelivery(next, stages)).toBe(200);
+      next = nextOf(before);
+    }
+    expect(stagesSeen).toEqual(['learn', 'discover', 'match', 'releases']);
+    expect(await stored()).toMatchObject({ stage: 'done', seq: 4, claimToken: null });
+    const now = await contents();
+    expect(now.research).toHaveLength(1);
+    expect(now.outcomes).toHaveLength(1);
+    expect(now.rejections).toHaveLength(1);
+    expect(now.research[0]!.evidence).toEqual({ query: 'releases' });
+  });
+
+  it('leaves the stored contents unchanged when a delivery is redelivered twice', async () => {
+    let next: typeof DELIVERY | null = DELIVERY;
+    while (next) {
+      const before = fetchMock.mock.calls.length;
+      const delivered = next;
+      expect(await runDelivery(delivered, stages)).toBe(200);
+      const after = await contents();
+      const sent = fetchMock.mock.calls.length;
+      for (let again = 0; again < 2; again += 1) {
+        expect(await runDelivery(delivered, stages)).toBe(200);
+      }
+      expect(await contents()).toEqual(after);
+      expect(fetchMock.mock.calls.length).toBe(sent);
+      next = nextOf(before);
+    }
+    expect((await stored())?.stage).toBe('done');
+  });
+
+  it('keeps the first retrieval time through the stages that save evidence again', async () => {
+    let next: typeof DELIVERY | null = DELIVERY;
+    const times: number[] = [];
+    while (next) {
+      const before = fetchMock.mock.calls.length;
+      await runDelivery(next, stages);
+      const [row] = await db().select().from(jobResearch);
+      if (row) times.push(row.retrievedAt.getTime());
+      next = nextOf(before);
+    }
+    expect(times).toHaveLength(3);
+    expect(new Set(times).size).toBe(1);
+  });
+
+  it('re-runs a batch once when the process died after the enqueue and before the commit', async () => {
+    let runs = 0;
+    const dying: Stages = {
+      ...stages,
+      learn: () => {
+        runs += 1;
+        return Promise.resolve({
+          done: 1,
+          stage: 'discover',
+          cursor: 0,
+          writes: () => Promise.reject(new Error('process died')),
+        });
+      },
+    };
+    const survived: Stages = {
+      ...stages,
+      learn: (context) => {
+        runs += 1;
+        return stages.learn(context);
+      },
+    };
+    await expect(runDelivery(DELIVERY, dying)).rejects.toThrow('process died');
+    expect(runs).toBe(1);
+    // The next task was already created; the claim is still held.
+    expect(tasks().map((task) => task.name)).toEqual([`${QUEUE}/tasks/run-1-1`]);
+    expect(await stored()).toMatchObject({ seq: 0, stage: 'learn' });
+    expect(await db().select().from(artistOutcomes)).toEqual([]);
+
+    // Both the next task and the original wait on the held claim.
+    expect(await runDelivery({ ...DELIVERY, seq: 1 }, survived)).toBe(503);
+    expect(await runDelivery(DELIVERY, survived)).toBe(503);
+    expect(runs).toBe(1);
+
+    // Once the claim lapses, the original runs the batch again, and only once.
+    await db()
+      .update(researchRuns)
+      .set({ claimUntil: new Date(Date.now() - 1_000) });
+    expect(await runDelivery(DELIVERY, survived)).toBe(200);
+    expect(runs).toBe(2);
+    expect(await runDelivery(DELIVERY, survived)).toBe(200);
+    expect(runs).toBe(2);
+    expect(await stored()).toMatchObject({ seq: 1, stage: 'discover' });
+    expect(await db().select().from(artistOutcomes)).toHaveLength(1);
+    // The re-enqueue names the same task, which Cloud Tasks dedupes.
+    expect(new Set(tasks().map((task) => task.name))).toEqual(new Set([`${QUEUE}/tasks/run-1-1`]));
+  });
+
+  it('writes nothing for a worker whose claim lapsed and was taken by a redelivery', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: Stages = {
+      ...stages,
+      learn: async (context) => {
+        await gate;
+        return stages.learn(context);
+      },
+    };
+    const first = runDelivery(DELIVERY, slow);
+    await vi.waitFor(async () => expect((await stored())?.claimToken).not.toBeNull());
+    await db()
+      .update(researchRuns)
+      .set({ claimUntil: new Date(Date.now() - 1_000) });
+    expect(await runDelivery(DELIVERY, stages)).toBe(200);
+    const after = await contents();
+    release();
+    expect(await first).toBe(200);
+    expect(await contents()).toEqual(after);
+  });
+
+  it('leaves the artist’s guides unchanged through a full run', async () => {
+    const before = await db().select().from(artistGuides);
+    expect(before.length).toBeGreaterThan(0);
+    let next: typeof DELIVERY | null = DELIVERY;
+    while (next) {
+      const sent = fetchMock.mock.calls.length;
+      await runDelivery(next, stages);
+      next = nextOf(sent);
+    }
+    expect(await db().select().from(artistGuides)).toEqual(before);
   });
 });

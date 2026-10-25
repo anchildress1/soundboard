@@ -1191,6 +1191,76 @@ describe('runStep: PICK research', () => {
     expect(pick).toMatchObject({ limits, recommendation: { limits } });
   });
 
+  describe('when the free sources fail', () => {
+    // Google’s APIs, and YouTube’s thumbnail CDN.
+    const GOOGLE = /(^|\.)(googleapis\.com|google\.com|ytimg\.com)$/;
+    const hosts = () => [...new Set(calls.map(({ url }) => new URL(url).host))];
+    /** The pick ends in a draft that names what it lacked, and the job never counts a failure. */
+    const drafted = async () => {
+      expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0, error: null });
+      for (const host of hosts()) expect(host).toMatch(GOOGLE);
+      return (await pickAt(1)) as { limits: string[]; recommendation: { limits: string[] } };
+    };
+
+    it('drafts after YouTube quota held the research at every stage, saying it did not finish', async () => {
+      on(/youtube\/v3\/search\?/, () => refusal(403, 'quotaExceeded'));
+      expect(await runStep(await unresearched())).toEqual({ wait: 'researching similar artists' });
+      const [first] = await runs();
+      // Learn has no analytics to read, so it moves on; discover then meets the quota.
+      expect(await runDelivery({ jobId: 'j1', uid: USER_C.uid, runId: first!.id, seq: 0 })).toBe(
+        200,
+      );
+      expect(await runDelivery({ jobId: 'j1', uid: USER_C.uid, runId: first!.id, seq: 1 })).toBe(
+        200,
+      );
+      expect((await runs())[0]).toMatchObject({
+        stage: 'discover',
+        wait: 'waiting on YouTube',
+        consecutiveFailures: 0,
+        limits: ['analytics-not-shared'],
+      });
+      // Still waiting under 10 minutes.
+      expect(await runStep(await saved())).toEqual({ wait: 'researching similar artists' });
+      await db()
+        .update(researchRuns)
+        .set({ startedAt: new Date(Date.now() - RESEARCH_MAX_MS) });
+      expect(await runStep(await saved())).toEqual({});
+      const pick = await drafted();
+      expect(pick.limits).toEqual([
+        'analytics-not-shared',
+        'research-unfinished',
+        'genre-search-unavailable',
+      ]);
+      expect(pick.recommendation.limits).toEqual(pick.limits);
+    });
+
+    it('drafts from a failed run with the limits it ended on', async () => {
+      await unresearched();
+      await researched(C_JOB, { stage: 'failed', error: 'boom', limits: ['analytics-not-shared'] });
+      expect(await runStep(await saved())).toEqual({});
+      const pick = await drafted();
+      expect(pick.limits).toEqual(['analytics-not-shared', 'research-unfinished']);
+      expect(called(TASKS)).toHaveLength(0);
+    });
+
+    it('drafts when the queue is down, with the limit that says so', async () => {
+      on(TASKS, () => json({}, { status: 503 }));
+      expect(await runStep(await unresearched())).toEqual({});
+      const pick = await drafted();
+      expect(pick.limits).toEqual(['research-unavailable']);
+      expect(called(TASKS)).toHaveLength(1);
+    });
+
+    it('drafts when the queue is down and the genre search is out of quota too', async () => {
+      on(TASKS, () => json({}, { status: 503 }));
+      on(/youtube\/v3\/search\?/, () => refusal(403, 'quotaExceeded'));
+      expect(await runStep(await unresearched())).toEqual({});
+      const pick = await drafted();
+      expect(pick.limits).toEqual(['research-unavailable', 'genre-search-unavailable']);
+      expect((await pickAt(1))!.tags).toEqual([ARTIST_C.name]);
+    });
+  });
+
   it('starts no run for a job whose owner has no profile', async () => {
     await unresearched({ ownerUid: 'uid-b', artistId: null });
     await runStep(await saved());
