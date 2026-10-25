@@ -18,6 +18,7 @@ Decisions marked **(owner)** were made on 2026-10-25 and are binding. They're re
   - II: "Description voice MUST be grounded in the artist's own writing". Non-curated artists get `GENERIC_VOICE`.
   - IV: "Artist-specific values (name, voice, channel IDs) MUST NOT be constants in core code". `ARTIST_VOICE` and Nathan's credit wording stay in `smart-pick.ts`.
   - Both become explicit, time-boxed exceptions, removed by spec 005.
+- **II, the required artist tag:** "Hashtags and tags MUST come from the job's candidate lists" gains the exception PRD R4 already states: the pick's own `artistName` is the one tag allowed outside them, exactly once. This one is permanent.
 - **Classification: MAJOR (2.0.1 → 3.0.0).** Governance reads: "MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording."
   - An exception narrows what a MUST requires, so it redefines the principle.
   - Precedent: `cef38f2` added the II peer-influence exception and the III exceptions, and bumped 1.0.3 → 2.0.0.
@@ -88,27 +89,28 @@ Decisions marked **(owner)** were made on 2026-10-25 and are binding. They're re
 
 - **Pick:** reads the owner's current profile when it runs (US4) and stores `Pick.artistName`.
 - **Approval:** allows the pick's own `artistName`, so a rename between pick and approval can't break the draft (FR-011, SC-005).
-- **Short (owner):** `createShort` sets `artistName` to the owner's current profile name. It rebuilds the Short's tags:
+- **Short (owner):** `createShort` keeps the parent's `artistId`, because `jobs_insert` (`drizzle/0004_tenant_rls.sql:40`) checks it through `soundboard_owns_job` (`:8`, `IS NOT DISTINCT FROM`), null included. The policy is unchanged. It sets `artistName` to the owner's current profile name and rebuilds the Short's tags:
   - drop the parent pick's `artistName` (case-insensitive) from the copied approved tags
   - put the current name first, with its length reserved (R9)
   - leave the parent's approved fields untouched
-  - a legacy parent with `artistName: null` just gains the current name
+  - a legacy parent with `artistName: null` just gains the current name, and keeps `artistId: null`
 - **Backfill:** R3 step 4. `null` means unknown, never a guessed name. `'Flies Like Robots'` on `flr` jobs is what the constant put in those picks.
 
 ## R8 · Identity-read outcomes (platform layer)
 
-New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick and the brand flows:
+New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick and the brand flows. A 403 is classified by its `error.errors[0].reason`, never by status alone.
 
-| Outcome        | Inputs                                                                                                                                                                                     | Pick step                           | Brand propose                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------- |
-| `access-lost`  | No connected row; `accessTokenFor` → null (`invalid_grant` marks it revoked); YouTube 401; 403 `insufficientPermissions` or `forbidden`; no `mine=true` item matching the channel          | wait `reconnect YouTube`            | `{ wait: 'reconnect YouTube' }`  |
-| `busy`         | 403 `quotaExceeded`, `rateLimitExceeded` or `userRateLimitExceeded`; 429; 5xx; network error; the deadline's abort; `accessTokenFor`'s channel-mismatch throw (a reconnect raced the read) | wait `waiting on YouTube`           | `{ wait: 'waiting on YouTube' }` |
-| `app-rejected` | Token refresh `invalid_client` or `unauthorized_client`; 403 `accessNotConfigured`; any other 4xx                                                                                          | throw (a failure, constitution III) | throw                            |
+| Outcome        | Inputs                                                                                                                                                                                                                                                                                                           | Pick step                 | Brand propose                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------- |
+| `access-lost`  | No connected row; `accessTokenFor` → null (`invalid_grant` marks it revoked); 401; 403 `forbidden`, `insufficientPermissions`, `channelForbidden`, `playlistItemsNotAccessible`, or any other 403 reason not listed below; 404 (`channelNotFound`, `playlistNotFound`); no `mine=true` item matching the channel | wait `reconnect YouTube`  | `{ wait: 'reconnect YouTube' }`  |
+| `busy`         | 403 `quotaExceeded`, `dailyLimitExceeded`, `rateLimitExceeded` or `userRateLimitExceeded`; 429; 5xx; network error; an abort; `DeadlineSpent` (R14); `accessTokenFor`'s channel-mismatch throw (a reconnect raced the read)                                                                                      | wait `waiting on YouTube` | `{ wait: 'waiting on YouTube' }` |
+| `app-rejected` | Token refresh `invalid_client` or `unauthorized_client`; 403 `accessNotConfigured`; 400 `keyInvalid` or `keyExpired`; any other 400 (a malformed request is an app defect)                                                                                                                                       | throw (a failure)         | throw                            |
 
 - `access-lost` from a live token calls `access.refused(job.id)`, which marks the grant like uploads do.
 - `busy` never touches the grant.
 - A wait never counts toward `consecutiveFailures` and never fails the job.
 - Quota uses `waiting on YouTube`, not `limitUntil`. `limitUntil` drives `quotaHold`'s "model quota spent" on model steps, so it can't carry a YouTube limit.
+- Reasons: [errors reference](https://developers.google.com/youtube/v3/docs/errors), and the `channels.list` and `playlistItems.list` error tables.
 
 ## R9 · The required artist tag
 
@@ -131,10 +133,17 @@ New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick
 - **Generic (owner):** `GENERIC_VOICE`, which is `ARTIST_VOICE`'s plain-copy lines without the humor, asides and caps lines. The prompt says no credit line and no contact line, and `bandcamp.credits` is an empty string.
 - **Contact line (FR-006), placed in code, deterministically:**
   - The prompt tells every run to write no contact line.
-  - `finalizePick` strips from the model's description and credits every line that contains an email address or starts with `contact` (case-insensitive). That covers stale contacts copied from uploads or feedback.
+  - `finalizePick` drops every description and credits line that looks like contact information. That covers stale contacts copied from uploads or feedback. A line is dropped when it:
+    - contains an email address
+    - contains a phone number: `\+?\d[\d\s().-]{6,}\d`, at least 8 digits in all
+    - contains a URL (`https?://` or `www.`)
+    - contains an `@handle`: `(?<![\w@])@[\w.]{2,}`
+    - starts with a contact label, case-insensitive: `booking`, `bookings`, `contact`, `email`, `e-mail`, `dm`, `dms`, `inquiries`, `enquiries`, `management`, `press`, optionally followed by `:` or `-`
+  - **The filter is pattern-based.** It catches these forms, not every way to write a contact. The Review step is the backstop.
   - It then appends the profile's `contactLine` as the last body line, before the closing hashtags. It's reserved before `clip`, so it's never truncated.
   - It also appends it as the last line of `bandcamp.credits`.
   - Null contact means nothing is appended, so a cleared contact leaves none.
+- **Unaffected:** the hashtag line, the credit line ("Written, performed, recorded, hacked and slashed by …") and ordinary prose match none of the patterns. Links from public facts don't exist after R5, so dropping URL lines removes no allowed link.
 - **Wording:** `smart-pick.ts:184` "Keep his slang" → "Keep the artist's slang".
 - **SC-004:** Nathan's contact text is identical. Its position is the end of the body, where his credit and contact lines sit today.
 
@@ -152,15 +161,18 @@ New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick
 | bandcampUrl | not `https:`, host not `<sub>.bandcamp.com` (`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.bandcamp\.com$`, lowercased), a port, credentials, or a path other than `/` | "Use your https://<name>.bandcamp.com address." |
 | contactLine | > 200                                                                                                                                                       | "Contact lines are at most 200 characters."     |
 | contactLine | `<` or `>`                                                                                                                                                  | "Contact lines can't contain < or >."           |
+| contactLine | `#` anywhere                                                                                                                                                | "Contact lines can't contain #."                |
 
 - **Storage:** the URL is stored normalized as `https://<sub>.bandcamp.com`. Empty optional fields become null.
+- **Why `#` in contact:** the app appends the contact line verbatim, and `metadata.ts:55` rejects any hashtag not in the job's candidates. `DM #myband` would make every draft unapprovable as written.
 
 ## R12 · Bandcamp links and gate G1
 
 - **Editor:** `${bandcampUrl}/edit_track`. Footer: `bandcampUrl`.
-- **G1 (2026-10-25, quickstart Q6):** a signed-out `GET` on `<sub>.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=<sub>.bandcamp.com/edit_track`, for Nathan's subdomain and for a second artist's.
-- **After sign-in:** the editor is reached by following that `bounce`. Today's feature proves this for Nathan's own account. Other accounts follow the same `bounce` URL; the app never needs another artist's login.
-- **Coverage:** validation accepts only this URL class (owner), so the gate covers everything accepted. Custom domains are refused.
+- **G1, signed-out part (2026-10-25, quickstart Q6):** verified. A signed-out `GET` on `<sub>.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=<sub>.bandcamp.com/edit_track`, for Nathan's subdomain and for a second artist's.
+- **G1, authenticated part: pending, owner to run (task T043).** Signed in as Nathan, `https://flieslikerobots.bandcamp.com/edit_track` must open his track editor. Agents may not enter his Bandcamp login.
+  - It doesn't block implementation: today's hard-coded link is the same URL, so the change carries no new risk for Nathan. The PR calls the pending check out.
+- **Coverage:** validation accepts only this URL class (owner), so the signed-out check covers everything accepted. Custom domains are refused.
 
 ## R13 · Retention and revocation of YouTube data
 
@@ -168,15 +180,18 @@ New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick
   - III.E.4.c: other Authorized Data is kept "no longer than 30 calendar days", then deleted or refreshed.
   - III.D: deletion within 7 days of in-app revocation.
   - The text has no exemption for resource IDs, so IDs count as API Data.
+- **Gemini:** the owner's own authorized YouTube data has gone to Gemini (paid tier) since spec 002. Google's prompt retention (up to 55 days for abuse monitoring, `store: false`) is the PRD's documented, accepted position (`docs/prd.md:220`). This spec adds no new kind of data to those calls, so no new gate.
 - **Identity reads:** used in memory within one step.
   - Never written to the database: the pick stores only model output and `artistName`.
   - A test asserts a sentinel string from a fake upload description appears in no `jobs` or `artist_memory` row.
+- **Model output is app output:** drafts, `brandCheck` and brand rules the artist approves are the app's own text, not stored API data. Reply and reasoning tracing stay as AGENTS.md requires.
 - **Sentry:**
   - Span retention is plan-dependent: 30 days on Developer and Team, 90 days on transaction-billed Team and Business, 13 months downsampled on Business and Enterprise.
   - The org's plan is unknown (PRD Open Questions), so the retention counts as unknown.
-  - **Decision:** YouTube-sourced text never reaches Sentry.
+  - **Decision:** YouTube-sourced input never reaches Sentry.
     - The pick's `recentUploads` and the brand request's `uploads` go in their own text part, tagged `source: 'youtube'`.
     - `redactTurns` (`core/tracing.ts:60`) replaces it with `{ type: 'text', content: '[YouTube uploads: <n>]' }` in both `invoke_agent` and `chat` span attributes.
+    - **Re-ask:** `chatJson` (`ai/model.ts:206-222`) resends the original turns, tags included, so the re-ask's `chat` span carries the same placeholder. `sdkMessage` drops `source` before the SDK call.
     - Thumbnails are already placeholders. The model sees the full text.
     - AGENTS.md's "Keep prompt and reply text for every agent" gains this exception, and so does PRD R11.
 - **Brand source IDs:** `basedOn: string[]` (`artist/brand.ts:226`, shown only as a count at `brand/+page.svelte:157`) becomes `uploadCount: number`. The migration converts stored rows (R3 step 5).
@@ -188,12 +203,19 @@ New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick
 
 ## R14 · Step deadline
 
-- **Decision:** the step's shared 110 s `deadline` (epoch ms) is threaded through. No helper starts its own fixed timeout.
-  - `accessTokenFor(uid, channelId, deadline)` builds its `OAuth2Client` with `transporterOptions: { signal: AbortSignal.timeout(Math.max(0, deadline - Date.now())) }`.
-  - `ownUploads` passes `AbortSignal.timeout(remaining)` to each `fetch`.
-- **Other callers:** every other `accessTokenFor` caller passes its own step deadline (`stepDeadline()` in actions). That covers publishing, verify, confirm-upload and brand.
+- **Decision:** the step's shared 110 s `deadline` (epoch ms) bounds every read the pick and the brand proposal make. No helper starts its own fixed timer.
+- **`budgetSignal(deadline)`** in `platforms/youtube/youtube.ts`:
+  - remaining ≤ 0 → throws `DeadlineSpent` before any request. `AbortSignal.timeout` throws `RangeError` on a negative value, so it's never called with one.
+  - otherwise → `AbortSignal.timeout(remaining)`.
+- **Threaded through:**
+  - `accessTokenFor(uid, channelId, deadline)`: checks first, then builds its `OAuth2Client` with `transporterOptions: { signal: budgetSignal(deadline) }`.
+  - `ownUploads`: each of its 3 calls.
+  - `thumbnailImage(url, deadline)`: drops its 10 s timer (`youtube.ts:217`). `DeadlineSpent` or an abort → null, as for any unreadable thumbnail.
+  - `keyGet(path, query, deadline)` (`youtube.ts:59`, drops its 15 s timer), so `searchMusicVideos`, `videosByIds` and `audienceEvidence(chunks, durationSec, deadline)` (`pipeline/hashtags.ts:130`). `DeadlineSpent` or an abort in the audience read → the pick returns `waiting on YouTube`. Other audience errors keep today's handling.
+- **Other `accessTokenFor` callers:** publishing and verify pass the handler's deadline from `runStep`; confirm-upload passes `stepDeadline()`. A refresh error that `identityFailure` classifies as `busy` returns `waiting on YouTube`; their other errors keep today's handling.
+- **Model time is reserved:** before the model call, the pick and the brand proposal check `hasModelTime(agent, deadline)` (new in `ai/model.ts`: remaining ≥ the agent's `minCallMs`). Short → `{ wait: 'model busy' }`, no model call, no failure count. Today `chat` throws there (`model.ts:150`), which counts as a failure.
 - **G2 (2026-10-25, quickstart Q8):** a real `OAuth2Client` (11.1.0) against a local token endpoint that never answers, with `transporterOptions.signal = AbortSignal.timeout(1500)`, rejected "The operation was aborted." after 1505 ms. The signal reaches the refresh request.
-- **On abort:** the error classifies as `busy` (R8), so the step returns `waiting on YouTube`, and `runStep` releases the claim as for any wait. Publishing and verify apply the same `busy` check to a refresh error; their other errors keep today's handling.
+- **On abort:** the error classifies as `busy` (R8), so the step returns `waiting on YouTube`, and `runStep` releases the claim as for any wait.
 
 ## R15 · Missing profile at pick time
 
@@ -215,4 +237,4 @@ New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick
 
 - **Unit:** the migration and backfill, RLS, the profile API, prompt and finalize (curated and generic), owner-grant reads with every R8 outcome, deadline aborts, Sentry redaction, no persistence, approval and Short rename, and the missing-profile wait.
 - **E2E (both projects, Pixel 7 primary):** the first-run form, Settings edits, display for a non-Nathan user, signed-out pages, and the fixed artist tag in review.
-- **Not tested:** YouTube's own tag acceptance, and Bandcamp's post-login redirect (provider behavior).
+- **Not automated:** YouTube's own tag acceptance (provider behavior), and Bandcamp's signed-in editor (the owner's check, T043).

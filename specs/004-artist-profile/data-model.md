@@ -9,7 +9,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 | `id`           | `text` PK     | `flr` for Nathan (migration). New profiles: `gen_random_uuid()::text` inside `soundboard_create_artist`.                       |
 | `name`         | `text` NN     | `name = btrim(name)`, `char_length(name) between 1 and 100`, `name !~ '[<>,]'`, `name !~ '^#'` (FR-004)                        |
 | `bandcamp_url` | `text` null   | null, or `~ '^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?\.bandcamp\.com$'` (normalized origin, R11)                                 |
-| `contact_line` | `text` null   | null, or `contact_line = btrim(contact_line)`, `char_length between 1 and 200`, `!~ '[<>]'`                                    |
+| `contact_line` | `text` null   | null, or `contact_line = btrim(contact_line)`, `char_length between 1 and 200`, `!~ '[<>#]'`                                   |
 | `curated`      | `boolean` NN  | default `false`. `true` only for `flr`, set by the migration. The app has no grant on it. **Spec 005 drops this column** (R4). |
 | `created_at`   | `timestamptz` | default `now()`                                                                                                                |
 | `updated_at`   | `timestamptz` | default `now()`; the app sets it on every edit                                                                                 |
@@ -29,6 +29,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 - `artist_id` → `REFERENCES artists(id)`. No new column.
 - `jobs_insert` top-level branch: `parent_id is null and artist_id is not null and artist_id = (select u.artist_id …)`.
 - `picks` JSON: every element gains `artistName` (backfilled, R3 step 4).
+- **Shorts:** keep the parent's `artist_id`, null included (`soundboard_owns_job`, unchanged). Only `artistName` comes from the owner's current profile (R7).
 
 ## `artist_memory` (changed)
 
@@ -66,9 +67,12 @@ Runs after `CREATE TABLE artists` and before the foreign keys and unique constra
 - **`PickContext` / `PickFixups`:** `artist: boolean` → `artist: { name; contactLine; curated }` and `memory: boolean`.
 - **`Part`** (`core/tracing.ts`): the text part gains an optional `source: 'youtube'` that `redactTurns` replaces with a placeholder.
 - **YouTube platform:**
+  - `budgetSignal(deadline): AbortSignal`, throwing `DeadlineSpent` when no time remains (R14)
   - `ownUploads(token, channelId, count, deadline)`
+  - `thumbnailImage(url, deadline)`, `keyGet(path, query, deadline)`, `audienceEvidence(chunks, durationSec, deadline)`
   - `identityFailure(error): 'access-lost' | 'busy' | 'app-rejected'`
   - `accessTokenFor(uid, channelId, deadline)`
+- **Model:** `hasModelTime(agent, deadline): boolean` in `ai/model.ts`.
 - **Layout data:** `artist: { name; bandcampUrl; curated } | null`.
 - **Settings data (owner only):** `artist: { name; bandcampUrl; contactLine } | null`.
 

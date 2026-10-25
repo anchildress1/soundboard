@@ -60,7 +60,7 @@ The unit suite covers this:
   3. An approved job's fields don't change. Check this with a seeded or earlier approved job, not by uploading.
 - **No approval or upload in this check.** If an upload is ever needed, it goes only as `private`, and never when the connected channel looks like Nathan's (brief).
 
-## Q6 · Gate G1: Bandcamp editor URL (task T004, research R12)
+## Q6 · Gate G1: Bandcamp editor URL (tasks T004 and T043, research R12)
 
 - Open `https://<a second artist>.bandcamp.com/edit_track` signed out. It should lead to Bandcamp's sign-in, not a 404.
 - Validation accepts only `https://<name>.bandcamp.com`, so this gate covers every accepted URL. Reaching the editor after sign-in follows Bandcamp's `bounce` parameter, which today's feature already exercises for Nathan's own account.
@@ -68,7 +68,11 @@ The unit suite covers this:
   - `https://flieslikerobots.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=https://flieslikerobots.bandcamp.com/edit_track`.
   - A second artist, `https://amandapalmer.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=https://amandapalmer.bandcamp.com/edit_track`.
   - A subdomain that doesn't exist bounces to `bandcamp.com/edit_track` instead, so a mistyped subdomain lands on Bandcamp's own editor after sign-in.
-  - **Passes for every accepted URL. Custom domains are refused by validation.**
+  - **Signed-out redirect verified for every accepted URL. Custom domains are refused by validation.**
+- **Authenticated editor check: pending, owner to run (T043).** It doesn't block implementation.
+  1. Sign in to Bandcamp as Nathan in a normal browser.
+  2. Open `https://flieslikerobots.bandcamp.com/edit_track`.
+  3. It must open his track editor. Record the result and date here. The PR calls this check out until it's recorded.
 
 ## Q7 · Nathan unchanged (SC-004)
 

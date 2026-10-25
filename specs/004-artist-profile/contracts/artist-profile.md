@@ -22,6 +22,7 @@ Creates the caller's profile, or updates it. The first-run form on `/new` and th
 - **No profile:** `locals.user.artist === null` → `409 "Add your artist name first."`, checked before signing or creating anything.
 - **Job's `artist_id`:** set to `locals.user.artist.id`. `jobs_insert` rejects anything else.
 - **Short creation** (R7):
+  - `artist_id` stays the parent's, null included. `jobs_insert` checks it through `soundboard_owns_job`, unchanged.
   - `artistName` is the owner's current profile name.
   - Tags are the parent's approved tags with the parent pick's `artistName` removed (case-insensitive), with the current name first.
   - The parent's fields are unchanged.
@@ -35,7 +36,10 @@ Checks run in this order, all before any model call:
    - `access-lost` → `{ wait: 'reconnect YouTube' }`. A live token is marked refused.
    - `busy` → `{ wait: 'waiting on YouTube' }`. The grant is untouched.
    - `app-rejected` → the step fails (counts toward `consecutiveFailures`).
-3. **Model call and stored pick:** the stored pick carries `artistName`.
+   - 403s are classified by reason (research R8).
+3. **Audience and thumbnails:** bounded by the same deadline. Out of time in the audience read → `{ wait: 'waiting on YouTube' }`.
+4. **Model time:** under the smart pick's minimum → `{ wait: 'model busy' }`, no model call, no failure count.
+5. **Model call and stored pick:** the stored pick carries `artistName`.
    - The description and `bandcamp.credits` end with the owner's `contactLine` when set, placed in code.
    - No YouTube-sourced text from the read is stored, and none reaches Sentry.
 
@@ -53,6 +57,7 @@ Checks run in this order, all before any model call:
   - `access-lost` → `{ wait: 'reconnect YouTube' }`.
   - `busy` → `{ wait: 'waiting on YouTube' }`.
   - `app-rejected` → error.
+  - Under the brand agent's minimum model time → `{ wait: 'model busy' }`.
   - Zero uploads → the existing `409`.
 - **Stored proposal:** keeps `uploadCount`, not video IDs.
 - **Memory:** keyed by `locals.user.artist.id`.

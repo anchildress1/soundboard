@@ -32,11 +32,13 @@ description: 'Task list for artist profile inputs and display'
 - [x] T000 👤 Decision gate (research R0), decided 2026-10-25:
   - III wins: a missing or revoked grant waits. The spec was changed to match.
   - II (grounded voice) and IV (no artist constants) get explicit, temporary exceptions, removed by spec 005.
+  - II (tags from candidates) gets the permanent required-artist-tag exception PRD R4 already states.
   - Classification: **MAJOR, 2.0.1 → 3.0.0** (an exception redefines a MUST; precedent `cef38f2`).
 - [ ] T001 👤 Amend `.specify/memory/constitution.md` through `/speckit-constitution` (blocks T006 onward):
   - II: "Until spec 005 ships, artists without a curated profile get generic voice rules (`GENERIC_VOICE`)."
   - IV: "Until spec 005 ships, Nathan's `ARTIST_VOICE` and credit wording stay in `smart-pick.ts`, selected by `artists.curated`."
-  - Each exception names spec 005 as its removal point.
+  - Each voice exception names spec 005 as its removal point.
+  - II, tags (permanent): "The pick's own artist name (`Pick.artistName`) is the one tag allowed outside the candidate lists, exactly once."
   - Version 3.0.0, with the Sync Impact Report.
 
 ---
@@ -69,13 +71,14 @@ description: 'Task list for artist profile inputs and display'
   - Keep line 273.
 - [ ] T003 [P] Update `AGENTS.md` (FR-016):
   - Line 15: `ARTIST_VOICE` applies only to `artists.curated`; everyone else gets `GENERIC_VOICE`. Spec 005 removes `curated`.
+  - Line 17: "Hashtags and tags: only from the job's candidate lists (PRD R4), plus the pick's own `artistName` tag exactly once. Reject anything else."
   - Lines 26-27:
     - Only a user with a curated profile opens `/brand`.
     - Gate artist memory and feedback on `artistJob`. Identity reads need the owner's profile and grant; without the grant, the pick waits on `reconnect YouTube`.
   - Line 38: add "Replace YouTube-sourced text parts (`source: 'youtube'`) with `[YouTube uploads: <n>]`."
   - Add: "Artist values come from `artists` only. NEVER add an FLR constant to app code."
   - Add: "NEVER store identity-read uploads (titles, descriptions, video IDs) in the database."
-- [x] T004 👤 Gate G1: Bandcamp editor URL (constitution V, research R12, quickstart Q6). Passed 2026-10-25 for every accepted URL. Blocks T035.
+- [x] T004 👤 Gate G1, signed-out part: Bandcamp editor URL (constitution V, research R12, quickstart Q6). The signed-out redirect was verified 2026-10-25 for every accepted URL. The signed-in check is T043 (owner, non-blocking).
 - [x] T005 👤 Gate G2: the deadline aborts a stalled token refresh (research R14, quickstart Q8). Passed 2026-10-25. Blocks T020.
 
 ---
@@ -91,7 +94,7 @@ description: 'Task list for artist profile inputs and display'
     - `id text PK`
     - `name text not null`, `CHECK name = btrim(name) and char_length(name) between 1 and 100 and name !~ '[<>,]' and name !~ '^#'`
     - `bandcamp_url text`, null or `~ '^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?\.bandcamp\.com$'`
-    - `contact_line text`, null or `= btrim(contact_line)`, `char_length between 1 and 200` and `!~ '[<>]'`
+    - `contact_line text`, null or `= btrim(contact_line)`, `char_length between 1 and 200` and `!~ '[<>#]'`
     - `curated boolean not null default false`
     - `created_at`, `updated_at` (`timestamptz`, default `now()`)
     - RLS `artists_owner` for select and update to `soundboard_app`, using `id = (select u.artist_id from public.users u where u.uid = <principal> and u.active)`
@@ -135,7 +138,7 @@ description: 'Task list for artist profile inputs and display'
     - creates and links the profile
     - a second call raises `23505`
     - no identity raises `42501`
-    - a `CHECK` violation raises: a 101-character name, `<`, a comma, a leading `#`, `https://example.com`
+    - a `CHECK` violation raises: a 101-character name, `<`, a comma, a leading `#`, `https://example.com`, a contact line with `#`
   - **Constraints:** two users can't link the same profile (unique). A top-level job insert with `artist_id` null is rejected by `jobs_insert`.
 - [ ] T009 [P] Create `src/lib/artist.ts`:
   - `parseArtist(input: unknown): { value: ArtistInput } | { errors: ArtistFieldErrors }`, implementing research R11 exactly, messages verbatim. The Bandcamp URL is stored normalized as `https://<sub>.bandcamp.com`.
@@ -143,7 +146,7 @@ description: 'Task list for artist profile inputs and display'
     - valid input; empty optional fields → null
     - name: 100 vs 101 characters; `<`, `>`, a comma; a leading `#`; `#` inside the name accepted
     - Bandcamp: `https://Name.Bandcamp.com/` normalized; refused: `http:`, `javascript:`, `https://user:pw@x.bandcamp.com`, a port, a path, `https://bandcamp.com`, `https://x.bandcamp.com.evil.com`, a custom domain, an unparsable URL
-    - contact: 200 vs 201 characters; `<`/`>`
+    - contact: 200 vs 201 characters; `<`/`>`; `#` anywhere (`DM #myband`) → "Contact lines can't contain #."
     - surrounding whitespace; a non-object body
 - [ ] T010 Create `src/lib/server/artist/profile.ts`:
   - `type ArtistProfile`
@@ -251,21 +254,32 @@ description: 'Task list for artist profile inputs and display'
       1. `channels?mine=true&part=contentDetails`; select the item with `id === channelId`
       2. `playlistItems` (`maxResults = count + 5`, ≤ 50)
       3. `videos?part=snippet`
-      - All with a bearer header and `AbortSignal.timeout(deadline - Date.now())`. Returns `CatalogVideo`-shaped items, newest first, with `views` 0 (no `statistics` requested).
-    - Add `identityFailure(error): 'access-lost' | 'busy' | 'app-rejected'`, exactly the R8 table.
+      - All with a bearer header and `budgetSignal(deadline)`. Returns `CatalogVideo`-shaped items, newest first, with `views` 0 (no `statistics` requested).
+    - Add `DeadlineSpent` and `budgetSignal(deadline)` (R14): no time left → throw `DeadlineSpent` before any request, never `AbortSignal.timeout` with a negative value.
+    - Add `identityFailure(error): 'access-lost' | 'busy' | 'app-rejected'`, exactly the R8 table. A 403 is classified by `error.errors[0].reason`.
     - Delete `recentVideos`, and its export in `index.ts:20`.
   - **Tests** in `tests/unit/lib/server/platforms/youtube/youtube.test.ts`:
     - bearer on all 3 calls, and no `key=`; no `statistics` in `part`
     - ordering; empty playlist → `[]`
     - `channels.list` with several items picks the matching one; no matching item → `access-lost`
-    - a call made after the deadline aborts, and classifies as `busy`
-    - `identityFailure`, one case per R8 row input: 401, 403 `insufficientPermissions`, 403 `forbidden` → `access-lost`; 403 `quotaExceeded`, `rateLimitExceeded`, `userRateLimitExceeded`, 429, 503, a network error, an `AbortError`, the channel-mismatch throw → `busy`; `invalid_client`, `unauthorized_client`, 403 `accessNotConfigured`, a plain 400 → `app-rejected`
-- [ ] T020 [US2] Thread the step deadline through token refresh (research R14, inventory #36-37). Needs T005.
-  - **`src/lib/server/platforms/youtube/connection.ts`:** `accessTokenFor(uid, channelId, deadline)` builds its `OAuth2Client` with `transporterOptions: { signal: AbortSignal.timeout(Math.max(0, deadline - Date.now())) }`. No other timeout.
+    - an expired deadline: `DeadlineSpent`, and no `fetch` happens; a call that stalls past the deadline aborts; both classify as `busy`
+    - `identityFailure`, one case per R8 input:
+      - `access-lost`: 401; 403 `forbidden`, `insufficientPermissions`, `channelForbidden`, `playlistItemsNotAccessible`, an unlisted 403 reason; 404 `playlistNotFound`
+      - `busy`: 403 `quotaExceeded`, `dailyLimitExceeded`, `rateLimitExceeded`, `userRateLimitExceeded`; 429; 503; a network error; an `AbortError`; `DeadlineSpent`; the channel-mismatch throw
+      - `app-rejected`: `invalid_client`, `unauthorized_client`, 403 `accessNotConfigured`, 400 `keyInvalid`, a plain 400
+- [ ] T020 [US2] Thread the step deadline through every read the pick and brand make, and reserve model time (research R14, inventory #36-37, #52-54). Needs T005 and T019.
+  - **`src/lib/server/platforms/youtube/connection.ts`:** `accessTokenFor(uid, channelId, deadline)` throws `DeadlineSpent` when no time is left, else builds its `OAuth2Client` with `transporterOptions: { signal: budgetSignal(deadline) }`. No other timeout.
+  - **`src/lib/server/platforms/youtube/youtube.ts`:** `thumbnailImage(url, deadline)` and `keyGet(path, query, deadline)` use `budgetSignal` and drop their 10 s and 15 s timers. `thumbnailImage` returns null on `DeadlineSpent` or an abort.
+  - **`src/lib/server/pipeline/hashtags.ts`:** `audienceEvidence(chunks, durationSec, deadline)` passes it to `searchMusicVideos` and `videosByIds`. `pipeline.ts:163-168` and `brand.ts:201` pass the step deadline.
+  - **`src/lib/server/ai/model.ts`:** export `hasModelTime(agent, deadline)` (remaining ≥ `minCallMs`).
   - **Callers:** `publishing` (`pipeline.ts:265`) and `verify` (`pipeline.ts:366`) take the handler's deadline from `runStep`; `pastedVideo` (`actions.ts:235`) passes `stepDeadline()`; brand passes its own (T027).
   - **Abort in publishing and verify:** a refresh error that `identityFailure` classifies as `busy` returns `waiting on YouTube`. Every other error keeps today's handling.
   - **Tests** in `tests/unit/lib/server/platforms/youtube/connection.test.ts` and `pipeline.test.ts`:
     - a token endpoint that never answers rejects at the deadline, not later (fake `fetch` honoring the signal)
+    - an expired deadline makes no token, thumbnail or audience `fetch`
+    - a slow but successful identity read that leaves less than the smart pick's `minCallMs` → `{ wait: 'model busy' }`, 0 Gemini calls, `consecutiveFailures` unchanged
+    - a slow successful thumbnail read that spends the budget → the same `model busy` wait
+    - an audience read out of time → `waiting on YouTube`, `consecutiveFailures` unchanged
     - the pick step then returns `waiting on YouTube`, releases the claim with its token, and makes 0 Gemini calls
     - publishing and verify on a stalled refresh return a wait, not a failure
     - existing `invalid_grant` → revoked behavior unchanged
@@ -284,10 +298,13 @@ description: 'Task list for artist profile inputs and display'
     - The derived name always; stored facts only with `memory`.
 - [ ] T022 [P] [US2] Redact YouTube text in spans (research R13, inventory #38):
   - **`src/lib/server/core/tracing.ts`:** the text `Part` gains optional `source: 'youtube'`. `redactTurns` replaces such a part with `{ type: 'text', content: '[YouTube uploads: <n>]' }`, `n` passed on the part.
+  - **`src/lib/server/ai/model.ts`:** `chatJson`'s re-ask resends the original turns with their `source` tags, so the re-ask's `chat` span is redacted the same way. `sdkMessage` drops `source` before the SDK call.
+  - Model replies and reasoning stay traced (AGENTS.md); they're app output (R13).
   - **Tests** in `tests/unit/lib/server/core/tracing.test.ts`, through the global Sentry mock:
     - a sentinel string in a `source: 'youtube'` part appears in no `invoke_agent` or `chat` span attribute
     - the placeholder carries the count
     - untagged text parts are kept verbatim
+    - a first reply that fails to parse: the re-ask's `chat` span shows the placeholder too, and the SDK request carries the full upload text without a `source` field
 - [ ] T023 [US2] Prompt and finalize (research R9, R10, R13, inventory #5-12, #29-34):
   - **`src/lib/server/ai/smart-pick.ts`:**
     - `PickContext` and `PickFixups` take `artist: { name, contactLine, curated }` and `memory: boolean`.
@@ -299,7 +316,7 @@ description: 'Task list for artist profile inputs and display'
     - Line 184: "Keep the artist's slang".
     - `tagPool({ artistName, candidateLists })`.
     - `pickTags`: reserve the artist tag's `tagsLength` first, exempt it from the song-title rule, then fill model picks into what's left.
-    - `finalizePick`: strip every description and credits line containing an email address or starting with `contact` (case-insensitive), then append `artist.contactLine` as the last body line before the closing hashtags (reserved before `clip`) and as the last credits line. Null appends nothing.
+    - `finalizePick`: drop every description and credits line matching the R10 contact patterns (email, phone number, URL, `@handle`, or a leading booking/contact/email/DM label), then append `artist.contactLine` as the last body line before the closing hashtags (reserved before `clip`) and as the last credits line. Null appends nothing. A code comment says the filter is pattern-based.
     - Delete `CONTACT_LINE` and `ARTIST_CREDITS`.
   - **Tests** in `tests/unit/lib/server/ai/smart-pick.test.ts`:
     - Curated A: `ARTIST_VOICE` and the credit-line instruction present; the description ends with `Contact at flieslikerobots@gmail.com.` taken from the profile fixture, not code (SC-004).
@@ -307,6 +324,11 @@ description: 'Task list for artist profile inputs and display'
     - Contact placement, in both description and credits:
       - model output with no contact → the profile's line appended
       - a stale contact copied from uploads or feedback → stripped, the current line appended
+      - phone-only (`Bookings: +1 202 555 0100`, and a bare `202-555-0100`) → stripped
+      - handle-only (`@oldband`, `DM @oldband`) → stripped
+      - a stale URL line → stripped
+      - a changed contact → only the new line remains
+      - kept: the hashtag line, the curated credit line, prose with a year or a time (`2019`, `3:45`)
       - an incorrect or truncated contact → stripped, the current line appended
       - a cleared contact (null) → none, and stale lines still stripped
       - a 5,000-character model description → the contact line survives `clip`
@@ -322,7 +344,9 @@ description: 'Task list for artist profile inputs and display'
        - `busy` → `{ wait: 'waiting on YouTube' }`; the grant is untouched
        - `app-rejected` → throw (counts toward `consecutiveFailures`)
     4. `memory = await artistJob(job)`. `listFacts(artist, memory)`; `recentFeedback(artist.id)` only when `memory`; `approvedBrand(artist.id)` only when `memory` and `curated`.
-    5. Run the pick and store `artistName: artist.name`.
+    5. Thumbnails and audience evidence with the same deadline (T020). Audience out of time → `{ wait: 'waiting on YouTube' }`.
+    6. `hasModelTime('smart-pick', deadline)` false → `{ wait: 'model busy' }`.
+    7. Run the pick and store `artistName: artist.name`.
     - `recordPublish` passes `job.artistId`.
     - The shared 110 s deadline covers all of it: no new deadline.
   - **Tests** in `tests/unit/lib/server/pipeline/pipeline.test.ts`:
@@ -331,6 +355,7 @@ description: 'Task list for artist profile inputs and display'
     - Revoked grant (`invalid_grant` on refresh): marked revoked, `reconnect YouTube`, 0 Gemini calls.
     - 401 on a read: `access.refused` called, `reconnect YouTube`.
     - 403 `quotaExceeded`, 429 and 503 on a read: `waiting on YouTube`, grant untouched, `consecutiveFailures` unchanged.
+    - 403 `playlistItemsNotAccessible` and 403 `forbidden` on a read: `reconnect YouTube`, `consecutiveFailures` unchanged.
     - `invalid_client` on refresh: the step fails, and two in a row fail the job.
     - A reconnect to another channel between `getConnection` and the read: `waiting on YouTube`, then the next step reads the new channel.
     - No profile (B's legacy job): `Add your artist name first.`, 0 Gemini and 0 YouTube calls.
@@ -347,17 +372,19 @@ description: 'Task list for artist profile inputs and display'
     - after renaming the profile, the old pick's name is still accepted (no change to approved fields)
     - a pick with `artistName: null` accepts no artist tag and requires none
 - [ ] T026 [US2] Short creation uses the current name (research R7, inventory #41):
-  - **`src/lib/server/jobs/jobs.ts` `createShort`:** `artistName` is the owner's current profile name. Tags: the parent's approved tags without the parent pick's `artistName` (case-insensitive), with the current name first and its length reserved. The parent's fields are untouched.
+  - **`src/lib/server/jobs/jobs.ts` `createShort`:** keeps the parent's `artistId`, null included (`soundboard_owns_job`, unchanged). `artistName` is the owner's current profile name. Tags: the parent's approved tags without the parent pick's `artistName` (case-insensitive), with the current name first and its length reserved. The parent's fields are untouched.
   - **Tests** in `tests/unit/lib/server/jobs/jobs.test.ts`:
     - same name: tags unchanged, name once
     - rename before the Short: the old name dropped, the new one first; the parent's `finalFields` byte-identical
-    - legacy parent with `artistName: null`: gains the current name
+    - legacy parent with `artistId: null` and `artistName: null`, created through the request-scoped `soundboard_app` connection: the insert passes RLS, the Short keeps `artistId: null`, and its tags gain the current name
+    - a parent linked to the owner's profile: the Short keeps that `artistId`
     - the hook prompt (`short.ts` `buildHookRequest`) is unchanged and names no artist (FR-005 covers only prompts that name one)
 - [ ] T027 [US2] Brand guide on the owner's grant (FR-007, research R8, R13, inventory #14-16, #28, #39, #49):
   - **`src/lib/server/artist/brand.ts`:**
     - `requireCurated(user)` replaces `requireArtist`.
     - Slots, `getBrand`, `approvedBrand`, `proposeBrand`, `approveBrand` and `discardBrandProposal` take `artistId`.
     - `proposeBrand(uid, artistId)`: `accessTokenFor(uid, channelId, deadline)` → `ownUploads(token, channelId, BRAND_VIDEOS, deadline)`, the deadline from `:192`. Outcomes per R8 return `{ wait }` or throw.
+    - Before the model call: `hasModelTime('brand-guide', deadline)` false → `{ wait: 'model busy' }`.
     - The uploads go in a `source: 'youtube'` text part. The proposal stores `uploadCount`, not `basedOn`.
   - **`src/lib/brand.ts:11`:** `basedOn: string[]` → `uploadCount: number`.
   - **Routes:** update `src/routes/brand/+page.server.ts`, `src/routes/brand/+page.svelte:157` (`uploadCount`), and `src/routes/api/brand/{propose,approve,discard}/+server.ts`.
@@ -366,6 +393,8 @@ description: 'Task list for artist profile inputs and display'
     - C and B: 404
     - not connected or revoked: `{ wait: 'reconnect YouTube' }`, 0 Gemini calls
     - quota or 503: `{ wait: 'waiting on YouTube' }`, grant untouched
+    - 403 `playlistItemsNotAccessible`: `{ wait: 'reconnect YouTube' }`
+    - a slow successful read that spends the budget: `{ wait: 'model busy' }`, 0 Gemini calls
     - `invalid_client`: error
     - zero uploads: the existing 409
 - [ ] T028 [P] [US2] Review and working screen (research R9, R15, inventory #42):
@@ -373,7 +402,7 @@ description: 'Task list for artist profile inputs and display'
   - **`src/routes/jobs/[id]/+page.svelte`:** `'Add your artist name first.'` with a link to `/settings`; `'reconnect YouTube'` during the pick with a link to Connections.
   - **Tests:** extend `tests/unit/lib/components/Review.test.ts` (fixed tag rendered, not editable, counted, submitted once even when typed again) and the job page test.
   - **E2E** in `tests/e2e/artist.spec.ts`: as C on its seeded review job, the fixed `Test Artist` tag shows, and clearing the comma field still approves with it.
-- [ ] T029 👤 [US2] Delete `FLR_CHANNEL_ID` (config, needs approval; inventory #52): `deploy.sh:39,48,186`, `.env.example:15`, `playwright.config.ts:37`, `README.md:191`.
+- [ ] T029 👤 [US2] Delete `FLR_CHANNEL_ID` (config, needs approval; inventory #55): `deploy.sh:39,48,186`, `.env.example:15`, `playwright.config.ts:37`, `README.md:191`.
   - Then `grep -rn FLR_CHANNEL_ID src scripts deploy.sh .env.example playwright.config.ts README.md` returns nothing. `specs/` and `docs/` mentions are history and stay.
 
 **Checkpoint**: US1 and US2 deliver the MVP. A non-Nathan user can run a full release with their own details.
@@ -479,13 +508,16 @@ description: 'Task list for artist profile inputs and display'
   - **No approval, no upload.**
   - **Report:** calls, tokens, and estimated spend.
 - [ ] T042 After the stack rebase onto `003-resumable-upload`: if 003 added a migration numbered `0005`, regenerate this feature's migration (research R17). Drop 004's SQL, snapshot and journal entry, rerun `pnpm drizzle-kit generate --name artist_profiles`, and re-insert the T006 data block and function. Then rerun T040.
+- [ ] T043 👤 Gate G1, signed-in part (research R12, quickstart Q6). Owner only: agents may not enter Nathan's Bandcamp login.
+  - Signed in as Nathan, `https://flieslikerobots.bandcamp.com/edit_track` opens his track editor. Record the result and date in quickstart Q6.
+  - Doesn't block implementation or merge. The PR description calls it out until it's recorded.
 
 ---
 
 ## Dependencies and execution order
 
 - **Phase 0:** T000 is decided. T001 blocks every code task (T006 onward).
-- **Setup (T002-T005):** the PRD must match before behavior code. T004 (G1) passed, so T032 is unblocked. T005 (G2) passed, so T020 is unblocked.
+- **Setup (T002-T005):** the PRD must match before behavior code. T004 (G1, signed-out) passed, so T032 is unblocked. T005 (G2) passed, so T020 is unblocked.
 - **Foundational (T006-T012)** blocks every story.
   - T006 → T007 → T008.
   - T009 [P] alongside T006.
@@ -502,7 +534,7 @@ description: 'Task list for artist profile inputs and display'
   - T029 only after T024 and T027 remove the last readers.
 - **US3 (T030-T034)** after T011. Its components are independent [P]; T034 last.
 - **US4 (T035-T037)** after T014 (shared form) and T024 and T025 (rename semantics).
-- **Polish (T038-T042)** last. T041 after T040 is green. T042 only when rebasing.
+- **Polish (T038-T043)** last. T041 after T040 is green. T042 only when rebasing. T043 is the owner's, any time, and blocks nothing.
 
 ## Parallel examples
 

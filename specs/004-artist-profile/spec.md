@@ -33,6 +33,8 @@
 - Q: Do non-Nathan drafts carry a credit line? → A: Never. Only Nathan's curated profile gets his credit line.
 - Q: Which name does a Short use? → A: The owner's current profile name when the Short is created.
 - Q: What happens to a pick on an older job whose owner has no profile yet? → A: It waits with "Add your artist name first." and a link to Settings.
+- Q: Can a contact line contain `#`? → A: No. The app appends it verbatim, and a hashtag outside the job's list would block approval.
+- Q: Which job does a Short belong to for artist memory? → A: The parent's artist link. Only its tags use the owner's current name.
 
 ## User Scenarios & Testing _(mandatory)_
 
@@ -111,6 +113,8 @@ On the Settings page, the user edits their artist name, Bandcamp URL or contact 
 - **A Bandcamp URL that isn't `https://<name>.bandcamp.com`:** refused, custom domains included.
 - **A contact line containing a link:** allowed as the user wrote it. It's their own contact, placed by the app, not rewritten by the model.
 - **A cleared contact line:** the next draft has none, even if older uploads or feedback carry one.
+- **A contact line with `#`:** refused at entry. It would read as a hashtag outside the job's list.
+- **Contact text the model copies** (an old email, phone number, link, `@handle` or a "Booking:" line): removed by pattern before the app appends the current line. Forms outside those patterns are caught at Review.
 - **A user who signed in before this feature and has no profile:** they see the form on their next visit before starting a job. Their existing jobs stay readable.
 - **The connected channel changes:** identity reads follow the current connection. Jobs already approved keep their recorded destination channel (spec 001).
 - **Nathan's surname:** never pre-filled or written anywhere by the app. His profile name stays "Flies Like Robots".
@@ -122,7 +126,7 @@ On the Settings page, the user edits their artist name, Bandcamp URL or contact 
 - **FR-001**: Each signed-in user MUST have at most one artist profile, owned by that account and never shared.
 - **FR-002**: An artist profile MUST hold a required artist name, an optional Bandcamp URL and an optional contact line.
 - **FR-003**: A user without an artist profile MUST see the artist form before the new-release form, and MUST NOT be able to start a job until a profile is saved.
-- **FR-004**: The artist name MUST be trimmed and 1–100 characters, MUST NOT contain `<`, `>` or `,`, and MUST NOT start with `#`. The Bandcamp URL MUST be `https://<name>.bandcamp.com`, with no path, port or credentials. The contact line MUST be at most 200 characters and MUST NOT contain `<` or `>`.
+- **FR-004**: The artist name MUST be trimmed and 1–100 characters, MUST NOT contain `<`, `>` or `,`, and MUST NOT start with `#`. The Bandcamp URL MUST be `https://<name>.bandcamp.com`, with no path, port or credentials. The contact line MUST be at most 200 characters and MUST NOT contain `<`, `>` or `#`.
 - **FR-005**: Every pick, re-run and Short MUST carry the job owner's artist name as the required tag, exactly once. Every model prompt that names the artist MUST use that name; the hook prompt names no artist. A Short MUST use the owner's current name at Short creation. The required artist tag MUST be exempt from the song-title rule and MUST NOT be removable in the tag editor.
 - **FR-006**: Drafts (description and Bandcamp credits) MUST end with the owner's current contact line exactly when set, and contain no contact line when it isn't. The app places it; the model doesn't write it.
 - **FR-007**: Identity reads (recent uploads) and brand-guide reads MUST use the owner's connected YouTube channel through the owner's own grant. A missing, disconnected or revoked grant MUST make the pick wait with "Reconnect YouTube" before any model call (constitution III). The app MUST never read another artist's channel instead.
