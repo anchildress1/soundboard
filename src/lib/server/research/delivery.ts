@@ -2,10 +2,14 @@
 import { captureException, startSpan } from '@sentry/sveltekit';
 import { scrubUrl } from '#lib/scrub.js';
 import { stepDeadline } from '#lib/server/ai/model.js';
+import { pgCode } from '#lib/server/core/errors.js';
 import { withIdentity } from '#lib/server/core/identity.js';
 import { RETRY_MS, waitFor, type Batch, type Stage } from './batch';
 import { discover } from './discover';
+import { learn } from './learn';
+import { match } from './match';
 import { enqueue } from './queue';
+import { releases } from './releases';
 import {
   claim,
   commit,
@@ -22,13 +26,11 @@ const MAX_FAILURES = 2;
 
 export type Stages = Record<Exclude<RunStage, 'done' | 'failed'>, Stage>;
 
-// learn, match and releases are placeholders until T037, T020 and T021 land.
 const STAGES: Stages = {
-  learn: () =>
-    Promise.resolve({ done: 0, stage: 'discover', cursor: 0, limits: ['analytics-not-shared'] }),
+  learn,
   discover,
-  match: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
-  releases: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
+  match,
+  releases,
 };
 
 type Outcome = { release: Release; at: number; writes?: Batch['writes'] };
@@ -143,7 +145,15 @@ async function deliver(delivery: Delivery, stages: Stages): Promise<DeliveryStat
         }
       }
       const writes = outcome.writes;
-      await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
+      try {
+        await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
+      } catch (error) {
+        // 28000: the grant the batch read through changed before it saved (a disconnect, a
+        // revocation or a reconnect). Its reports are dropped and the next delivery reads the
+        // grant again; that is a wait, never a failure.
+        if (pgCode(error) !== '28000') throw error;
+        await commit(run, token, { ...stay(run), wait: 'waiting on YouTube' });
+      }
       return 200;
     },
   );

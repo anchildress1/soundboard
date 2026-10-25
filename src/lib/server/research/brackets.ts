@@ -1,5 +1,6 @@
 // Subscriber-count ranges (research R7): decade ranges, the same boundaries for the artist and every
 // peer. A bracket is a pure function of the reported count, so a single viral release can't move it.
+import type { ResearchLimit } from './runs';
 
 export const BRACKETS = [0, 100, 1000, 10000, 100000, 1000000] as const;
 
@@ -42,14 +43,14 @@ export function nextBracket(artist: Bracket | null): Bracket | null {
  */
 export function selectPeers<T extends { relation: Relation | null }>(
   kept: T[],
-): { selected: (T & { secondary: boolean })[]; limits: string[] } {
+): { selected: (T & { secondary: boolean })[]; limits: ResearchLimit[] } {
   const primary = (peer: T) => ({ ...peer, secondary: false });
   if (kept.every((peer) => peer.relation === null)) {
     return { selected: kept.slice(0, MAX_PEERS).map(primary), limits: [] };
   }
   const of = (r: Relation) => kept.filter((peer) => peer.relation === r);
   const selected = of('next').slice(0, MAX_PEERS).map(primary);
-  const limits: string[] = [];
+  const limits: ResearchLimit[] = [];
   if (selected.length < MIN_PEERS) {
     const same = of('same').slice(0, MIN_PEERS - selected.length);
     if (same.length > 0) limits.push('same-range-fallback');
