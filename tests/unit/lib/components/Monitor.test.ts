@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Monitor from '#lib/components/Monitor.svelte';
 
 const media = (el: Element, props: Record<string, number>) => {
@@ -67,5 +67,26 @@ describe('Monitor', () => {
     media(video, { videoHeight: 720 });
     await fireEvent(video, new Event('resize'));
     expect(screen.getByText('360p')).toBeInTheDocument();
+  });
+
+  it('calls onerror when the video cannot load its source', async () => {
+    const onerror = vi.fn();
+    const { container } = render(Monitor, { src: 'blob:unreadable', onerror });
+    await fireEvent.error(container.querySelector('video')!);
+    expect(onerror).toHaveBeenCalledOnce();
+  });
+
+  it('leaves onerror alone for a file that loads', async () => {
+    const onerror = vi.fn();
+    const { container } = render(Monitor, { src: 'blob:local', onerror });
+    const video = container.querySelector('video')!;
+    media(video, { duration: 12 });
+    await fireEvent.loadedMetadata(video);
+    expect(onerror).not.toHaveBeenCalled();
+  });
+
+  it('ignores a load error without an onerror', async () => {
+    const { container } = render(Monitor, { src: 'blob:unreadable' });
+    await expect(fireEvent.error(container.querySelector('video')!)).resolves.toBe(true);
   });
 });
