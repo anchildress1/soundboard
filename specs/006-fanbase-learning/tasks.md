@@ -258,20 +258,20 @@ description: 'Task list for learning what grows the fanbase'
   - `service.yaml`: env `RESEARCH_QUEUE`, `RESEARCH_TASK_URL`, `RESEARCH_TASK_SA`; `PEER_HEARING` per T005
   - `deploy.sh`: `APP_DOMAIN="${APP_DOMAIN:-https://soundboard.anchildress1.dev}"`; `PROJECT_NUMBER` from `gcloud projects describe`; `RESEARCH_TASK_URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app/api/research/task"`; enable `cloudtasks.googleapis.com` and `youtubeanalytics.googleapis.com`; create or update `soundboard-research` with `--max-concurrent-dispatches 1 --max-attempts 20 --min-backoff 10s --max-backoff 300s --max-retry-duration 3600s`; IAM per R2. Never run.
   - `.env.example` and the `README.md` env table: the four keys, with dev leaving the queue unset
-- [ ] T047 Sweep, output recorded in the PR description:
+- [x] T047 Sweep, output recorded in the PR description:
   - `grep -rn "BRACKETS_ENABLED" src docs AGENTS.md service.yaml .env.example` → nothing
   - `grep -rnE "viewCount" src/lib/server/research` → nothing
   - no code sums, averages or counts statistics across channels: `grep -rnE "reduce\(|sum\(|avg\(" src/lib/server/research src/lib/server/jobs/view.ts` reviewed hit by hit
   - `git --no-pager diff 005-artist-branding -- package.json pnpm-lock.yaml` adds no dependency (SC-001)
   - no surname anywhere in the diff
-- [ ] T048 After a rebase, if 005's migration number moved: delete this migration, its snapshot and journal entry, rerun `pnpm drizzle-kit generate --name fanbase_learning`, paste T006's appended SQL back, and rerun T008 and T049.
+- [x] T048 After a rebase, if 005's migration number moved: delete this migration, its snapshot and journal entry, rerun `pnpm drizzle-kit generate --name fanbase_learning`, paste T006's appended SQL back, and rerun T008 and T049.
 - [ ] T049 Validation loop (max 5 attempts, then stop with the exact errors):
   1. `make ai-checks`: coverage ≥ 85/85/85/80, zero warnings
   2. `pnpm exec playwright test`: both projects
   3. `semgrep scan --config auto --error --metrics=off` on changed files: zero findings
   4. SonarQube `analyze_code_snippet` on each changed or added source file: zero issues
   5. `pnpm audit --prod` and `pnpm audit`: zero
-- [ ] T050 👤 Fixed-evidence evaluation E1 (quickstart E1, research R15, #20). ≈ $0.30 of the $0.50 share. Write `specs/006-fanbase-learning/eval/{fixture.ts,eval.test.ts,vitest.eval.config.ts}` (the config reuses the repo's aliases, unmocked `fetch`); run the three picks; record `eval/result.json` against R15's pass criteria. Read and log the ledger before each call. Any pick the share can't cover → **unverified**.
+- [x] T050 👤 Fixed-evidence evaluation E1 (quickstart E1, research R15, #20). ≈ $0.30 of the $0.50 share. Write `specs/006-fanbase-learning/eval/{fixture.ts,eval.test.ts,vitest.eval.config.ts}` (the config reuses the repo's aliases, unmocked `fetch`); run the three picks; record `eval/result.json` against R15's pass criteria. Read and log the ledger before each call. Any pick the share can't cover → **unverified**.
 - [ ] T051 👤 Live local validation ([quickstart](quickstart.md) Q0–Q6). Gemini within what's left of the $0.50 share after T005 and T050.
   - Read and log `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` before each call.
   - Dev `.env` and dev Neon branch only; `RESEARCH_QUEUE` unset.

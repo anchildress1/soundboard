@@ -1,0 +1,118 @@
+{
+  "model": "gemini-4-argon",
+  "results": [
+    {
+      "pick": 1,
+      "scenario": "every role at 0, results missing",
+      "providerCalls": 2,
+      "failure": null,
+      "draft": {
+        "title": "Test Artist - Last Exit",
+        "description": "An instrumental synthwave piece played on drum machine and analog synth, recorded live in a single take.\n\n#synthwave #analogsynth #instrumental #electronic #retrowave",
+        "tags": [
+          "Test Artist",
+          "synthwave",
+          "analog synth",
+          "instrumental",
+          "electronic",
+          "retrowave"
+        ],
+        "hashtags": ["#synthwave", "#analogsynth", "#instrumental", "#electronic", "#retrowave"],
+        "bandcampAbout": "Last Exit is an instrumental synthwave track built on drum machine and analog synth, recorded live in a single take."
+      },
+      "citations": {
+        "sound": ["analysis"],
+        "feel": ["voice"],
+        "wording": ["voice"],
+        "discovery": ["analysis", "G1"],
+        "structure": ["identity"]
+      },
+      "recommendation": {
+        "approach": "Try leading the metadata with plain descriptions of the live single-take recording and hardware synth instrumentation.",
+        "intendedOutcome": "Help listeners searching for hardware-based synthwave and live-recorded instrumentals find the video.",
+        "follows": "artist",
+        "followsWhy": "Rests on the artist's own audio-visual analysis and voice rules rather than peer releases, as peer influence is set to zero.",
+        "evidence": ["analysis", "voice"],
+        "limits": ["analytics-not-shared"]
+      },
+      "influenceWarning": null,
+      "influenceFailures": [],
+      "limits": ["analytics-not-shared"],
+      "modelWroteAStatistic": false,
+      "costUsd": 0.0405
+    },
+    {
+      "pick": 2,
+      "scenario": "every role at 2, results that conflict with the peers",
+      "providerCalls": 2,
+      "failure": null,
+      "draft": {
+        "title": "Last Exit",
+        "description": "An instrumental synthwave piece recorded live in one take using a drum machine and analog synth.\n\n#synthwave #instrumental #analogsynth #electronic #retrowave",
+        "tags": [
+          "Test Artist",
+          "synthwave",
+          "instrumental",
+          "analog synth",
+          "electronic",
+          "retrowave"
+        ],
+        "hashtags": ["#synthwave", "#instrumental", "#analogsynth", "#electronic", "#retrowave"],
+        "bandcampAbout": "An instrumental synthwave track recorded live in one take, featuring a driving drum machine and analog synth."
+      },
+      "citations": {
+        "sound": ["analysis", "P1", "P2"],
+        "feel": ["voice", "P1-R1", "P2-R1"],
+        "wording": ["voice", "P1-R1", "P2-R1"],
+        "discovery": ["analysis", "G1", "P1-R1", "P2-R1"],
+        "structure": ["identity", "P1-R1", "P2-R1"]
+      },
+      "recommendation": {
+        "approach": "Try using a standalone song title without suffixes and pairing it with a specific set of instrument and subgenre tags alongside a brief note on the live recording process.",
+        "intendedOutcome": "Improve search discovery and reach among synthwave and hardware synth listeners while matching the artist's preference for minimal titles.",
+        "follows": "both",
+        "followsWhy": "In A1, the artist removed the '(Official Video)' suffix on YouTube, which aligns with the unadorned title format of next-range release P1-R1; meanwhile, expanding the tag set and mentioning the analog synth and one-take process draws from next-range peers P1-R1 and P2-R1 where A1 had sparse metadata and limited reach.",
+        "evidence": ["A1", "P1-R1", "P2-R1"],
+        "limits": []
+      },
+      "influenceWarning": null,
+      "influenceFailures": [],
+      "limits": [],
+      "modelWroteAStatistic": false,
+      "costUsd": 0.0425
+    },
+    {
+      "pick": 3,
+      "scenario": "every role at 4, one successful adopted release",
+      "providerCalls": 2,
+      "failure": null,
+      "draft": {
+        "title": "Last Exit",
+        "description": "Live one-take synthwave instrumental on drum machine and analog synth.\n\n#synthwave #instrumental #analogsynth #electronic",
+        "tags": ["Test Artist", "synthwave", "instrumental", "analog synth", "electronic"],
+        "hashtags": ["#synthwave", "#instrumental", "#analogsynth", "#electronic"],
+        "bandcampAbout": "Live one-take synthwave instrumental on drum machine and analog synth."
+      },
+      "citations": {
+        "sound": ["P1", "P2", "P3"],
+        "feel": ["P1", "P2", "P1-R1", "P2-R1"],
+        "wording": ["P1-R1", "P2-R1", "voice"],
+        "discovery": ["P1-R1", "P2-R1", "P3-R1"],
+        "structure": ["P1-R1", "P2-R1"]
+      },
+      "recommendation": {
+        "approach": "Keep the title to the song name only and expand the tags to include specific instrument and style terms like 'analog synth' and 'instrumental' alongside 'synthwave'.",
+        "intendedOutcome": "Steady listener retention alongside broader search discovery.",
+        "follows": "both",
+        "followsWhy": "The artist's single complete result A1 showed positive net subscriber growth using a song-name-only title, which aligns with next-range peer release P1-R1; adding specific instrument tags from next-range peers P1-R1 and P2-R1 builds on that baseline without conflict.",
+        "evidence": ["A1", "P1-R1", "P2-R1"],
+        "limits": []
+      },
+      "influenceWarning": null,
+      "influenceFailures": [],
+      "limits": [],
+      "modelWroteAStatistic": false,
+      "costUsd": 0.04
+    }
+  ]
+}
