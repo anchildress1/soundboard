@@ -1,8 +1,7 @@
 // The artist's own results as a pick reads them (research R8): fresh, shared, newest upload first,
 // each linked to what was suggested and what was published.
 import { desc } from 'drizzle-orm';
-import type { PickFields } from '#lib/types.js';
-import type { Calculated } from '#lib/types.js';
+import type { Calculated, PickFields } from '#lib/types.js';
 import { publishesFor } from '#lib/server/artist/memory.js';
 import { query } from '#lib/server/core/db.js';
 import { artistOutcomes } from '#lib/server/core/schema.js';
