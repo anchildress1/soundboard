@@ -367,6 +367,29 @@ describe('proposeVoice', () => {
     expect((await pending())!.grantAt).toBeNull();
   });
 
+  it('binds an edits-only proposal to the grant it was claimed on', async () => {
+    on(/youtube\/v3\/videos\?/, () =>
+      json({ items: [{ id: 'v1', snippet: { title: 'S', description: '' } }] }),
+    );
+    await seedFeedback({ field: 'description', before: 'a', after: PROSE });
+    const result = (await propose()) as { proposal: Proposal<VoiceRules> };
+    expect(result.proposal.sources).toMatchObject({ uploads: [], drafts: [], edits: 1 });
+    expect((await pending())!.grantAt).not.toBeNull();
+  });
+
+  it('waits on a reconnect and stores nothing when an edits-only proposal loses its grant', async () => {
+    on(/youtube\/v3\/videos\?/, () =>
+      json({ items: [{ id: 'v1', snippet: { title: 'S', description: '' } }] }),
+    );
+    await seedFeedback({ field: 'description', before: 'a', after: PROSE });
+    on(GEMINI, async () => {
+      await db().delete(connections).where(eq(connections.uid, USER_C.uid));
+      return interaction(JSON.stringify(VOICE));
+    });
+    expect(await propose()).toEqual({ wait: 'reconnect YouTube' });
+    expect(await pending()).toBeNull();
+  });
+
   it('409s with nothing to learn from, calling no model', async () => {
     await db().delete(connections).where(eq(connections.uid, USER_C.uid));
     await expect(propose()).rejects.toMatchObject({

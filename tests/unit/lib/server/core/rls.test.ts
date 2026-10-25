@@ -922,7 +922,7 @@ describe('artist guides', () => {
     expect(await guides()).toEqual([{ artistId: 'flr', status: 'approved' }]);
   });
 
-  it('refuses uploads read through a grant that was replaced before the save', async () => {
+  it('refuses any save on a claim whose grant was replaced before the save', async () => {
     await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
     await db()
       .update(connections)
@@ -932,8 +932,36 @@ describe('artist guides', () => {
       asUser(USER_C.uid, (tx) => save(tx, 't1', UPLOADS)),
       '28000',
     );
-    // Edits alone hold no YouTube data, so they save without a grant.
+    // A claim made while connected holds even an edits-only save to its grant.
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 't1')),
+      '28000',
+    );
+  });
+
+  it('refuses an edits-only save claimed while connected once YouTube is disconnected', async () => {
+    await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
+    await db().delete(connections).where(eq(connections.uid, USER_C.uid));
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 't1')),
+      '28000',
+    );
+    expect(await guides()).toEqual([{ artistId: 'flr', status: 'approved' }]);
+  });
+
+  it('saves an edits-only proposal claimed with no connection, unbound to any grant', async () => {
+    await db().delete(connections).where(eq(connections.uid, USER_C.uid));
+    await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
     expect(await asUser(USER_C.uid, (tx) => save(tx, 't1'))).toMatchObject([{ grant_at: null }]);
+  });
+
+  it('refuses uploads saved on a claim that saw no grant', async () => {
+    await db().delete(connections).where(eq(connections.uid, USER_C.uid));
+    await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 't1', UPLOADS)),
+      '28000',
+    );
   });
 
   it('ignores temp tables that shadow the ones the functions write', async () => {

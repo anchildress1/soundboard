@@ -147,15 +147,16 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Proposal claim lost' USING ERRCODE = '55000';
   END IF;
-  IF coalesce(jsonb_array_length(p_sources->'uploads'), 0) + coalesce(jsonb_array_length(p_sources->'drafts'), 0) > 0 THEN
-    -- Only the grant the claim saw: a disconnect or a reconnect since then refuses the save.
+  -- A claim made while connected saves only on the grant it saw, even from edits alone, so a
+  -- disconnect or reconnect since then refuses it and no proposal outlives its disconnect.
+  IF v_grant IS NOT NULL THEN
     PERFORM 1 FROM public.connections n
       WHERE n.uid = v_sub AND n.status = 'connected' AND n.updated_at = v_grant FOR SHARE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'YouTube disconnected' USING ERRCODE = '28000';
     END IF;
-  ELSE
-    v_grant := NULL;
+  ELSIF coalesce(jsonb_array_length(p_sources->'uploads'), 0) + coalesce(jsonb_array_length(p_sources->'drafts'), 0) > 0 THEN
+    RAISE EXCEPTION 'YouTube disconnected' USING ERRCODE = '28000';
   END IF;
   DELETE FROM public.artist_guides g WHERE g.artist_id = v_artist AND g.kind = p_kind AND g.status = 'proposed';
   UPDATE public.guide_claims c SET claim_token = NULL, claim_until = NULL
