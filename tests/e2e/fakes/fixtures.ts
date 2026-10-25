@@ -2,9 +2,9 @@
 // job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
 // backs the Connections page. Each test owns its job IDs, so parallel tests and both Playwright
 // projects never share mutable state.
-import type { JobDoc } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
-import type { Chunk, Pick, Short } from '$lib/types';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
+import type { Chunk, Pick, Short } from '#lib/types.js';
 import type { Seed } from '../../helpers/db';
 import { A_JOB, CHANNEL_A, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
 

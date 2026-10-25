@@ -1,16 +1,16 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jobs/actions';
-import { STALE_ANALYSIS } from '$lib/server/pipeline/short';
-import { ActionError } from '$lib/server/core/errors';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory, connections, jobAudience, jobs, users } from '$lib/server/core/schema';
-import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
-import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import { saveAudience } from '$lib/server/jobs/audience';
-import type { Hook, JobState, Pick, Short } from '$lib/types';
+import { approve, discard, makeShort, recut, rerun, retry } from '#lib/server/jobs/actions.js';
+import { STALE_ANALYSIS } from '#lib/server/pipeline/short.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory, connections, jobAudience, jobs, users } from '#lib/server/core/schema.js';
+import { createJob, getJob, listPicks, type JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
+import { saveAudience } from '#lib/server/jobs/audience.js';
+import type { Hook, JobState, Pick, Short } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

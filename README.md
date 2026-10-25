@@ -9,7 +9,7 @@ Soundboard analyzes a finished music video and drafts its YouTube title, descrip
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange)](LICENSE)
 
 ![Node 24](https://img.shields.io/badge/Node-24-5FA04E?logo=nodedotjs&logoColor=white)
-![SvelteKit 2](https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white)
+![SvelteKit 3](https://img.shields.io/badge/SvelteKit-3-FF3E00?logo=svelte&logoColor=white)
 ![Gemini API](https://img.shields.io/badge/Gemini%20API-paid%20tier-4285F4?logo=googlegemini&logoColor=white)
 ![Cloud Run](https://img.shields.io/badge/Cloud%20Run-us--central1-4285F4?logo=googlecloud&logoColor=white)
 ![Sentry](https://img.shields.io/badge/Sentry-AI%20agent%20tracing-362D59?logo=sentry&logoColor=white)
@@ -70,7 +70,7 @@ The models run on the paid tier of the Gemini API: `gemini-3.8-flash` watches an
 
 | Layer         | Choice                                                                                                 |
 | ------------- | ------------------------------------------------------------------------------------------------------ |
-| App           | SvelteKit 2 + Svelte 5, TypeScript, Node 24                                                            |
+| App           | SvelteKit 3 + Svelte 5, TypeScript, Node 24                                                            |
 | Model         | Gemini API, paid tier: `gemini-3.8-flash` (analyst), `gemini-4-argon` (picks, brand guide), via AI SDK |
 | Media         | ffmpeg                                                                                                 |
 | Hosting       | Cloud Run, us-central1                                                                                 |

@@ -14,8 +14,8 @@
     by <b>Ashley Childress</b>
   </p>
   <div class="legal">
-    <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
-    <a href={resolve('/terms')} data-sveltekit-reload>Terms of Service</a>
+    <a href={resolve('privacy')} data-sveltekit-reload>Privacy policy</a>
+    <a href={resolve('terms')} data-sveltekit-reload>Terms of Service</a>
   </div>
   <nav class="links" aria-label="Ashley Childress">
     <!-- Icons from Simple Icons (CC0) and Lucide (ISC). -->

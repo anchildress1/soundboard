@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { invalidateAll } from '$app/navigation';
-  import { disconnectYouTube } from '$lib/api';
+  import { refreshAll } from '$app/navigation';
+  import { disconnectYouTube } from '#lib/api.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -31,7 +31,7 @@
     try {
       const { revokedAtGoogle } = await disconnectYouTube();
       if (!revokedAtGoogle) message = UNCONFIRMED;
-      await invalidateAll();
+      await refreshAll();
     } catch (error) {
       message = error instanceof Error ? error.message : 'Disconnect failed';
     } finally {

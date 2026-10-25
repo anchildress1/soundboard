@@ -1,13 +1,15 @@
-import { json } from '@sveltejs/kit';
 import { ActionError } from './errors';
 
 /** Runs a route body, turning expected `ActionError`s into JSON error responses. */
 export async function respond(fn: () => Promise<unknown>): Promise<Response> {
   try {
-    return json(await fn());
+    return Response.json(await fn());
   } catch (error) {
     if (error instanceof ActionError) {
-      return json({ error: error.message, fields: error.fields ?? null }, { status: error.status });
+      return Response.json(
+        { error: error.message, fields: error.fields ?? null },
+        { status: error.status },
+      );
     }
     throw error;
   }

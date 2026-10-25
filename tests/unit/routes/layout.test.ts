@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { describe, expect, it } from 'vitest';
-import Layout from '$routes/+layout.svelte';
+import Layout from '#src/routes/+layout.svelte';
 
 const HANDLE = '@flieslikerobots';
 const NATHAN_EMAIL = 'nathan@example.com';

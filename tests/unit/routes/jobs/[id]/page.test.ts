@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setPending } from '$lib/pending';
-import { POLL_BACKOFF } from '$lib/retry';
-import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '$lib/types';
-import Page from '$routes/jobs/[id]/+page.svelte';
+import { setPending } from '#lib/pending.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '#lib/types.js';
+import Page from '#src/routes/jobs/[id]/+page.svelte';
 
 const BRAND_CHECK = 'Keeps the naming pattern.';
 const PLAYBACK_URL = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
@@ -306,7 +306,7 @@ describe('job page: driving', () => {
   it('goes home to sign in when a step finds the session gone', async () => {
     fetchMock.mockResolvedValueOnce(json({ message: 'Sign in first.' }, 401));
     setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { invalidateAll: true }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { refreshAll: true }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

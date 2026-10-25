@@ -7,7 +7,7 @@ import {
   pickModel,
   required,
   signupMode,
-} from '$lib/server/core/env';
+} from '#lib/server/core/env.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();

@@ -2,8 +2,8 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
 import {
   accessTokenFor,
   getConnection,
@@ -11,7 +11,7 @@ import {
   putConnection,
   revokeGrant,
   type ConnectionRow,
-} from '$lib/server/platforms/youtube/connection';
+} from '#lib/server/platforms/youtube/connection.js';
 import { seed } from '../../../../../helpers/db';
 
 const UID = 'sub-a';

@@ -4,7 +4,6 @@
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
 !.npmrc
-!svelte.config.js
 !vite.config.ts
 !tsconfig.json
 !src/

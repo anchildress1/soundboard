@@ -2,12 +2,12 @@
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { connections, jobs } from '$lib/server/core/schema';
-import { getJob, type JobDoc } from '$lib/server/jobs/jobs';
-import { POST } from '$routes/api/jobs/[id]/confirm-upload/+server';
-import type { JobView } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { connections, jobs } from '#lib/server/core/schema.js';
+import { getJob, type JobDoc } from '#lib/server/jobs/jobs.js';
+import { POST } from '#src/routes/api/jobs/[id]/confirm-upload/+server.js';
+import type { JobView } from '#lib/types.js';
 import { seed, truncate } from '../../../../../../helpers/db';
 import {
   A_JOB,

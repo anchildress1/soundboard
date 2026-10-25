@@ -78,7 +78,11 @@ test.describe('signed out', () => {
   }) => {
     const response = await request.get('/jobs/e2e-b-review/__data.json', { maxRedirects: 0 });
     expect(response.status()).toBe(200);
-    expect(await response.json()).toEqual({ type: 'redirect', location: '/auth/signed-out' });
+    expect(await response.json()).toEqual({
+      type: 'redirect',
+      status: 303,
+      location: '/auth/signed-out',
+    });
   });
 
   test('refuses POST /api/jobs with 401', async ({ request }) => {

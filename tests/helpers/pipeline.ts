@@ -1,7 +1,7 @@
 // Pure fixtures and fakes for the pipeline tests; the module mocks stay in the test file.
 import { EventEmitter } from 'node:events';
-import type { JobDoc } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
 import { seed, type Seed } from './db';
 import { interaction } from './gemini';
 

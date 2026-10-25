@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Page from '$routes/connections/+page.svelte';
+import Page from '#src/routes/connections/+page.svelte';
 
-const nav = vi.hoisted(() => ({ invalidateAll: vi.fn() }));
+const nav = vi.hoisted(() => ({ refreshAll: vi.fn() }));
 vi.mock('$app/navigation', () => nav);
 
 type Status = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
@@ -19,7 +19,7 @@ const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   fetchMock.mockReset();
-  nav.invalidateAll.mockReset();
+  nav.refreshAll.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -101,7 +101,7 @@ describe('connections page', () => {
     fetchMock.mockResolvedValue(Response.json({ revokedAtGoogle: true }));
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
-    await waitFor(() => expect(nav.invalidateAll).toHaveBeenCalledOnce());
+    await waitFor(() => expect(nav.refreshAll).toHaveBeenCalledOnce());
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/connections/youtube/disconnect',
       expect.objectContaining({ method: 'POST' }),
@@ -118,7 +118,7 @@ describe('connections page', () => {
         "Removed here. Google didn't confirm. Remove Soundboard at myaccount.google.com/permissions.",
       ),
     ).toBeInTheDocument();
-    expect(nav.invalidateAll).toHaveBeenCalledOnce();
+    expect(nav.refreshAll).toHaveBeenCalledOnce();
   });
 
   it('disables Disconnect while the request is in flight', async () => {
@@ -137,7 +137,7 @@ describe('connections page', () => {
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByText('Sign in first.')).toBeInTheDocument();
-    expect(nav.invalidateAll).not.toHaveBeenCalled();
+    expect(nav.refreshAll).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
   });
 

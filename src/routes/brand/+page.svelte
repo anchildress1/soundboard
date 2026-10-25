@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { approveBrand, discardBrandProposal, proposeBrand } from '$lib/api';
+  import { approveBrand, discardBrandProposal, proposeBrand } from '#lib/api.js';
   import {
     BRAND_THUMBNAILS,
     BRAND_VIDEOS,
@@ -10,10 +10,10 @@
     splitRules,
     STATEMENT_MAX,
     type StoredBrand,
-  } from '$lib/brand';
+  } from '#lib/brand.js';
   import pRetry, { AbortError } from 'p-retry';
-  import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import type { Wait } from '$lib/types';
+  import { POLL_BACKOFF, Waiting } from '#lib/retry.js';
+  import type { Wait } from '#lib/types.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();

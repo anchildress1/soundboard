@@ -1,6 +1,6 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
-import { GET } from '$routes/health/+server';
+import { GET } from '#src/routes/health/+server.js';
 
 describe('GET /health', () => {
   it('returns 200 with ok: true', async () => {

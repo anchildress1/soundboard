@@ -212,7 +212,7 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 
 | Piece                      | Runs                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `app` (Cloud Run, ingress) | SvelteKit 2.70 + Svelte 5.57, ffmpeg                                                                   |
+| `app` (Cloud Run, ingress) | SvelteKit 3.1 + Svelte 5.57, ffmpeg                                                                    |
 | Gemini API (paid tier)     | `gemini-3.8-flash` (analyst), `gemini-4-argon` (smart pick, hook pick, brand guide); set by app config |
 
 - **App service:** 2 vCPU / 8 GiB, max 1, min 0, 60-min request timeout. No GPU.

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '$lib/metadata';
-import type { Fact, Feedback } from '$lib/server/artist/memory';
+import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '#lib/metadata.js';
+import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
   allowedLinks,
   ARTIST_CREDITS,
@@ -21,11 +21,11 @@ import {
   type PickContext,
   type PickFixups,
   type RawPick,
-} from '$lib/server/ai/smart-pick';
-import type { Chunk, Measurements, Probe } from '$lib/types';
-import type { CandidateList } from '$lib/server/pipeline/hashtags';
-import type { AgentSpan, Part } from '$lib/server/core/tracing';
-import { stepDeadline } from '$lib/server/ai/model';
+} from '#lib/server/ai/smart-pick.js';
+import type { Chunk, Measurements, Probe } from '#lib/types.js';
+import type { CandidateList } from '#lib/server/pipeline/hashtags.js';
+import type { AgentSpan, Part } from '#lib/server/core/tracing.js';
+import { stepDeadline } from '#lib/server/ai/model.js';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { span } from '../../../../mocks/sentry';
 import { interaction, unavailable503 } from '../../../../helpers/gemini';

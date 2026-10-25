@@ -8,10 +8,10 @@ import {
   SESSION_TTL_SEC,
   sessionCookie,
   type OAuthState,
-} from '$lib/server/auth/auth';
-import { admit } from '$lib/server/auth/users';
-import { withIdentity } from '$lib/server/core/identity';
-import { connectGrant, type ConnectOutcome } from '$lib/server/platforms/youtube';
+} from '#lib/server/auth/auth.js';
+import { admit } from '#lib/server/auth/users.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { connectGrant, type ConnectOutcome } from '#lib/server/platforms/youtube/index.js';
 import type { RequestHandler } from './$types';
 
 type Callback = { url: URL; cookies: Cookies; code: string };

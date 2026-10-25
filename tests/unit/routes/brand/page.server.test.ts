@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { load } from '$routes/brand/+page.server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { load } from '#src/routes/brand/+page.server.js';
 import { seed, truncate } from '../../../helpers/db';
 import { USER_A, USER_B } from '../../../helpers/pipeline';
 

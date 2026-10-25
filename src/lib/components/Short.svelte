@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { timecode } from '$lib/format';
-  import type { FieldErrors } from '$lib/metadata';
-  import { cutErrors, lengthBounds, tenth } from '$lib/short';
-  import { jobStatus, modelLabel, modelSeconds, publishPaused } from '$lib/status';
-  import type { Destination, JobView, PickFields, Reframe } from '$lib/types';
+  import { timecode } from '#lib/format.js';
+  import type { FieldErrors } from '#lib/metadata.js';
+  import { cutErrors, lengthBounds, tenth } from '#lib/short.js';
+  import { jobStatus, modelLabel, modelSeconds, publishPaused } from '#lib/status.js';
+  import type { Destination, JobView, PickFields, Reframe } from '#lib/types.js';
   import Label from './Label.svelte';
   import Monitor from './Monitor.svelte';
   import Track from './Track.svelte';

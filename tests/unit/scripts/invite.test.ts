@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { users } from '$lib/server/core/schema';
+import { db } from '#lib/server/core/db.js';
+import { users } from '#lib/server/core/schema.js';
 import { add, list, reactivate, revoke, run, USAGE } from '../../../scripts/invite';
 import { client, seed, truncate } from '../../helpers/db';
 import { USER_A, USER_B, USERS } from '../../helpers/pipeline';
@@ -161,7 +161,7 @@ describe('scripts/invite.ts as a standalone script', () => {
 
   it('imports no app code, so plain Node can run it', () => {
     const source = readFileSync(SCRIPT, 'utf8');
-    expect(source).not.toMatch(/from '\$lib/);
+    expect(source).not.toMatch(/from '#lib/);
     expect(source).not.toMatch(/from '\.\.?\//);
   });
 

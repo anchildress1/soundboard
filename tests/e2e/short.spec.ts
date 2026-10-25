@@ -6,6 +6,12 @@ const TABS_JOB = '/jobs/e2e-tabs';
 const tab = (page: Page, name: 'YouTube' | 'Short' | 'Bandcamp') =>
   page.getByRole('tab', { name: new RegExp(name) });
 const shortPanel = (page: Page) => page.locator('#panel-short');
+// A click before hydration attaches the tablist's handler does nothing, so retry it.
+const openShort = (page: Page) =>
+  expect(async () => {
+    await tab(page, 'Short').click();
+    await expect(tab(page, 'Short')).toHaveAttribute('aria-selected', 'true', { timeout: 1000 });
+  }).toPass();
 
 // Every job here is user A's, linked to FLR.
 test.beforeEach(async ({ page }) => {
@@ -84,7 +90,7 @@ test.describe('Short tab', () => {
   }, testInfo) => {
     const id = `e2e-short-paused-${testInfo.project.name}`;
     await page.goto(`/jobs/${id}`);
-    await tab(page, 'Short').click();
+    await openShort(page);
     const panel = shortPanel(page);
     const recovery = panel.getByRole('region', { name: 'Upload outcome unknown' });
     await expect(recovery).toBeVisible();
@@ -109,7 +115,7 @@ test.describe('Short tab', () => {
 
   test('makes a Short and waits on the model for the hook', async ({ page }, testInfo) => {
     await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
-    await tab(page, 'Short').click();
+    await openShort(page);
     const step = page.waitForResponse(
       (response) => response.request().method() === 'POST' && response.url().endsWith('/step'),
     );
@@ -125,7 +131,7 @@ test.describe('Short tab', () => {
 
   test('refuses a Short of a video analyzed by an older version', async ({ page }) => {
     await page.goto('/jobs/e2e-stale');
-    await tab(page, 'Short').click();
+    await openShort(page);
     const make = page.waitForResponse((response) => response.url().endsWith('/short'));
     await shortPanel(page).getByRole('button', { name: 'Make a Short' }).click();
     expect((await make).status()).toBe(409);
@@ -139,7 +145,7 @@ test.describe('Short tab', () => {
 
   test('reviews a cut Short in a 9:16 frame with an accessible cut form', async ({ page }) => {
     await page.goto('/jobs/e2e-cut');
-    await tab(page, 'Short').click();
+    await openShort(page);
     const panel = shortPanel(page);
     const monitor = (await panel.locator('.monitor').boundingBox())!;
     expect(monitor.width / monitor.height).toBeCloseTo(9 / 16, 2);

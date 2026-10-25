@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
+import { resetClients } from '#lib/server/core/clients.js';
 import {
   objectInfo,
   signedReadUrl,
   signedUploadUrl,
   uploadFile,
   uploadObjectName,
-} from '$lib/server/media/gcs';
+} from '#lib/server/media/gcs.js';
 
 const UPLOAD_OBJECT = 'uploads/j1';
 

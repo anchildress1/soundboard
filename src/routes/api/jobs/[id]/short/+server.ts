@@ -1,7 +1,7 @@
-import { makeShort } from '$lib/server/jobs/actions';
-import { respond } from '$lib/server/core/http';
-import { getJob } from '$lib/server/jobs/jobs';
-import { authorizedJob, buildView } from '$lib/server/jobs/view';
+import { makeShort } from '#lib/server/jobs/actions.js';
+import { respond } from '#lib/server/core/http.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { authorizedJob, buildView } from '#lib/server/jobs/view.js';
 import type { RequestHandler } from './$types';
 
 /** Starts the video's Short, or returns the one it already has; the page then drives its steps. */

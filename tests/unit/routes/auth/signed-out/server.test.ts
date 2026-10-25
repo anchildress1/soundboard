@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isRedirect } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
-import { GET } from '$routes/auth/signed-out/+server';
+import { GET } from '#src/routes/auth/signed-out/+server.js';
 
 type Event = Parameters<typeof GET>[0];
 

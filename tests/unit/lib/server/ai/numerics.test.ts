@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripDeep, stripNumerics } from '$lib/server/ai/numerics';
+import { stripDeep, stripNumerics } from '#lib/server/ai/numerics.js';
 
 describe('stripNumerics', () => {
   it('drops unitless peak and loudness figures', () => {

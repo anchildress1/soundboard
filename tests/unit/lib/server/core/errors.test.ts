@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { invalidGrant } from '$lib/server/core/errors';
+import { invalidGrant } from '#lib/server/core/errors.js';
 
 describe('invalidGrant', () => {
   const tokenError = (error: string) =>

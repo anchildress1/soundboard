@@ -1,7 +1,7 @@
 // Maps jobs between their in-app shape and their row. Kept apart from jobs.ts, which needs the
 // database client: the E2E build's fake client seeds fixture rows through these.
 import { sql } from 'drizzle-orm';
-import { jobs } from '$lib/server/core/schema';
+import { jobs } from '#lib/server/core/schema.js';
 import type { JobDoc } from './jobs';
 
 type Row = typeof jobs.$inferSelect;

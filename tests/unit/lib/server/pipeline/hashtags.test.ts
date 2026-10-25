@@ -13,9 +13,9 @@ import {
   TAG_CANDIDATE_LIMIT,
   TOP_VIDEO_COUNT,
   topVideos,
-} from '$lib/server/pipeline/hashtags';
-import type { CatalogVideo } from '$lib/server/platforms/youtube/youtube';
-import type { Chunk } from '$lib/types';
+} from '#lib/server/pipeline/hashtags.js';
+import type { CatalogVideo } from '#lib/server/platforms/youtube/youtube.js';
+import type { Chunk } from '#lib/types.js';
 
 const SYNTHWAVE_TAG = '#synthwave';
 const INDUSTRIAL = '#industrial';

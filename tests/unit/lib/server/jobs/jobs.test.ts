@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
 import {
   claimJob,
   createJob,
@@ -21,10 +21,10 @@ import {
   transitionJob,
   type JobDoc,
   type NewJob,
-} from '$lib/server/jobs/jobs';
-import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import { saveAudience } from '$lib/server/jobs/audience';
-import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
+} from '#lib/server/jobs/jobs.js';
+import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
+import { saveAudience } from '#lib/server/jobs/audience.js';
+import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, SESSION_URI, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

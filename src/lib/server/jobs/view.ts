@@ -1,8 +1,8 @@
 import { error } from '@sveltejs/kit';
-import type { JobState, JobView, Pick, Wait } from '$lib/types';
-import { modelRole } from '$lib/status';
-import { analystModel, pickModel } from '$lib/server/core/env';
-import { objectInfo, signedReadUrl } from '$lib/server/media/gcs';
+import type { JobState, JobView, Pick, Wait } from '#lib/types.js';
+import { modelRole } from '#lib/status.js';
+import { analystModel, pickModel } from '#lib/server/core/env.js';
+import { objectInfo, signedReadUrl } from '#lib/server/media/gcs.js';
 import { getJob, latestPick, listChunks, toPublic, type JobDoc } from './jobs';
 
 /** Loads the caller's own job; anyone else's, or any job when signed out, reads as missing. */

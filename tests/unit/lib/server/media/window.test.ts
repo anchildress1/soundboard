@@ -5,7 +5,7 @@ import { existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cutWindowClip, MAX_CLIP_BYTES, measureWindow } from '$lib/server/media/window';
+import { cutWindowClip, MAX_CLIP_BYTES, measureWindow } from '#lib/server/media/window.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const spawnMock = vi.mocked(spawn);

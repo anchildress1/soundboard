@@ -2,18 +2,21 @@ import { expect, test } from '@playwright/test';
 import { signIn, USER_A, USER_B } from './session';
 
 test.describe('brand guide', () => {
-  test('sends a signed-out user home and refuses its API', async ({ page, request }) => {
+  test('sends a signed-out user home and refuses its API', async ({ page, request, baseURL }) => {
     const response = await request.get('/brand', { maxRedirects: 0 });
     expect([response.status(), response.headers().location]).toEqual([303, '/']);
-    expect((await request.post('/api/brand/propose')).status()).toBe(401);
+    // A browser sends Origin on every POST; SvelteKit refuses a bodyless POST without one.
+    const sameOrigin = { headers: { origin: baseURL! } };
+    expect((await request.post('/api/brand/propose', sameOrigin)).status()).toBe(401);
     await page.goto('/');
     await expect(page.getByRole('link', { name: 'Brand guide' })).toHaveCount(0);
   });
 
-  test('is a 404 for a user not linked to the artist', async ({ page }) => {
+  test('is a 404 for a user not linked to the artist', async ({ page, baseURL }) => {
     await signIn(page, USER_B);
     expect((await page.goto('/brand'))?.status()).toBe(404);
-    expect((await page.request.post('/api/brand/propose')).status()).toBe(404);
+    const sameOrigin = { headers: { origin: baseURL! } };
+    expect((await page.request.post('/api/brand/propose', sameOrigin)).status()).toBe(404);
     await page.goto('/');
     await expect(page.getByRole('link', { name: 'Brand guide' })).toHaveCount(0);
   });

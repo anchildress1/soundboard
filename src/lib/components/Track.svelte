@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Status } from '$lib/status';
+  import type { Status } from '#lib/status.js';
 
   let {
     status,

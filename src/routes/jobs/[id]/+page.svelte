@@ -2,20 +2,20 @@
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
-  import Bandcamp from '$lib/components/Bandcamp.svelte';
-  import Destinations from '$lib/components/Destinations.svelte';
-  import Heard from '$lib/components/Heard.svelte';
-  import Label from '$lib/components/Label.svelte';
-  import Monitor from '$lib/components/Monitor.svelte';
-  import Short from '$lib/components/Short.svelte';
-  import UploadRecovery from '$lib/components/UploadRecovery.svelte';
-  import Track from '$lib/components/Track.svelte';
+  import { action, ApiError, step, uploadToGcs, type ActionName } from '#lib/api.js';
+  import Bandcamp from '#lib/components/Bandcamp.svelte';
+  import Destinations from '#lib/components/Destinations.svelte';
+  import Heard from '#lib/components/Heard.svelte';
+  import Label from '#lib/components/Label.svelte';
+  import Monitor from '#lib/components/Monitor.svelte';
+  import Short from '#lib/components/Short.svelte';
+  import UploadRecovery from '#lib/components/UploadRecovery.svelte';
+  import Track from '#lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
-  import { drive } from '$lib/driver';
-  import type { FieldErrors } from '$lib/metadata';
-  import { takePending } from '$lib/pending';
-  import { POLL_BACKOFF, Waiting } from '$lib/retry';
+  import { drive } from '#lib/driver.js';
+  import type { FieldErrors } from '#lib/metadata.js';
+  import { takePending } from '#lib/pending.js';
+  import { POLL_BACKOFF, Waiting } from '#lib/retry.js';
   import {
     heardTags,
     jobStatus,
@@ -23,9 +23,9 @@
     modelSeconds,
     modelWorking,
     publishPaused,
-  } from '$lib/status';
-  import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
-  import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '$lib/types';
+  } from '#lib/status.js';
+  import { canCutShort, SHORT_MIN_SEC } from '#lib/short.js';
+  import { DRIVEN_STATES, SHORT_SOURCE_STATES, type JobView, type PickFields } from '#lib/types.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -87,7 +87,7 @@
     return () => clearInterval(tick);
   });
 
-  const signedOut = () => void goto(resolve('/'), { invalidateAll: true });
+  const signedOut = () => void goto(resolve('/'), { refreshAll: true });
 
   const run = async () => {
     if (driving) return;

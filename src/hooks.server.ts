@@ -1,9 +1,8 @@
 import { captureMessage, handleErrorWithSentry, sentryHandle } from '@sentry/sveltekit';
-import { json, type Handle } from '@sveltejs/kit';
-import { sequence } from '@sveltejs/kit/hooks';
-import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
-import { getUser } from '$lib/server/auth/users';
-import { withIdentity } from '$lib/server/core/identity';
+import { sequence, type Handle } from '@sveltejs/kit/hooks';
+import { readSession, SESSION_COOKIE } from '#lib/server/auth/auth.js';
+import { getUser } from '#lib/server/auth/users.js';
+import { withIdentity } from '#lib/server/core/identity.js';
 
 const SENTRY_TRACE = /^[0-9a-f]{32}-[0-9a-f]{16}(?:-[01])?$/;
 // Stricter than W3C baggage, which allows raw `&`, `<`, and `>`: Sentry percent-encodes values with
@@ -83,7 +82,7 @@ const gate: Handle = ({ event, resolve }) => {
     return new Response(null, { status: 303, headers: { location: '/auth/signed-out' } });
   if (OPEN.has(pathname)) return resolve(event);
   if (pathname === '/api' || pathname.startsWith('/api/'))
-    return json({ message: 'Sign in first.' }, { status: 401 });
+    return Response.json({ message: 'Sign in first.' }, { status: 401 });
   return new Response(null, { status: 303, headers: { location: '/' } });
 };
 

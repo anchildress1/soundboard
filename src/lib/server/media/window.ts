@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Measurements } from '$lib/types';
+import type { Measurements } from '#lib/types.js';
 import { encodeClip, measureRange } from './ffmpeg';
 
 /** The clip is sent inline; this leaves the request room for the prompt under Gemini's limit. */

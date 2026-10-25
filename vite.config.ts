@@ -1,4 +1,5 @@
 import { sentrySvelteKit } from '@sentry/sveltekit/vite';
+import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
@@ -8,19 +9,11 @@ const fake = (name: string) =>
 
 // E2E builds swap Google Cloud clients for in-memory fakes and the database for a PGlite seeded
 // with fixture users and jobs; release and check builds never include them.
-const e2eFakes =
-  process.env.E2E_FAKES === '1'
-    ? {
-        alias: {
-          '@google-cloud/kms': fake('kms'),
-          '@google-cloud/storage': fake('storage'),
-        },
-      }
-    : undefined;
+const e2eFakes = process.env.E2E_FAKES === '1';
 
-// App modules can't be swapped by `resolve.alias`: SvelteKit's `$lib` alias rewrites the specifier
-// first. Matching the resolved file catches every import of it. Window media is faked because E2E
-// runs no ffmpeg.
+// App modules can't be swapped by `resolve.alias`: `#lib` subpath imports resolve before it
+// applies. Matching the resolved file catches every import of it. Window media is faked because
+// E2E runs no ffmpeg.
 const appFakes = new Map([
   [fileURLToPath(new URL('src/lib/server/core/db.ts', import.meta.url)), fake('db')],
   [fileURLToPath(new URL('src/lib/server/media/window.ts', import.meta.url)), fake('window')],
@@ -45,8 +38,32 @@ export default defineConfig({
       release: { name: process.env.SENTRY_RELEASE || undefined },
       telemetry: false,
     }),
-    sveltekit(),
+    sveltekit({
+      compilerOptions: {
+        // Runes for app code only; third-party components may still ship legacy syntax.
+        runes: ({ filename }) =>
+          filename.split(/[/\\]/).includes('node_modules') ? undefined : true,
+      },
+      adapter: adapter(),
+      // Sentry initializes from src/instrumentation.server.ts, before any app module loads, and
+      // SvelteKit's own server tracing feeds the same spans.
+      tracing: { server: true },
+    }),
     ...(e2eFakes ? [e2eModules] : []),
   ],
-  resolve: e2eFakes,
+  ssr: {
+    // Sentry instruments these at build time, so they must be bundled; adapter-node externalizes
+    // every other dependency before Sentry's own `noExternal` applies.
+    noExternal: ['pg', 'ai'],
+    // adapter-node bundles devDependencies, and a bundled PGlite can't find its .data and .wasm files.
+    ...(e2eFakes && { external: ['@electric-sql/pglite'] }),
+  },
+  ...(e2eFakes && {
+    resolve: {
+      alias: {
+        '@google-cloud/kms': fake('kms'),
+        '@google-cloud/storage': fake('storage'),
+      },
+    },
+  }),
 });

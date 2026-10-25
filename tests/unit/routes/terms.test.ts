@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Terms from '$routes/terms/+page.svelte';
+import Terms from '#src/routes/terms/+page.svelte';
 
 describe('terms of service', () => {
   it('explains content rights, approval and alpha limitations without account controls', () => {

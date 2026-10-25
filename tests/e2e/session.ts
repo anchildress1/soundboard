@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
 export const USER_A = 'uid-a';
 export const USER_B = 'uid-b';
 
-// Mirrors $lib/server/auth sign() with the E2E server's SESSION_SECRET (playwright.config.ts).
+// Mirrors #lib/server/auth sign() with the E2E server's SESSION_SECRET (playwright.config.ts).
 export function sessionCookie(uid: string): string {
   const session = { uid, sid: randomBytes(16).toString('base64url'), exp: Date.now() + 3_600_000 };
   const body = Buffer.from(JSON.stringify(session)).toString('base64url');

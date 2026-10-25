@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Privacy from '$routes/privacy/+page.svelte';
+import Privacy from '#src/routes/privacy/+page.svelte';
 
 describe('privacy policy', () => {
   it('explains data processing and manual deletion without account controls', () => {

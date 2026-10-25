@@ -8,7 +8,7 @@ import {
   proposeBrand,
   step,
   uploadToGcs,
-} from '$lib/api';
+} from '#lib/api.js';
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

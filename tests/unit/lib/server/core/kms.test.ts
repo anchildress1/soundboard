@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { decrypt, encrypt } from '$lib/server/core/kms';
+import { resetClients } from '#lib/server/core/clients.js';
+import { decrypt, encrypt } from '#lib/server/core/kms.js';
 
 const KEY = 'projects/p/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens';
 

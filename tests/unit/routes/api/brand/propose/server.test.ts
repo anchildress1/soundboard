@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { POST } from '$routes/api/brand/propose/+server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { POST } from '#src/routes/api/brand/propose/+server.js';
 import { busy429, perDay429 } from '../../../../../helpers/gemini';
 import { USER_A, USER_B } from '../../../../../helpers/pipeline';
 

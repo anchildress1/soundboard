@@ -25,7 +25,7 @@ description: 'Task list for Google sign-in and connections'
 
 - [x] T001 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add @google-cloud/kms@6.2.1 drizzle-orm@0.45.3 pg@8.23.1` and `pnpm add -D drizzle-kit@0.31.11 @types/pg@8.23.1 @electric-sql/pglite@0.5.8` (research R7, R12)
 - [x] T002 [P] 👤 You apply: add env `SIGNUP_MODE` (`invite|open`), `KMS_KEY`, `DATABASE_URL` and `DATABASE_URL_UNPOOLED`, and remove `ALLOWLIST_EMAILS` and `DEMO_EMAILS`, in .env.example, service.yaml and playwright.config.ts
-- [x] T003 [P] In vite.config.ts under `E2E_FAKES=1`: alias `@google-cloud/kms` to `tests/e2e/fakes/kms.ts` and `$lib/server/core/db` to `tests/e2e/fakes/db.ts`; drop the Firestore alias; keep Storage and Secret Manager. In vitest.config.ts, alias `$lib/server/core/db` to `tests/helpers/db.ts` so unit tests hit PGlite without mocking an internal module
+- [x] T003 [P] In vite.config.ts under `E2E_FAKES=1`: alias `@google-cloud/kms` to `tests/e2e/fakes/kms.ts` and `#lib/server/core/db` to `tests/e2e/fakes/db.ts`; drop the Firestore alias; keep Storage and Secret Manager. In vitest.config.ts, alias `$lib/server/core/db` to `tests/helpers/db.ts` so unit tests hit PGlite without mocking an internal module
 - [x] T004 [P] Create drizzle.config.ts: `dialect: 'postgresql'`, schema `src/lib/server/core/schema.ts`, out `drizzle/`, credentials from `DATABASE_URL_UNPOOLED` (direct connection; migrations fail through the pooler)
 - [ ] T005 👤 Neon project `soundboard` (`withered-river-18454408`, `aws-us-east-2`) exists. Put its pooled connection string in Secret Manager as `DATABASE_URL`, then time a claim `UPDATE … RETURNING` from local and from Cloud Run, cold and warm; record the numbers under R12 in specs/001-google-sign-in/research.md
 
@@ -148,7 +148,7 @@ description: 'Task list for Google sign-in and connections'
 
 ### Implementation
 
-- [x] T043 [US3] Create scripts/invite.ts (`add <email> [--artist flr]`, `revoke <email>`, `list`) with a standalone `pg` client on `DATABASE_URL` and no `$lib` imports, runnable as `node scripts/invite.ts` under Node 24 type stripping
+- [x] T043 [US3] Create scripts/invite.ts (`add <email> [--artist flr]`, `revoke <email>`, `list`) with a standalone `pg` client on `DATABASE_URL` and no `#lib` imports, runnable as `node scripts/invite.ts` under Node 24 type stripping
 - [x] T044 [US3] Wire the denied path in src/routes/auth/callback/+server.ts to write nothing before `redeemInvite` succeeds (FR-005)
 
 **Checkpoint**: US1–US3 testable.

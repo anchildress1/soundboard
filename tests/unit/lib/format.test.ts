@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, percent, resolution, timecode } from '$lib/format';
+import { ago, percent, resolution, timecode } from '#lib/format.js';
 
 describe('timecode', () => {
   it('formats hours, minutes, and seconds', () => {

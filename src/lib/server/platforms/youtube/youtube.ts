@@ -1,5 +1,5 @@
-import type { LiveMetadata, PickFields } from '$lib/types';
-import { required } from '$lib/server/core/env';
+import type { LiveMetadata, PickFields } from '#lib/types.js';
+import { required } from '#lib/server/core/env.js';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/youtube/v3/videos';

@@ -5,7 +5,7 @@ import {
   DELETE_EXPIRED_GENRE_EVIDENCE,
   handleGenreCleanup,
   type CleanupConnection,
-} from '$lib/server/core/genre-cleanup';
+} from '#lib/server/core/genre-cleanup.js';
 import { client, seed, truncate } from '../../../../helpers/db';
 
 const triggerRequest = (scheduledAt = '2099-01-01T00:00:00Z') =>

@@ -5,10 +5,10 @@ import { isRedirect, type RequestEvent } from '@sveltejs/kit';
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { handle } from '$lib/../hooks.server';
-import { db } from '$lib/server/core/db';
-import { connections, jobs, users } from '$lib/server/core/schema';
+import { resetClients } from '#lib/server/core/clients.js';
+import { handle } from '#src/hooks.server.js';
+import { db } from '#lib/server/core/db.js';
+import { connections, jobs, users } from '#lib/server/core/schema.js';
 import {
   newOAuthState,
   OAUTH_COOKIE,
@@ -17,8 +17,8 @@ import {
   SESSION_TTL_SEC,
   sign,
   type OAuthState,
-} from '$lib/server/auth/auth';
-import { GET } from '$routes/auth/callback/+server';
+} from '#lib/server/auth/auth.js';
+import { GET } from '#src/routes/auth/callback/+server.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

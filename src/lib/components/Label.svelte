@@ -7,8 +7,8 @@
     TITLE_MAX,
     validateFields,
     type FieldErrors,
-  } from '$lib/metadata';
-  import type { Destination, PickFields } from '$lib/types';
+  } from '#lib/metadata.js';
+  import type { Destination, PickFields } from '#lib/types.js';
 
   type Fields = { title: string; description: string; tags: string[] };
 

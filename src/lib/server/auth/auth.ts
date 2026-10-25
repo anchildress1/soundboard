@@ -1,8 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client, type Credentials } from 'google-auth-library';
-import { required } from '$lib/server/core/env';
-import { invalidGrant } from '$lib/server/core/errors';
-import { YOUTUBE_SCOPES } from '$lib/server/platforms/youtube';
+import { required } from '#lib/server/core/env.js';
+import { invalidGrant } from '#lib/server/core/errors.js';
+import { YOUTUBE_SCOPES } from '#lib/server/platforms/youtube/index.js';
 
 export const SESSION_COOKIE = 'sb_session';
 export const OAUTH_COOKIE = 'sb_oauth';

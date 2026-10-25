@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { JobState } from '$lib/types';
+  import type { JobState } from '#lib/types.js';
 
   type Job = { id: string; songTitle: string; state: JobState };
 

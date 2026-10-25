@@ -10,11 +10,11 @@ import { jobDoc, seedJob, USERS } from '../../../../helpers/pipeline';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { interaction, unavailable503 } from '../../../../helpers/gemini';
 import { span, startSpan } from '../../../../mocks/sentry';
-import { ModelBusy, stepDeadline } from '$lib/server/ai/model';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import type { JobDoc } from '$lib/server/jobs/jobs';
+import { ModelBusy, stepDeadline } from '#lib/server/ai/model.js';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import {
   buildHookRequest,
   HOOK_SCHEMA,
@@ -27,8 +27,8 @@ import {
   settleHook,
   STALE_ANALYSIS,
   type HookContext,
-} from '$lib/server/pipeline/short';
-import type { Chunk, Short } from '$lib/types';
+} from '#lib/server/pipeline/short.js';
+import type { Chunk, Short } from '#lib/types.js';
 
 const NOTES = 'first single';
 const CHORUS = 'The chorus lands.';

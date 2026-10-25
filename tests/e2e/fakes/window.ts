@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Measurements } from '$lib/types';
+import type { Measurements } from '#lib/types.js';
 
 export const MAX_CLIP_BYTES = 8_000_000;
 

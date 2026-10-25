@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '$lib/api';
-import { drive, type DriverDeps } from '$lib/driver';
-import { POLL_BACKOFF } from '$lib/retry';
-import type { JobState, JobView, Wait } from '$lib/types';
+import { ApiError } from '#lib/api.js';
+import { drive, type DriverDeps } from '#lib/driver.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import type { JobState, JobView, Wait } from '#lib/types.js';
 
 const view = (state: JobState, wait?: Wait): JobView => ({
   job: {

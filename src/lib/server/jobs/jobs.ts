@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
-import { query, type Tx } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import type { Chunk, JobState, Pick, PublicJob } from '#lib/types.js';
+import { query, type Tx } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 import { readAudience, saveAudience } from './audience';
 

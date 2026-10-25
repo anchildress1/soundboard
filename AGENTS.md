@@ -50,18 +50,18 @@ Audience: AI coding agents. Directives only.
 
 ## Stack
 
-- SvelteKit 2, Svelte 5 runes, TypeScript strict, Node 24 (`.nvmrc`), pnpm.
+- SvelteKit 3, Svelte 5 runes, TypeScript strict, Node 24 (`.nvmrc`), pnpm.
 - Data: Neon Postgres via Drizzle (`src/lib/server/core/schema.ts`). Schema change → `pnpm drizzle-kit generate`; commit the SQL in `drizzle/`. NEVER hand-edit applied migrations.
-- Ask before upgrading to SvelteKit 3, TypeScript 7, or adapter-node 6.
+- Ask before upgrading to SvelteKit 4, TypeScript 7, or adapter-node 7.
 
 ## Tests
 
 - Unit: `tests/unit/`, mirroring `src/`. E2E: `tests/e2e/`.
-- Import app code via `$lib` / `$routes`. NEVER relative paths into `src/`.
+- Import app code via the `#lib/*` and `#src/*` subpath imports, with the file extension (`.js` for `.ts`). NEVER relative paths into `src/`.
 - Coverage floors: 85% lines/functions/statements, 80% branches. NEVER lower.
 - Every new module: positive, negative, error, and edge-case tests.
 - Mock at process boundaries only (GCS, KMS, `google-auth-library`, Google/YouTube/Gemini HTTP via `fetch`, ffmpeg). NEVER mock internal modules or the AI SDK.
-- NEVER mock the database. `$lib/server/core/db` aliases to `tests/helpers/db.ts` (PGlite, real migrations) in `vitest.config.ts`; seed rows through it.
+- NEVER mock the database. `#lib/server/core/db` aliases to `tests/helpers/db.ts` (PGlite, real migrations) in `vitest.config.ts`; seed rows through it.
 - `@sentry/sveltekit` is mocked globally (`tests/mocks/sentry.ts`). Assert through that mock. NEVER load the real SDK in tests.
 - E2E projects: desktop Chrome and Pixel 7. Pixel 7 is the primary path.
 - E2E builds swap the db module, KMS, Storage, and window media (`src/lib/server/media/window.ts`) for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.

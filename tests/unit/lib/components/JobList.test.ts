@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import JobList from '$lib/components/JobList.svelte';
-import type { JobState } from '$lib/types';
+import JobList from '#lib/components/JobList.svelte';
+import type { JobState } from '#lib/types.js';
 
 const job = (id: string, songTitle: string, state: JobState) => ({ id, songTitle, state });
 

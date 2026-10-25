@@ -1,22 +1,22 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { getJob } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
-import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
-import { load as layoutLoad } from '$routes/+layout.server';
-import { load as homeLoad } from '$routes/+page.server';
-import { load as jobLoad } from '$routes/jobs/[id]/+page.server';
-import { load as connectionsLoad } from '$routes/connections/+page.server';
-import { GET as getJobApi } from '$routes/api/jobs/[id]/+server';
-import { POST as approve } from '$routes/api/jobs/[id]/approve/+server';
-import { POST as confirmUpload } from '$routes/api/jobs/[id]/confirm-upload/+server';
-import { POST as discard } from '$routes/api/jobs/[id]/discard/+server';
-import { POST as recut } from '$routes/api/jobs/[id]/recut/+server';
-import { POST as rerun } from '$routes/api/jobs/[id]/rerun/+server';
-import { POST as makeShort } from '$routes/api/jobs/[id]/short/+server';
-import { POST as step } from '$routes/api/jobs/[id]/step/+server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
+import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
+import { load as layoutLoad } from '#src/routes/+layout.server.js';
+import { load as homeLoad } from '#src/routes/+page.server.js';
+import { load as jobLoad } from '#src/routes/jobs/[id]/+page.server.js';
+import { load as connectionsLoad } from '#src/routes/connections/+page.server.js';
+import { GET as getJobApi } from '#src/routes/api/jobs/[id]/+server.js';
+import { POST as approve } from '#src/routes/api/jobs/[id]/approve/+server.js';
+import { POST as confirmUpload } from '#src/routes/api/jobs/[id]/confirm-upload/+server.js';
+import { POST as discard } from '#src/routes/api/jobs/[id]/discard/+server.js';
+import { POST as recut } from '#src/routes/api/jobs/[id]/recut/+server.js';
+import { POST as rerun } from '#src/routes/api/jobs/[id]/rerun/+server.js';
+import { POST as makeShort } from '#src/routes/api/jobs/[id]/short/+server.js';
+import { POST as step } from '#src/routes/api/jobs/[id]/step/+server.js';
 import { seed, truncate } from '../../helpers/db';
 import { A_JOB, CHANNEL_A, jobDoc, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 

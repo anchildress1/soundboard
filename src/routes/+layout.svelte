@@ -9,7 +9,7 @@
   import wordmarkFont from '@fontsource/mr-dafoe/files/mr-dafoe-latin-400-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
-  import Footer from '$lib/components/Footer.svelte';
+  import Footer from '#lib/components/Footer.svelte';
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
@@ -47,10 +47,10 @@
         </p>
       {/if}
       {#if data.user}
-        <a class="btn ghost small" href={resolve('/connections')}>Connections</a>
+        <a class="btn ghost small" href={resolve('connections')}>Connections</a>
       {/if}
       {#if data.user?.artistId === 'flr'}
-        <a class="btn ghost small" href={resolve('/brand')}>Brand guide</a>
+        <a class="btn ghost small" href={resolve('brand')}>Brand guide</a>
       {/if}
       {#if data.user}
         <form method="POST" action="/auth/logout">
@@ -58,7 +58,7 @@
         </form>
       {:else}
         <!-- A full page load: the login route redirects off-site to Google. -->
-        <a class="btn primary small" href={resolve('/auth/login')} data-sveltekit-reload
+        <a class="btn primary small" href={resolve('auth/login')} data-sveltekit-reload
           >Sign in with Google</a
         >
       {/if}

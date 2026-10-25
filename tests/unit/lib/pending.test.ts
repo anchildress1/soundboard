@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { setPending, takePending, type PendingUpload } from '$lib/pending';
+import { setPending, takePending, type PendingUpload } from '#lib/pending.js';
 
 const upload = (name: string): PendingUpload => ({
   file: new File(['x'], name, { type: 'video/mp4' }),

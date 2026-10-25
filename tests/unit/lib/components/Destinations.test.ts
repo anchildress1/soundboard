@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { describe, expect, it } from 'vitest';
-import Destinations from '$lib/components/Destinations.svelte';
+import Destinations from '#lib/components/Destinations.svelte';
 
 const YOUTUBE_PANEL = 'YouTube panel';
 const SHORT_PANEL = 'Short panel';

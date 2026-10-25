@@ -53,7 +53,7 @@ description: 'Task list for the Gemini API swap'
   - Remove `MODEL_URL`.
   - Add `GEMINI_API_KEY`, from Secret Manager `soundboard-gemini-api-key` in service.yaml.
   - Add `GEMINI_ANALYST_MODEL` (default `gemini-3.8-flash`, or T001's choice) and `GEMINI_PICK_MODEL` (default `gemini-4-argon`).
-- [x] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
+- [x] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `#lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
 - [x] T007 [P] 👤 In playwright.config.ts:
   - Delete the `node tests/e2e/fakes/model.ts` webServer on port 4174 and the `MODEL_URL` env.
   - Add `--import ./tests/e2e/fakes/gemini.ts` to the preview server's Node command.

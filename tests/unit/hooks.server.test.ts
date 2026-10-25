@@ -1,14 +1,17 @@
+import type { RequestEvent } from '@sveltejs/kit';
+import type { ResolveOptions } from '@sveltejs/kit/hooks';
+
 // @vitest-environment node
 import { captureMessage } from '@sentry/sveltekit';
-import type { RequestEvent, ResolveOptions } from '@sveltejs/kit';
+
 // @ts-expect-error -- SvelteKit publishes no types for its internal request store.
 import { with_request_store } from '@sveltejs/kit/internal/server';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handle, replaceTraceMeta } from '$lib/../hooks.server';
-import { readSession, SESSION_COOKIE, sessionCookie } from '$lib/server/auth/auth';
-import { db } from '$lib/server/core/db';
-import { users } from '$lib/server/core/schema';
+import { handle, replaceTraceMeta } from '#src/hooks.server.js';
+import { readSession, SESSION_COOKIE, sessionCookie } from '#lib/server/auth/auth.js';
+import { db } from '#lib/server/core/db.js';
+import { users } from '#lib/server/core/schema.js';
 import { reactivate, revoke } from '../../scripts/invite';
 import { client, seed, truncate } from '../helpers/db';
 import { USER_A, USER_B, USERS } from '../helpers/pipeline';
@@ -249,10 +252,12 @@ describe('handle', () => {
 
   it("reports a malformed job trace tagged with the page's job", async () => {
     const { resolve } = renderer();
-    const ev = event(sessionCookie(USER_A.uid), {
-      jobTrace: { sentryTrace: 'bad', baggage: JOB_BAGGAGE },
-    });
-    ev.params = { id: 'j1' };
+    const ev = {
+      ...event(sessionCookie(USER_A.uid), {
+        jobTrace: { sentryTrace: 'bad', baggage: JOB_BAGGAGE },
+      }),
+      params: { id: 'j1' },
+    };
     expect(await (await run(ev, resolve)).text()).toContain('req-trace');
     expect(vi.mocked(captureMessage)).toHaveBeenCalledWith(
       'Job trace dropped: malformed sentry-trace or baggage',

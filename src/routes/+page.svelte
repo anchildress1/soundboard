@@ -2,13 +2,13 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
-  import { ApiError, createJob } from '$lib/api';
-  import Heard from '$lib/components/Heard.svelte';
-  import JobList from '$lib/components/JobList.svelte';
-  import Monitor from '$lib/components/Monitor.svelte';
-  import SignInNotice from '$lib/components/SignInNotice.svelte';
-  import { setPending } from '$lib/pending';
-  import { TITLE_MAX } from '$lib/metadata';
+  import { ApiError, createJob } from '#lib/api.js';
+  import Heard from '#lib/components/Heard.svelte';
+  import JobList from '#lib/components/JobList.svelte';
+  import Monitor from '#lib/components/Monitor.svelte';
+  import SignInNotice from '#lib/components/SignInNotice.svelte';
+  import { setPending } from '#lib/pending.js';
+  import { TITLE_MAX } from '#lib/metadata.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();

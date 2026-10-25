@@ -8,30 +8,36 @@ import {
   STATEMENT_MAX,
   type BrandGuide,
   type StoredBrand,
-} from '$lib/brand';
-import type { Wait } from '$lib/types';
-import { ActionError } from '$lib/server/core/errors';
-import { required } from '$lib/server/core/env';
+} from '#lib/brand.js';
+import type { Wait } from '#lib/types.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { required } from '#lib/server/core/env.js';
 import { and, eq } from 'drizzle-orm';
-import { query, type Tx } from '$lib/server/core/db';
-import { artistMemory } from '$lib/server/core/schema';
+import { query, type Tx } from '#lib/server/core/db.js';
+import { artistMemory } from '#lib/server/core/schema.js';
 import { ARTIST_ID, memoryOf } from './memory';
-import { chatJson, ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '$lib/server/ai/model';
-import { stripDeep } from '$lib/server/ai/numerics';
-import { isString, isStrings, shape } from '$lib/server/ai/shape';
+import {
+  chatJson,
+  ModelBusy,
+  modelFor,
+  ModelQuotaSpent,
+  stepDeadline,
+} from '#lib/server/ai/model.js';
+import { stripDeep } from '#lib/server/ai/numerics.js';
+import { isString, isStrings, shape } from '#lib/server/ai/shape.js';
 import {
   agentInput,
   agentOutput,
   invokeAgent,
   type ModelRequest,
   type Part,
-} from '$lib/server/core/tracing';
+} from '#lib/server/core/tracing.js';
 import {
   recentVideos,
   thumbnailImage,
   type CatalogVideo,
   type Thumbnail,
-} from '$lib/server/platforms/youtube';
+} from '#lib/server/platforms/youtube/index.js';
 
 const DESCRIPTION_CHARS = 200;
 /** Uploads carry 14 to 44 tags each; the leading few show the pattern without paying for the rest. */

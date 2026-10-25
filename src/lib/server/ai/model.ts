@@ -9,7 +9,7 @@ import {
   type LanguageModelUsage,
   type ModelMessage,
 } from 'ai';
-import { analystModel, geminiApiKey, pickModel } from '$lib/server/core/env';
+import { analystModel, geminiApiKey, pickModel } from '#lib/server/core/env.js';
 import {
   chatSpan,
   type AgentName,
@@ -17,8 +17,8 @@ import {
   type ModelRequest,
   type Part,
   type Turn,
-} from '$lib/server/core/tracing';
-import { quotaResetAt } from '$lib/server/platforms/youtube/youtube';
+} from '#lib/server/core/tracing.js';
+import { quotaResetAt } from '#lib/server/platforms/youtube/youtube.js';
 
 export type Agent = AgentName;
 

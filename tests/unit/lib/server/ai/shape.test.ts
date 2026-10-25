@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isFiniteNumber, isString, isStrings, shape } from '$lib/server/ai/shape';
+import { isFiniteNumber, isString, isStrings, shape } from '#lib/server/ai/shape.js';
 
 describe('isString / isFiniteNumber / isStrings', () => {
   it('accepts the matching type', () => {

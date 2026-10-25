@@ -21,8 +21,8 @@ import {
   videosByIds,
   isoSeconds,
   YouTubeError,
-} from '$lib/server/platforms/youtube/youtube';
-import type { PickFields } from '$lib/types';
+} from '#lib/server/platforms/youtube/youtube.js';
+import type { PickFields } from '#lib/types.js';
 
 const SESSION_URL = 'https://session';
 

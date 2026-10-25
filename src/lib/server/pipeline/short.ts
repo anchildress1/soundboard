@@ -2,9 +2,9 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pRetry from 'p-retry';
-import { REASK_ONCE } from '$lib/retry';
-import { floorTenth, lengthBounds, tenth } from '$lib/short';
-import type { Chunk, Hook, Short } from '$lib/types';
+import { REASK_ONCE } from '#lib/retry.js';
+import { floorTenth, lengthBounds, tenth } from '#lib/short.js';
+import type { Chunk, Hook, Short } from '#lib/types.js';
 import {
   chunkCount,
   LOUDNESS_TIMEOUT_MS,
@@ -13,21 +13,21 @@ import {
   renderShort,
   WINDOW_SEC,
   type LoudnessPoint,
-} from '$lib/server/media/ffmpeg';
-import { signedReadUrl, uploadFile } from '$lib/server/media/gcs';
-import { fail, getJob, listChunks, ok, type JobDoc } from '$lib/server/jobs/jobs';
-import type { JobPatch } from '$lib/server/jobs/rows';
-import { chatJson, modelFor } from '$lib/server/ai/model';
-import { stripNumerics } from '$lib/server/ai/numerics';
-import { isFiniteNumber, isString, shape } from '$lib/server/ai/shape';
-import { digestChunks } from '$lib/server/ai/smart-pick';
+} from '#lib/server/media/ffmpeg.js';
+import { signedReadUrl, uploadFile } from '#lib/server/media/gcs.js';
+import { fail, getJob, listChunks, ok, type JobDoc } from '#lib/server/jobs/jobs.js';
+import type { JobPatch } from '#lib/server/jobs/rows.js';
+import { chatJson, modelFor } from '#lib/server/ai/model.js';
+import { stripNumerics } from '#lib/server/ai/numerics.js';
+import { isFiniteNumber, isString, shape } from '#lib/server/ai/shape.js';
+import { digestChunks } from '#lib/server/ai/smart-pick.js';
 import {
   agentInput,
   agentOutput,
   invokeAgent,
   type AgentSpan,
   type ModelRequest,
-} from '$lib/server/core/tracing';
+} from '#lib/server/core/tracing.js';
 
 /**
  * Time the hook step keeps after the model: the loudness pass's whole time limit, plus signing its

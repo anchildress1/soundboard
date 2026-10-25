@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { startSpan } from '@sentry/sveltekit';
-import type { Measurements, Probe, Reframe } from '$lib/types';
+import type { Measurements, Probe, Reframe } from '#lib/types.js';
 
 /** Each analyze step sends the model one clip this long. */
 export const WINDOW_SEC = 60;

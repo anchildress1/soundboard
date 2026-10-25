@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { publishPaused } from '$lib/status';
-  import type { JobView } from '$lib/types';
+  import { publishPaused } from '#lib/status.js';
+  import type { JobView } from '#lib/types.js';
 
   let {
     view,
@@ -20,7 +20,7 @@
   <section class="paused" aria-labelledby={`${id}-title`}>
     <h2 id={`${id}-title`}>Upload paused</h2>
     <p>
-      YouTube access is lost. <a href={resolve('/connections')}>Reconnect on Connections</a>
+      YouTube access is lost. <a href={resolve('connections')}>Reconnect on Connections</a>
       to resume, or discard the job.
     </p>
   </section>

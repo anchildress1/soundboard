@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Heard from '$lib/components/Heard.svelte';
+import Heard from '#lib/components/Heard.svelte';
 
 const measurements = {
   integratedLufs: -13.84,

@@ -43,7 +43,7 @@
   <p>
     Soundboard uses YouTube API Services. By using Soundboard, you also agree to be bound by the
     <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. The
-    <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a> explains the data we process,
+    <a href={resolve('privacy')} data-sveltekit-reload>Privacy policy</a> explains the data we process,
     service providers, retention, deletion requests, and how to disconnect YouTube or revoke access through
     Google account permissions.
   </p>

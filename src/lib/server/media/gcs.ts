@@ -1,4 +1,4 @@
-import { bucket } from '$lib/server/core/clients';
+import { bucket } from '#lib/server/core/clients.js';
 
 /** The 2 GB cap is enforced by GCS itself through the signed header, not by the app. */
 export const CONTENT_LENGTH_RANGE = '1,2147483648';

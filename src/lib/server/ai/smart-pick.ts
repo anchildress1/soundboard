@@ -1,5 +1,5 @@
 import pRetry from 'p-retry';
-import type { BrandGuide } from '$lib/brand';
+import type { BrandGuide } from '#lib/brand.js';
 import {
   containsWords,
   DESCRIPTION_MAX,
@@ -7,22 +7,22 @@ import {
   tagsLength,
   TAGS_MAX,
   TITLE_MAX,
-} from '$lib/metadata';
-import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
-import { REASK_ONCE } from '$lib/retry';
-import { ARTIST_NAME, type Fact, type Feedback } from '$lib/server/artist/memory';
+} from '#lib/metadata.js';
+import type { Chunk, Measurements, Pick, Probe } from '#lib/types.js';
+import { REASK_ONCE } from '#lib/retry.js';
+import { ARTIST_NAME, type Fact, type Feedback } from '#lib/server/artist/memory.js';
 import { chatJson } from './model';
 import { stripDeep } from './numerics';
 import { isString, isStrings, shape } from './shape';
-import type { AudienceVideo, CandidateList, TagCandidate } from '$lib/server/pipeline/hashtags';
+import type { AudienceVideo, CandidateList, TagCandidate } from '#lib/server/pipeline/hashtags.js';
 import {
   agentInput,
   agentOutput,
   type AgentSpan,
   type ModelRequest,
   type Part,
-} from '$lib/server/core/tracing';
-import type { CatalogVideo, Thumbnail } from '$lib/server/platforms/youtube';
+} from '#lib/server/core/tracing.js';
+import type { CatalogVideo, Thumbnail } from '#lib/server/platforms/youtube/index.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 

@@ -18,7 +18,7 @@ import {
   toolSpan,
   type ChatReply,
   type ModelRequest,
-} from '$lib/server/core/tracing';
+} from '#lib/server/core/tracing.js';
 
 import { span } from '../../../../mocks/sentry';
 

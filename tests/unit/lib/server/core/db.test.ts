@@ -2,10 +2,10 @@
 import { captureException } from '@sentry/sveltekit';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-// The `.js` suffix slips past vitest.config.ts's exact-match alias to the PGlite helper, so this
+// The `#src` path slips past vitest.config.ts's exact-match alias to the PGlite helper, so this
 // file tests the real module with `pg` mocked at the process boundary.
-import { db, query, resetDb } from '$lib/server/core/db.js';
-import { withIdentity } from '$lib/server/core/identity';
+import { db, query, resetDb } from '#src/lib/server/core/db.js';
+import { withIdentity } from '#lib/server/core/identity.js';
 
 const pg = vi.hoisted(() => ({
   failedSql: undefined as string | undefined,

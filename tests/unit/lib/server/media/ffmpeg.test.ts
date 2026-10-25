@@ -17,7 +17,7 @@ import {
   SHORT_HEIGHT,
   SHORT_WIDTH,
   shortFilter,
-} from '$lib/server/media/ffmpeg';
+} from '#lib/server/media/ffmpeg.js';
 
 const SIGNED_OBJECT_URL = 'https://storage.example/obj?X-Goog-Signature=secret';
 const FFMPEG_OP = 'process.ffmpeg';

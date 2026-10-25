@@ -5,9 +5,9 @@ import {
   buildChunkRequest,
   CHUNK_SCHEMA,
   isChunkAnalysis,
-} from '$lib/server/ai/chunk-analyst';
-import { stepDeadline } from '$lib/server/ai/model';
-import type { ChunkAnalysis, Measurements } from '$lib/types';
+} from '#lib/server/ai/chunk-analyst.js';
+import { stepDeadline } from '#lib/server/ai/model.js';
+import type { ChunkAnalysis, Measurements } from '#lib/types.js';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { badRequest400, busy429, interaction } from '../../../../helpers/gemini';
 import { omit } from '../../../../helpers/omit';

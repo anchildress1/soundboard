@@ -36,17 +36,17 @@ import {
   unavailable503,
 } from '../../../../helpers/gemini';
 import { captureException, captureMessage, span, startSpan } from '../../../../mocks/sentry';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { withIdentity } from '$lib/server/core/identity';
-import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
-import { discard, retry } from '$lib/server/jobs/actions';
-import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
-import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import { saveAudience } from '$lib/server/jobs/audience';
-import { failurePatch, runStep, VERIFY_ATTEMPTS } from '$lib/server/pipeline/pipeline';
-import { HOOK_SCHEMA } from '$lib/server/pipeline/short';
-import { clearStatsCache, quotaResetAt } from '$lib/server/platforms/youtube/youtube';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { artistMemory, connections, jobs, users } from '#lib/server/core/schema.js';
+import { discard, retry } from '#lib/server/jobs/actions.js';
+import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
+import { saveAudience } from '#lib/server/jobs/audience.js';
+import { failurePatch, runStep, VERIFY_ATTEMPTS } from '#lib/server/pipeline/pipeline.js';
+import { HOOK_SCHEMA } from '#lib/server/pipeline/short.js';
+import { clearStatsCache, quotaResetAt } from '#lib/server/platforms/youtube/youtube.js';
 
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';

@@ -2,8 +2,8 @@
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { RULE_MAX, RULES_MAX, STATEMENT_MAX, type StoredBrand } from '$lib/brand';
-import { ActionError } from '$lib/server/core/errors';
+import { RULE_MAX, RULES_MAX, STATEMENT_MAX, type StoredBrand } from '#lib/brand.js';
+import { ActionError } from '#lib/server/core/errors.js';
 import {
   approveBrand,
   approvedBrand,
@@ -15,16 +15,16 @@ import {
   isBrandGuide,
   proposeBrand,
   requireArtist,
-} from '$lib/server/artist/brand';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory } from '$lib/server/core/schema';
-import { memoryOf } from '$lib/server/artist/memory';
+} from '#lib/server/artist/brand.js';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory } from '#lib/server/core/schema.js';
+import { memoryOf } from '#lib/server/artist/memory.js';
 import {
   clearStatsCache,
   type CatalogVideo,
   type Thumbnail,
-} from '$lib/server/platforms/youtube/youtube';
+} from '#lib/server/platforms/youtube/youtube.js';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { seed, truncate } from '../../../../helpers/db';
 import {

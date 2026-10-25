@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import Short from '$lib/components/Short.svelte';
-import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$lib/types';
+import Short from '#lib/components/Short.svelte';
+import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '#lib/types.js';
 
 const INVALID = 'aria-invalid';
 const PICKER = 'Configured picker: gemini-4-argon';

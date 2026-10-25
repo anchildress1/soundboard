@@ -11,10 +11,10 @@ import {
   STEP_BUDGET_MS,
   stepDeadline,
   type Agent,
-} from '$lib/server/ai/model';
-import { CLAIM_TTL_MS } from '$lib/server/jobs/jobs';
-import type { ModelRequest } from '$lib/server/core/tracing';
-import { quotaResetAt } from '$lib/server/platforms/youtube/youtube';
+} from '#lib/server/ai/model.js';
+import { CLAIM_TTL_MS } from '#lib/server/jobs/jobs.js';
+import type { ModelRequest } from '#lib/server/core/tracing.js';
+import { quotaResetAt } from '#lib/server/platforms/youtube/youtube.js';
 import {
   busy429,
   geminiError,

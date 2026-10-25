@@ -1,8 +1,13 @@
-import type { Chunk, ChunkAnalysis, Measurements } from '$lib/types';
+import type { Chunk, ChunkAnalysis, Measurements } from '#lib/types.js';
 import { chatJson, modelFor } from './model';
 import { stripDeep, stripNumerics } from './numerics';
 import { isString, isStrings, shape } from './shape';
-import { agentInput, agentOutput, invokeAgent, type ModelRequest } from '$lib/server/core/tracing';
+import {
+  agentInput,
+  agentOutput,
+  invokeAgent,
+  type ModelRequest,
+} from '#lib/server/core/tracing.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 

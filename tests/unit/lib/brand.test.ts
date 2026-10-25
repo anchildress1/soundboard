@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guideError, RULE_MAX, RULES_MAX, splitRules, STATEMENT_MAX } from '$lib/brand';
+import { guideError, RULE_MAX, RULES_MAX, splitRules, STATEMENT_MAX } from '#lib/brand.js';
 
 const guide = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: [] };
 

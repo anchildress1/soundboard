@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StoredBrand } from '$lib/brand';
-import { POLL_BACKOFF } from '$lib/retry';
-import Page from '$routes/brand/+page.svelte';
+import type { StoredBrand } from '#lib/brand.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import Page from '#src/routes/brand/+page.svelte';
 
 const GUIDE = {
   statement: 'Song title first, then a short story.',

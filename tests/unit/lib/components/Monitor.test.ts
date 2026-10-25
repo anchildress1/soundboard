@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Monitor from '$lib/components/Monitor.svelte';
+import Monitor from '#lib/components/Monitor.svelte';
 
 const media = (el: Element, props: Record<string, number>) => {
   for (const [key, value] of Object.entries(props)) {

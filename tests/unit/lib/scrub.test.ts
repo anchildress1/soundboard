@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scrubBreadcrumb, scrubEvent, scrubSpan, scrubUrl } from '$lib/scrub';
+import { scrubBreadcrumb, scrubEvent, scrubSpan, scrubUrl } from '#lib/scrub.js';
 
 const REDACTED = '[redacted]';
 const SCRUBBED_UPLOAD_URL = 'https://storage.googleapis.com/b/uploads/j1?[redacted]';

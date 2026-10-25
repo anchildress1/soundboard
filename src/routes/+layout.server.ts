@@ -1,5 +1,9 @@
 import { captureException } from '@sentry/sveltekit';
-import { channelStats, getConnection, type ChannelStats } from '$lib/server/platforms/youtube';
+import {
+  channelStats,
+  getConnection,
+  type ChannelStats,
+} from '#lib/server/platforms/youtube/index.js';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals }) => {

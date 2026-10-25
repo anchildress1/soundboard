@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Track from '$lib/components/Track.svelte';
+import Track from '#lib/components/Track.svelte';
 
 const VALUE_NOW = 'aria-valuenow';
 const NEEDS_REVIEW = 'Needs review';

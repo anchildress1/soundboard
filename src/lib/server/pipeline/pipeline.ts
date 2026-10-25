@@ -1,6 +1,6 @@
 import { readFile, rm } from 'node:fs/promises';
 import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
-import { scrubUrl } from '$lib/scrub';
+import { scrubUrl } from '#lib/scrub.js';
 import {
   DRIVEN_STATES,
   type Chunk,
@@ -8,12 +8,12 @@ import {
   type Pick,
   type PickFields,
   type Wait,
-} from '$lib/types';
-import { approvedBrand } from '$lib/server/artist/brand';
-import { analyzeChunk } from '$lib/server/ai/chunk-analyst';
-import { chunkCount, measureFile, probe, WINDOW_SEC } from '$lib/server/media/ffmpeg';
-import { cutWindowClip, measureWindow } from '$lib/server/media/window';
-import { objectInfo, signedReadUrl } from '$lib/server/media/gcs';
+} from '#lib/types.js';
+import { approvedBrand } from '#lib/server/artist/brand.js';
+import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
+import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
+import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
+import { objectInfo, signedReadUrl } from '#lib/server/media/gcs.js';
 import { audienceEvidence, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
@@ -28,15 +28,15 @@ import {
   releaseJob,
   transitionJob,
   type JobDoc,
-} from '$lib/server/jobs/jobs';
-import { artistJob, listFacts, recentFeedback, recordPublish } from '$lib/server/artist/memory';
-import type { Tx } from '$lib/server/core/db';
-import { required } from '$lib/server/core/env';
-import { ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '$lib/server/ai/model';
+} from '#lib/server/jobs/jobs.js';
+import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
+import type { Tx } from '#lib/server/core/db.js';
+import { required } from '#lib/server/core/env.js';
+import { ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '#lib/server/ai/model.js';
 import { hookStep, renderStep } from './short';
-import { runPick } from '$lib/server/ai/smart-pick';
-import type { JobPatch } from '$lib/server/jobs/rows';
-import { invokeAgent } from '$lib/server/core/tracing';
+import { runPick } from '#lib/server/ai/smart-pick.js';
+import type { JobPatch } from '#lib/server/jobs/rows.js';
+import { invokeAgent } from '#lib/server/core/tracing.js';
 import {
   accessTokenFor,
   finalChunk,
@@ -52,7 +52,7 @@ import {
   type Access,
   type ChunkResult,
   type ReadBack,
-} from '$lib/server/platforms/youtube';
+} from '#lib/server/platforms/youtube/index.js';
 
 export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 3;

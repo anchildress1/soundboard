@@ -7,8 +7,8 @@ import {
   modelSeconds,
   modelWorking,
   publishPaused,
-} from '$lib/status';
-import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
+} from '#lib/status.js';
+import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '#lib/types.js';
 
 const BUSY = 'model busy';
 const SYNTH_BASS = 'synth bass';
