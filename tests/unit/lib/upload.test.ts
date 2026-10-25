@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakeLocks, FakeXhr } from '../../helpers/uploads';
 
 type UploadModule = typeof import('#lib/upload.js');
 type SentryMock = typeof import('../../mocks/sentry');
@@ -8,106 +9,6 @@ const SIZE = 1000;
 const FP = 'f'.repeat(64);
 const URI = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
 const URI_2 = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s2';
-
-/** XMLHttpRequest as the uploader uses it; tests answer each request by hand or via `handler`. */
-class FakeXhr {
-  static all: FakeXhr[] = [];
-  static handler: ((xhr: FakeXhr) => void) | null = null;
-  method = '';
-  url = '';
-  headers: Record<string, string> = {};
-  body: Blob | undefined;
-  status = 0;
-  done = false;
-  aborted = false;
-  responseHeaders: Record<string, string> = {};
-  upload: {
-    onprogress: ((event: { loaded: number; total: number }) => void) | null;
-    onload: (() => void) | null;
-  } = { onprogress: null, onload: null };
-  onload: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onabort: (() => void) | null = null;
-
-  open(method: string, url: string) {
-    this.method = method;
-    this.url = url;
-  }
-  setRequestHeader(name: string, value: string) {
-    this.headers[name.toLowerCase()] = value;
-  }
-  getResponseHeader(name: string) {
-    return this.responseHeaders[name.toLowerCase()] ?? null;
-  }
-  send(body?: Blob) {
-    this.body = body;
-    FakeXhr.all.push(this);
-    const handler = FakeXhr.handler;
-    if (handler) queueMicrotask(() => handler(this));
-  }
-  abort() {
-    if (this.done) return;
-    this.done = true;
-    this.aborted = true;
-    this.onabort?.();
-  }
-
-  get isQuery() {
-    return this.headers['content-range']!.startsWith('bytes */');
-  }
-  respond(status: number, headers: Record<string, string> = {}) {
-    this.status = status;
-    this.responseHeaders = headers;
-    this.done = true;
-    this.onload?.();
-  }
-  drop() {
-    this.done = true;
-    this.onerror?.();
-  }
-  progress(loaded: number) {
-    this.upload.onprogress?.({ loaded, total: this.body!.size });
-  }
-}
-
-/** Web Locks shared by every "tab" (module instance) in a test. */
-class FakeLocks {
-  holders = new Set<string>();
-  queue: { name: string; grant: () => void }[] = [];
-
-  request(
-    name: string,
-    options: { ifAvailable?: boolean; signal?: AbortSignal },
-    callback: (lock: { name: string } | null) => unknown,
-  ): Promise<unknown> {
-    if (!this.holders.has(name)) return this.grant(name, callback);
-    if (options.ifAvailable) return Promise.resolve(callback(null));
-    return new Promise((resolve, reject) => {
-      const waiting = { name, grant: () => this.grant(name, callback).then(resolve, reject) };
-      this.queue.push(waiting);
-      options.signal?.addEventListener('abort', () => {
-        this.queue = this.queue.filter((item) => item !== waiting);
-        reject(new DOMException('Aborted', 'AbortError'));
-      });
-    });
-  }
-
-  private grant(name: string, callback: (lock: { name: string }) => unknown): Promise<unknown> {
-    this.holders.add(name);
-    return Promise.resolve(callback({ name })).finally(() => {
-      this.holders.delete(name);
-      const next = this.queue.find((item) => item.name === name);
-      if (next) {
-        this.queue = this.queue.filter((item) => item !== next);
-        next.grant();
-      }
-    });
-  }
-
-  async query() {
-    return { held: [...this.holders].map((name) => ({ name })), pending: [] };
-  }
-}
 
 type AppBody = { op: string; opId?: string; generation: number; fingerprint: string };
 type AppCall = { path: string; body: AppBody | null };
@@ -119,8 +20,7 @@ let calls: AppCall[];
 let answer: (call: AppCall) => Response | Promise<Response>;
 let locks: FakeLocks;
 
-const defaultAnswer = ({ path, body }: AppCall): Response => {
-  if (path.endsWith('/step')) return json(200, {});
+const defaultAnswer = ({ body }: AppCall): Response => {
   if (body!.op === 'renew') {
     return json(200, { sessionUri: URI_2, generation: body!.generation + 1, restarted: true });
   }
@@ -278,7 +178,7 @@ describe('the upload loop', () => {
     put.respond(200);
     await flush();
     expect(entryOf(upload)).toMatchObject({ state: 'done', saved: SIZE });
-    expect(calls.at(-1)!.path).toBe(`/api/jobs/${JOB}/step`);
+    expect(calls.every((call) => !call.path.endsWith('/step'))).toBe(true);
     expect(locks.holders.size).toBe(0);
   });
 
@@ -781,16 +681,6 @@ describe('one sender', () => {
     await flush();
     expect(onTakeover).not.toHaveBeenCalled();
     expect(locks.holders.size).toBe(0);
-  });
-
-  it('ignores a failed step call once the upload lands', async () => {
-    const upload = await tab();
-    answer = (call) => (call.path.endsWith('/step') ? json(500, {}) : defaultAnswer(call));
-    await started(upload);
-    last().respond(201);
-    await flush();
-    expect(entryOf(upload)!.state).toBe('done');
-    expect(calls.at(-1)!.path).toBe(`/api/jobs/${JOB}/step`);
   });
 
   it('releases the lock when the upload finishes', async () => {

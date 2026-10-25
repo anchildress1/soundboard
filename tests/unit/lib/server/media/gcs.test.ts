@@ -7,14 +7,12 @@ import {
   newUploadObject,
   objectInfo,
   signedReadUrl,
-  signedUploadUrl,
   sweepUploads,
   uploadFile,
-  uploadObjectName,
   uploadOffset,
 } from '#lib/server/media/gcs.js';
 
-const UPLOAD_OBJECT = 'uploads/j1';
+const UPLOAD_OBJECT = 'uploads/j1/o1';
 
 const gcs = vi.hoisted(() => ({
   storageOptions: [] as unknown[],
@@ -65,46 +63,6 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
 });
 
-describe('uploadObjectName', () => {
-  it('puts uploads under uploads/', () => {
-    expect(uploadObjectName('abc')).toBe('uploads/abc');
-  });
-});
-
-describe('signedUploadUrl', () => {
-  it('signs a v4 write with the content type and the 2 GB range header', async () => {
-    gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/put']);
-    expect(await signedUploadUrl(UPLOAD_OBJECT, 'video/mp4')).toBe('https://storage/put');
-    expect(gcs.storageOptions).toEqual([{ projectId: 'proj' }]);
-    expect(gcs.buckets).toEqual(['sb-media']);
-    expect(gcs.files).toEqual([UPLOAD_OBJECT]);
-    expect(gcs.getSignedUrl).toHaveBeenCalledWith({
-      version: 'v4',
-      action: 'write',
-      expires: NOW + 30 * 60 * 1000,
-      contentType: 'video/mp4',
-      extensionHeaders: { 'x-goog-content-length-range': '1,2147483648' },
-    });
-  });
-
-  it('reuses the storage client across calls', async () => {
-    gcs.getSignedUrl.mockResolvedValue(['u']);
-    await signedUploadUrl('a', 'video/mp4');
-    await signedUploadUrl('b', 'video/webm');
-    expect(gcs.storageOptions).toHaveLength(1);
-  });
-
-  it('throws without a bucket name', async () => {
-    vi.stubEnv('GCS_BUCKET', '');
-    await expect(signedUploadUrl('a', 'video/mp4')).rejects.toThrow('GCS_BUCKET');
-  });
-
-  it('propagates a signing failure', async () => {
-    gcs.getSignedUrl.mockRejectedValueOnce(new Error('no signer'));
-    await expect(signedUploadUrl('a', 'video/mp4')).rejects.toThrow('no signer');
-  });
-});
-
 describe('uploadFile', () => {
   it('uploads the local file to the object with its content type', async () => {
     gcs.upload.mockResolvedValueOnce([{}]);
@@ -131,12 +89,31 @@ describe('signedReadUrl', () => {
   it('signs a v4 read for two hours', async () => {
     gcs.getSignedUrl.mockResolvedValueOnce(['https://storage/get']);
     expect(await signedReadUrl('uploads/a.mp4')).toBe('https://storage/get');
+    expect(gcs.storageOptions).toEqual([{ projectId: 'proj' }]);
+    expect(gcs.buckets).toEqual(['sb-media']);
     expect(gcs.files).toEqual(['uploads/a.mp4']);
     expect(gcs.getSignedUrl).toHaveBeenCalledWith({
       version: 'v4',
       action: 'read',
       expires: NOW + 2 * 60 * 60 * 1000,
     });
+  });
+
+  it('reuses the storage client across calls', async () => {
+    gcs.getSignedUrl.mockResolvedValue(['u']);
+    await signedReadUrl('a');
+    await signedReadUrl('b');
+    expect(gcs.storageOptions).toHaveLength(1);
+  });
+
+  it('throws without a bucket name', async () => {
+    vi.stubEnv('GCS_BUCKET', '');
+    await expect(signedReadUrl('a')).rejects.toThrow('GCS_BUCKET');
+  });
+
+  it('propagates a signing failure', async () => {
+    gcs.getSignedUrl.mockRejectedValueOnce(new Error('no signer'));
+    await expect(signedReadUrl('a')).rejects.toThrow('no signer');
   });
 });
 

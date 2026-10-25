@@ -1,9 +1,10 @@
 import { TITLE_MAX } from '#lib/metadata.js';
 import { ActionError } from '#lib/server/core/errors.js';
-import { signedUploadUrl, uploadObjectName } from '#lib/server/media/gcs.js';
-import { createJob, MAX_MINUTES, newJobId } from './jobs';
 import { num, text } from '#lib/server/core/http.js';
+import { encrypt, UPLOAD_KMS_MS } from '#lib/server/core/kms.js';
 import { startJobTrace } from '#lib/server/core/tracing.js';
+import { createUploadSession, newUploadObject } from '#lib/server/media/gcs.js';
+import { createJob, MAX_MINUTES, newJobId } from './jobs';
 
 export const NOTES_MAX = 1000;
 export const MAX_BYTES = 2 * 1024 ** 3;
@@ -15,9 +16,20 @@ export type CreateInput = {
   contentType: string;
   size: number;
   durationSec: number;
+  fingerprint: string;
 };
 
-export type Created = { id: string; uploadUrl: string };
+/** `sessionUri` is the browser's upload credential; it leaves the server only in this reply. */
+export type Created = { id: string; sessionUri: string; generation: number };
+
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
+/** A picked file's fingerprint: 64 lowercase hex characters, or a 400 the page shows as is. */
+export function fingerprintOf(value: unknown): string {
+  const fingerprint = text(value);
+  if (!FINGERPRINT.test(fingerprint)) throw new ActionError(400, 'Pick the video again.');
+  return fingerprint;
+}
 
 /** A positive, finite number no larger than `max`. */
 const within = (n: number, max: number) => Number.isFinite(n) && n > 0 && n <= max;
@@ -45,28 +57,39 @@ function parseUpload(input: CreateInput) {
     throw new ActionError(400, `Song title is over ${TITLE_MAX} characters.`);
   if (notes.length > NOTES_MAX)
     throw new ActionError(400, `Notes are over ${NOTES_MAX} characters.`);
-  const { contentType, filename } = parseMedia(input);
-  return { songTitle, notes, contentType, filename };
+  const media = parseMedia(input);
+  return { songTitle, notes, ...media, fingerprint: fingerprintOf(input.fingerprint) };
 }
 
-/** Creates the user's job and the signed URL the browser uploads the video to. */
+/**
+ * Creates the user's job and the resumable session the browser uploads the video through.
+ * `origin` is the app address the browser sends from.
+ */
 export async function create(
   input: CreateInput,
   user: { uid: string; artistId: string | null },
+  origin: string,
 ): Promise<Created> {
   const id = newJobId();
-  const fields = parseUpload(input);
-  // Signing can fail (IAM); do it before a job is stored.
-  const uploadUrl = await signedUploadUrl(uploadObjectName(id), fields.contentType);
+  const { size, fingerprint, ...fields } = parseUpload(input);
+  // Opening and sealing the session can fail; both happen before a job is stored.
+  const object = newUploadObject(id);
+  const sessionUri = await createUploadSession(object, {
+    origin,
+    contentType: fields.contentType,
+    size,
+  });
+  const sessionCipher = await encrypt(sessionUri, { timeout: UPLOAD_KMS_MS });
   await createJob(
     {
       ...fields,
       ownerUid: user.uid,
       artistId: user.artistId,
-      object: null,
+      object,
+      videoUpload: { sessionCipher, generation: 1, size, fingerprint, ops: [] },
       trace: startJobTrace(id),
     },
     id,
   );
-  return { id, uploadUrl };
+  return { id, sessionUri, generation: 1 };
 }

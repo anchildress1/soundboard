@@ -125,7 +125,7 @@ description: 'Task list for the resumable video upload'
 
 **Independent Test**: Drop the connection several times mid-upload. It finishes with no tap, and the bytes received are close to the file size.
 
-- [ ] T022 [US1] Switch-over, one task so no checkpoint sits on a half-moved caller, depends on Phase 2:
+- [x] T022 [US1] Switch-over, one task so no checkpoint sits on a half-moved caller, depends on Phase 2:
   - src/lib/server/jobs/create.ts: `fingerprint` in `CreateInput` (64 lowercase hex, else 400 'Pick the video again.'); `newUploadObject` and `createUploadSession` before `createJob`, so a failure stores no job; encrypt it (5 s); store `object` and `videoUpload` (`generation: 1`, `ops: []`); `Created` is `{ id, sessionUri, generation }`. src/routes/api/jobs/+server.ts passes `url.origin`.
   - src/lib/api.ts: `createJob` sends `fingerprint` and returns `{ id, sessionUri, generation }`; delete `uploadToGcs`.
   - src/routes/new/+page.svelte: `fingerprint(file)` before create (while Start shows "Starting"); `acquire` the lock; hand `{ file, sessionUri, generation, size, fingerprint }` to `start`; `goto` the job page. It keeps revoking its own object URL on destroy.

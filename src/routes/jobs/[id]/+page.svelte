@@ -2,8 +2,9 @@
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { action, ApiError, step, uploadToGcs, type ActionName } from '#lib/api.js';
+  import { action, ApiError, step, type ActionName } from '#lib/api.js';
   import Bandcamp from '#lib/components/Bandcamp.svelte';
+  import BrowserUpload from '#lib/components/BrowserUpload.svelte';
   import Heard from '#lib/components/Heard.svelte';
   import Monitor from '#lib/components/Monitor.svelte';
   import ReleaseBar from '#lib/components/ReleaseBar.svelte';
@@ -15,7 +16,6 @@
   import { clearDraft, draftKey } from '#lib/draft.js';
   import { drive } from '#lib/driver.js';
   import type { FieldErrors } from '#lib/metadata.js';
-  import { takePending } from '#lib/pending.js';
   import { POLL_BACKOFF, Waiting } from '#lib/retry.js';
   import {
     heardTags,
@@ -34,8 +34,6 @@
 
   // svelte-ignore state_referenced_locally
   let view = $state<JobView>(data.view);
-  let uploadPct = $state(0);
-  let localUrl = $state<string | null>(null);
   let busy = $state(false);
   // svelte-ignore state_referenced_locally
   let message = $state(data.view.job.error ?? '');
@@ -81,13 +79,7 @@
   const paused = $derived(publishPaused(view));
   // The headline already names a wait, so the status row shows the state's progress instead. A
   // paused upload has none to show, so the row names what it's waiting on.
-  const status = $derived(
-    jobStatus(view, paused ? view.wait : undefined, {
-      state: 'sending',
-      saved: uploadPct,
-      total: 100,
-    }),
-  );
+  const status = $derived(jobStatus(view, paused ? view.wait : undefined));
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
   const current = $derived(stepIndex(job.state, reviewStep, job.failedState));
   const work = $derived(workCopy(view));
@@ -211,31 +203,9 @@
     }
   };
 
-  /** A reload mid-upload loses the file; the upload may still have landed. */
-  const resumeAfterReload = async () => {
-    view = await step(job.id, data.trace).catch(() => view);
-    if (view.job.state === 'AWAITING_UPLOAD') {
-      message = 'The upload was interrupted. Start a new run from the home page.';
-    } else {
-      void run();
-    }
-  };
-
-  const finishUpload = async () => {
-    const pending = takePending(job.id);
-    if (!pending) {
-      await resumeAfterReload();
-      return;
-    }
-    localUrl = pending.objectUrl;
+  /** The browser upload landed: a few looks for the job to move on, then the steps take over. */
+  const landed = async () => {
     try {
-      await uploadToGcs(
-        pending.uploadUrl,
-        pending.file,
-        pending.contentType,
-        (pct) => (uploadPct = pct),
-      );
-      // A few looks for the landed object; past that, run() takes over with whatever state it reads.
       await pRetry(
         async () => {
           if (stopped) throw new AbortError(new Waiting('stopped'));
@@ -248,20 +218,19 @@
       });
       void run();
     } catch (error) {
-      message = error instanceof Error ? error.message : 'Upload failed';
+      message = error instanceof Error ? error.message : 'Step failed';
     }
   };
 
   onMount(() => {
     hydrated = true;
     if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
-    if (job.state === 'AWAITING_UPLOAD') void finishUpload();
-    else void run();
+    // The browser upload says when it lands; until then there's no step to run.
+    if (job.state !== 'AWAITING_UPLOAD') void run();
   });
 
   onDestroy(() => {
     stopped = true;
-    if (localUrl) URL.revokeObjectURL(localUrl);
   });
 </script>
 
@@ -405,15 +374,19 @@
         <h1>{work.title}</h1>
         <p class="help">{work.body}</p>
       </div>
-      <Monitor
-        src={localUrl ?? data.playbackUrl}
-        filename={job.filename}
-        width={job.probe?.width}
-        height={job.probe?.height}
-      />
-      <div class="panel">
-        <Track {status} {model} {seconds} />
-      </div>
+      {#if job.state === 'AWAITING_UPLOAD'}
+        <BrowserUpload {view} {model} saved={data.uploadSaved} onlanded={landed} />
+      {:else}
+        <Monitor
+          src={data.playbackUrl}
+          filename={job.filename}
+          width={job.probe?.width}
+          height={job.probe?.height}
+        />
+        <div class="panel">
+          <Track {status} {model} {seconds} />
+        </div>
+      {/if}
       {#if !approved}
         <Heard tags={heardTags(view)} measurements={job.measurements} />
       {:else if job.finalFields}

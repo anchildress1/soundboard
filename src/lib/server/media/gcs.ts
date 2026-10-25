@@ -2,28 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { bucket } from '#lib/server/core/clients.js';
 import { budget, within } from '#lib/server/core/deadline.js';
 
-/** The 2 GB cap is enforced by GCS itself through the signed header, not by the app. */
-export const CONTENT_LENGTH_RANGE = '1,2147483648';
-const UPLOAD_TTL_MS = 30 * 60 * 1000;
 const READ_TTL_MS = 2 * 60 * 60 * 1000;
-
-export function uploadObjectName(jobId: string): string {
-  return `uploads/${jobId}`;
-}
-
-/** Signed PUT the browser uploads to directly; it must send the same content type and range header. */
-export async function signedUploadUrl(object: string, contentType: string): Promise<string> {
-  const [url] = await bucket()
-    .file(object)
-    .getSignedUrl({
-      version: 'v4',
-      action: 'write',
-      expires: Date.now() + UPLOAD_TTL_MS,
-      extensionHeaders: { 'x-goog-content-length-range': CONTENT_LENGTH_RANGE },
-      contentType,
-    });
-  return url;
-}
 
 /** Uploads a rendered file from local disk to the bucket. */
 /** One request, not a resumable session: the SDK applies `timeout` only to a single request. */

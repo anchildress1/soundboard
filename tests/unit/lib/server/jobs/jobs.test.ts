@@ -170,6 +170,18 @@ describe('createJob / getJob', () => {
     expect(await getJob('job1')).toEqual(job);
   });
 
+  it('waits for the browser upload of a named object that has a session', async () => {
+    const videoUpload = {
+      sessionCipher: 'c',
+      generation: 1,
+      size: 10,
+      fingerprint: 'f'.repeat(64),
+      ops: [],
+    };
+    const job = await createJob({ ...input, object: 'uploads/job3/o', videoUpload }, 'job3');
+    expect(job).toMatchObject({ state: 'AWAITING_UPLOAD', object: 'uploads/job3/o', videoUpload });
+  });
+
   it('starts at PREP when the object already sits in the bucket', async () => {
     const job = await createJob({ ...input, object: SOURCE_OBJECT }, 'job2');
     expect(job.state).toBe('PREP');

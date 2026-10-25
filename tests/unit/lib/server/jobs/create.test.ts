@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
 import { ActionError } from '#lib/server/core/errors.js';
@@ -12,29 +12,21 @@ import {
   type CreateInput,
 } from '#lib/server/jobs/create.js';
 import { getJob, type JobDoc } from '#lib/server/jobs/jobs.js';
+import { KeyManagementServiceClient } from '../../../../e2e/fakes/kms';
 import { seed, truncate } from '../../../../helpers/db';
+import { deferred, gcs, resetGcs } from '../../../../helpers/gcs';
 import { omit } from '../../../../helpers/omit';
-import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { sealed, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
-const SIGNED_PUT = 'https://storage/put';
+const ORIGIN = 'http://localhost:5173';
 const TOO_LONG = 'Videos are capped at 15 minutes.';
 const TITLE_REQUIRED = 'Song title is required.';
 const TOO_BIG = 'Videos must be under 2 GB.';
+const PICK_AGAIN = 'Pick the video again.';
+const FP = 'c'.repeat(64);
 
-const gcs = vi.hoisted(() => ({ getSignedUrl: vi.fn(), files: [] as string[] }));
-
-vi.mock('@google-cloud/storage', () => ({
-  Storage: class {
-    bucket() {
-      return {
-        file(object: string) {
-          gcs.files.push(object);
-          return { getSignedUrl: gcs.getSignedUrl };
-        },
-      };
-    }
-  },
-}));
+vi.mock('@google-cloud/storage', () => import('../../../../helpers/gcs'));
+vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
 
 const upload = (over: Record<string, unknown> = {}): CreateInput =>
   ({
@@ -44,6 +36,7 @@ const upload = (over: Record<string, unknown> = {}): CreateInput =>
     contentType: 'video/mp4',
     size: 50_000_000,
     durationSec: 180,
+    fingerprint: FP,
     ...over,
   }) as CreateInput;
 
@@ -59,24 +52,40 @@ const rejection = async (promise: Promise<unknown>) => {
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'b');
+  vi.stubEnv('KMS_KEY', 'projects/p/locations/l/keyRings/r/cryptoKeys/k');
   resetClients();
-  vi.clearAllMocks();
-  gcs.files.length = 0;
-  gcs.getSignedUrl.mockResolvedValue([SIGNED_PUT]);
+  resetGcs();
   await truncate();
   await seed(USERS);
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('create', () => {
-  it("makes the user's job awaiting upload, with a signed upload URL", async () => {
-    const { id, uploadUrl } = await create(upload(), USER_B);
-    expect(uploadUrl).toBe(SIGNED_PUT);
-    expect(gcs.files).toEqual([`uploads/${id}`]);
-    expect(gcs.getSignedUrl).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'write', contentType: 'video/mp4' }),
-    );
+  it("makes the user's job awaiting upload, with a resumable session for a fresh object", async () => {
+    const created = await create(upload(), USER_B, ORIGIN);
+    const { id } = created;
     expect(id).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(await job(id)).toMatchObject({
+    const [session] = gcs.created;
+    expect(session!.object).toMatch(new RegExp(`^uploads/${id}/[\\w-]{22}$`));
+    expect(session!.options).toEqual({
+      origin: ORIGIN,
+      metadata: { contentType: 'video/mp4', contentLength: 50_000_000 },
+    });
+    const sessionUri = [...gcs.sessions.keys()][0]!;
+    expect(created).toEqual({ id, sessionUri, generation: 1 });
+    const stored = await job(id);
+    expect(stored.videoUpload).toEqual({
+      sessionCipher: sealed(sessionUri),
+      generation: 1,
+      size: 50_000_000,
+      fingerprint: FP,
+      ops: [],
+    });
+    expect(JSON.stringify(stored)).not.toContain(sessionUri);
+    expect(stored).toMatchObject({
       ownerUid: USER_B.uid,
       artistId: null,
       parentId: null,
@@ -84,7 +93,7 @@ describe('create', () => {
       uploadStartedAt: null,
       finalChunkAt: null,
       state: 'AWAITING_UPLOAD',
-      object: `uploads/${id}`,
+      object: session!.object,
       songTitle: 'PeekaBoo',
       notes: 'first cut',
       filename: 'peekaboo.mp4',
@@ -92,7 +101,7 @@ describe('create', () => {
   });
 
   it("copies the owner's artist link", async () => {
-    const { id } = await create(upload(), USER_A);
+    const { id } = await create(upload(), USER_A, ORIGIN);
     expect(await job(id)).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr' });
   });
 
@@ -100,6 +109,7 @@ describe('create', () => {
     const { id } = await create(
       upload({ songTitle: '  PeekaBoo  ', notes: '  n  ', filename: 'f'.repeat(300) }),
       USER_B,
+      ORIGIN,
     );
     expect((await job(id)).songTitle).toBe('PeekaBoo');
     expect((await job(id)).notes).toBe('n');
@@ -107,20 +117,20 @@ describe('create', () => {
   });
 
   it('defaults a missing filename and notes', async () => {
-    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, USER_B);
+    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, USER_B, ORIGIN);
     expect((await job(id)).filename).toBe('video');
     expect((await job(id)).notes).toBe('');
   });
 
   it('defaults a filename that is not text', async () => {
-    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), USER_B);
+    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), USER_B, ORIGIN);
     expect((await job(id)).filename).toBe('video');
   });
 
   it('accepts a video at exactly 15 minutes and rejects one over, for every user', async () => {
     for (const user of [USER_A, USER_B]) {
-      await expect(create(upload({ durationSec: 900 }), user)).resolves.toBeTruthy();
-      const error = await rejection(create(upload({ durationSec: 901 }), user));
+      await expect(create(upload({ durationSec: 900 }), user, ORIGIN)).resolves.toBeTruthy();
+      const error = await rejection(create(upload({ durationSec: 901 }), user, ORIGIN));
       expect([error.status, error.message]).toEqual([400, TOO_LONG]);
     }
   });
@@ -152,11 +162,15 @@ describe('create', () => {
     ['a NaN duration', upload({ durationSec: 'long' }), TOO_LONG],
     ['a null duration', upload({ durationSec: null }), TOO_LONG],
     ['a duration in an array', upload({ durationSec: [180] }), TOO_LONG],
+    ['a missing fingerprint', omit(upload(), 'fingerprint'), PICK_AGAIN],
+    ['a short fingerprint', upload({ fingerprint: 'c'.repeat(63) }), PICK_AGAIN],
+    ['an uppercase fingerprint', upload({ fingerprint: 'C'.repeat(64) }), PICK_AGAIN],
   ])('rejects %s with 400', async (_label, input, message) => {
-    const error = await rejection(create(input as CreateInput, USER_B));
+    const error = await rejection(create(input as CreateInput, USER_B, ORIGIN));
     expect(error.status).toBe(400);
     expect(error.message).toBe(message);
     expect(await jobCount()).toBe(0);
+    expect(gcs.created).toEqual([]);
   });
 
   it('accepts the boundaries: 100-char title, 1000-char notes, exactly 2 GB', async () => {
@@ -164,20 +178,41 @@ describe('create', () => {
       create(
         upload({ songTitle: 'x'.repeat(100), notes: 'n'.repeat(NOTES_MAX), size: MAX_BYTES }),
         USER_B,
+        ORIGIN,
       ),
     ).resolves.toBeTruthy();
   });
 });
 
 describe('failures', () => {
-  it('stores no job when the upload URL cannot be signed', async () => {
-    gcs.getSignedUrl.mockRejectedValueOnce(new Error('iam.serviceAccounts.signBlob denied'));
-    await expect(create(upload(), USER_B)).rejects.toThrow('signBlob');
+  it('stores no job when the session cannot be opened', async () => {
+    gcs.createResumableUpload.mockRejectedValueOnce(new Error('storage.objects.create denied'));
+    await expect(create(upload(), USER_B, ORIGIN)).rejects.toThrow('denied');
+    expect(await jobCount()).toBe(0);
+  });
+
+  it('stores no job when opening the session outlives 10 s', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    gcs.createResumableUpload.mockReturnValueOnce(deferred<string>().promise);
+    const pending = create(upload(), USER_B, ORIGIN).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await pending).toMatchObject({
+      message: 'Opening the upload session took longer than 10000 ms',
+    });
+    vi.useRealTimers();
+    expect(await jobCount()).toBe(0);
+  });
+
+  it('stores no job when the session cannot be sealed', async () => {
+    vi.spyOn(KeyManagementServiceClient.prototype, 'encrypt').mockRejectedValueOnce(
+      new Error('PERMISSION_DENIED'),
+    );
+    await expect(create(upload(), USER_B, ORIGIN)).rejects.toThrow('PERMISSION_DENIED');
     expect(await jobCount()).toBe(0);
   });
 
   it('stores no job for an owner who is not a user', async () => {
-    await expect(create(upload(), { uid: 'ghost', artistId: null })).rejects.toThrow();
+    await expect(create(upload(), { uid: 'ghost', artistId: null }, ORIGIN)).rejects.toThrow();
     expect(await jobCount()).toBe(0);
   });
 });
@@ -207,7 +242,7 @@ describe('parseMedia', () => {
   });
 
   it('leaves the song title to create', async () => {
-    expect((await rejection(create(upload({ songTitle: '' }), USER_B))).message).toBe(
+    expect((await rejection(create(upload({ songTitle: '' }), USER_B, ORIGIN))).message).toBe(
       TITLE_REQUIRED,
     );
   });

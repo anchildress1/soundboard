@@ -3,7 +3,7 @@
 // breadcrumb, browser storage or an error.
 import { addBreadcrumb } from '@sentry/sveltekit';
 import { get, writable } from 'svelte/store';
-import { ApiError, SessionTimeout, step, UploadConflict, uploadSession, type Trace } from './api';
+import { ApiError, SessionTimeout, UploadConflict, uploadSession } from './api';
 import { UPLOAD_BACKOFF } from './retry';
 import type { PauseReason } from './status';
 
@@ -27,7 +27,6 @@ export type Upload = {
 
 export type StartInput = Pick<Upload, 'file' | 'sessionUri' | 'generation' | 'fingerprint'> & {
   notice?: Upload['notice'];
-  trace?: Trace;
 };
 
 /** A GCS reply, or the timer that gave up on one. */
@@ -80,7 +79,6 @@ type Run = {
   pausedFor: PauseReason | null;
   hiddenSaved: number | null;
   renewOpId: string | null;
-  trace: Trace;
 };
 
 const store = writable<Record<string, Upload>>({});
@@ -304,9 +302,8 @@ async function drive(jobId: string, run: Run) {
     if (run.stopped) return;
     switch (next.do) {
       case 'done':
+        // The job page moves the job on: now, or when it next opens.
         end(jobId, run, { state: 'done', saved: entry(jobId).size, reason: null });
-        // The page drives the step too; this one only moves the job on if the page isn't open.
-        step(jobId, run.trace).catch(() => undefined);
         return;
       case 'conflict': {
         const state =
@@ -376,7 +373,6 @@ export function start(jobId: string, input: StartInput): void {
     pausedFor: null,
     hiddenSaved: null,
     renewOpId: null,
-    trace: input.trace ?? null,
   };
   runs.set(jobId, run);
   store.update((all) => ({

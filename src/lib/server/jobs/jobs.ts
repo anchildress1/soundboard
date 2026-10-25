@@ -84,7 +84,8 @@ export function newJobId(): string {
 export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
   return {
     id,
-    state: input.object ? 'PREP' : 'AWAITING_UPLOAD',
+    // An object with no browser session already sits in the bucket.
+    state: input.object && !input.videoUpload ? 'PREP' : 'AWAITING_UPLOAD',
     ownerUid: input.ownerUid,
     artistId: input.artistId,
     parentId: null,

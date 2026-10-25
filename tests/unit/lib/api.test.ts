@@ -10,7 +10,6 @@ import {
   step,
   UploadConflict,
   uploadSession,
-  uploadToGcs,
 } from '#lib/api.js';
 
 const json = (status: number, body: unknown) =>
@@ -37,13 +36,15 @@ const BODY = {
   contentType: 'video/mp4',
   size: 10,
   durationSec: 60,
+  fingerprint: 'a'.repeat(64),
 };
 
 describe('createJob', () => {
   it('POSTs JSON and returns the body', async () => {
-    fetchMock.mockResolvedValue(json(200, { id: 'j1', uploadUrl: 'https://u' }));
+    const created = { id: 'j1', sessionUri: 'https://storage/s', generation: 1 };
+    fetchMock.mockResolvedValue(json(200, created));
     const body = BODY;
-    expect(await createJob(body)).toEqual({ id: 'j1', uploadUrl: 'https://u' });
+    expect(await createJob(body)).toEqual(created);
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs');
     expect(lastInit().method).toBe('POST');
     expect(lastInit().headers['content-type']).toBe('application/json');
@@ -234,87 +235,5 @@ describe('uploadSession', () => {
   it('passes other network failures through', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(uploadSession('j1', CONFIRM)).rejects.toThrow('Failed to fetch');
-  });
-});
-
-describe('uploadToGcs', () => {
-  let lastXhr: FakeXhr;
-  const track = (xhr: FakeXhr) => {
-    lastXhr = xhr;
-  };
-  class FakeXhr {
-    upload: {
-      onprogress:
-        ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
-    } = {
-      onprogress: null,
-    };
-    status = 0;
-    onload: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    open = vi.fn();
-    setRequestHeader = vi.fn();
-    send = vi.fn();
-    constructor() {
-      track(this);
-    }
-  }
-
-  beforeEach(() => {
-    vi.stubGlobal('XMLHttpRequest', FakeXhr);
-  });
-
-  const file = new File(['abc'], 'a.mp4', { type: 'video/mp4' });
-
-  it('PUTs the file with the signed headers and reports progress', async () => {
-    const progress = vi.fn();
-    const done = uploadToGcs('https://storage.example/u?sig=1', file, 'video/mp4', progress);
-    const xhr = lastXhr;
-    expect(xhr.open).toHaveBeenCalledWith('PUT', 'https://storage.example/u?sig=1');
-    expect(xhr.setRequestHeader).toHaveBeenCalledWith('content-type', 'video/mp4');
-    expect(xhr.setRequestHeader).toHaveBeenCalledWith(
-      'x-goog-content-length-range',
-      '1,2147483648',
-    );
-    expect(xhr.send).toHaveBeenCalledWith(file);
-    xhr.upload.onprogress!({ lengthComputable: true, loaded: 1, total: 3 });
-    xhr.upload.onprogress!({ lengthComputable: false, loaded: 2, total: 0 });
-    expect(progress.mock.calls).toEqual([[33]]);
-    xhr.status = 200;
-    xhr.onload!();
-    await expect(done).resolves.toBeUndefined();
-  });
-
-  it('sends the signed content type, not the browser-reported one', async () => {
-    const untyped = new File(['abc'], 'clip.mkv');
-    void uploadToGcs('u', untyped, 'video/mp4', () => {});
-    expect(lastXhr.setRequestHeader).toHaveBeenCalledWith('content-type', 'video/mp4');
-  });
-
-  it('rejects with the HTTP status on a failed upload', async () => {
-    const done = uploadToGcs('u', file, 'video/mp4', () => {});
-    lastXhr.status = 403;
-    lastXhr.onload!();
-    await expect(done).rejects.toMatchObject({ status: 403, message: 'Upload failed (403)' });
-  });
-
-  it('treats 299 as success and 300 as failure', async () => {
-    const ok = uploadToGcs('u', file, 'video/mp4', () => {});
-    lastXhr.status = 299;
-    lastXhr.onload!();
-    await expect(ok).resolves.toBeUndefined();
-    const redirect = uploadToGcs('u', file, 'video/mp4', () => {});
-    lastXhr.status = 300;
-    lastXhr.onload!();
-    await expect(redirect).rejects.toBeInstanceOf(ApiError);
-  });
-
-  it('rejects with status 0 on a network error', async () => {
-    const done = uploadToGcs('u', file, 'video/mp4', () => {});
-    lastXhr.onerror!();
-    await expect(done).rejects.toMatchObject({
-      status: 0,
-      message: 'Upload failed: network error',
-    });
   });
 });

@@ -1,11 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { takePending } from '#lib/pending.js';
+import { fingerprint } from '#lib/fingerprint.js';
+import { stop, uploads } from '#lib/upload.js';
 import Page from '#src/routes/new/+page.svelte';
+import { installUploadFakes, type FakeLocks } from '../../../helpers/uploads';
 
 const FILE_NAME = 'peekaboo.mp4';
 const LOCAL_BLOB = 'blob:local-1';
-const SIGNED_PUT = 'https://storage.googleapis.com/put';
+const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
 
 const h = vi.hoisted(() => ({ goto: vi.fn() }));
 
@@ -29,10 +32,13 @@ async function pickFile(container: HTMLElement, file: File = video, duration = 2
   await fireEvent(el, new Event('durationchange'));
 }
 
+let locks: FakeLocks;
+
 beforeEach(() => {
   h.goto.mockReset();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  locks = installUploadFakes();
   let n = 0;
   URL.createObjectURL = vi.fn(() => {
     n += 1;
@@ -42,8 +48,18 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const id of Object.keys(get(uploads))) stop(id);
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+/** `/api/jobs` creates the job; the uploader's first confirm then waits forever. */
+const created = (id: string) =>
+  fetchMock.mockImplementation(async (path) =>
+    String(path) === '/api/jobs'
+      ? json({ id, sessionUri: SESSION, generation: 1 })
+      : new Promise<Response>(() => {}),
+  );
 
 describe('new release: form', () => {
   it('keeps Analyze disabled until a file and a title are given', async () => {
@@ -101,8 +117,8 @@ describe('new release: form', () => {
     expect(start()).toBeDisabled();
   });
 
-  it('creates the job, hands the file to the job page, and navigates', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job1', uploadUrl: SIGNED_PUT }));
+  it('creates the job, starts the upload under its lock, and navigates', async () => {
+    created('job1');
     const { container } = setup();
     await fireEvent.input(songTitle(), {
       target: { value: ' PeekaBoo ' },
@@ -115,6 +131,7 @@ describe('new release: form', () => {
     await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job1'));
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/api/jobs');
+    const print = await fingerprint(video);
     expect(JSON.parse(String(init!.body))).toEqual({
       songTitle: 'PeekaBoo',
       notes: 'first single',
@@ -122,23 +139,40 @@ describe('new release: form', () => {
       contentType: 'video/mp4',
       size: 10,
       durationSec: 200,
+      fingerprint: print,
     });
-    expect(takePending('job1')).toEqual({
+    expect(locks.holders).toEqual(new Set(['upload:job1']));
+    expect(get(uploads).job1).toMatchObject({
       file: video,
-      uploadUrl: SIGNED_PUT,
-      objectUrl: LOCAL_BLOB,
-      contentType: 'video/mp4',
+      sessionUri: SESSION,
+      generation: 1,
+      fingerprint: print,
+      size: 10,
+      state: 'sending',
     });
   });
 
-  it('hands the job page the signed type for an untyped file', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job4', uploadUrl: SIGNED_PUT }));
+  it('sends video/mp4 for an untyped file', async () => {
+    created('job4');
     const { container } = setup();
     await fireEvent.input(songTitle(), { target: { value: 'PeekaBoo' } });
     await pickFile(container, new File(['x'], 'clip', { type: '' }));
     await fireEvent.click(start());
     await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job4'));
-    expect(takePending('job4')?.contentType).toBe('video/mp4');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)).contentType).toBe('video/mp4');
+  });
+
+  it('asks for the file again when it cannot be read, and creates nothing', async () => {
+    const { container } = setup();
+    await fireEvent.input(songTitle(), { target: { value: 'PeekaBoo' } });
+    await pickFile(container);
+    vi.spyOn(Blob.prototype, 'arrayBuffer').mockRejectedValue(
+      new DOMException('The file could not be read.', 'NotReadableError'),
+    );
+    await fireEvent.click(start());
+    expect(await screen.findByText("Couldn't read this video. Pick it again.")).toBeInTheDocument();
+    expect(start()).toBeEnabled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('shows the API error and re-enables the form', async () => {
@@ -150,6 +184,8 @@ describe('new release: form', () => {
     expect(await screen.findByText('Videos must be under 2 GB.')).toBeInTheDocument();
     expect(start()).toBeEnabled();
     expect(h.goto).not.toHaveBeenCalled();
+    expect(get(uploads)).toEqual({});
+    expect(locks.holders.size).toBe(0);
   });
 
   it('falls back to a generic message on a network failure', async () => {

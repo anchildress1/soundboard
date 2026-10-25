@@ -171,3 +171,6 @@ export type LiveMetadata = {
   description: string;
   tags: string[];
 };
+
+/** How much of a browser upload GCS saved, read on the job page's load. Never the session URI. */
+export type UploadSaved = { saved: number; total: number; done: boolean };

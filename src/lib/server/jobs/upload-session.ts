@@ -13,7 +13,8 @@ import {
   uploadOffset,
 } from '#lib/server/media/gcs.js';
 import { finishDiscardCleanup } from './actions';
-import { parseMedia } from './create';
+import { fingerprintOf, parseMedia } from './create';
+import type { UploadSaved } from '#lib/types.js';
 import { commitUpload, getJob, uploadGeneration, type JobDoc, type VideoUpload } from './jobs';
 
 export const REPLACED = 'A different video replaced this upload.';
@@ -48,15 +49,7 @@ type Renew = { op: 'renew'; opId: string; generation: number; fingerprint: strin
 type Confirm = { op: 'confirm'; generation: number; fingerprint: string };
 type SessionRequest = PickRequest | Renew | Confirm;
 
-const FINGERPRINT = /^[0-9a-f]{64}$/;
 const OP_ID = /^[\w-]{1,64}$/;
-
-/** A job's fingerprint: 64 lowercase hex characters, or a 400 the page shows as is. */
-export function fingerprintOf(value: unknown): string {
-  const fingerprint = text(value);
-  if (!FINGERPRINT.test(fingerprint)) throw new ActionError(400, 'Pick the video again.');
-  return fingerprint;
-}
 
 function generationOf(value: unknown, min: number): number {
   const generation = num(value);
@@ -217,8 +210,6 @@ export async function uploadSession(
     current = fresh;
   }
 }
-
-export type UploadSaved = { saved: number; total: number; done: boolean };
 
 /** How much of the job's upload GCS saved, or null when it has none or GCS or KMS didn't answer. */
 export async function savedAmount(job: JobDoc): Promise<UploadSaved | null> {
