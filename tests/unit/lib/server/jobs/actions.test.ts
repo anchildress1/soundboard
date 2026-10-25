@@ -802,6 +802,8 @@ async function shortJob(
   });
 }
 
+const PROBE_180 = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
+
 describe('recut', () => {
   it('re-renders with the new framing and keeps the reason when the cut stays put', async () => {
     const job = await shortJob();
@@ -820,6 +822,19 @@ describe('recut', () => {
       lengthSec: 22.1,
       reason: '',
     });
+  });
+
+  it('re-cuts an existing cut after its video went stale under older windows', async () => {
+    const id = await makeShort(
+      await makeJob({ state: 'VERIFIED', patch: { probe: PROBE_180, chunkCount: 3 } }),
+    );
+    await patchJob({ chunkCount: 6 });
+    await db()
+      .update(jobs)
+      .set(jobSet({ state: 'REVIEW', short: SHORT }))
+      .where(eq(jobs.id, id));
+    await recut((await getJob(id))!, { startSec: 90, lengthSec: 30, reframe: 'blur' });
+    expect((await getJob(id))!).toMatchObject({ state: 'RENDER', error: null });
   });
 
   it('accepts a cut ending exactly at the end of the source', async () => {
