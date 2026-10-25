@@ -47,7 +47,7 @@ description: 'Task list for artist profile inputs and display'
 
 **Purpose**: the docs agents work from. The constitution treats code that disagrees with the PRD as a stop, so these come first.
 
-- [ ] T002 Update `docs/prd.md` (FR-016):
+- [x] T002 Update `docs/prd.md` (FR-016):
   - Header and Users (lines 5, 49): every user owns one artist profile, and Nathan's is Flies Like Robots.
   - Non-Goals (line 45): per-artist voice and brand come with spec 005.
   - R4 (lines 87, 99, 100, 103, 105):
@@ -69,7 +69,7 @@ description: 'Task list for artist profile inputs and display'
     - Brand guide appears only for the curated profile; Settings for everyone, with an Artist section.
     - The footer's artist credit only when signed in.
   - Keep line 273.
-- [ ] T003 [P] Update `AGENTS.md` (FR-016):
+- [x] T003 [P] Update `AGENTS.md` (FR-016):
   - Line 15: `ARTIST_VOICE` applies only to `artists.curated`; everyone else gets `GENERIC_VOICE`. Spec 005 removes `curated`.
   - Line 17: "Hashtags and tags: only from the job's candidate lists (PRD R4), plus the pick's own `artistName` tag exactly once. Reject anything else."
   - Lines 26-27:
