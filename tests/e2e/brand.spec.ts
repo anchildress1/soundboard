@@ -24,9 +24,11 @@ test.describe('brand guide', () => {
   test('opens for Nathan from the header, with no channel connect links', async ({ page }) => {
     await signIn(page, USER_A);
     await page.goto('/');
+    await page.getByRole('button', { name: 'Menu' }).click();
     await page.getByRole('link', { name: 'Brand guide' }).click();
     await expect(page).toHaveURL('/brand');
-    await expect(page.getByRole('heading', { name: /Approved guide/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Approved' })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('link', { name: /connect/i })).toHaveCount(0);
   });
 
   test('waits on a busy model and keeps asking, storing no proposal', async ({ page }) => {
@@ -38,7 +40,7 @@ test.describe('brand guide', () => {
     await page.getByRole('button', { name: 'Propose' }).click();
     // The preload answers the brand model call with a 429 after the upload reads.
     expect(await (await first).json()).toEqual({ wait: 'model busy' });
-    await expect(page.getByRole('button', { name: 'model busy' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Model busy' })).toBeDisabled();
     expect(await (await proposals()).json()).toEqual({ wait: 'model busy' });
     await expect(page.getByLabel(/^Statement/)).toHaveCount(0);
   });

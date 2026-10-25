@@ -13,8 +13,9 @@ async function signedIn(browser: Browser, uid: string) {
 
 const signOut = async (page: Page) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.locator('#menu').getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
 };
 
 test.describe('two users', () => {
@@ -43,7 +44,7 @@ test.describe('two users', () => {
     const b = await signedIn(browser, USER_B);
     await signOut(a.page);
     await b.page.goto('/');
-    await expect(b.page.getByRole('form', { name: 'Start a run' })).toBeVisible();
+    await expect(b.page.getByRole('link', { name: 'Start a new release' })).toBeVisible();
     await a.context.close();
     await b.context.close();
   });
@@ -56,7 +57,7 @@ test('one user in two browsers: signing out one leaves the other signed in', asy
   const second = await signedIn(browser, USER_B);
   await signOut(first.page);
   expect((await second.page.goto(B_JOB))?.status()).toBe(200);
-  await expect(second.page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(second.page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await first.context.close();
   await second.context.close();
 });

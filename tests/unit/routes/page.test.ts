@@ -1,201 +1,128 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { takePending } from '#lib/pending.js';
+import { render, screen, within } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Page from '#src/routes/+page.svelte';
 
-const FILE_NAME = 'peekaboo.mp4';
-const LOCAL_BLOB = 'blob:local-1';
-const SIGNED_PUT = 'https://storage.googleapis.com/put';
+const h = vi.hoisted(() => ({ page: { url: new URL('https://soundboard.test/') } }));
 
-const h = vi.hoisted(() => ({
-  goto: vi.fn(),
-  page: { url: new URL('https://soundboard.test/') },
-}));
-
-vi.mock('$app/navigation', () => ({ goto: h.goto }));
 vi.mock('$app/state', () => ({ page: h.page }));
 
-const fetchMock = vi.fn<typeof fetch>();
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-
 const USER = { email: 'b@example.com', artistId: null };
+const START = /Start a new release/;
 
 type ListedJob = { id: string; songTitle: string; state: string; createdAt: number };
+
+const job = (id: string, songTitle: string, state: string): ListedJob => ({
+  id,
+  songTitle,
+  state,
+  createdAt: 1,
+});
 
 function setup(user: typeof USER | null = USER, jobs: ListedJob[] = []) {
   return render(Page, { props: { data: { user, channel: null, jobs } } as never });
 }
 
-const analyze = () => screen.getByRole('button', { name: /Analyze|Starting/ });
-const video = new File(['x'.repeat(10)], FILE_NAME, { type: 'video/mp4' });
-
-async function pickFile(container: HTMLElement, file: File = video, duration = 200) {
-  await fireEvent.change(screen.getByLabelText(/^Video/), { target: { files: [file] } });
-  const el = container.querySelector('video')!;
-  Object.defineProperty(el, 'duration', { configurable: true, get: () => duration });
-  await fireEvent(el, new Event('durationchange'));
-}
-
 beforeEach(() => {
-  h.goto.mockReset();
-  fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
-  let n = 0;
-  URL.createObjectURL = vi.fn(() => {
-    n += 1;
-    return `blob:local-${n}`;
-  });
-  URL.revokeObjectURL = vi.fn();
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-describe('home page: job list', () => {
-  it('lists the runs under the upload form with a continue link', () => {
-    setup(USER, [{ id: 'j1', songTitle: 'PeekaBoo', state: 'REVIEW', createdAt: 1 }]);
-    const form = screen.getByRole('form', { name: 'Start a run' });
-    const list = screen.getByRole('region', { name: 'Your runs' });
-    expect(form.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Continue PeekaBoo' })).toHaveAttribute(
-      'href',
-      '/jobs/j1',
-    );
-  });
-
-  it('shows no list without runs', () => {
-    setup();
-    expect(screen.queryByRole('region', { name: 'Your runs' })).toBeNull();
-  });
+  h.page.url = new URL('https://soundboard.test/');
 });
 
 describe('home page: signed out', () => {
-  it('leaves sign-in to the header: no links, upload form or tape', () => {
+  it('is a sign-in view with one Google action and no release controls', () => {
     setup(null);
-    expect(screen.queryByRole('link')).toBeNull();
-    expect(screen.queryByRole('form', { name: 'Start a run' })).toBeNull();
-    expect(screen.queryByRole('region', { name: 'The video' })).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sign in to Soundboard');
+    const signIn = screen.getByRole('link', { name: 'Continue with Google' });
+    expect(signIn).toHaveAttribute('href', '/auth/login');
+    expect(signIn).toHaveAttribute('data-sveltekit-reload');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: START })).toBeNull();
+  });
+
+  it('shows the not-invited notice from the callback', () => {
+    h.page.url = new URL('https://soundboard.test/?signin=denied');
+    setup(null);
+    expect(screen.getByRole('status')).toHaveTextContent("That Google account isn't invited");
   });
 });
 
-describe('home page: form', () => {
-  it('keeps Analyze disabled until a file and a title are given', async () => {
-    const { container } = setup();
-    expect(analyze()).toBeDisabled();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    expect(analyze()).toBeDisabled();
-    await pickFile(container);
-    expect(analyze()).toBeEnabled();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: '   ' } });
-    expect(analyze()).toBeDisabled();
-  });
-
-  it('plays the picked file in the monitor at once', async () => {
-    const { container } = setup();
-    await pickFile(container);
-    expect(container.querySelector('video')).toHaveAttribute('src', LOCAL_BLOB);
-    expect(screen.getByText(FILE_NAME)).toBeInTheDocument();
-  });
-
-  it('revokes the previous object URL when another file is picked', async () => {
-    const { container } = setup();
-    await pickFile(container);
-    await pickFile(container, new File(['y'], 'second.mp4', { type: 'video/mp4' }));
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
-    expect(container.querySelector('video')).toHaveAttribute('src', 'blob:local-2');
-  });
-
-  it('clears the monitor when the picker is emptied', async () => {
-    const { container } = setup();
-    await pickFile(container);
-    await fireEvent.change(screen.getByLabelText(/^Video/), { target: { files: [] } });
-    expect(container.querySelector('video')).toBeNull();
-  });
-
-  it('caps videos at 15 minutes', async () => {
-    const { container } = setup();
-    expect(screen.getByText('up to 15 min')).toBeInTheDocument();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container, video, 15 * 60);
-    expect(analyze()).toBeEnabled();
-    await pickFile(container, video, 15 * 60 + 1);
-    expect(screen.getByText('This video runs over 15 minutes.')).toBeInTheDocument();
-    expect(analyze()).toBeDisabled();
-  });
-
-  it('creates the job, hands the file to the job page, and navigates', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job1', uploadUrl: SIGNED_PUT }));
-    const { container } = setup();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), {
-      target: { value: ' PeekaBoo ' },
-    });
-    await fireEvent.input(screen.getByLabelText(/^Notes/), { target: { value: ' first single ' } });
-    await pickFile(container);
-    await fireEvent.click(analyze());
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job1'));
-    const [path, init] = fetchMock.mock.calls[0]!;
-    expect(path).toBe('/api/jobs');
-    expect(JSON.parse(String(init!.body))).toEqual({
-      songTitle: 'PeekaBoo',
-      notes: 'first single',
-      filename: FILE_NAME,
-      contentType: 'video/mp4',
-      size: 10,
-      durationSec: 200,
-    });
-    expect(takePending('job1')).toEqual({
-      file: video,
-      uploadUrl: SIGNED_PUT,
-      objectUrl: LOCAL_BLOB,
-      contentType: 'video/mp4',
-    });
-  });
-
-  it('hands the job page the signed type for an untyped file', async () => {
-    fetchMock.mockResolvedValue(json({ id: 'job4', uploadUrl: SIGNED_PUT }));
-    const { container } = setup();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container, new File(['x'], 'clip', { type: '' }));
-    await fireEvent.click(analyze());
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/jobs/job4'));
-    expect(takePending('job4')?.contentType).toBe('video/mp4');
-  });
-
-  it('shows the API error and re-enables the form', async () => {
-    fetchMock.mockResolvedValue(json({ error: 'Videos must be under 2 GB.' }, 400));
-    const { container } = setup();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container);
-    await fireEvent.click(analyze());
-    expect(await screen.findByText('Videos must be under 2 GB.')).toBeInTheDocument();
-    expect(analyze()).toBeEnabled();
-    expect(h.goto).not.toHaveBeenCalled();
-  });
-
-  it('falls back to a generic message on a network failure', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-    const { container } = setup();
-    await fireEvent.input(screen.getByLabelText(/^Song title/), { target: { value: 'PeekaBoo' } });
-    await pickFile(container);
-    await fireEvent.click(analyze());
-    expect(await screen.findByText('Could not start the run.')).toBeInTheDocument();
-  });
-
-  it('does not submit while incomplete', async () => {
+describe('home page: first release', () => {
+  it('explains the loop and starts the first release', () => {
     setup();
-    await fireEvent.submit(screen.getByRole('form', { name: 'Start a run' }));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Upload your first video');
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByRole('link', { name: 'Start' })).toHaveAttribute('href', '/new');
+    expect(screen.queryByRole('region', { name: 'Earlier' })).toBeNull();
   });
 });
 
-describe('home page: cleanup', () => {
-  it('revokes an unused object URL on leave', async () => {
-    const { container, unmount } = setup();
-    await pickFile(container);
-    unmount();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
+describe('home page: releases', () => {
+  it('puts the newest release that needs review up next, with one Continue', () => {
+    setup(USER, [
+      job('j3', 'Paper Satellites', 'ANALYZE'),
+      job('j2', 'Static Bloom', 'REVIEW'),
+      job('j1', 'Half Light', 'REVIEW'),
+    ]);
+    const next = screen.getByRole('region', { name: 'Review the draft for Static Bloom' });
+    expect(within(next).getByRole('link', { name: 'Continue Static Bloom' })).toHaveAttribute(
+      'href',
+      '/jobs/j2',
+    );
+    expect(within(next).getByRole('link')).toHaveClass('primary');
+    // The older review waits in the list, still marked as needing the user.
+    const earlier = screen.getByRole('region', { name: 'Earlier' });
+    expect(within(earlier).getByText('Half Light')).toBeInTheDocument();
+    expect(within(earlier).getByText('Needs your review')).toBeInTheDocument();
+  });
+
+  it('keeps New release secondary while something is up next', () => {
+    setup(USER, [job('j2', 'Static Bloom', 'REVIEW')]);
+    expect(screen.getByRole('link', { name: START })).not.toHaveClass('primary');
+    expect(screen.getByRole('link', { name: START })).toHaveAttribute('href', '/new');
+  });
+
+  it('makes New release the primary action when nothing needs the user', () => {
+    setup(USER, [job('j1', 'Half Light', 'VERIFIED')]);
+    expect(screen.queryByRole('region', { name: /Review the draft/ })).toBeNull();
+    expect(screen.getByRole('link', { name: START })).toHaveClass('primary');
+  });
+
+  it('shows running releases with nothing to do yet and a Watch link', () => {
+    setup(USER, [job('j3', 'Paper Satellites', 'ANALYZE'), job('j4', 'Low Orbit', 'PUBLISHING')]);
+    const running = screen.getByRole('region', { name: 'Paper Satellites' });
+    expect(running).toHaveTextContent('Listening · nothing to do yet');
+    expect(within(running).getByRole('link', { name: 'Watch Paper Satellites' })).toHaveAttribute(
+      'href',
+      '/jobs/j3',
+    );
+    expect(screen.getByRole('region', { name: 'Low Orbit' })).toHaveTextContent(
+      'Uploading to YouTube',
+    );
+    expect(screen.queryByRole('region', { name: 'Earlier' })).toBeNull();
+  });
+
+  it('sends a browser upload back to its page instead of saying to wait', () => {
+    setup(USER, [job('j5', 'Night Bus', 'AWAITING_UPLOAD')]);
+    const running = screen.getByRole('region', { name: 'Night Bus' });
+    expect(running).toHaveTextContent('Uploading · open it to finish the upload');
+    expect(running).not.toHaveTextContent('nothing to do yet');
+    expect(within(running).getByRole('link', { name: 'Open Night Bus' })).toHaveAttribute(
+      'href',
+      '/jobs/j5',
+    );
+  });
+
+  it('lists finished, failed, and discarded releases under Earlier with their state', () => {
+    setup(USER, [
+      job('j1', 'Half Light', 'VERIFIED'),
+      job('j2', 'Mr. Kill', 'FAILED'),
+      job('j3', 'Gone', 'DISCARDED'),
+    ]);
+    const rows = within(screen.getByRole('region', { name: 'Earlier' })).getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Half Light Verified · private Open',
+      'Mr. Kill Failed Open',
+      'Gone Discarded Open',
+    ]);
+    expect(screen.getByRole('link', { name: 'Open Mr. Kill' })).toHaveAttribute('href', '/jobs/j2');
+    expect(rows[1]!.querySelector('.dot')).toHaveAttribute('data-tone', 'err');
   });
 });

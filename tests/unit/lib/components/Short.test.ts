@@ -111,9 +111,12 @@ describe('Short: running', () => {
     expect(screen.queryByRole('button', { name: 'Re-cut' })).toBeNull();
   });
 
-  it.each(['model busy', 'model quota spent'] as const)('shows the %s wait on the chip', (wait) => {
+  it.each([
+    ['model busy', 'Model busy'],
+    ['model quota spent', 'Model quota spent'],
+  ] as const)('shows the %s wait on the chip', (wait, text) => {
     setup({ view: view('HOOK', { hook: null }, {}, { wait }) });
-    expect(screen.getByRole('status')).toHaveTextContent(wait);
+    expect(screen.getByRole('status')).toHaveTextContent(text);
   });
 });
 

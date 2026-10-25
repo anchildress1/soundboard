@@ -89,8 +89,7 @@
     </div>
     <div class="field" class:err={errors.tags}>
       <label for="{idPrefix}tags">Tags <span>{tagCount} / {TAGS_MAX}</span></label>
-      <textarea id="{idPrefix}tags" class="mono" rows="2" bind:value={tagsText} readonly={!editable}
-      ></textarea>
+      <textarea id="{idPrefix}tags" rows="3" bind:value={tagsText} readonly={!editable}></textarea>
       <span class="msg"
         >{errors.tags ?? 'Plain terms, comma-separated. Hashtags live in the description.'}</span
       >
@@ -113,17 +112,16 @@
   {#if editable || done}
     <div class="actions">
       <button
-        class="btn ghost"
+        class="btn danger small"
         type="button"
         onclick={ondiscard}
         disabled={busy || (done && !discardable)}>Discard</button
       >
-      <button class="btn ghost" type="button" onclick={onrerun} disabled={busy || done}
+      <button class="btn" type="button" onclick={onrerun} disabled={busy || done}
         >{rerunLabel}</button
       >
       <button
         class="btn primary"
-        class:done
         type="button"
         disabled={busy || done || invalid || !destination}
         onclick={() => onapprove({ title, description, tags })}
@@ -134,70 +132,58 @@
 </section>
 
 <style>
-  /* Same panel and heading as the Bandcamp tab, so the two destinations read alike. */
   .youtube {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 20px;
     min-width: 0;
-    background: var(--panel);
-    padding: 12px 14px;
-  }
-
-  h2 {
-    margin: 0;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--orange);
   }
 
   .fields {
     display: grid;
-    gap: 14px;
+    gap: 18px;
   }
 
   .fixed {
-    margin: 0;
-    padding: 10px 12px;
-    background: var(--well);
+    padding: 12px 14px;
     border: 1px solid var(--line);
-    font: 500 13px/1.5 var(--mono);
+    border-radius: var(--radius-control);
+    background: var(--panel);
   }
 
   .channel {
-    margin: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 4px 8px;
-    font-size: 14px;
+    font-size: 15px;
     overflow-wrap: anywhere;
   }
 
   .channel span {
     color: var(--muted);
-    font-family: var(--mono);
   }
 
-  /* One group, always together: right-aligned on wide screens, one block on phones. */
+  /* Secondary actions left, the one primary right. */
   .actions {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
-    border-top: 1px solid var(--line);
-    padding-top: 16px;
+    gap: 12px;
   }
 
-  @media (max-width: 520px) {
-    .actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+  .actions :global(.primary) {
+    margin-left: auto;
+  }
+
+  @media (width < 560px) {
+    .actions > :global(.btn) {
+      flex: 1;
     }
 
     .actions :global(.primary) {
-      grid-column: 1 / -1;
+      flex-basis: 100%;
       order: -1;
+      margin-left: 0;
     }
   }
 </style>

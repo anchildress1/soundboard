@@ -12,7 +12,7 @@
 - the contact line in drafts
 - the channel that identity and brand reads come from
 - the Bandcamp editor and footer links
-- the header subtitle and the page description
+- the header and the page description
 - the seeded artist-name fact
 
 ## Clarifications
@@ -21,7 +21,7 @@
 
 - Q: How do users relate to artists? → A: One artist per user. Each signed-in user owns exactly one artist profile, and Nathan's account keeps the existing Flies Like Robots profile. Profiles are never shared between accounts.
 - Q: Which details does the user enter? → A: Artist name (required), Bandcamp URL (optional) and contact line (optional). The channel isn't typed: identity and brand reads use the user's connected YouTube channel.
-- Q: When is the name entered? → A: After first sign-in, a short form asks for it before the first job can start. Everything stays editable later on a settings page.
+- Q: When is the name entered? → A: After first sign-in, a short form asks for it before the first job can start. Everything stays editable later on the Settings page (`/settings`).
 - Q: Does this include per-artist voice and brand? → A: No. This covers identity inputs and where they show. Learning each artist's voice is a separate future spec: other artists get generic voice rules, and Nathan keeps his.
 
 ## User Scenarios & Testing _(mandatory)_
@@ -32,13 +32,13 @@ A newly invited user signs in for the first time. Before they can start a run, a
 
 **Why this priority**: Without it, every user's drafts carry Flies Like Robots' name and links.
 
-**Independent Test**: Sign in as a new invited user. The form appears before the home page's upload works. Save a name, and the home page shows it.
+**Independent Test**: Sign in as a new invited user. The form appears before a release can start on `/new`. Save a name, and the header shows it.
 
 **Acceptance Scenarios**:
 
-1. **Given** a signed-in user with no artist profile, **When** they open the home page, **Then** they see the artist form instead of the upload form.
+1. **Given** a signed-in user with no artist profile, **When** they open `/new`, **Then** they see the artist form instead of the new-release form.
 2. **Given** the form, **When** they submit an empty name, **Then** it's refused with a plain message and nothing is saved.
-3. **Given** a valid name, **When** they save, **Then** their artist profile exists and the upload form appears.
+3. **Given** a valid name, **When** they save, **Then** their artist profile exists and the new-release form appears.
 4. **Given** a user with no artist profile, **When** they try to start a job any other way, **Then** it's refused with "Add your artist name first."
 5. **Given** Nathan's account, **When** this feature ships, **Then** it already has the Flies Like Robots profile, with the same name, Bandcamp URL and contact line as today, and he never sees the form.
 
@@ -63,16 +63,16 @@ The user runs a job. The draft's forced artist tag, the artist name in the promp
 
 ### User Story 3: The app shows the user's artist (Priority: P2)
 
-Signed in, the user sees their own artist name in the header. The Bandcamp tab opens their own Bandcamp editor. The footer credits their artist.
+Signed in, the user sees their own artist name in the header. The Bandcamp screen opens their own Bandcamp editor. The footer credits their artist.
 
 **Why this priority**: Display mistakes are visible on every page, but they don't break a draft.
 
-**Independent Test**: Signed in as a non-Nathan user, check the header, the Bandcamp tab and the footer: no Flies Like Robots value appears. Signed out, the shared pages show no user's artist.
+**Independent Test**: Signed in as a non-Nathan user, check the header, the Bandcamp screen and the footer: no Flies Like Robots value appears. Signed out, the shared pages show no user's artist.
 
 **Acceptance Scenarios**:
 
-1. **Given** a signed-in user, **When** any page loads, **Then** the header subtitle shows their artist name.
-2. **Given** a Bandcamp URL, **When** the Bandcamp tab opens the editor, **Then** it opens that artist's Bandcamp editor. **Given** no Bandcamp URL, **Then** the tab still offers the copy and shows "Add your Bandcamp URL in Settings" instead of an editor link.
+1. **Given** a signed-in user, **When** any page loads, **Then** the header shows their artist name.
+2. **Given** a Bandcamp URL, **When** the Bandcamp screen opens the editor, **Then** it opens that artist's Bandcamp editor. **Given** no Bandcamp URL, **Then** the screen still offers the copy and shows "Add your Bandcamp URL in Settings" instead of an editor link.
 3. **Given** a signed-in user, **When** the footer renders, **Then** it credits their artist, linked to their Bandcamp page when they have one.
 4. **Given** a signed-out visitor, **When** the sign-in page or `/privacy` renders, **Then** neither the header nor the footer names any user's artist.
 
@@ -80,7 +80,7 @@ Signed in, the user sees their own artist name in the header. The Bandcamp tab o
 
 ### User Story 4: Change artist details later (Priority: P2)
 
-On a settings page, the user edits their artist name, Bandcamp URL or contact line. New drafts use the new values. Drafts already approved keep what was approved.
+On the Settings page, the user edits their artist name, Bandcamp URL or contact line. New drafts use the new values. Drafts already approved keep what was approved.
 
 **Why this priority**: Bands rename, and links change.
 
@@ -88,7 +88,7 @@ On a settings page, the user edits their artist name, Bandcamp URL or contact li
 
 **Acceptance Scenarios**:
 
-1. **Given** the settings page, **When** the user saves a new name, **Then** the next pick and re-run use it.
+1. **Given** the Settings page, **When** the user saves a new name, **Then** the next pick and re-run use it.
 2. **Given** an approved or published job, **When** the name changes, **Then** that job's approved fields stay as they were.
 3. **Given** an invalid value (empty name, malformed URL), **When** saving, **Then** it's refused with a plain message and the old value stays.
 
@@ -109,15 +109,15 @@ On a settings page, the user edits their artist name, Bandcamp URL or contact li
 
 - **FR-001**: Each signed-in user MUST have at most one artist profile, owned by that account and never shared.
 - **FR-002**: An artist profile MUST hold a required artist name, an optional Bandcamp URL and an optional contact line.
-- **FR-003**: A user without an artist profile MUST see the artist form before the upload form, and MUST NOT be able to start a job until a profile is saved.
+- **FR-003**: A user without an artist profile MUST see the artist form before the new-release form, and MUST NOT be able to start a job until a profile is saved.
 - **FR-004**: The artist name MUST be 1–100 characters, MUST NOT contain `<` or `>`, and MUST be trimmed. The Bandcamp URL MUST be an `https` address. The contact line MUST be at most 200 characters.
 - **FR-005**: Every pick, re-run, hook pick and Short MUST use the job owner's artist name as the required tag and as the artist name in model prompts.
 - **FR-006**: Drafts MUST use the owner's contact line when set, and none when it isn't.
 - **FR-007**: Identity reads (recent uploads) and brand-guide reads MUST use the owner's connected YouTube channel through the owner's own grant. A missing or disconnected channel MUST mean no identity reads. The app MUST never read another artist's channel instead.
-- **FR-008**: The Bandcamp tab MUST link to the owner's Bandcamp editor when a Bandcamp URL is set, and show an "add it in Settings" note when it isn't.
-- **FR-009**: When signed in, the header subtitle MUST show the user's artist name, and the footer MUST credit the user's artist, linked to their Bandcamp page when set. When signed out, neither MUST name any user's artist.
+- **FR-008**: The Bandcamp screen MUST link to the owner's Bandcamp editor when a Bandcamp URL is set, and show an "add it in Settings" note when it isn't.
+- **FR-009**: When signed in, the header MUST show the user's artist name, and the footer MUST credit the user's artist, linked to their Bandcamp page when set. When signed out, neither MUST name any user's artist.
 - **FR-010**: The page description shared with link previews MUST describe the product generically, never a specific artist.
-- **FR-011**: A settings page MUST let the user edit all three fields. Changes MUST apply to later picks only. Approved and published fields MUST NOT change.
+- **FR-011**: The Settings page MUST let the user edit all three fields. Changes MUST apply to later picks only. Approved and published fields MUST NOT change.
 - **FR-012**: Nathan's account MUST keep the existing Flies Like Robots profile, with today's name, Bandcamp URL and contact line, without seeing the form.
 - **FR-013**: No Flies Like Robots value MUST remain hard-coded in app code, prompts, links or page text. The only exceptions are Nathan's own voice rules and his profile's seeded facts.
 - **FR-014**: The artist-name fact in artist memory MUST come from the profile, not a constant.
@@ -134,7 +134,7 @@ On a settings page, the user edits their artist name, Bandcamp URL or contact li
 ### Measurable Outcomes
 
 - **SC-001**: A new invited user goes from first sign-in to a saved artist profile in under 1 minute.
-- **SC-002**: For a non-Nathan user, 0 occurrences of a Flies Like Robots value (name, links, contact) appear in their drafts, header, footer or Bandcamp tab across the regression suite.
+- **SC-002**: For a non-Nathan user, 0 occurrences of a Flies Like Robots value (name, links, contact) appear in their drafts, header, footer or Bandcamp screen across the regression suite.
 - **SC-003**: 100% of picks include the owner's artist name as a tag, exactly once.
 - **SC-004**: Nathan's next draft after the release is identical in artist name, links and contact line to one made before it.
 - **SC-005**: Changing an artist name changes 0 approved or published jobs.

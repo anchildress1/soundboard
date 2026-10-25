@@ -21,7 +21,7 @@ const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
 async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
   await seedJob({
     id,
-    state: 'REVIEW',
+    state: 'VERIFIED',
     object: `uploads/${id}`,
     probe: PROBE,
     chunkCount: 3,

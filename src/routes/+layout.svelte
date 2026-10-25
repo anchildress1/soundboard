@@ -1,12 +1,8 @@
 <script lang="ts">
-  // Self-hosted fonts: a third-party font host made the wordmark's paint, and Lighthouse, swing.
-  import '@fontsource/inter/400.css';
-  import '@fontsource/inter/600.css';
-  import '@fontsource/jetbrains-mono/500.css';
-  import '@fontsource/mr-dafoe/400.css';
-  import '@fontsource/rubik/700.css';
-  import '@fontsource/rubik/900.css';
-  import wordmarkFont from '@fontsource/mr-dafoe/files/mr-dafoe-latin-400-normal.woff2?url';
+  // Self-hosted fonts: a third-party font host made the first paint, and Lighthouse, swing.
+  import '@fontsource-variable/bricolage-grotesque/opsz.css';
+  import '@fontsource-variable/onest';
+  import displayFont from '@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-opsz-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
   import Footer from '#lib/components/Footer.svelte';
@@ -14,11 +10,22 @@
   import type { LayoutData } from './$types';
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  let menu = $state<HTMLElement>();
+  const artist = $derived(data.user?.artistId === 'flr');
+  // Exact counts as YouTube returns them: rounding would be a number derived from its statistics.
+  const count = (n: number, noun: string) =>
+    `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`;
+
+  /** The popover outlives client-side navigation, so following one of its links closes it. */
+  const closeOnLink = (event: MouseEvent) => {
+    if ((event.target as Element).closest('a')) menu?.hidePopover();
+  };
 </script>
 
 <svelte:head>
-  <!-- The wordmark is the largest paint; fetch its font with the page instead of after the CSS. -->
-  <link rel="preload" href={wordmarkFont} as="font" type="font/woff2" crossorigin="anonymous" />
+  <!-- Every page title is set in the display face; fetch it with the page instead of after the CSS. -->
+  <link rel="preload" href={displayFont} as="font" type="font/woff2" crossorigin="anonymous" />
   <meta
     name="description"
     content="Release agent for Flies Like Robots: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
@@ -28,41 +35,37 @@
 <a class="skip" href="#content">Skip to content</a>
 
 <div class="app">
-  <div class="smear" aria-hidden="true"></div>
-
   <header>
-    <h1 class="wordmark">
-      <a href={resolve('/')}>Soundboard</a><small>Flies Like Robots · Release agent</small>
-    </h1>
-    <div class="bar">
+    <a class="wordmark" href={resolve('/')}><span aria-hidden="true"></span>Soundboard</a>
+    {#if data.user}
       {#if data.channel}
-        <p class="chip">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
-            ><path
-              d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"
-            /></svg
-          >
+        <p class="channel">
           <b>{data.channel.handle}</b>
-          <span>{data.channel.videoCount} videos · {data.channel.subscriberCount} subs</span>
+          <span class="num"
+            >{count(data.channel.videoCount, 'video')} · {count(
+              data.channel.subscriberCount,
+              'subscriber',
+            )}</span
+          >
         </p>
       {/if}
-      {#if data.user}
-        <a class="btn ghost small" href={resolve('connections')}>Connections</a>
-      {/if}
-      {#if data.user?.artistId === 'flr'}
-        <a class="btn ghost small" href={resolve('brand')}>Brand guide</a>
-      {/if}
-      {#if data.user}
+      <button class="btn small menu-button" type="button" popovertarget="menu" aria-label="Menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      </button>
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+      <nav id="menu" aria-label="Menu" popover bind:this={menu} onclick={closeOnLink}>
+        <a href={resolve('connections')}>Connections</a>
+        {#if artist}
+          <a href={resolve('brand')}>Brand guide</a>
+          <a href={resolve('settings')}>Settings</a>
+        {/if}
         <form method="POST" action="/auth/logout">
-          <button class="btn ghost small" type="submit" title={data.user.email}>Sign out</button>
+          <button type="submit" title={data.user.email}>Sign out</button>
         </form>
-      {:else}
-        <!-- A full page load: the login route redirects off-site to Google. -->
-        <a class="btn primary small" href={resolve('auth/login')} data-sveltekit-reload
-          >Sign in with Google</a
-        >
-      {/if}
-    </div>
+      </nav>
+    {:else}
+      <span class="help">Invite only</span>
+    {/if}
   </header>
 
   <div id="content" class="content" tabindex="-1">
@@ -74,143 +77,133 @@
 
 <style>
   .app {
-    max-width: 1100px;
-    margin: 0 auto;
-    min-height: 100%;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    padding-block: 16px 32px;
   }
 
-  .smear {
-    height: 14px;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 0 14px rgba(46, 140, 255, 0.35);
-    background: linear-gradient(
-      90deg,
-      var(--blue) 0 38%,
-      var(--orange) 38% 76%,
-      var(--magenta) 76%
-    );
-  }
-
-  .smear::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: repeating-linear-gradient(
-      90deg,
-      transparent 0 23px,
-      var(--ground) 23px 27px,
-      transparent 27px 61px,
-      var(--ground) 61px 63px
-    );
-    opacity: 0.9;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    /* VHS tracking: the gaps in the smear drift slowly sideways. */
-    .smear::after {
-      animation: tracking 9s linear infinite;
-    }
-
-    .wordmark {
-      animation: flicker-on 1.4s ease-out both;
-    }
-
-    .skip {
-      transition: top 0.15s ease;
-    }
-  }
-
-  /*
-   * Fixed rows at every width, never wrapping by fit: if the controls dropped to a second row only
-   * when they didn't fit, a web font arriving late would reflow the header and shift the page.
-   * Phones always stack the controls under the wordmark.
-   */
   header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px 16px;
-  }
-
-  @media (max-width: 640px) {
-    header {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .bar {
-      justify-content: flex-start;
-    }
+    justify-content: space-between;
+    gap: 4px 16px;
+    min-height: 60px;
+    padding: 8px var(--gutter);
+    border-bottom: 1px solid var(--line);
   }
 
   .wordmark {
-    min-width: 0;
-    margin: 0;
-    font: 400 clamp(52px, 8vw, 84px) / 0.9 var(--script);
-    color: var(--magenta);
-    text-shadow:
-      0 0 18px rgba(255, 79, 216, 0.55),
-      0 0 2px rgba(255, 79, 216, 0.9);
-    letter-spacing: 0.01em;
-  }
-
-  .wordmark a {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    color: var(--ink);
+    font: 800 19px/1 var(--font-display);
+    letter-spacing: -0.02em;
     text-decoration: none;
   }
 
-  .wordmark small {
-    display: block;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font: 600 11px/1 var(--sans);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--muted);
-    text-shadow: none;
-    margin: 8px 0 0 6px;
+  .wordmark span {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: var(--signal);
   }
 
-  .bar {
+  /* Phones give the channel its own row under the wordmark; wider screens keep one row. */
+  .channel {
+    order: 1;
+    flex-basis: 100%;
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 10px;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+    margin: 0 0 4px;
+    font-size: 13px;
+    line-height: 1.2;
   }
 
-  .bar form {
-    margin: 0;
+  .channel b,
+  .channel span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .chip {
-    margin: 0;
-    min-height: 40px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 14px;
-    border: 1px solid var(--line);
-    font: 500 12px/1 var(--mono);
+  .channel span {
     color: var(--muted);
   }
 
-  .chip svg {
-    width: 16px;
-    height: 16px;
+  @media (width >= 640px) {
+    .channel {
+      order: 0;
+      flex-basis: auto;
+      margin: 0 0 0 auto;
+    }
   }
 
-  .chip b {
+  .menu-button {
+    width: 44px;
+    padding: 0;
+  }
+
+  .menu-button svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  /* Top layer, pinned under the header's right edge. */
+  #menu {
+    position: fixed;
+    inset: 64px var(--gutter) auto auto;
+    width: 220px;
+    margin: 0;
+    padding: 6px 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+
+  #menu :is(a, button) {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 0;
+    background: none;
     color: var(--ink);
     font-weight: 500;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  #menu :is(a, button):hover {
+    background: var(--well);
+  }
+
+  #menu form {
+    margin: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  #menu button {
+    color: var(--muted);
   }
 
   /* A real box, not display: contents, so the skip link can focus and scroll to it. */
   .content {
+    flex: 1;
     display: block;
   }
 
@@ -221,36 +214,18 @@
   .skip {
     position: absolute;
     left: 16px;
-    top: -48px;
+    top: -60px;
     z-index: 10;
-    padding: 10px 14px;
-    background: var(--magenta);
-    color: var(--ground);
-    font: 900 13px/1 var(--display);
+    padding: 12px 16px;
+    border-radius: var(--radius-control);
+    background: var(--action);
+    color: var(--on-action);
+    font-weight: 600;
     text-decoration: none;
+    transition: top var(--motion);
   }
 
   .skip:focus {
-    top: 12px;
-  }
-
-  @keyframes tracking {
-    to {
-      background-position: 126px 0;
-    }
-  }
-
-  /* Starts and ends lit: the wordmark is the page's largest paint, so it must show at once. */
-  @keyframes flicker-on {
-    0%,
-    12%,
-    26%,
-    100% {
-      opacity: 1;
-    }
-    6%,
-    20% {
-      opacity: 0.35;
-    }
+    top: 8px;
   }
 </style>

@@ -88,14 +88,13 @@
 
 <div class="short">
   {#if expired}
-    <p class="expired" role="note">
+    <p class="notice" data-tone="warn" role="note">
       This Short's video is gone from storage after 7 days. Its saved details stay here; upload the
       video again from the home page to finish anything that needs it.
     </p>
   {/if}
   {#if job.state === 'VERIFIED' && job.videoId}
-    <p class="uploaded">
-      <span class="check" aria-hidden="true">✓</span>
+    <p class="notice" data-tone="ok">
       <span
         >Short uploaded to YouTube · private ·
         <a href="https://youtu.be/{job.videoId}" target="_blank" rel="noopener"
@@ -115,7 +114,7 @@
     <Track {status} {model} {seconds} />
 
     {#if hook}
-      <section class="cut" aria-labelledby="short-cut-heading">
+      <section class="cut panel" aria-labelledby="short-cut-heading">
         <h2 id="short-cut-heading">Cut</h2>
         <p class="range">
           {timecode(hook.startSec)} – {timecode(hook.startSec + hook.lengthSec)} · {hook.lengthSec}s
@@ -168,7 +167,7 @@
             >
           </fieldset>
           {#if editable}
-            <button class="btn ghost" type="submit" disabled={!canRecut}>Re-cut</button>
+            <button class="btn" type="submit" disabled={!canRecut}>Re-cut</button>
           {/if}
         </form>
       </section>
@@ -199,7 +198,7 @@
   {/if}
   {#if job.state === 'FAILED'}
     <div class="actions">
-      <button class="btn ghost" type="button" disabled={busy} onclick={ondiscard}>Discard</button>
+      <button class="btn danger" type="button" disabled={busy} onclick={ondiscard}>Discard</button>
       <button class="btn primary" type="button" disabled={busy} onclick={onretry}>Retry</button>
     </div>
   {/if}
@@ -211,83 +210,37 @@
   .tape {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 20px;
     min-width: 0;
   }
 
-  .uploaded {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid var(--green);
-    border-left-width: 4px;
-    background: color-mix(in srgb, var(--green) 8%, var(--panel));
-    font: 600 14px/1.4 var(--sans);
-    color: var(--ink);
-  }
-
-  .uploaded .check {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: var(--green);
-    color: var(--ground);
-    font-size: 14px;
-  }
-
-  .uploaded a {
-    color: var(--green);
-  }
-
-  .expired {
-    margin: 0;
-    padding: 12px 14px;
-    border-left: 3px solid var(--yellow);
-    background: var(--panel);
-  }
-
   .cut {
-    background: var(--panel);
-    padding: 12px 14px;
     display: grid;
-    gap: 10px;
+    gap: 12px;
   }
 
   h2 {
-    margin: 0;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--orange);
+    font: 600 16px/1.4 var(--font-body);
   }
 
   .range {
-    margin: 0;
-    font: 500 13px/1.4 var(--mono);
-    color: var(--ink);
+    font-variant-numeric: tabular-nums;
   }
 
   .why {
-    margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--muted);
   }
 
   .why span {
-    font: 600 12px/1 var(--sans);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     margin-right: 6px;
+    font-weight: 600;
+    color: var(--ink);
   }
 
   form {
     display: grid;
-    gap: 12px;
+    gap: 16px;
   }
 
   .row {
@@ -297,55 +250,58 @@
   }
 
   fieldset {
-    border: 1px solid var(--line);
-    margin: 0;
-    padding: 8px 12px 10px;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 18px;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    border: 0;
   }
 
   legend {
-    padding: 0 4px;
-    font: 600 12px/1 var(--sans);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
+    margin-bottom: 8px;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 600;
   }
 
+  /* Segmented choice: the whole pill is the target. */
   fieldset label {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 14px;
+    gap: 8px;
     min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-control);
+    cursor: pointer;
   }
 
-  input[type='radio'] {
-    accent-color: var(--magenta);
-    width: 18px;
-    height: 18px;
+  fieldset label:has(input:checked) {
+    border-color: var(--action);
+    color: var(--action);
   }
 
-  input[type='radio']:focus-visible {
-    outline: 2px solid var(--magenta);
+  fieldset label:has(input:focus-visible) {
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
 
+  input[type='radio'] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--action);
+  }
+
   form .btn {
-    justify-self: end;
+    justify-self: start;
   }
 
   .actions {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
     justify-content: flex-end;
-  }
-
-  .toast {
-    font: 500 12px/1.4 var(--mono);
-    color: var(--muted);
-    min-height: 1.4em;
-    margin: 0;
+    gap: 12px;
   }
 </style>

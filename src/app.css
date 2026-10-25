@@ -1,209 +1,351 @@
-:root {
-  --ground: #0a0a0a;
-  --panel: #171615;
-  --well: #242321;
-  --line: #6e6a64;
-  --ink: #f4f1ea;
-  --muted: #b3ada3;
-  --magenta: #ff4fd8;
-  --orange: #ff7a1a;
-  --yellow: #ffd23f;
-  --blue: #2e8cff;
-  --green: #6fdc5a;
-  --red: #d8281a;
-  --red-text: #ff6a52;
-  --info: #7fb2ff;
-  --script: 'Mr Dafoe', cursive;
-  --display: 'Rubik', system-ui, sans-serif;
-  --sans: 'Inter', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
-  color-scheme: dark;
-}
+/* Layered so a component's scoped (unlayered) styles always win over these defaults. */
+@layer tokens, base, components;
 
-* {
-  box-sizing: border-box;
-}
+@import './lib/styles/tokens.css';
 
-html,
-body {
-  height: 100%;
-}
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  font: 400 15px/1.5 var(--sans);
-  padding-inline: 16px;
-}
+  html {
+    scrollbar-color: var(--line) var(--ground);
+    -webkit-text-size-adjust: none;
+    text-size-adjust: none;
+  }
 
-a {
-  color: inherit;
-}
+  html,
+  body {
+    min-height: 100%;
+  }
 
-.btn {
-  font: 900 14px/1 var(--display);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 14px 18px;
-  border: 2px solid var(--ink);
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  min-height: 44px;
-}
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 16px/1.5 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
 
-/* Motion is opt-in, so reduced-motion users get none. */
-@media (prefers-reduced-motion: no-preference) {
-  .btn {
-    transition:
-      transform 0.15s ease,
-      box-shadow 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease;
+  :is(h1, h2, h3) {
+    margin: 0;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    text-wrap: balance;
+  }
+
+  h1 {
+    font-size: clamp(26px, 5vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+
+  h2 {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  h3 {
+    font: 600 16px/1.4 var(--font-body);
+  }
+
+  p {
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  a {
+    color: var(--action);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  a:hover {
+    color: var(--action-hover);
+  }
+
+  ::selection {
+    background: var(--action);
+    color: var(--on-action);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::placeholder {
+    color: var(--placeholder);
+    opacity: 1;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
   }
 }
 
-.btn:not([disabled]):hover {
-  border-color: var(--magenta);
-  color: var(--ink);
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: var(--control-height);
+    padding: 0 22px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--ink);
+    font: 600 16px/1.2 var(--font-body);
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      background var(--motion),
+      border-color var(--motion),
+      color var(--motion);
+  }
+
+  .btn:hover {
+    color: var(--ink);
+  }
+
+  .btn:not(:disabled):hover {
+    background: var(--panel);
+    border-color: var(--muted);
+  }
+
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* One per view. */
+  .btn.primary {
+    background: var(--action);
+    border-color: var(--action);
+    color: var(--on-action);
+  }
+
+  .btn.primary:not(:disabled):hover {
+    background: var(--action-hover);
+    border-color: var(--action-hover);
+    color: var(--on-action);
+  }
+
+  /* Destructive is outlined, never filled. */
+  .btn.danger {
+    color: var(--err);
+  }
+
+  .btn.danger:not(:disabled):hover {
+    border-color: var(--err);
+    color: var(--err);
+  }
+
+  .btn.small {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  .field {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  /* Label left, counter right, on one row. */
+  .field > :is(label, .label) {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .field > :is(label, .label) span {
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+
+  .field :is(input, textarea, select) {
+    width: 100%;
+    min-height: var(--control-height);
+    padding: 12px 14px;
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-control);
+    background: var(--ground);
+    font-size: 17px;
+    line-height: 1.55;
+    transition:
+      border-color var(--motion),
+      box-shadow var(--motion);
+  }
+
+  .field textarea {
+    resize: vertical;
+  }
+
+  .field :is(input, textarea, select):focus-visible {
+    outline: none;
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
+  }
+
+  .field :is(input, textarea)[readonly] {
+    background: var(--panel);
+  }
+
+  .field .msg {
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .field.err :is(input, textarea) {
+    border-color: var(--err);
+  }
+
+  .field.err .msg {
+    color: var(--err);
+  }
+
+  .panel {
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    background: var(--panel);
+  }
+
+  .help {
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Small caps-style kicker above a heading: "Up next", "Earlier". */
+  .kicker {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--well);
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  /* Tone sets the status color; the dot keeps it readable for anyone who can't tell the hues apart. */
+  :is(.chip, .dot)[data-tone='running'] {
+    --tone: var(--running);
+  }
+
+  :is(.chip, .dot)[data-tone='attention'] {
+    --tone: var(--attention);
+  }
+
+  :is(.chip, .dot)[data-tone='ok'] {
+    --tone: var(--ok);
+  }
+
+  :is(.chip, .dot)[data-tone='warn'] {
+    --tone: var(--warn);
+  }
+
+  :is(.chip, .dot)[data-tone='err'] {
+    --tone: var(--err);
+  }
+
+  :is(.chip, .dot)[data-tone='idle'] {
+    --tone: var(--idle);
+  }
+
+  .chip[data-tone] {
+    border-color: var(--tone);
+    color: var(--tone);
+  }
+
+  .chip[data-tone='idle'] {
+    color: var(--muted);
+  }
+
+  .dot {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--tone, var(--idle));
+  }
+
+  .notice {
+    display: grid;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: var(--panel);
+  }
+
+  .notice[data-tone='warn'] {
+    border-color: var(--warn);
+  }
+
+  .notice[data-tone='err'] {
+    border-color: var(--err);
+  }
+
+  .notice[data-tone='ok'] {
+    border-color: var(--ok);
+  }
+
+  .notice strong {
+    font-weight: 600;
+  }
+
+  .toast {
+    min-height: 1.5em;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .toast.err {
+    color: var(--err);
+  }
 }
 
-.btn.small {
-  padding: 10px 14px;
-  min-height: 40px;
-  font-size: 12px;
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--magenta);
-  outline-offset: 3px;
-}
-
-.btn.primary {
-  background: var(--magenta);
-  border-color: var(--magenta);
-  color: var(--ground);
-  box-shadow: 4px 4px 0 var(--ink);
-}
-
-.btn.primary:not([disabled]):hover {
-  color: var(--ground);
-  transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0 var(--ink);
-}
-
-.btn.primary:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 var(--ink);
-}
-
-.btn.primary[disabled] {
-  background: var(--well);
-  border-color: var(--well);
-  color: var(--muted);
-  box-shadow: none;
-  cursor: default;
-}
-
-.btn.primary.done[disabled] {
-  background: var(--green);
-  border-color: var(--green);
-  color: var(--ground);
-}
-
-.btn.ghost {
-  border-color: var(--line);
-  color: var(--muted);
-}
-
-.field {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.field > label,
-.field > .label {
-  font: 600 12px/1 var(--sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.field > label span,
-.field > .label span {
-  font: 500 11px/1 var(--mono);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.field :is(textarea, input, select) {
-  width: 100%;
-  background: var(--well);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  padding: 10px 12px;
-  font: 400 14px/1.5 var(--sans);
-  resize: vertical;
-}
-
-.field .mono {
-  font: 500 13px/1.6 var(--mono);
-}
-
-.field :is(textarea, input, select):focus-visible {
-  outline: 2px solid var(--magenta);
-  outline-offset: 2px;
-}
-
-.field.err :is(textarea, input) {
-  border-color: var(--red-text);
-}
-
-.field .msg {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.field.err .msg {
-  color: var(--red-text);
-}
-
+/* Unlayered, so it beats every layered rule, like `.field input` taking a hidden control's width. */
 .visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
+  min-height: 0;
+  padding: 0;
+  margin: -1px;
+  border: 0;
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-/* Sections rise in on load, a beat apart. */
-@media (prefers-reduced-motion: no-preference) {
-  main > * {
-    animation: rise 0.45s ease-out both;
-  }
-}
-
-main > :nth-child(2) {
-  animation-delay: 0.08s;
-}
-
-main > :nth-child(3) {
-  animation-delay: 0.16s;
-}
-
-main > :nth-child(n + 4) {
-  animation-delay: 0.24s;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
 }

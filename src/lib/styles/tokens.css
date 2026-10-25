@@ -1,0 +1,86 @@
+/*
+ * The only file allowed to hold a color literal; tests/unit/styles/palette.test.ts fails on any
+ * other. Components read the semantic tokens, never the primitives, so a palette change is one edit.
+ */
+@layer tokens {
+  :root {
+    color-scheme: dark;
+
+    /* Primitives */
+    --charcoal-950: #0f0e0c;
+    --charcoal-900: #171512;
+    --charcoal-850: #201d19;
+    --charcoal-800: #33302a;
+    --charcoal-700: #4a463e;
+    --charcoal-600: #6e685d;
+    --stone-500: #857e71;
+    --stone-300: #a9a295;
+    --stone-50: #f3f0ea;
+    --cyan-400: #1ee0da;
+    --cyan-200: #8af0eb;
+    --magenta-400: #ff3db0;
+    --green-400: #5ee38a;
+    --amber-400: #ffc53d;
+    --red-400: #ff6b6b;
+
+    /* Surfaces, darkest first. Depth is tone, never shadow. */
+    --ground: var(--charcoal-950);
+    --panel: var(--charcoal-900);
+    --well: var(--charcoal-850);
+    --scrim: color-mix(in srgb, var(--charcoal-950) 72%, transparent);
+
+    /* Dividers are decorative; anything a user operates gets `--edge`, which clears 3:1 on every surface. */
+    --line: var(--charcoal-800);
+    --line-strong: var(--charcoal-700);
+    --edge: var(--charcoal-600);
+
+    /* Text: ink 17:1, muted 7.6:1, placeholder 4.8:1 on ground. */
+    --ink: var(--stone-50);
+    --muted: var(--stone-300);
+    --placeholder: var(--stone-500);
+
+    /* One job each. */
+    --action: var(--cyan-400);
+    --action-hover: var(--cyan-200);
+    --on-action: var(--charcoal-950);
+    --focus: var(--cyan-400);
+    --running: var(--cyan-400);
+    --attention: var(--magenta-400);
+    --ok: var(--green-400);
+    --warn: var(--amber-400);
+    --err: var(--red-400);
+    --idle: var(--charcoal-700);
+
+    /* The Signal Line: progress and the current step only. Never a background, text, or card border. */
+    --signal: linear-gradient(90deg, var(--cyan-400), var(--magenta-400));
+
+    --font-display: 'Bricolage Grotesque Variable', 'Onest Variable', system-ui, sans-serif;
+    --font-body: 'Onest Variable', system-ui, sans-serif;
+
+    --radius-control: 10px;
+    --radius-panel: 14px;
+    --radius-pill: 999px;
+
+    --gutter: 24px;
+    --measure-page: 880px;
+    --measure-step: 720px;
+    --control-height: 48px;
+
+    --motion: 160ms ease-out;
+    --motion-slow: 500ms ease-out;
+  }
+
+  /* Every transition reads these, so zeroing them is the whole reduced-motion switch. */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --motion: 0s;
+      --motion-slow: 0s;
+    }
+  }
+
+  @media (width < 640px) {
+    :root {
+      --gutter: 16px;
+    }
+  }
+}

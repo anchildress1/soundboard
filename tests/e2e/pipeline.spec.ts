@@ -21,7 +21,7 @@ test('analyzes the next window up to the model, then waits while it is busy', as
     job: { state: 'ANALYZE', chunkIndex: 1, error: null },
     chunks: [{ index: 0 }],
   });
-  await expect(page.getByRole('status')).toHaveText(/model busy/i);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
   await expect(page.getByText('Configured analyst: gemini-3.8-flash')).toBeVisible();
   await noHorizontalScroll(page);
 });
@@ -35,7 +35,7 @@ test('waits while the model is busy during the pick', async ({ page }, testInfo)
     wait: 'model busy',
     job: { state: 'PICK', error: null },
   });
-  await expect(page.getByRole('status')).toHaveText(/model busy/i);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
   await expect(page.getByText('Configured picker: gemini-4-argon')).toBeVisible();
   await noHorizontalScroll(page);
 });

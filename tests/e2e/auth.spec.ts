@@ -57,19 +57,22 @@ test.describe('signed out', () => {
   test('shows only the sign-in view and sets zero cookies', async ({ page, context }) => {
     const response = await page.goto('/');
     expect(response?.headers()['set-cookie']).toBeUndefined();
-    await expect(
-      page.getByRole('banner').getByRole('link', { name: 'Sign in with Google' }),
-    ).toBeVisible();
-    await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Sign in to Soundboard');
+    await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute(
+      'href',
+      '/auth/login',
+    );
+    await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Start a new release' })).toHaveCount(0);
     await page.waitForLoadState('load');
     expect(await context.cookies()).toEqual([]);
   });
 
-  for (const path of ['/jobs/x', '/brand', '/connections']) {
+  for (const path of ['/jobs/x', '/new', '/brand', '/connections', '/settings']) {
     test(`redirects ${path} home`, async ({ page }) => {
       await page.goto(path);
       await expect(page).toHaveURL('/');
-      await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
     });
   }
 
@@ -93,7 +96,8 @@ test.describe('signed out', () => {
 
   test('says why an uninvited account was turned away', async ({ page }) => {
     await page.goto('/?signin=denied');
-    await expect(page.getByRole('status')).toHaveText("That Google account isn't invited.");
+    await expect(page.getByRole('status')).toContainText("That Google account isn't invited");
+    await expect(page.getByRole('status')).toContainText('Ask Ashley to add your email');
   });
 
   test('lets only the app frame its pages', async ({ request }) => {
@@ -102,11 +106,11 @@ test.describe('signed out', () => {
   });
 });
 
-test('a signed-in user gets the upload form, not sign-in', async ({ page }) => {
+test('a signed-in user gets their releases, not sign-in', async ({ page }) => {
   await signIn(page, USER_B);
   await page.goto('/');
-  await expect(page.getByRole('form', { name: 'Start a run' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Start a new release' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveCount(0);
 });
 
 test('a session that stops validating mid-run sends the job page home', async ({
@@ -126,7 +130,7 @@ test('a session that stops validating mid-run sends the job page home', async ({
   const refused = await page.waitForResponse((r) => r.url().endsWith(`${job}/step`));
   expect(refused.status()).toBe(401);
   await expect(page).toHaveURL('/');
-  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
 });
 
 test('a client navigation home after the session ends drops the signed-in layout', async ({
@@ -134,12 +138,12 @@ test('a client navigation home after the session ends drops the signed-in layout
 }) => {
   await signIn(page, USER_B);
   await page.goto('/jobs/e2e-b-review');
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
   await page.context().clearCookies();
-  await page.getByRole('link', { name: 'Soundboard' }).click();
-  await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
-  await expect(page.getByRole('form', { name: 'Start a run' })).toHaveCount(0);
+  await page.getByRole('banner').getByRole('link', { name: 'Soundboard', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Start a new release' })).toHaveCount(0);
 });
 
 for (const [name, path] of [
@@ -155,7 +159,7 @@ for (const [name, path] of [
     await page.getByRole('contentinfo').getByRole('link', { name }).click();
     await expect(page).toHaveURL(path);
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'Sign in with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
+    await expect(page.getByRole('banner')).toContainText('Invite only');
   });
 }

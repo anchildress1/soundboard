@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Layout from '#src/routes/+layout.svelte';
 
 const HANDLE = '@flieslikerobots';
@@ -29,35 +29,37 @@ const channel = {
   lastUploadAt: new Date().toISOString(),
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete (HTMLElement.prototype as Partial<HTMLElement>).hidePopover;
+});
+
+// A closed popover is out of the accessibility tree, so menu queries include hidden elements.
+const hidden = { hidden: true } as const;
+const menu = () => document.querySelector<HTMLElement>('nav#menu')!;
+
 describe('layout', () => {
-  it('renders the wordmark as a home link with its subtitle', () => {
+  it('renders the wordmark as a home link, leaving the h1 to the page', () => {
     setup();
-    const heading = screen.getByRole('heading', { level: 1 });
-    expect(heading).toHaveTextContent('Soundboard');
     expect(screen.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    expect(heading).toHaveTextContent('Flies Like Robots · Release agent');
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
   });
 
   it('renders the page between header and footer', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
-    expect(screen.getByRole('contentinfo')).toHaveTextContent(
-      'Built for Flies Like Robots by Ashley Childress',
-    );
+    const footer = screen.getByRole('contentinfo');
+    expect(footer).toHaveTextContent('Built for Flies Like Robots by Ashley Childress');
+    expect(footer).toHaveTextContent('PolyForm Noncommercial 1.0.0');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
-    const artist = within(screen.getByRole('contentinfo')).getByRole('link', {
-      name: 'Flies Like Robots',
-    });
+    const artist = within(footer).getByRole('link', { name: 'Flies Like Robots' });
     expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
     expect(artist).toHaveAttribute('target', '_blank');
-    const privacy = within(screen.getByRole('contentinfo')).getByRole('link', {
-      name: 'Privacy policy',
-    });
+    const legal = within(footer).getByRole('navigation', { name: 'Legal' });
+    const privacy = within(legal).getByRole('link', { name: 'Privacy policy' });
     expect(privacy).toHaveAttribute('href', '/privacy');
     expect(privacy).toHaveAttribute('data-sveltekit-reload');
-    const terms = within(screen.getByRole('contentinfo')).getByRole('link', {
-      name: 'Terms of Service',
-    });
+    const terms = within(legal).getByRole('link', { name: 'Terms of Service' });
     expect(terms).toHaveAttribute('href', '/terms');
     expect(terms).toHaveAttribute('data-sveltekit-reload');
   });
@@ -66,76 +68,92 @@ describe('layout', () => {
     setup();
     const nav = screen.getByRole('navigation', { name: 'Ashley Childress' });
     const links = within(nav).getAllByRole('link');
-    expect(links.map((l) => [l.getAttribute('aria-label'), l.getAttribute('href')])).toEqual([
-      ['anchildress1.dev', 'https://anchildress1.dev'],
+    expect(links.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Site', 'https://anchildress1.dev'],
       ['GitHub', 'https://github.com/anchildress1'],
       ['DEV', 'https://dev.to/anchildress1'],
       ['LinkedIn', 'https://www.linkedin.com/in/anchildress1'],
       ['X', 'https://x.com/anchildress1'],
     ]);
     for (const link of links) {
-      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     }
     expect(nav.closest('footer')).not.toBeNull();
   });
 
-  it("shows FLR channel stats to Nathan's session", () => {
-    setup({ channel, user: NATHAN });
-    expect(screen.getByText(HANDLE)).toBeInTheDocument();
-    expect(screen.getByText('12 videos · 340 subs')).toBeInTheDocument();
+  it("shows the connected channel's handle with its exact counts", () => {
+    setup({ channel: { ...channel, subscriberCount: 12_345 }, user: NATHAN });
+    expect(screen.getByText(HANDLE).closest('header')).not.toBeNull();
+    expect(screen.getByText('12 videos · 12,345 subscribers')).toBeInTheDocument();
   });
 
-  it('renders without stats', () => {
+  it('counts one video and one subscriber in the singular', () => {
+    setup({ channel: { ...channel, videoCount: 1, subscriberCount: 1 }, user: NATHAN });
+    expect(screen.getByText('1 video · 1 subscriber')).toBeInTheDocument();
+  });
+
+  it('renders without a channel', () => {
+    setup({ user: NATHAN });
+    expect(screen.queryByText(HANDLE)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument();
+  });
+
+  it('shows no account controls when signed out; sign-in lives on the page', () => {
     setup();
-    expect(screen.queryByText(/videos ·/)).toBeNull();
+    expect(screen.getByText('Invite only').closest('header')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign out', ...hidden })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Sign in/, ...hidden })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Connections', ...hidden })).toBeNull();
   });
 
-  it('offers Google sign-in in the header when signed out, with no account controls', () => {
-    setup();
-    const signIn = screen.getByRole('link', { name: 'Sign in with Google' });
-    expect(signIn).toHaveAttribute('href', '/auth/login');
-    expect(signIn).toHaveAttribute('data-sveltekit-reload');
-    expect(signIn.closest('header')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
-    expect(screen.queryByRole('link', { name: BRAND_GUIDE })).toBeNull();
+  it('opens one menu from the header button', () => {
+    setup({ user: STRANGER });
+    const button = screen.getByRole('button', { name: 'Menu' });
+    expect(button).toHaveAttribute('popovertarget', 'menu');
+    expect(menu()).toHaveAttribute('aria-label', 'Menu');
+    expect(menu()).toHaveAttribute('popover');
   });
 
-  it('shows the email and sign-out for an unlinked user, without the brand guide', () => {
+  it('gives an unlinked user Connections and sign-out, without the artist rooms', () => {
     setup({ user: STRANGER });
     expect(screen.queryByText(STRANGER_EMAIL)).toBeNull();
-    const signOut = screen.getByRole('button', { name: 'Sign out' });
+    const signOut = within(menu()).getByRole('button', { name: 'Sign out', ...hidden });
     expect(signOut).toHaveAttribute('title', STRANGER_EMAIL);
-    expect(signOut).toHaveClass('btn');
     expect(signOut.closest('form')).toHaveAttribute('action', '/auth/logout');
     expect(signOut.closest('form')).toHaveAttribute('method', 'POST');
-    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
-    expect(screen.queryByRole('link', { name: BRAND_GUIDE })).toBeNull();
+    expect(within(menu()).getByRole('link', { name: 'Connections', ...hidden })).toHaveAttribute(
+      'href',
+      '/connections',
+    );
+    expect(screen.queryByRole('link', { name: BRAND_GUIDE, ...hidden })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Settings', ...hidden })).toBeNull();
   });
 
-  it("gives Nathan's artist the brand guide link, without a sign-in", () => {
+  it("gives Nathan's artist the brand guide and settings", () => {
     setup({ user: NATHAN });
-    const brand = screen.getByRole('link', { name: BRAND_GUIDE });
-    expect(brand).toHaveAttribute('href', '/brand');
-    expect(brand.closest('header')).not.toBeNull();
-    expect(screen.queryByRole('link', { name: /Connect (YouTube|channel)/ })).toBeNull();
-    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull();
+    expect(within(menu()).getByRole('link', { name: BRAND_GUIDE, ...hidden })).toHaveAttribute(
+      'href',
+      '/brand',
+    );
+    expect(within(menu()).getByRole('link', { name: 'Settings', ...hidden })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
   });
 
-  it.each([
-    ['Nathan', NATHAN],
-    ['an unlinked user', STRANGER],
-  ])('links %s to Connections in the header, the one place to connect YouTube', (_l, user) => {
-    setup({ user });
-    const link = screen.getByRole('link', { name: 'Connections' });
-    expect(link).toHaveAttribute('href', '/connections');
-    expect(link.closest('header')).not.toBeNull();
-  });
-
-  it('offers no Connections link when signed out', () => {
-    setup();
-    expect(screen.queryByRole('link', { name: 'Connections' })).toBeNull();
+  it('closes the menu when one of its links is followed, not on other clicks', async () => {
+    const hidePopover = vi.fn();
+    HTMLElement.prototype.hidePopover = hidePopover;
+    setup({ user: NATHAN });
+    await fireEvent.click(menu()!);
+    expect(hidePopover).not.toHaveBeenCalled();
+    const link = within(menu()!).getByRole('link', { name: 'Connections', ...hidden });
+    // jsdom can't navigate; stop the default so only the menu's handler runs.
+    link.addEventListener('click', (event) => event.preventDefault());
+    await fireEvent.click(link);
+    expect(hidePopover).toHaveBeenCalledOnce();
   });
 
   it('offers a skip link to the page content', () => {
@@ -144,13 +162,5 @@ describe('layout', () => {
       'href',
       '#content',
     );
-  });
-
-  it('never prints "undefined" for a partial stats record', () => {
-    setup({
-      channel: { handle: HANDLE, lastUploadAt: null },
-      user: NATHAN,
-    });
-    expect(screen.getByText(/videos ·/).textContent).not.toContain('undefined');
   });
 });

@@ -429,12 +429,11 @@ async function isLive(tx: Tx, id: string): Promise<boolean> {
 export type ShortStart = { id: string } | { noPick: true } | null;
 
 /**
- * Cuts a Short job from a video job. Everything is read inside the transaction, so an approval that
- * lands first is what the Short starts from: the video's approved fields over its pick on screen
- * become the Short's pick v1. Candidate lists come along so approve holds the same rules, and the
- * trace is shared, so the Short lands in the video's trace. One live Short per video: an existing
- * one that isn't discarded is returned instead. Null when the parent left `states` before the
- * transaction ran.
+ * Cuts a Short job from an approved video job, read inside the transaction: the video's approved
+ * fields over its approved pick become the Short's pick v1. Candidate lists come along so approve
+ * holds the same rules, and the trace is shared, so the Short lands in the video's trace. One live
+ * Short per video: an existing one that isn't discarded is returned instead. Null when the parent
+ * left `states` before the transaction ran.
  */
 export async function createShort(
   parent: JobDoc,

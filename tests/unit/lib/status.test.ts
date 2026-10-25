@@ -92,12 +92,15 @@ describe('publishPaused', () => {
 });
 
 describe('jobStatus', () => {
-  it.each([BUSY, 'model quota spent'] as const)(
-    'shows the %s wait with running progress ahead of the state label',
-    (wait) => {
+  it.each([
+    [BUSY, 'Model busy'],
+    ['model quota spent', 'Model quota spent'],
+  ] as const)(
+    'shows the %s wait in plain words with running progress ahead of the state label',
+    (wait, text) => {
       expect(jobStatus(view({ state: 'ANALYZE' }), wait)).toEqual({
         tone: 'info',
-        text: wait,
+        text,
         progress: 6 + 21,
       });
     },
@@ -115,12 +118,12 @@ describe('jobStatus', () => {
   it('shows chunk N / M during analysis, clamped to the count', () => {
     expect(jobStatus(view({ state: 'ANALYZE', chunkIndex: 0, chunkCount: 4 }))).toEqual({
       tone: 'info',
-      text: 'Chunk 1 / 4',
+      text: 'Window 1 of 4',
       progress: 6,
     });
     expect(jobStatus(view({ state: 'ANALYZE', chunkIndex: 4, chunkCount: 4 }))).toEqual({
       tone: 'info',
-      text: 'Chunk 4 / 4',
+      text: 'Window 4 of 4',
       progress: 90,
     });
   });

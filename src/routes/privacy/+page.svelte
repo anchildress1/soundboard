@@ -3,15 +3,15 @@
 </svelte:head>
 
 <main aria-labelledby="privacy-title">
-  <h2 id="privacy-title">Privacy policy</h2>
-  <p class="updated">Updated October 24, 2026</p>
+  <h1 id="privacy-title">Privacy policy</h1>
+  <p class="help">Updated October 24, 2026</p>
 
   <p>
     Ashley Childress operates Soundboard, a private music-release assistant. This policy covers
     information processed when you visit, sign in, prepare a release, or connect YouTube.
   </p>
 
-  <h3>Information we use</h3>
+  <h2>Information we use</h2>
   <ul>
     <li>Your Google account ID and email address identify your account and control access.</li>
     <li>
@@ -26,7 +26,7 @@
     </li>
   </ul>
 
-  <h3>Processing and service providers</h3>
+  <h2>Processing and service providers</h2>
   <p>
     Google Cloud hosts the app, uploaded media, and encryption keys. Neon stores account,
     connection, job, and artist-profile records. Google receives account authorization requests and
@@ -61,14 +61,14 @@
     does not sell your information or use it for advertising.
   </p>
 
-  <h3>Cookies</h3>
+  <h2>Cookies</h2>
   <p>
     A signed session cookie keeps you signed in for up to 30 days. A temporary authorization cookie
     protects Google sign-in and expires after 10 minutes. Soundboard does not use advertising
     cookies.
   </p>
 
-  <h3>Storage and deletion</h3>
+  <h2>Storage and deletion</h2>
   <p>
     Uploaded media is scheduled for deletion by the storage bucket's seven-day lifecycle rule. Saved
     account records, analysis, drafts, and artist guidance are retained as needed to operate your
@@ -85,7 +85,7 @@
     caching, or the traces Sentry holds; those expire on the schedules above.
   </p>
 
-  <h3>YouTube access and your choices</h3>
+  <h2>YouTube access and your choices</h2>
   <p>
     Disconnect on the Connections page removes the stored connection token and asks Google to revoke
     Soundboard's grant; it does not delete saved jobs or artist guidance. If Google does not confirm
@@ -101,7 +101,7 @@
     subject to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>.
   </p>
 
-  <h3>Contact and changes</h3>
+  <h2>Contact and changes</h2>
   <p>
     For privacy questions, complaints, or deletion requests, contact Ashley Childress at
     <a href="mailto:anchildress1@gmail.com">anchildress1@gmail.com</a>. Changes to this policy will
@@ -111,21 +111,22 @@
 
 <style>
   main {
-    max-width: 72ch;
-    margin-inline: auto;
+    width: 100%;
+    max-width: var(--measure-step);
+    margin: 0 auto;
+    padding: 40px var(--gutter) 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   h2 {
-    font: 700 28px/1.2 var(--display);
+    margin-top: 20px;
   }
 
-  h3 {
-    margin-top: 28px;
-    font: 700 18px/1.4 var(--display);
-  }
-
-  .updated {
-    color: var(--muted);
+  ul {
+    margin: 0;
+    padding-left: 20px;
   }
 
   li + li {

@@ -102,7 +102,7 @@
 - The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the artist name. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
-- The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. The review screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
+- The same pick drafts Bandcamp copy in Nathan's voice: an About text and his credit and contact lines, cleaned like the description. After approval, the Bandcamp screen shows them with the song title and the pick's tags, each with a Copy button, and opens `flieslikerobots.bandcamp.com/edit_track` in a new tab.
 - Thumbnails go to the model as inline images.
 - Feedback weight: edits and approvals are strong; re-runs mean "not favorite," a weak signal.
 - [ ] Every hashtag in the description and every tag is in the job's candidate lists.
@@ -112,7 +112,7 @@
 
 **R5 · Review**
 
-- One recommendation. Every field is editable in place. Actions: **Approve & upload**, **Re-run model**, **Discard**.
+- One recommendation, reviewed one field at a time. Every field is editable. Actions: **Approve & upload**, **Re-run model**, **Discard**.
 - Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
 - Approve holds edited tags to the same rules as the pick: the job's tag candidates or the artist name, never the song title.
 - Discard ends the job; nothing is learned from it.
@@ -138,9 +138,9 @@
 **R7 · Status**
 
 - The status page drives the run: it calls the next step until the job reaches review.
-- The home page lists only the signed-in user's jobs, newest first, with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
+- The home page lists only the signed-in user's jobs: the newest one in review up next, then running ones, then the rest, newest first, each with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
 - Resume depends on the seven-day media lifecycle. Missing media gets a clear new-upload requirement; saved metadata stays visible.
-- [ ] Chunk N/M or a named wait ("model busy", "model quota spent") is always on screen.
+- [ ] "Window n of m" or a named wait ("model busy", "model quota spent") is always on screen.
 - [ ] Reloading the page resumes from the next unfinished step.
 - [ ] A step's claim on the job expires after 3 minutes, so an aborted request frees the job.
 
@@ -195,12 +195,12 @@
 
 **R13 · Short**
 
-- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request from a video in review or later. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
+- A vertical 15–60 s cut of the video's hook for YouTube Shorts, made on request once the video is approved. A video under 15 s can't make one. No video-generation model: every frame is Nathan's.
 - The Short is its own job (`short` set, `parentId` → the video; the video holds `shortId`). It shares the video's trace, owner, channel, and candidate lists. One live Short per video.
 - **hook:** one pick-model call (`invoke_agent hook-pick`), text only, over the video's chunk results and per-window ffmpeg loudness → `window, lengthSec, reason`. Re-pick sends the skipped hooks; a repeat retries once, then fails the step.
 - **cut placement:** ffmpeg's momentary loudness across the window places the start on the biggest jump, backed up to the quietest moment in the second before it. No clear jump keeps the window start. A late window caps the length at what's left of the source from its start, so the cut starts inside the window; a window in the last 15 s gets the source's final 15 s.
 - **render:** ffmpeg reads the source by signed URL, cuts, and fits to 1080×1920 (YouTube's Shorts frame), blur fill (default) or center crop, into a faststart MP4 in the container's temp dir. The file goes to its own GCS object, is deleted locally, and is read back with ffprobe before review.
-- **Short tab:** a destination tab between YouTube and Bandcamp. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
+- **Short screen:** offered once the video is approved. Short metadata starts from the video's approved fields, else its pick, under R4 and R5's rules. Nathan edits start, length, and framing (re-render, no model), re-picks the hook, approves, or discards the Short alone.
 - Approve uploads through R6 (private, read-back verified) and counts against YouTube's daily upload limit. It records Nathan's edits as EDITED feedback but no ACCEPTED: the draft is the video's own metadata.
 - [ ] Every hashtag and tag in an approved Short is in the video's candidate lists.
 - [ ] A 60 s Short renders inside one step on the app container.
@@ -241,32 +241,28 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 
 ## UX
 
-Built from the [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg). One screen, dark only.
+Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmWvnwQgaf), adapted to what the app can actually back. Dark only.
 
-- **Frame:** true-black letterbox, a VHS smear strip across the top (blue / orange / magenta), the Mr Dafoe "Soundboard" wordmark in neon magenta, and the signed-in user's channel stats from `channels.list` top right.
-- **Left pane, the tape:**
-  - Video monitor (R2), with filename, resolution (short side, marked vertical when taller than wide), and timecode overlays.
-  - State chip + magenta progress bar + model label (`Configured analyst: <model>` during prep and analysis, `Configured picker: <model>` after) and, separately, `Total model time: <seconds>s`, which ticks live while the pick runs. The label is the current configuration, not proof of which model made an older result.
-  - "What the model heard": perceptual tags from the chunk analysis (genre, tempo feel, instrumentation). Vocals is a free-text description, not a tag.
-- **Right pane: one tab per destination,** each marked done (green ✓) or to do (yellow ●).
-  - Above both tabs, "Check before uploading" lists the flags as a warning (⚠, yellow outline), since an audio or video problem matters wherever the song goes.
-  - **YouTube** (done once verified): the title as a plain field with a live `n / 100` counter, the description ("model draft", ending in the picked hashtags), tags in mono with a live `n / 500` counter (Approve disables past 500), and Visibility fixed at **Private**. Actions sit together: Discard, Re-run model, Approve & upload (magenta, offset shadow).
-  - **Short** (done once verified): "Make a Short" until one exists, then the 9:16 render, its cut (start, length, blur fill / center crop) with Re-cut, and its own YouTube fields with Re-pick hook in place of Re-run model.
-  - **Bandcamp** (done once every field is copied): track name, About, credits, and tags with a Copy button each, and Bandcamp's new-track page opened in its own window.
-  - The brand check stays in the pick for tracing but isn't shown: it's the model grading itself, not something Nathan acts on.
-- **Under 820px:** one column: the video, its status, and "What the model heard", then the tabs. The actions stack as one block, Approve first.
-- **Motion:** light and decorative only: the smear's gaps drift like VHS tracking, the wordmark flickers on once, sections rise in on load, tag chips pop in. All of it is off under `prefers-reduced-motion`.
-- **Signed out:** the home page is a sign-in view: the frame, the wordmark, and one "Sign in with Google" button in the header. Nothing else.
-- **Signed-in home:** own jobs, newest first, with title, state and a continuation link; no other user's work.
-- **Header:** one aligned row: the user's channel handle and video and subscriber counts, Connections, Brand guide (artist-linked user only), and Sign out. A "not invited" or "sign-in expired" notice shows under the header on the sign-in view.
-- **Connections:** one row per platform with Connected as … / Not connected and Connect, Reconnect, Disconnect. YouTube only for now.
-- **Footer:** artist and Ashley credits, public Privacy policy and Terms of Service links, then icon links to Ashley's site and socials. No DEV challenge credit. Neutral colors only.
-- **Accents have one job each:** magenta for the wordmark, primary actions, and focus; orange for panel labels; blue for the smear and info states. Header and footer chrome stays neutral.
-- **Not found / errors:** a page under the same frame with the status, a plain explanation, and a link home.
-- **States:** info `#7fb2ff`, needs review `--yellow`, verified `--green`, failed `--red-text`. Verified reads "Verified · private" with the video link.
-- **Tokens:** `--ground #0a0a0a`, `--panel #171615`, `--well #242321`, `--line #6e6a64`, `--ink #f4f1ea`, `--muted #b3ada3`, `--magenta #ff4fd8`, `--orange #ff7a1a`, `--yellow #ffd23f`, `--blue #2e8cff` (neon), `--green #6fdc5a`, `--red #d8281a`, `--red-text #ff6a52`.
-- **Type:** Mr Dafoe wordmark, Rubik 700/900 labels and buttons, Inter body, JetBrains Mono for tags, counters, and metadata.
-- **Mockup copy that the build replaces:** hashtags in the tags field (they move to the description; tags are plain terms), "118 bpm" and lyric fragments in "What the model heard" (numbers come from ffmpeg; lyrics are a non-goal), "last 10 uploads" (the grounding is the genre search), the Public/Scheduled/Unlisted options, the Playlist picker, and "Live on YouTube".
+- **One release, one path:** a release is eight steps: Upload, Listening, Title, Description, Tags, Check, Approve, Upload & verify. Each screen asks one question and has one primary button. A bar on top shows "Step n of 8 · Name", an eight-segment rail, and Back to releases, plus Save & leave from Listening through Upload & verify, once there is something saved to come back to.
+- **Working screens:** while the app works, the screen says what it's doing in one headline and one plain line (window n of m, or the named wait), and that leaving is safe once the browser upload is done. The video monitor (R2), the state with its progress bar and model label, and "What the model heard" sit below.
+- **Guided review (R5):** Title, then Description, then Tags, each with its live counter and the pick's "Why this". Check appears only when ffmpeg flagged something. Approve shows a summary (title, description length and hashtags, tags, destination channel, Private) with Back, Discard, and Approve & upload; the field screens carry Re-run model. A field the server rejects sends Nathan back to that field. Approve still sends every field at once.
+- **Edits survive leaving:** unsaved review edits and the current step stay in the browser per job and pick version, and clear on approval.
+- **Up next, after approval:** once the YouTube upload is approved, the release offers Make a Short from the hook (R13) and Put it on Bandcamp (R4's copy fields). Each opens as its own screen with a way back. A video under 15 s says why it can't make a Short.
+- **New release:** its own page: pick the finished video, the song title, and optional notes, then Start the release.
+- **Home, signed out:** "Sign in to Soundboard" and one Continue with Google button. A "not invited" or "sign-in expired" notice shows above it.
+- **Home, signed in:** the newest release that needs review sits on top as Up next with one Continue button. Running releases follow with "nothing to do yet" and a Watch link. Everything else is under Earlier with its state. New release is the primary action only when nothing is up next. No releases yet: a short explanation of the loop and Start.
+- **Header:** the wordmark, the connected channel's handle with its exact video and subscriber counts (on its own row on phones), and a Menu: Connections, Brand guide and Settings (artist-linked user only), and Sign out.
+- **Connections:** YouTube with Connected as … / Not connected and Connect, Reconnect, Disconnect. Bandcamp is listed as copy and paste with nothing to connect; Instagram and TikTok as coming later, with no controls.
+- **Settings:** Peer influence lists the five roles and the source each uses by default. No sliders until fanbase learning ships (spec 006).
+- **Not found / errors:** the status, a plain explanation, and a link home.
+- **Footer:** artist and Ashley credits and the license, text links to Ashley's site and socials, and the Terms of Service and Privacy policy.
+- **Phones (primary):** one column. On review screens the actions pin to the bottom, primary first and full width.
+- **Color:** one palette in `src/lib/styles/tokens.css`, the only file allowed color values: primitives first, then semantic names (`--ground`, `--panel`, `--well`, `--ink`, `--muted`, `--action`, `--attention`, `--ok`, `--warn`, `--err`). Components use semantic names only; Stylelint rejects a color literal anywhere else and any undeclared token.
+- **Accents have one job each:** cyan for actions, links, focus, and running work; magenta only for what needs Nathan; green verified, amber warnings, red errors. The cyan-to-magenta Signal Line marks the brand and the current step. Control borders meet 3:1 contrast.
+- **States:** running, needs review, verified ("Verified · private" with the video link), failed, and discarded, each as a colored dot or chip with its text.
+- **Type:** Bricolage Grotesque for headings and the wordmark, Onest for everything else, numbers in tabular figures.
+- **Motion:** state changes only, off under `prefers-reduced-motion`.
+- **Board copy the build replaces:** peer statistics such as average title length (no numbers derived from YouTube statistics, per the API terms), the brand thumbnail strip, sample peer artists, working influence sliders, the error page's trace ID, and an Instagram/TikTok connect button.
 
 ## Success Metrics
 

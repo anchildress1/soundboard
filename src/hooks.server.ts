@@ -96,6 +96,14 @@ const securityHeaders: Handle = async ({ event, resolve }) => {
 
 // The gate runs inside securityHeaders so its own 303 and 401 responses carry them too, except a
 // data request's 303: SvelteKit replaces it with a fresh JSON redirect after every hook ran.
-export const handle = sequence(jobTraceMeta, sentryHandle(), session, securityHeaders, gate);
+// The fetch proxy puts Sentry's fetch wrapper under SvelteKit's. Over it, Sentry copies each
+// request's options and drops SvelteKit's own-fetch flag, so dev warns on every `__data.json` load.
+export const handle = sequence(
+  jobTraceMeta,
+  sentryHandle({ injectFetchProxyScript: true }),
+  session,
+  securityHeaders,
+  gate,
+);
 
 export const handleError = handleErrorWithSentry();

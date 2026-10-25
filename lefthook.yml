@@ -8,6 +8,9 @@ pre-commit:
     lint:
       glob: '*.{js,ts,svelte}'
       run: pnpm exec eslint --max-warnings 0 {staged_files}
+    stylelint:
+      glob: '*.{css,svelte}'
+      run: pnpm exec stylelint --max-warnings 0 {staged_files}
     actionlint:
       glob: '.github/workflows/*.{yml,yaml}'
       run: actionlint {staged_files}

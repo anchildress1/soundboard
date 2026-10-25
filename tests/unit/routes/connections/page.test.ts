@@ -61,7 +61,7 @@ describe('connections page', () => {
   it('names the channel without a link when its ID is unknown', () => {
     setup({ status: 'connected', channelTitle: 'Flies Like Robots', channelId: null });
     expect(screen.getByText('Connected to Flies Like Robots.')).toBeInTheDocument();
-    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Flies Like Robots' })).toBeNull();
   });
 
   it.each<[Status, string]>([
@@ -73,6 +73,20 @@ describe('connections page', () => {
     expect(screen.getByText(line)).toBeInTheDocument();
     reconnectForm('Reconnect');
     expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
+  });
+
+  it('lists Bandcamp and later platforms with nothing to operate', () => {
+    setup(null);
+    expect(screen.getByRole('heading', { name: 'Bandcamp' })).toBeInTheDocument();
+    expect(screen.getByText('Nothing to connect')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Instagram · TikTok' })).toBeInTheDocument();
+    expect(screen.getByText('Coming later')).toBeInTheDocument();
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Connect']);
+  });
+
+  it('links back to releases', () => {
+    setup(null);
+    expect(screen.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/');
   });
 
   it('offers Connect with no connection', () => {
