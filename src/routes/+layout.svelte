@@ -57,8 +57,8 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <nav id="menu" aria-label="Menu" popover bind:this={menu} onclick={closeOnLink}>
         <a href={resolve('connections')}>Connections</a>
-        {#if data.artist?.curated}
-          <a href={resolve('brand')}>Brand guide</a>
+        {#if data.artist}
+          <a href={resolve('brand')}>Brand</a>
         {/if}
         <a href={resolve('settings')}>Settings</a>
         <form method="POST" action="/auth/logout">

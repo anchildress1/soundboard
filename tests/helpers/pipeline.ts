@@ -1,9 +1,13 @@
 // Pure fixtures and fakes for the pipeline tests; the module mocks stay in the test file.
 import { EventEmitter } from 'node:events';
+import type { BrandGuide, ProposalSources, SourceSummary, VoiceRules } from '#lib/brand.js';
 import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import { seed, type Seed } from './db';
 import { interaction } from './gemini';
+import { NATHAN_VOICE_RULES } from './voice';
+
+export { NATHAN_VOICE_RULES };
 
 export const SYNTHWAVE = '#synthwave';
 export const RETROWAVE = '#retrowave';
@@ -185,13 +189,12 @@ export function defaultHandlers(): Handler[] {
 /** The e2e KMS fake's ciphertext format, so one fixture decrypts in unit tests and the E2E build. */
 export const sealed = (plain: string) => Buffer.from(`e2e-kms:${plain}`).toString('base64');
 
-/** Nathan's profile as migration 0005 inserts it; curated, so his voice and brand guide apply. */
+/** Nathan's profile as migration 0005 inserts it. */
 export const ARTIST_A = {
   id: 'flr',
   name: ARTIST,
   bandcampUrl: 'https://flieslikerobots.bandcamp.com',
   contactLine: 'Contact at flieslikerobots@gmail.com.',
-  curated: true,
 } as const;
 /** A non-Nathan profile: generic voice, its own Bandcamp URL and contact line. */
 export const ARTIST_C = {
@@ -199,8 +202,41 @@ export const ARTIST_C = {
   name: 'Test Artist',
   bandcampUrl: 'https://test-artist.bandcamp.com',
   contactLine: 'Booking: test@example.com',
-  curated: false,
 } as const;
+
+const CARRIED = { uploads: 0, drafts: 0, edits: 0, approvals: 0, carriedOver: true };
+
+/** An approved guide row for `artistId`, carried over unless `sources` says otherwise. */
+export function approvedGuide(
+  artistId: string,
+  kind: 'voice' | 'brand',
+  body: VoiceRules | BrandGuide,
+  sources: SourceSummary = CARRIED,
+) {
+  return {
+    artistId,
+    kind,
+    status: 'approved' as const,
+    body,
+    sources,
+    proposedAt: new Date(Date.now() - 60_000),
+    approvedAt: new Date(Date.now() - 60_000),
+  };
+}
+
+/** A pending proposal row for `artistId`, read at `proposedAt` through the grant from `grantAt`. */
+export function pendingProposal(
+  artistId: string,
+  kind: 'voice' | 'brand',
+  body: VoiceRules | BrandGuide,
+  {
+    sources = { uploads: [], drafts: [], edits: 0, approvals: 0, thin: false },
+    proposedAt = new Date(Date.now() - 60_000),
+    grantAt = null,
+  }: { sources?: ProposalSources; proposedAt?: Date; grantAt?: Date | null } = {},
+) {
+  return { artistId, kind, status: 'proposed' as const, body, sources, proposedAt, grantAt };
+}
 
 /** Linked to Flies Like Robots, with YouTube connected to the FLR channel. */
 export const USER_A = {
@@ -241,9 +277,10 @@ const connected = (uid: string, channelId: string, channelTitle: string, refresh
   updatedAt: new Date(0),
 });
 
-/** A, B and C as invited, signed-up users; A's and C's YouTube grants are connected. */
+/** A, B and C as invited, signed-up users; A's and C's YouTube grants are connected; Nathan's voice. */
 export const USERS = {
   artists: [ARTIST_A, ARTIST_C].map((artist) => ({ ...artist })),
+  artistGuides: [approvedGuide(ARTIST_A.id, 'voice', { rules: NATHAN_VOICE_RULES })],
   users: [USER_A, USER_B, USER_C].map(({ uid, email, artistId }) => ({ uid, email, artistId })),
   connections: [
     connected(USER_A.uid, CHANNEL_A, ARTIST, REFRESH_A),

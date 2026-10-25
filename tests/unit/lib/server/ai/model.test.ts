@@ -98,6 +98,7 @@ const AGENT_SETTINGS: [Agent, string, string, number][] = [
   ['smart-pick', 'gemini-4-argon', 'medium', 8192],
   ['hook-pick', 'gemini-4-argon', 'low', 8192],
   ['brand-guide', 'gemini-4-argon', 'medium', 8192],
+  ['voice-guide', 'gemini-4-argon', 'medium', 8192],
 ];
 
 describe('chat request', () => {
@@ -364,6 +365,7 @@ describe('step budget', () => {
     ['smart-pick', 32_999],
     ['hook-pick', 34_999],
     ['brand-guide', 32_999],
+    ['voice-guide', 32_999],
     ['smart-pick', -1],
   ] as [Agent, number][])('%s refuses to start with %i ms left', async (agent, left) => {
     await expect(chat(request, agent, schema, now + left)).rejects.toThrow('ran out of time');
@@ -432,6 +434,24 @@ describe('chatJson', () => {
     expect(reask).toContain(SENTINEL);
     expect(reask).not.toContain('"source"');
     expect(reask).not.toContain('"count"');
+  });
+
+  it('re-asks a guide agent with its earlier reply as a placeholder on the span, the text to the SDK', async () => {
+    const SENTINEL = 'SENTINEL-GUIDE-7f3';
+    fetchMock
+      .mockResolvedValueOnce(interaction(`{"rules":["${SENTINEL}"`))
+      .mockResolvedValueOnce(interaction(OK_JSON));
+    startSpan.mockClear();
+    await chatJson(request, 'voice-guide', schema, isOk, stepDeadline());
+    const spans = JSON.stringify(startSpan.mock.calls.map(([options]) => options));
+    expect(spans).not.toContain(SENTINEL);
+    expect(spans).toContain('[guide proposal: ');
+    const reask = sent(1).body;
+    expect(reask.input[1]).toEqual({
+      type: 'model_output',
+      content: [{ type: 'text', text: `{"rules":["${SENTINEL}"` }],
+    });
+    expect(JSON.stringify(reask)).not.toContain('"source"');
   });
 
   it('re-asks without an assistant turn when the reply was empty', async () => {

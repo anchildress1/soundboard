@@ -2,7 +2,7 @@
 // job but B's and C's; user B is invited with no profile; user C has a non-Nathan profile and its
 // own connected channel. One more user per broken YouTube status backs the Connections page, an
 // upload user with a profile creates its own jobs through `/new`, and each Playwright project has its own
-// no-profile and rename users, since those tests write. Each test owns its job IDs, so parallel
+// no-profile, rename and guide users, since those tests write. Each test owns its job IDs, so parallel
 // tests and both Playwright projects never share mutable state.
 import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
@@ -10,12 +10,14 @@ import type { Chunk, Pick, Short } from '#lib/types.js';
 import type { Seed } from '../../helpers/db';
 import {
   A_JOB,
+  approvedGuide,
   ARTIST_A,
   ARTIST_C,
   C_JOB,
   CHANNEL_A,
   CHANNEL_C,
   jobDoc,
+  pendingProposal,
   USER_B,
   USERS,
 } from '../../helpers/pipeline';
@@ -282,6 +284,30 @@ const perProject = PROJECTS.flatMap((project) => {
   ];
 });
 
+/**
+ * Each project's own guide users: `brand` and `race` hold one pending voice proposal (one approves
+ * it, two tabs race on the other); `propose` has no guides and C's connected channel.
+ */
+const GUIDE_ROLES = { brand: 'b', race: 'rc', propose: 'p' } as const;
+const guideUsers = PROJECTS.flatMap((project) => {
+  const device = DEVICE[project];
+  return Object.entries(GUIDE_ROLES).map(([role, id]) => ({
+    uid: `uid-${role}-${device}`,
+    email: `${role}-${device}@example.com`,
+    artistId: `artist-${id}${device[0]}`,
+  }));
+});
+const proposers = guideUsers.filter(({ uid }) => uid.startsWith('uid-propose-'));
+const reviewers = guideUsers.filter((user) => !proposers.includes(user));
+
+/** Nathan's brand guide as 004 approved it; migration 0006 already carried his voice over. */
+export const NATHAN_BRAND = {
+  statement: 'Plain titles, a short story, then the credits.',
+  keep: ['Song title alone in the title'],
+  fix: ['One links block'],
+  drop: ['All-caps titles'],
+};
+
 /** Every row the E2E database starts with, in `seed()` order. */
 export const SEED: Seed = {
   // The real migrations already inserted `flr`.
@@ -289,15 +315,19 @@ export const SEED: Seed = {
     ...USERS.artists.filter((artist) => artist.id !== ARTIST_A.id),
     { id: 'artist-upload', name: 'Upload Band' },
     ...perProject.flatMap(({ artist }) => (artist ? [artist] : [])),
+    ...guideUsers.map(({ artistId }) => ({ id: artistId, name: 'Guide Band' })),
   ],
   users: [
     ...USERS.users,
     ...broken.map(({ uid, email }) => ({ uid, email })),
     { uid: 'uid-upload', email: 'upload@example.com', artistId: 'artist-upload' },
     ...perProject.map(({ user }) => user),
+    ...guideUsers,
   ],
   connections: [
     ...USERS.connections,
+    // Same grant and channel as C, so each project proposes on its own claim.
+    ...proposers.map(({ uid }) => ({ ...USERS.connections[1]!, uid })),
     ...broken.map(({ uid, status }) => ({
       uid,
       status,
@@ -318,4 +348,21 @@ export const SEED: Seed = {
       ? [{ jobId: job.id, retrievedAt: new Date(job.audience.retrievedAt), evidence: job.audience }]
       : [],
   ),
+  artistGuides: [
+    approvedGuide(ARTIST_A.id, 'brand', NATHAN_BRAND, {
+      uploads: 30,
+      drafts: 0,
+      edits: 0,
+      approvals: 0,
+      carriedOver: true,
+    }),
+    ...reviewers.map(({ artistId }) =>
+      pendingProposal(
+        artistId,
+        'voice',
+        { rules: ['Short, dry sentences.', 'One aside per description.'] },
+        { sources: { uploads: [], drafts: [], edits: 2, approvals: 1, thin: true } },
+      ),
+    ),
+  ],
 };

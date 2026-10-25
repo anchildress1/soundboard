@@ -6,6 +6,7 @@ import { seed, truncate, vanishOnUpdate } from '../../../../helpers/db';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import {
   A_JOB,
+  approvedGuide,
   ANALYSIS,
   ARTIST,
   ARTIST_A,
@@ -41,6 +42,7 @@ import {
   unavailable503,
 } from '../../../../helpers/gemini';
 import { captureException, captureMessage, span, startSpan } from '../../../../mocks/sentry';
+import type { BrandGuide } from '#lib/brand.js';
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
@@ -994,7 +996,7 @@ describe("runStep: PICK with Nathan's memory", () => {
     await unlinkA();
     expect(await runStep(await pickJob(A_JOB))).toEqual({ wait: NO_ARTIST });
     expect(calls).toHaveLength(0);
-    expect(await artistRowCount()).toBe(2);
+    expect(await artistRowCount()).toBe(1);
   });
 
   it("runs a job not linked to the owner's profile without the profile's memory", async () => {
@@ -1099,17 +1101,8 @@ describe("runStep: PICK with Nathan's memory", () => {
   });
 
   const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
-  const approveGuide = () =>
-    seed({
-      artistMemory: [
-        {
-          artistId: 'flr',
-          kind: 'brand',
-          key: 'approved',
-          data: { ...GUIDE, status: 'APPROVED', uploadCount: 1, createdAt: 1, approvedAt: 2 },
-        },
-      ],
-    });
+  const approveGuide = (artistId = 'flr', guide: BrandGuide = GUIDE) =>
+    seed({ artistGuides: [approvedGuide(artistId, 'brand', guide)] });
 
   it("follows Nathan's approved brand guide", async () => {
     await approveGuide();
@@ -1117,20 +1110,35 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(context().brandGuide).toEqual(GUIDE);
   });
 
-  it("keeps a brand guide out of a profile that isn't curated, even one stored for it", async () => {
+  it("keeps Nathan's brand guide out of another artist's job", async () => {
     await approveGuide();
-    await seed({
-      artistMemory: [
-        {
-          artistId: ARTIST_C.id,
-          kind: 'brand',
-          key: 'approved',
-          data: { ...GUIDE, status: 'APPROVED', uploadCount: 1, createdAt: 1, approvedAt: 2 },
-        },
-      ],
-    });
     await runStep(await pickJob());
     expect(context()).not.toHaveProperty('brandGuide');
+  });
+
+  it("follows another artist's own approved brand guide", async () => {
+    const own = { statement: 'Loud covers.', keep: [], fix: ['Titles'], drop: [] };
+    await approveGuide(ARTIST_C.id, own);
+    await runStep(await pickJob());
+    expect(context().brandGuide).toEqual(own);
+  });
+
+  it("writes another artist's job in their own approved voice, never Nathan's", async () => {
+    await seed({
+      artistGuides: [approvedGuide(ARTIST_C.id, 'voice', { rules: ['Lowercase everything.'] })],
+    });
+    await runStep(await pickJob(C_JOB));
+    expect(rules()).toContain('- Lowercase everything.');
+    expect(rules()).not.toContain('hacked and slashed');
+    expect(rules()).not.toContain('Write the description in plain words:');
+  });
+
+  it('leaves every stored job byte for byte when a guide is approved later', async () => {
+    await runStep(await pickJob(A_JOB));
+    const before = await db().select().from(jobs);
+    await approveGuide();
+    await seed({ artistGuides: [approvedGuide(ARTIST_C.id, 'voice', { rules: ['New.'] })] });
+    expect(await db().select().from(jobs)).toEqual(before);
   });
 
   it('counts an unparseable recommendation as a failure', async () => {

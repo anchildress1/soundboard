@@ -12,6 +12,7 @@ import {
 import { analystModel, geminiApiKey, pickModel } from '#lib/server/core/env.js';
 import {
   chatSpan,
+  GUIDE_AGENTS,
   textTurn,
   type AgentName,
   type ChatReply,
@@ -40,6 +41,8 @@ const AGENTS = {
   'smart-pick': { model: pickModel, thinkingLevel: 'medium', maxTokens: 8192, minCallMs: 33_000 },
   'hook-pick': { model: pickModel, thinkingLevel: 'low', maxTokens: 8192, minCallMs: 35_000 },
   'brand-guide': { model: pickModel, thinkingLevel: 'medium', maxTokens: 8192, minCallMs: 33_000 },
+  // T004 measured 7.6 s at the voice caps, under the brand guide's p95.
+  'voice-guide': { model: pickModel, thinkingLevel: 'medium', maxTokens: 8192, minCallMs: 33_000 },
 } as const satisfies Record<
   Agent,
   { model: () => string; thinkingLevel: 'low' | 'medium'; maxTokens: number; minCallMs: number }
@@ -118,7 +121,10 @@ function sdkPart(part: Part) {
   return { type: 'file' as const, mediaType: part.mime_type, data: part.data };
 }
 
-/** Assistant turns are earlier text answers resent for a re-ask; nothing is stored provider-side. */
+/**
+ * Assistant turns are earlier text answers resent for a re-ask; nothing is stored provider-side. A
+ * part's `source` only steers span redaction, so it never reaches the SDK.
+ */
 const sdkMessage = (turn: Turn) =>
   ({ role: turn.role, content: turn.parts.map(sdkPart) }) as ModelMessage;
 
@@ -221,11 +227,11 @@ export async function chatJson<T>(
     if (attempt > 0 || deadline - Date.now() < AGENTS[agent].minCallMs) {
       return { value: null, raw: reply.content, ms };
     }
-    turns = [
-      ...turns,
-      ...(reply.content ? [textTurn('assistant', reply.content)] : []),
-      textTurn('user', REASK),
-    ];
+    // A guide's earlier reply restates its sources, so its span input records a placeholder.
+    const resent: Turn = GUIDE_AGENTS.has(agent)
+      ? { role: 'assistant', parts: [{ type: 'text', text: reply.content, source: 'guide' }] }
+      : textTurn('assistant', reply.content);
+    turns = [...turns, ...(reply.content ? [resent] : []), textTurn('user', REASK)];
   }
 }
 

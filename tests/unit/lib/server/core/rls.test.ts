@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db, query, type Database, type Tx } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
 import {
+  artistGuides,
   artistMemory,
   artists,
   connections,
+  guideClaims,
   jobAudience,
   jobs,
   users,
@@ -18,9 +20,11 @@ import { jobRow } from '#lib/server/jobs/rows.js';
 import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { seed, truncate } from '../../../../helpers/db';
 import {
+  approvedGuide,
   ARTIST_A,
   ARTIST_C,
   jobDoc,
+  pendingProposal,
   USER_A,
   USER_B,
   USER_C,
@@ -43,6 +47,8 @@ const TABLES = [
   'jobs',
   'job_audience',
   'artist_memory',
+  'artist_guides',
+  'guide_claims',
 ] as const;
 
 function restricted<T>(
@@ -147,6 +153,9 @@ describe('runtime role isolation', () => {
             { job_id: own },
           ]);
           expect(await rows(tx, sql`select artist_id from artist_memory`)).toEqual(
+            own === 'a' ? [{ artist_id: 'flr' }] : [],
+          );
+          expect(await rows(tx, sql`select artist_id from artist_guides`)).toEqual(
             own === 'a' ? [{ artist_id: 'flr' }] : [],
           );
         }),
@@ -560,7 +569,6 @@ describe('artist profiles', () => {
   });
 
   it.each([
-    ['curated', sql`update artists set curated = true`],
     ['id', sql`update artists set id = 'mine'`],
     ['a direct insert', sql`insert into artists (id, name) values ('mine', 'Mine')`],
     ['users.artist_id', sql`update users set artist_id = null`],
@@ -576,7 +584,6 @@ describe('artist profiles', () => {
       name: 'New Band',
       bandcamp_url: 'https://new-band.bandcamp.com',
       contact_line: 'Booking: new@example.com',
-      curated: false,
     });
     expect(
       await db().select({ artistId: users.artistId }).from(users).where(eq(users.uid, USER_B.uid)),
@@ -735,5 +742,280 @@ describe('identity bootstrap function', () => {
         sql`select has_function_privilege('soundboard_cleanup', ${signature}, 'EXECUTE') as allowed`,
       ),
     ).toEqual([{ allowed: false }]);
+  });
+});
+
+describe('artist guides', () => {
+  const asUser = <T>(uid: string, operation: (tx: Tx) => Promise<T>) =>
+    restricted('app', uid, operation);
+  const VOICE = JSON.stringify({ rules: ['Plain.'] });
+  const NO_UPLOADS = JSON.stringify({
+    uploads: [],
+    drafts: [],
+    edits: 2,
+    approvals: 0,
+    thin: true,
+  });
+  const UPLOADS = JSON.stringify({
+    uploads: [{ videoId: 'v1', title: 'Song', publishedAt: '2026-10-01T00:00:00Z' }],
+    drafts: [],
+    edits: 0,
+    approvals: 0,
+    thin: true,
+  });
+  const claim = (tx: Tx, token: string, kind = 'voice') =>
+    rows(tx, sql`select * from public.soundboard_claim_proposal(${kind}, ${token})`);
+  const save = (tx: Tx, token: string, sources = NO_UPLOADS, kind = 'voice') =>
+    rows(
+      tx,
+      sql`select * from public.soundboard_save_proposal(${kind}, ${VOICE}::jsonb, ${sources}::jsonb, ${token})`,
+    );
+  const fail = async (operation: Promise<unknown>, code: string) =>
+    expect(
+      operation.catch((error: unknown) => {
+        throw error instanceof Error && error.cause ? error.cause : error;
+      }),
+    ).rejects.toMatchObject({ code });
+  const guides = () =>
+    db()
+      .select({ artistId: artistGuides.artistId, status: artistGuides.status })
+      .from(artistGuides)
+      .orderBy(artistGuides.id);
+
+  it("hides another artist's guides and changes none of them", async () => {
+    await asUser(USER_C.uid, async (tx) => {
+      expect(await rows(tx, sql`select id from artist_guides`)).toEqual([]);
+      expect(await rows(tx, sql`update artist_guides set body = '{}' returning id`)).toEqual([]);
+      expect(await rows(tx, sql`delete from artist_guides returning id`)).toEqual([]);
+    });
+    expect(await guides()).toEqual([{ artistId: 'flr', status: 'approved' }]);
+  });
+
+  it.each([
+    [
+      'a direct proposal insert',
+      sql`insert into artist_guides (artist_id, kind, status, body, sources, proposed_at)
+        values ('artist-c', 'voice', 'proposed', '{}', ${NO_UPLOADS}::jsonb, now())`,
+    ],
+    ['a status change', sql`update artist_guides set status = 'proposed'`],
+    ['a grant_at write', sql`update artist_guides set grant_at = now()`],
+    [
+      'a claim insert',
+      sql`insert into guide_claims (artist_id, kind) values ('artist-c', 'voice')`,
+    ],
+    ['a claimed_at write', sql`update guide_claims set claimed_at = now() - interval '1 minute'`],
+    ['a claim grant_at write', sql`update guide_claims set grant_at = now()`],
+  ])('denies %s', async (_label, statement) => {
+    await denied(asUser(USER_C.uid, (tx) => tx.execute(statement)));
+  });
+
+  it('hides a proposal at 29 days and keeps an approved guide visible for good', async () => {
+    await seed({
+      artistGuides: [
+        pendingProposal(
+          ARTIST_C.id,
+          'voice',
+          { rules: ['day 29'] },
+          {
+            proposedAt: new Date(Date.now() - 29 * DAY_MS),
+          },
+        ),
+        pendingProposal(
+          ARTIST_C.id,
+          'brand',
+          { rules: ['day 28'] },
+          {
+            proposedAt: new Date(Date.now() - 29 * DAY_MS + 60_000),
+          },
+        ),
+        { ...approvedGuide(ARTIST_C.id, 'voice', { rules: ['old'] }), proposedAt: new Date(0) },
+      ],
+    });
+    expect(
+      await asUser(USER_C.uid, (tx) =>
+        rows(tx, sql`select kind, status from artist_guides order by id`),
+      ),
+    ).toEqual([
+      { kind: 'brand', status: 'proposed' },
+      { kind: 'voice', status: 'approved' },
+    ]);
+  });
+
+  it.each([
+    ['an approved row with a grant', { grantAt: new Date() }],
+    ['an approved row without approved_at', { approvedAt: null }],
+    ['sources missing a key', { sources: { uploads: 0, drafts: 0, edits: 0, approvals: 0 } }],
+    ['proposal-shaped sources', { sources: JSON.parse(NO_UPLOADS) as object }],
+  ])('refuses %s even to the owner', async (_label, patch) => {
+    await fail(
+      seed({ artistGuides: [{ ...approvedGuide(ARTIST_C.id, 'brand', { rules: [] }), ...patch }] }),
+      '23514',
+    );
+  });
+
+  it('claims, saves and replaces the caller artist proposal through the functions only', async () => {
+    const saved = await asUser(USER_C.uid, async (tx) => {
+      await claim(tx, 't1');
+      await save(tx, 't1');
+      await claim(tx, 't2');
+      return save(tx, 't2', UPLOADS);
+    });
+    expect(saved).toMatchObject([{ artist_id: ARTIST_C.id, status: 'proposed', kind: 'voice' }]);
+    expect(saved[0]!.grant_at).not.toBeNull();
+    expect(await guides()).toEqual([
+      { artistId: 'flr', status: 'approved' },
+      { artistId: ARTIST_C.id, status: 'proposed' },
+    ]);
+    expect(await db().select().from(guideClaims)).toMatchObject([
+      { artistId: ARTIST_C.id, claimToken: null, claimUntil: null },
+    ]);
+  });
+
+  it('refuses a second claim while one runs and answers the held row', async () => {
+    await asUser(USER_C.uid, async (tx) => {
+      expect(await claim(tx, 't1')).toMatchObject([{ claim_token: 't1' }]);
+      expect(await claim(tx, 't2')).toMatchObject([{ claim_token: 't1' }]);
+      await fail(save(tx, 't2'), '55000');
+    });
+  });
+
+  it.each([
+    ['without a profile', USER_B.uid, (tx: Tx) => claim(tx, 't1')],
+    ['without a profile, saving', USER_B.uid, (tx: Tx) => save(tx, 't1')],
+    ['without a subject', '', (tx: Tx) => claim(tx, 't1')],
+  ])('refuses the functions %s', async (_label, uid, operation) => {
+    await fail(asUser(uid, operation), '42501');
+  });
+
+  it('refuses an empty claim token', async () => {
+    await fail(
+      asUser(USER_C.uid, (tx) => claim(tx, '')),
+      '22023',
+    );
+  });
+
+  it('refuses a save without its claim, or with another artist claim token', async () => {
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 'never-claimed')),
+      '55000',
+    );
+    await asUser(USER_A.uid, (tx) => claim(tx, 'a-token'));
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 'a-token')),
+      '55000',
+    );
+    expect(await guides()).toEqual([{ artistId: 'flr', status: 'approved' }]);
+  });
+
+  it.each([
+    ['in the future', sql`now() + interval '1 hour'`],
+    ['over 3 minutes old', sql`now() - interval '4 minutes'`],
+  ])('refuses a claim time %s, whatever claim_until says', async (_label, claimedAt) => {
+    await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
+    await db().execute(
+      sql`update guide_claims set claimed_at = ${claimedAt}, claim_until = now() + interval '1 day'`,
+    );
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 't1')),
+      '55000',
+    );
+    expect(await guides()).toEqual([{ artistId: 'flr', status: 'approved' }]);
+  });
+
+  it('refuses uploads read through a grant that was replaced before the save', async () => {
+    await asUser(USER_C.uid, (tx) => claim(tx, 't1'));
+    await db()
+      .update(connections)
+      .set({ updatedAt: new Date(Date.now() + 1000) })
+      .where(eq(connections.uid, USER_C.uid));
+    await fail(
+      asUser(USER_C.uid, (tx) => save(tx, 't1', UPLOADS)),
+      '28000',
+    );
+    // Edits alone hold no YouTube data, so they save without a grant.
+    expect(await asUser(USER_C.uid, (tx) => save(tx, 't1'))).toMatchObject([{ grant_at: null }]);
+  });
+
+  it('ignores temp tables that shadow the ones the functions write', async () => {
+    const saved = await asUser(USER_C.uid, async (tx) => {
+      for (const table of ['users', 'connections', 'guide_claims', 'artist_guides']) {
+        await tx.execute(
+          sql.raw(
+            `create temp table ${table} (like public.${table} including defaults) on commit drop`,
+          ),
+        );
+      }
+      await tx.execute(sql`insert into pg_temp.users (uid, email, artist_id, active)
+        values (${USER_C.uid}, 'c@example.com', 'flr', true)`);
+      await claim(tx, 't1');
+      const row = await save(tx, 't1', UPLOADS);
+      expect(await rows(tx, sql`select count(*)::int as n from pg_temp.guide_claims`)).toEqual([
+        { n: 0 },
+      ]);
+      expect(await rows(tx, sql`select count(*)::int as n from pg_temp.artist_guides`)).toEqual([
+        { n: 0 },
+      ]);
+      return row;
+    });
+    expect(saved).toMatchObject([{ artist_id: ARTIST_C.id }]);
+  });
+
+  it('pins each function search path, temp schema last, and grants PUBLIC nothing', async () => {
+    expect(
+      await rows(
+        db(),
+        sql`select p.proname, p.prosecdef, p.proconfig from pg_proc p
+          where p.proname in ('soundboard_claim_proposal', 'soundboard_save_proposal')
+          order by p.proname`,
+      ),
+    ).toEqual(
+      ['soundboard_claim_proposal', 'soundboard_save_proposal'].map((proname) => ({
+        proname,
+        prosecdef: true,
+        proconfig: ['search_path=pg_catalog, public, pg_temp'],
+      })),
+    );
+    expect(
+      await rows(
+        db(),
+        sql`select p.proname from pg_proc p, lateral aclexplode(p.proacl) acl
+          where p.proname in ('soundboard_claim_proposal', 'soundboard_save_proposal')
+          and acl.grantee = 0`,
+      ),
+    ).toEqual([]);
+  });
+
+  it('lets cleanup see and delete only expired proposals, never their bodies', async () => {
+    await seed({
+      artistGuides: [
+        pendingProposal(
+          ARTIST_C.id,
+          'voice',
+          { rules: ['old'] },
+          {
+            proposedAt: new Date(Date.now() - 30 * DAY_MS),
+          },
+        ),
+        pendingProposal(ARTIST_C.id, 'brand', { rules: ['new'] }),
+      ],
+    });
+    await restricted('cleanup', undefined, async (tx) => {
+      expect(await rows(tx, sql`select status from artist_guides`)).toEqual([
+        { status: 'proposed' },
+      ]);
+      expect(await rows(tx, sql`delete from artist_guides returning status`)).toEqual([
+        { status: 'proposed' },
+      ]);
+    });
+    await denied(
+      restricted('cleanup', undefined, (tx) => tx.execute(sql`select body from artist_guides`)),
+    );
+    await denied(
+      restricted('cleanup', undefined, (tx) => tx.execute(sql`select * from guide_claims`)),
+    );
+    expect(await guides()).toEqual([
+      { artistId: 'flr', status: 'approved' },
+      { artistId: ARTIST_C.id, status: 'proposed' },
+    ]);
   });
 });

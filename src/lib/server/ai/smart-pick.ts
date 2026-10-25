@@ -1,5 +1,5 @@
 import pRetry from 'p-retry';
-import type { BrandGuide } from '#lib/brand.js';
+import type { BrandGuide, VoiceRules } from '#lib/brand.js';
 import {
   containsWords,
   DESCRIPTION_MAX,
@@ -77,8 +77,8 @@ export function isRawPick(value: unknown): value is RawPick {
   return RAW_PICK(value);
 }
 
-/** The job owner's profile as the pick uses it; `curated` selects Nathan's voice (spec 005 drops it). */
-export type PickArtist = { name: string; contactLine: string | null; curated: boolean };
+/** The job owner's profile as the pick uses it. */
+export type PickArtist = { name: string; contactLine: string | null };
 
 export type PickContext = {
   artist: PickArtist;
@@ -95,33 +95,15 @@ export type PickContext = {
   facts: Fact[];
   feedback: Feedback[];
   skipped: { title: string; description: string }[];
-  /** The curated artist's approved guide; null otherwise and before one is approved. */
+  /** The owner's approved voice; null before one is approved, or when the job can't use it. */
+  voice: VoiceRules | null;
+  /** The owner's approved brand guide; null before one is approved, or when the job can't use it. */
   brand: BrandGuide | null;
 };
 
 const RECENT_DESCRIPTION_CHARS = 700;
 
-/**
- * How the artist writes, distilled from his own YouTube descriptions and comments (2024 on).
- * Applies to the curated profile's description; the audience evidence still sets its structure and
- * length.
- */
-export const ARTIST_VOICE = [
-  'Write the description the way the artist writes his own:',
-  '- Short, plain, literal.',
-  '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
-  '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
-  '- Never write placeholders, brackets, or notes about missing information.',
-  '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
-  '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
-  '- Quoted phrases here show his style. Never copy them word for word, except the credit line.',
-  '- No marketing copy: no "explores", "journey", "sonic", "soundscape", "for fans of", no calls to like or subscribe, no emoji.',
-].join('\n');
-
-/**
- * `ARTIST_VOICE`'s plain-copy rules without his humor, asides and caps, for every profile that isn't
- * curated, until spec 005 learns each artist's voice.
- */
+/** Plain-copy rules for an artist with no approved voice; never another artist's voice. */
 export const GENERIC_VOICE = [
   'Write the description in plain words:',
   '- Short, plain, literal.',
@@ -131,11 +113,18 @@ export const GENERIC_VOICE = [
   '- No marketing copy: no "explores", "journey", "sonic", "soundscape", "for fans of", no calls to like or subscribe, no emoji.',
 ].join('\n');
 
-/** The curated artist's credit line: his identity, so only on his own profile. */
-export const CREDIT_LINE = [
-  'In the description, also:',
-  '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
-].join('\n');
+/** The artist's approved rules, or `GENERIC_VOICE` before they approve any. */
+export function voiceBlock(voice: VoiceRules | null): string {
+  if (!voice) return GENERIC_VOICE;
+  return [
+    'Write the description the way the artist writes their own:',
+    ...voice.rules.map((rule) => `- ${rule}`),
+  ].join('\n');
+}
+
+/** FR-008: the app's content rules win over anything the voice asks for. */
+export const CONTENT_RULES =
+  "These content rules outrank the voice rules: hashtags and tags only from candidateLists, no loudness, peak, clipping or silence figures except ffmpeg's, YouTube length limits, and facts, credits and links only from artistNotes, facts and recentUploads. Never write placeholders.";
 
 /** Condenses the chunk results into what the pick needs, keeping the prompt inside the context window. */
 export function digestChunks(chunks: Chunk[]) {
@@ -184,7 +173,8 @@ export function tagPool(fix: {
 }
 
 export function buildPickRequest(ctx: PickContext): ModelRequest {
-  const { name, curated } = ctx.artist;
+  const { name } = ctx.artist;
+  const voiced = ctx.voice !== null;
   const artistTag = ` Include "${name}". This required artist tag may be absent from the reference lists.`;
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
@@ -193,8 +183,11 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
     "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags.",
     `title: at most ${TITLE_MAX} characters.`,
     `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. Never open with or repeat the title: YouTube shows it right above. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
-    curated ? ARTIST_VOICE : GENERIC_VOICE,
-    curated ? CREDIT_LINE : 'Write no credit line.',
+    voiceBlock(ctx.voice),
+    CONTENT_RULES,
+    voiced
+      ? 'Write a credit line only as the voice rules say, with the credited name exactly as in recentUploads.'
+      : 'Write no credit line.',
     'Write no contact line, in the description or anywhere else.',
     "Correct spelling, capitalization, and grammar in everything you write, including wording taken from artistNotes or recentUploads. Keep the artist's slang, asides, the song title as styled, and the credited name exactly.",
     'hashtags: pick 3 to 5, copied exactly from a candidateLists hashtags entry, matching your tags where a candidate does. Never invent one.',
@@ -205,7 +198,7 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
     'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
     "bandcamp.about: the same song for Bandcamp's About field, in the artist voice, a few sentences at most. No hashtags, credits, or contact line.",
-    curated
+    voiced
       ? 'bandcamp.credits: the credit line from the description, exactly as written there.'
       : 'bandcamp.credits: an empty string.',
     ctx.skipped.length > 0

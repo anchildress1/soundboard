@@ -1,16 +1,16 @@
+import { error } from '@sveltejs/kit';
 import { eq, sql } from 'drizzle-orm';
 import { parseArtist, type ArtistValue } from '#lib/artist.js';
-import { ActionError } from '#lib/server/core/errors.js';
+import { ActionError, pgCode } from '#lib/server/core/errors.js';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
 import { artists, users } from '#lib/server/core/schema.js';
 
-/** The user's own artist profile. `curated` selects Nathan's voice and brand guide (spec 005 drops it). */
+/** The user's own artist profile. */
 export type ArtistProfile = {
   id: string;
   name: string;
   bandcampUrl: string | null;
   contactLine: string | null;
-  curated: boolean;
 };
 
 const PROFILE = {
@@ -18,7 +18,6 @@ const PROFILE = {
   name: artists.name,
   bandcampUrl: artists.bandcampUrl,
   contactLine: artists.contactLine,
-  curated: artists.curated,
 };
 
 /** The profile linked to `uid`, or null when the user has none; pass `q` to read in a transaction. */
@@ -36,7 +35,7 @@ export async function artistProfile(uid: string, q?: Database | Tx): Promise<Art
 export async function createArtist(value: ArtistValue): Promise<ArtistProfile> {
   return await query(async (tx) => {
     const result = (await tx.execute(sql`select id, name, bandcamp_url as "bandcampUrl",
-      contact_line as "contactLine", curated
+      contact_line as "contactLine"
       from public.soundboard_create_artist(${value.name}, ${value.bandcampUrl}, ${value.contactLine})`)) as {
       rows: ArtistProfile[];
     };
@@ -59,12 +58,6 @@ export async function updateArtist(
   return row ?? null;
 }
 
-/** The Postgres error code, which Drizzle keeps on the wrapped driver error. */
-const pgCode = (error: unknown): unknown => {
-  const { code, cause } = (error ?? {}) as { code?: unknown; cause?: { code?: unknown } };
-  return code ?? cause?.code;
-};
-
 /**
  * Creates the caller's profile, or updates the one they have. A create that races another tab's
  * gets `23505` and becomes an update. Invalid input is a 422 and writes nothing.
@@ -79,12 +72,18 @@ export async function saveArtist(
   if (!artistId) {
     try {
       return await createArtist(parsed.value);
-    } catch (error) {
-      if (pgCode(error) !== '23505') throw error;
+    } catch (error_) {
+      if (pgCode(error_) !== '23505') throw error_;
     }
     artistId = (await artistProfile(user.uid))?.id;
   }
   const saved = artistId ? await updateArtist(artistId, parsed.value) : null;
   if (!saved) throw new ActionError(409, 'Your artist profile changed. Reload and try again.');
   return saved;
+}
+
+/** The caller's artist ID, or the same 404 as a missing page when they have no profile. */
+export function requireArtist(user: { artist: ArtistProfile | null } | null): string {
+  if (!user?.artist) error(404, 'Not found');
+  return user.artist.id;
 }

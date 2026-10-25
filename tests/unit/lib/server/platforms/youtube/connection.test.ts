@@ -14,8 +14,10 @@ import {
   revokeGrant,
   type ConnectionRow,
 } from '#lib/server/platforms/youtube/connection.js';
+import { artistGuides } from '#lib/server/core/schema.js';
 import { DeadlineSpent, identityFailure } from '#lib/server/platforms/youtube/youtube.js';
 import { seed } from '../../../../../helpers/db';
+import { approvedGuide, pendingProposal } from '../../../../../helpers/pipeline';
 
 const UID = 'sub-a';
 /** A step deadline with time to spare. */
@@ -77,6 +79,12 @@ const DECRYPTION_FAILED = "Decryption failed: verify that 'name' refers to the c
 /** The shape @google-cloud/kms rejects with for an INVALID_ARGUMENT request. */
 const kmsRefusal = (details: string) =>
   Object.assign(new Error(`3 INVALID_ARGUMENT: ${details}`), { code: 3, details });
+
+/** A grant by its token; the generation only matters to the proposal tests. */
+const grant = (tokenCiphertext: string, updatedAt = new Date(0)) => ({
+  tokenCiphertext,
+  updatedAt,
+});
 
 const invalidGrant = () =>
   Object.assign(new Error('reauth required'), { response: { data: { error: 'invalid_grant' } } });
@@ -161,7 +169,7 @@ describe('putConnection / getConnection', () => {
 describe('markRevoked', () => {
   it('sets revoked and clears the token in one write, keeping the channel', async () => {
     await putConnection(UID, connected());
-    await markRevoked(UID, 'c2VhbGVk');
+    await markRevoked(UID, grant('c2VhbGVk'));
     expect(await getConnection(UID)).toMatchObject({
       status: 'revoked',
       tokenCiphertext: null,
@@ -171,7 +179,7 @@ describe('markRevoked', () => {
 
   it('leaves a newer grant alone when named a stale token', async () => {
     await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
-    await markRevoked(UID, 'b2xk');
+    await markRevoked(UID, grant('b2xk'));
     expect(await getConnection(UID)).toMatchObject({
       status: 'connected',
       tokenCiphertext: 'bmV3',
@@ -208,7 +216,7 @@ describe('accessTokenFor', () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     const access = (await accessTokenFor(UID, CHANNEL, later()))!;
-    await access.refused('j1');
+    await access.refused({ 'job.id': 'j1' });
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
     expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the grant', {
       level: 'warning',
@@ -293,7 +301,7 @@ describe('accessTokenFor', () => {
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     const access = (await accessTokenFor(UID, CHANNEL, later()))!;
     await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
-    await access.refused('j1');
+    await access.refused({ 'job.id': 'j1' });
     expect(await getConnection(UID)).toMatchObject({
       status: 'connected',
       tokenCiphertext: 'bmV3',
@@ -313,7 +321,7 @@ describe('accessTokenFor', () => {
         for each row execute function refuse_write()
     `);
     try {
-      await expect(access.refused('j1')).resolves.toBeUndefined();
+      await expect(access.refused({ 'job.id': 'j1' })).resolves.toBeUndefined();
     } finally {
       await db().execute(sql`drop trigger refuse_write on connections`);
       await db().execute(sql`drop function refuse_write`);
@@ -476,7 +484,7 @@ describe('ownChannelUploads', () => {
 
   it("reads the user's own connected channel through their own token", async () => {
     uploads();
-    const videos = await ownChannelUploads(UID, 3, later(), 'j1');
+    const videos = await ownChannelUploads(UID, 3, later(), { 'job.id': 'j1' });
     expect(videos).toMatchObject([{ videoId: 'v1', title: 'Song' }]);
     for (const [, init] of fetchMock.mock.calls) {
       expect((init!.headers as Record<string, string>).authorization).toBe('Bearer access-token');
@@ -534,7 +542,9 @@ describe('ownChannelUploads', () => {
     ['a 403 forbidden', refusal(403, 'forbidden')],
   ])('gives up the grant on %s and waits on a reconnect', async (_label, response) => {
     fetchMock.mockResolvedValueOnce(response);
-    expect(await ownChannelUploads(UID, 3, later(), 'j1')).toEqual({ wait: 'reconnect YouTube' });
+    expect(await ownChannelUploads(UID, 3, later(), { 'job.id': 'j1' })).toEqual({
+      wait: 'reconnect YouTube',
+    });
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked' });
     expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube refused the grant', {
       level: 'warning',
@@ -665,10 +675,100 @@ describe('revokeGrant', () => {
   it('still deletes a row a step marked revoked while Google answered', async () => {
     await putConnection(UID, connected());
     fetchMock.mockImplementation(async () => {
-      await markRevoked(UID, 'c2VhbGVk');
+      await markRevoked(UID, grant('c2VhbGVk'));
       return new Response('', { status: 200 });
     });
     expect(await revokeGrant(UID)).toBe(true);
     expect(await getConnection(UID)).toBeNull();
+  });
+});
+
+describe('guide proposals across grants', () => {
+  const ARTIST = 'artist-a';
+  const fetchMock = vi.fn<typeof fetch>();
+  const rules = (rule: string) => ({ rules: [rule] });
+  const kinds = async () =>
+    (
+      await db()
+        .select({ body: artistGuides.body, status: artistGuides.status })
+        .from(artistGuides)
+        .orderBy(artistGuides.id)
+    ).map(({ body, status }) => `${status}:${(body as { rules: string[] }).rules[0]}`);
+  const generation = async () => (await getConnection(UID))!.updatedAt;
+
+  beforeEach(async () => {
+    await db().execute(sql`truncate artists cascade`);
+    await seed({
+      artists: [{ id: ARTIST, name: 'A Band' }],
+      users: [{ uid: UID, email: 'a@example.com', artistId: ARTIST }],
+    });
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValue(new Response('', { status: 200 }));
+    await putConnection(UID, connected());
+  });
+
+  it('drops only the proposals read through the revoked grant, keeping approved guides', async () => {
+    const old = await generation();
+    await seed({
+      artistGuides: [
+        approvedGuide(ARTIST, 'voice', rules('kept')),
+        pendingProposal(ARTIST, 'brand', rules('old grant'), { grantAt: old }),
+        pendingProposal(ARTIST, 'voice', rules('edits only')),
+      ],
+    });
+    await markRevoked(UID, grant('c2VhbGVk', old));
+    expect(await kinds()).toEqual(['approved:kept', 'proposed:edits only']);
+  });
+
+  it('keeps a proposal saved on a new grant when the old one is refused late', async () => {
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'access-token' });
+    const access = (await accessTokenFor(UID, CHANNEL, later()))!;
+    const old = await generation();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+    const fresh = await generation();
+    await seed({
+      artistGuides: [
+        pendingProposal(ARTIST, 'voice', rules('old grant'), { grantAt: old }),
+        pendingProposal(ARTIST, 'brand', rules('new grant'), { grantAt: fresh }),
+      ],
+    });
+    await access.refused();
+    expect(await getConnection(UID)).toMatchObject({
+      status: 'connected',
+      tokenCiphertext: 'bmV3',
+    });
+    expect(await kinds()).toEqual(['proposed:new grant']);
+  });
+
+  it('drops the disconnected grant proposals, and spares a reconnect that lands while Google answers', async () => {
+    const old = await generation();
+    await seed({
+      artistGuides: [pendingProposal(ARTIST, 'voice', rules('old grant'), { grantAt: old })],
+    });
+    fetchMock.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+      await seed({
+        artistGuides: [
+          pendingProposal(ARTIST, 'brand', rules('new grant'), { grantAt: await generation() }),
+        ],
+      });
+      return new Response('', { status: 200 });
+    });
+    expect(await revokeGrant(UID)).toBe(true);
+    expect(await getConnection(UID)).toMatchObject({ tokenCiphertext: 'bmV3' });
+    expect(await kinds()).toEqual(['proposed:new grant']);
+  });
+
+  it("never drops another artist's proposals", async () => {
+    const old = await generation();
+    await seed({
+      artists: [{ id: 'artist-b', name: 'B Band' }],
+      artistGuides: [pendingProposal('artist-b', 'voice', rules('theirs'), { grantAt: old })],
+    });
+    await revokeGrant(UID);
+    expect(await kinds()).toEqual(['proposed:theirs']);
   });
 });

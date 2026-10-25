@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   action,
   ApiError,
-  approveBrand,
+  approveGuide,
   createJob,
-  discardBrandProposal,
-  proposeBrand,
+  discardGuide,
+  proposeGuide,
   SessionTimeout,
   step,
   Unreachable,
@@ -146,22 +146,26 @@ describe('action', () => {
   });
 });
 
-describe('brand guide', () => {
-  it('POSTs propose, approve with the guide, and discard to their routes', async () => {
+describe('guides', () => {
+  it('POSTs propose, approve with the edited body and its proposal, and discard per kind', async () => {
     fetchMock.mockImplementation(async () => json(200, {}));
     const guide = { statement: 's', keep: ['k'], fix: [], drop: [] };
-    await proposeBrand();
-    await approveBrand(guide, 42);
-    await discardBrandProposal();
+    await proposeGuide('voice');
+    await approveGuide('brand', guide, 42);
+    await approveGuide('voice', { rules: ['r'] }, 7);
+    await discardGuide('brand', 42);
     expect(fetchMock.mock.calls.map((c) => [c[0], (c[1] as RequestInit).method])).toEqual([
-      ['/api/brand/propose', 'POST'],
-      ['/api/brand/approve', 'POST'],
-      ['/api/brand/discard', 'POST'],
+      ['/api/guides/voice/propose', 'POST'],
+      ['/api/guides/brand/approve', 'POST'],
+      ['/api/guides/voice/approve', 'POST'],
+      ['/api/guides/brand/discard', 'POST'],
     ]);
-    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({
-      ...guide,
-      proposedAt: 42,
-    });
+    const bodies = fetchMock.mock.calls.slice(1).map((c) => JSON.parse(c[1].body as string));
+    expect(bodies).toEqual([
+      { ...guide, proposalId: 42 },
+      { rules: ['r'], proposalId: 7 },
+      { proposalId: 42 },
+    ]);
   });
 });
 

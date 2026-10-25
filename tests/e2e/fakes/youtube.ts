@@ -39,8 +39,14 @@ function answer(url: URL, channel: string | undefined): Response | null {
     case 'videos': {
       const ids = (params.get('id') ?? '').split(',');
       if (!ids.every((id) => VIDEOS.includes(id))) return null;
-      // No thumbnails, so the requests send no image fetch.
-      return json({ items: ids.map((id) => ({ id, snippet: { title: `Song ${id}` } })) });
+      // No thumbnails, so the requests send no image fetch. C's uploads carry prose for its voice.
+      const description =
+        channel === 'UCtest'
+          ? 'Recorded this one at home late at night, mostly by accident, enjoy.'
+          : '';
+      return json({
+        items: ids.map((id) => ({ id, snippet: { title: `Song ${id}`, description } })),
+      });
     }
     default:
       return null;

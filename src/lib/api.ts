@@ -1,5 +1,5 @@
 import type { ArtistInput, ArtistValue } from './artist';
-import type { BrandGuide, StoredBrand } from './brand';
+import type { Approved, BrandGuide, GuideKind, Proposal, VoiceRules } from './brand';
 import type { JobView, Wait } from './types';
 
 /** Each field's message, keyed by the form's field names. */
@@ -142,22 +142,30 @@ export function action(id: string, name: ActionName, trace: Trace, body: unknown
   });
 }
 
-export function proposeBrand() {
-  return call<{ wait: Wait } | { proposal: StoredBrand }>('/api/brand/propose', {
+/** Each guide kind's body. */
+export type GuideBody = { voice: VoiceRules; brand: BrandGuide };
+
+/** A proposal step's answer: the new proposal, or a wait (`limitUntil` with a spent quota). */
+export type ProposeAnswer<K extends GuideKind> =
+  { proposal: Proposal<GuideBody[K]> } | { wait: Wait; limitUntil?: number };
+
+export function proposeGuide<K extends GuideKind>(kind: K) {
+  return call<ProposeAnswer<K>>(`/api/guides/${kind}/propose`, { method: 'POST' });
+}
+
+/** `proposalId` names the reviewed proposal, so a replaced or approved one is a 404. */
+export function approveGuide<K extends GuideKind>(kind: K, body: GuideBody[K], proposalId: number) {
+  return call<{ approved: Approved<GuideBody[K]> }>(`/api/guides/${kind}/approve`, {
     method: 'POST',
+    body: JSON.stringify({ ...body, proposalId }),
   });
 }
 
-/** `proposedAt` is the reviewed proposal's `createdAt`, so a replaced proposal can't be approved. */
-export function approveBrand(guide: BrandGuide, proposedAt: number) {
-  return call<{ approved: StoredBrand }>('/api/brand/approve', {
+export function discardGuide(kind: GuideKind, proposalId: number) {
+  return call<{ proposal: null }>(`/api/guides/${kind}/discard`, {
     method: 'POST',
-    body: JSON.stringify({ ...guide, proposedAt }),
+    body: JSON.stringify({ proposalId }),
   });
-}
-
-export function discardBrandProposal() {
-  return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
 }
 
 /** Creates or updates the caller's artist profile; a 422 carries per-field errors. */

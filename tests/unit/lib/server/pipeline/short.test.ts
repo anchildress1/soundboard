@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { seed, truncate } from '../../../../helpers/db';
-import { jobDoc, seedJob, USERS } from '../../../../helpers/pipeline';
+import { A_JOB, jobDoc, NATHAN_VOICE_RULES, seedJob, USERS } from '../../../../helpers/pipeline';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { interaction, unavailable503 } from '../../../../helpers/gemini';
 import { span, startSpan } from '../../../../mocks/sentry';
@@ -143,6 +143,7 @@ const ctx = (patch: Partial<HookContext> = {}): HookContext => ({
   sourceDurationSec: 180,
   chunks: [0, 1, 2].map((i) => chunk(i)),
   skipped: [],
+  voice: null,
   ...patch,
 });
 
@@ -316,6 +317,19 @@ describe('buildHookRequest', () => {
     expect(context.skippedHooks).toEqual([{ window: 0, lengthSec: 20 }]);
     expect(context.windows[0]).not.toHaveProperty('integratedLufs');
     expect(context).not.toHaveProperty('artistNotes');
+  });
+});
+
+describe('buildHookRequest voice', () => {
+  it('writes reason in the approved voice, under the hook rules', () => {
+    const { system } = buildHookRequest(ctx({ voice: { rules: ['Short.', 'Dry.'] } }));
+    expect(system).toMatch(
+      /Write reason the way the artist writes their own:\n- Short\.\n- Dry\.\nThe rules above outrank the voice rules\.$/,
+    );
+  });
+
+  it("keeps today's prompt without an approved voice", () => {
+    expect(buildHookRequest(ctx()).system).not.toContain('Write reason');
   });
 });
 
@@ -518,6 +532,19 @@ describe('hookStep', () => {
     expect(agentSpanIO().output).toEqual([
       JSON.stringify({ window: 1, lengthSec: 30, reason: CHORUS }),
     ]);
+  });
+
+  it.each([
+    ["Nathan's job, with his approved voice", A_JOB, true],
+    ['a job with no artist', {}, false],
+  ])('reads the voice for %s', async (_label, patch, voiced) => {
+    await seedChunks(3);
+    h.objects.add('uploads/p1');
+    runs.loudness = { stderr: step(57, 122, 70) };
+    fetchMock.mockResolvedValueOnce(hookReply({ window: 1, lengthSec: 30, reason: CHORUS }));
+    await hookStep(shortJob(patch), stepDeadline());
+    const body = JSON.stringify(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body)));
+    expect(body.includes(NATHAN_VOICE_RULES[0]!)).toBe(voiced);
   });
 
   it('fails at HOOK for a video analyzed at another window length, before any model call', async () => {

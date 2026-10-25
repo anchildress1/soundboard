@@ -21,7 +21,6 @@ export async function getUser(
           name: artists.name,
           bandcampUrl: artists.bandcampUrl,
           contactLine: artists.contactLine,
-          curated: artists.curated,
         },
       })
       .from(users)

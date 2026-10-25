@@ -6,7 +6,7 @@ import Layout from '#src/routes/+layout.svelte';
 const HANDLE = '@flieslikerobots';
 const NATHAN_EMAIL = 'nathan@example.com';
 const STRANGER_EMAIL = 'someone@example.com';
-const BRAND_GUIDE = 'Brand guide';
+const BRAND = 'Brand';
 
 type Props = { data: { channel: unknown; user: unknown; artist: unknown }; children: unknown };
 
@@ -14,9 +14,8 @@ const NATHAN = { email: NATHAN_EMAIL };
 const FLR = {
   name: 'Flies Like Robots',
   bandcampUrl: 'https://flieslikerobots.bandcamp.com',
-  curated: true,
 };
-const C = { name: 'Test Artist', bandcampUrl: null, curated: false };
+const C = { name: 'Test Artist', bandcampUrl: null };
 const STRANGER = { email: STRANGER_EMAIL };
 
 const children = createRawSnippet(() => ({ render: () => '<main>page body</main>' }));
@@ -146,7 +145,7 @@ describe('layout', () => {
     expect(menu()).toHaveAttribute('popover');
   });
 
-  it('gives a user without a curated profile Connections, Settings and sign-out, no brand guide', () => {
+  it('gives any user with a profile Connections, Brand, Settings and sign-out', () => {
     setup({ user: STRANGER, artist: C });
     expect(screen.queryByText(STRANGER_EMAIL)).toBeNull();
     const signOut = within(menu()).getByRole('button', { name: 'Sign out', ...hidden });
@@ -157,7 +156,10 @@ describe('layout', () => {
       'href',
       '/connections',
     );
-    expect(screen.queryByRole('link', { name: BRAND_GUIDE, ...hidden })).toBeNull();
+    expect(within(menu()).getByRole('link', { name: BRAND, ...hidden })).toHaveAttribute(
+      'href',
+      '/brand',
+    );
     expect(within(menu()).getByRole('link', { name: 'Settings', ...hidden })).toHaveAttribute(
       'href',
       '/settings',
@@ -167,12 +169,12 @@ describe('layout', () => {
   it('gives a user with no profile Settings, so they can add one', () => {
     setup({ user: STRANGER });
     expect(within(menu()).getByRole('link', { name: 'Settings', ...hidden })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: BRAND_GUIDE, ...hidden })).toBeNull();
+    expect(screen.queryByRole('link', { name: BRAND, ...hidden })).toBeNull();
   });
 
-  it("gives Nathan's curated profile the brand guide and settings", () => {
+  it("gives Nathan's profile Brand and settings", () => {
     setup({ user: NATHAN, artist: FLR });
-    expect(within(menu()).getByRole('link', { name: BRAND_GUIDE, ...hidden })).toHaveAttribute(
+    expect(within(menu()).getByRole('link', { name: BRAND, ...hidden })).toHaveAttribute(
       'href',
       '/brand',
     );

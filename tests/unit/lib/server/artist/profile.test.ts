@@ -8,11 +8,12 @@ import { artists, users } from '#lib/server/core/schema.js';
 import {
   artistProfile,
   createArtist,
+  requireArtist,
   saveArtist,
   updateArtist,
 } from '#lib/server/artist/profile.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { ARTIST_A, ARTIST_C, USER_A, USER_B, USER_C, USERS } from '../../../../helpers/pipeline';
+import { ARTIST_C, USER_A, USER_B, USER_C, USERS } from '../../../../helpers/pipeline';
 
 const as = <T>(uid: string, operation: () => Promise<T>) => withIdentity(uid, operation);
 const row = async (id: string) => (await db().select().from(artists).where(eq(artists.id, id)))[0];
@@ -54,7 +55,6 @@ describe('saveArtist', () => {
       name: 'B Band',
       bandcampUrl: null,
       contactLine: null,
-      curated: false,
     });
     expect(saved.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await linkOf(USER_B.uid)).toBe(saved.id);
@@ -79,11 +79,6 @@ describe('saveArtist', () => {
   it('clears an emptied contact line to null', async () => {
     await as(USER_C.uid, () => saveArtist(USER_C, { ...ARTIST_C, contactLine: '' }));
     expect((await row(ARTIST_C.id))!.contactLine).toBeNull();
-  });
-
-  it('keeps the curated flag through an edit', async () => {
-    await as(USER_A.uid, () => saveArtist(USER_A, { ...ARTIST_A, name: 'FLR' }));
-    expect(await row(ARTIST_A.id)).toMatchObject({ name: 'FLR', curated: true });
   });
 
   it('turns a create that lost a race with another tab into an update', async () => {
@@ -165,5 +160,18 @@ describe('createArtist', () => {
       createArtist({ name: 'Ghost', bandcampUrl: null, contactLine: null }),
     ).catch((e: unknown) => e);
     expect(pgError(error)).toEqual({ code: '42501', message: 'Verified identity required' });
+  });
+});
+
+describe('requireArtist', () => {
+  it("returns the signed-in user's profile id", () => {
+    expect(requireArtist(USER_C)).toBe(ARTIST_C.id);
+  });
+
+  it.each([
+    ['signed out', null],
+    ['without a profile', USER_B],
+  ])('404s when %s, never 403', (_, user) => {
+    expect(() => requireArtist(user)).toThrow(expect.objectContaining({ status: 404 }));
   });
 });

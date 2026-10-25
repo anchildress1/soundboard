@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import pRetry from 'p-retry';
 import { REASK_ONCE } from '#lib/retry.js';
 import { floorTenth, lengthBounds, tenth } from '#lib/short.js';
+import type { VoiceRules } from '#lib/brand.js';
 import type { Chunk, Hook, Short } from '#lib/types.js';
 import {
   chunkCount,
@@ -15,6 +16,8 @@ import {
   type LoudnessPoint,
 } from '#lib/server/media/ffmpeg.js';
 import { signedReadUrl, uploadFile } from '#lib/server/media/gcs.js';
+import { approvedGuides } from '#lib/server/artist/guides.js';
+import { artistJob } from '#lib/server/artist/memory.js';
 import { fail, getJob, listChunks, ok, type JobDoc } from '#lib/server/jobs/jobs.js';
 import type { JobPatch } from '#lib/server/jobs/rows.js';
 import { chatJson, modelFor } from '#lib/server/ai/model.js';
@@ -73,6 +76,8 @@ export type HookContext = {
   sourceDurationSec: number;
   chunks: Chunk[];
   skipped: Short['skipped'];
+  /** The owner's current approved voice, for `reason`; null before one is approved. */
+  voice: VoiceRules | null;
 };
 
 export function buildHookRequest(ctx: HookContext): ModelRequest {
@@ -85,6 +90,13 @@ export function buildHookRequest(ctx: HookContext): ModelRequest {
     ctx.skipped.length > 0
       ? 'skippedHooks were rejected. Pick a different window, or the same window with a clearly different length.'
       : '',
+    ...(ctx.voice
+      ? [
+          'Write reason the way the artist writes their own:',
+          ...ctx.voice.rules.map((rule) => `- ${rule}`),
+          'The rules above outrank the voice rules.',
+        ]
+      : []),
   ].filter(Boolean);
   const context = {
     songTitle: ctx.songTitle,
@@ -235,12 +247,17 @@ export async function hookStep(job: JobDoc, deadline: number): Promise<JobPatch>
   if (parent && staleAnalysis(parent, short.sourceDurationSec)) return fail('HOOK', STALE_ANALYSIS);
   const chunks = parent ? await listChunks(parent.id) : [];
   if (chunks.length === 0) throw new Error("The source video's analysis is gone.");
+  const voice =
+    job.artistId !== null && (await artistJob(job))
+      ? (await approvedGuides(job.artistId)).voice
+      : null;
   const ctx: HookContext = {
     songTitle: job.songTitle,
     notes: job.notes,
     sourceDurationSec: short.sourceDurationSec,
     skipped: short.skipped,
     chunks,
+    voice,
   };
   const result = await invokeAgent('hook-pick', modelFor('hook-pick'), async (span) => {
     const picked = await runHook(ctx, deadline - LOUDNESS_RESERVE_MS, span);

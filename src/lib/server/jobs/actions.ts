@@ -348,7 +348,7 @@ async function pastedVideo(job: Paused, videoId: string) {
   } catch (error) {
     const failure = uploadFailure(error);
     if (failure === 'access-lost') {
-      await access.refused(job.id);
+      await access.refused({ 'job.id': job.id });
       throw new ActionError(409, RECONNECT_TO_CONFIRM);
     }
     if (failure === 'quota-spent') {
