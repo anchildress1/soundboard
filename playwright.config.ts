@@ -1,4 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
+
+// Workers reload this config with the runner's env, so the first load's random secret carries over
+// and the server and tests/e2e/session.ts sign with the same key.
+const sessionSecret = (process.env.E2E_SESSION_SECRET ??= randomBytes(32).toString('base64url'));
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -37,7 +42,7 @@ export default defineConfig({
         FLR_CHANNEL_ID: 'UC-e2e-artist',
         GCP_PROJECT_ID: 'e2e',
         GCS_BUCKET: 'e2e',
-        SESSION_SECRET: 'e2e-session-secret',
+        SESSION_SECRET: sessionSecret,
         SIGNUP_MODE: 'invite',
         KMS_KEY: 'projects/e2e/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens',
         // The E2E build swaps in PGlite (tests/e2e/fakes/db.ts); these only satisfy the env shape.

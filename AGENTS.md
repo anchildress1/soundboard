@@ -72,4 +72,4 @@ Audience: AI coding agents. Directives only.
 - Run `make ai-checks` before declaring work done.
 - Commits: Conventional Commits, signed, one AI attribution footer, `Signed-off-by` (commitlint enforces).
 - NEVER commit or push to `main` unless asked.
-- GitHub Actions: `actions/*` on tagged majors; all others pinned to a commit SHA with a version comment.
+- GitHub Actions: all actions pinned to a commit SHA with a version comment.

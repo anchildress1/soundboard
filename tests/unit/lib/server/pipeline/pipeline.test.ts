@@ -907,7 +907,7 @@ describe('runStep: model waits', () => {
     on(GEMINI, () => geminiError(status, 'ERROR'));
     await runStep(await pickJob());
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
-    expect((await saved()).error).toMatch(new RegExp(`^Gemini ${status}`));
+    expect((await saved()).error).toMatch(`Gemini ${status}: `);
     await runStep(await saved());
     expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PICK' });
     expect(captureException).toHaveBeenCalledTimes(2);

@@ -27,7 +27,7 @@ const e2eModules: Plugin = {
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     sentrySvelteKit({
       org: 'anchildress1dev',
@@ -53,8 +53,9 @@ export default defineConfig({
   ],
   ssr: {
     // Sentry instruments these at build time, so they must be bundled; adapter-node externalizes
-    // every other dependency before Sentry's own `noExternal` applies.
-    noExternal: ['pg', 'ai'],
+    // every other dependency before Sentry's own `noExternal` applies. Dev SSR inlines pg's
+    // CommonJS without interop ("require is not defined"), so only builds bundle them.
+    noExternal: command === 'build' ? ['pg', 'ai'] : [],
     // adapter-node bundles devDependencies, and a bundled PGlite can't find its .data and .wasm files.
     ...(e2eFakes && { external: ['@electric-sql/pglite'] }),
   },
@@ -66,4 +67,4 @@ export default defineConfig({
       },
     },
   }),
-});
+}));

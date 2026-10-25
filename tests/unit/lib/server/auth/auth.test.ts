@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   authUrl,
@@ -41,9 +41,10 @@ vi.mock('google-auth-library', () => ({
 }));
 
 const ORIGIN = 'https://soundboard.run.app';
+const SECRET = randomBytes(32).toString('base64url');
 
 beforeEach(() => {
-  vi.stubEnv('SESSION_SECRET', 'test-secret');
+  vi.stubEnv('SESSION_SECRET', SECRET);
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'cid');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'csecret');
   vi.clearAllMocks();
@@ -88,7 +89,7 @@ describe('sign / unsign', () => {
 
   it('returns null when a validly signed body is not JSON', () => {
     const body = Buffer.from('not json').toString('base64url');
-    const mac = createHmac('sha256', 'test-secret').update(body).digest('base64url');
+    const mac = createHmac('sha256', SECRET).update(body).digest('base64url');
     expect(unsign(`${body}.${mac}`)).toBeNull();
   });
 
