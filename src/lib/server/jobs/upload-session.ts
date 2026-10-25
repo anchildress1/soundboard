@@ -124,12 +124,8 @@ async function openSession(
 /** The commit missed: read again and decide again. */
 const RETRY = Symbol('retry');
 
-/** One pass of the contract's checks, in its order, against the job as read. */
-async function attempt(
-  job: JobDoc,
-  request: SessionRequest,
-  origin: string,
-): Promise<SessionReply | typeof RETRY> {
+/** A discarded or finished job takes no more upload requests. */
+async function refuseClosed(job: JobDoc): Promise<void> {
   if (job.state === 'DISCARDED') {
     await finishDiscardCleanup(job);
     throw new ActionError(409, DISCARDED);
@@ -137,37 +133,52 @@ async function attempt(
   if (job.state !== 'AWAITING_UPLOAD' || (await objectInfo(job.object))) {
     throw new ActionError(409, DONE);
   }
-  const generation = uploadGeneration(job);
+}
+
+/** A retried pick or renew already applied gets its first answer, or a 409 once it lost. */
+async function replay(
+  job: JobDoc,
+  request: PickRequest | Renew,
+  generation: number,
+): Promise<SessionReply | null> {
   const upload = job.videoUpload;
-  if (request.op !== 'confirm') {
-    const applied = upload?.ops.find((op) => op.opId === request.opId);
-    if (applied && upload) {
-      if (applied.generation !== generation) superseded(job, request.fingerprint);
-      return { sessionUri: await sessionOf(upload), generation, restarted: applied.restarted };
-    }
-  }
-  if (request.generation !== generation) superseded(job, request.fingerprint);
-  if (request.op === 'confirm') return { current: true };
+  const applied = upload?.ops.find((op) => op.opId === request.opId);
+  if (!applied || !upload) return null;
+  if (applied.generation !== generation) superseded(job, request.fingerprint);
+  return { sessionUri: await sessionOf(upload), generation, restarted: applied.restarted };
+}
 
+/** The same file again, after a reload or from another tab or device: it resumes the session. */
+async function resume(
+  job: JobDoc,
+  upload: VideoUpload,
+  opId: string,
+  generation: number,
+): Promise<SessionReply | typeof RETRY> {
   const next = generation + 1;
-  const ops = upload?.ops ?? [];
-  if (request.op === 'pick' && upload?.size === request.size) {
-    if (upload.fingerprint === request.fingerprint) {
-      // The same file again, after a reload or from another tab or device: it resumes the session.
-      const sessionUri = await sessionOf(upload);
-      const committed = await commitUpload(job.id, generation, {
-        videoUpload: {
-          ...upload,
-          generation: next,
-          ops: [...ops, { opId: request.opId, generation: next, restarted: false }],
-        },
-      });
-      return committed ? { sessionUri, generation: next, restarted: false } : RETRY;
-    }
-  }
+  const sessionUri = await sessionOf(upload);
+  const committed = await commitUpload(job.id, generation, {
+    videoUpload: {
+      ...upload,
+      generation: next,
+      ops: [...upload.ops, { opId, generation: next, restarted: false }],
+    },
+  });
+  return committed ? { sessionUri, generation: next, restarted: false } : RETRY;
+}
 
-  // A different file, or a renew: a new session for a new object. The displaced one is cancelled
-  // only after the commit, so a lost race never stops the session that won.
+/**
+ * A different file, or a renew: a new session for a new object. The displaced one is cancelled
+ * only after the commit, so a lost race never stops the session that won.
+ */
+async function restart(
+  job: JobDoc,
+  request: PickRequest | Renew,
+  generation: number,
+  origin: string,
+): Promise<SessionReply | typeof RETRY> {
+  const upload = job.videoUpload;
+  const next = generation + 1;
   const media =
     request.op === 'pick'
       ? parseMedia(request)
@@ -182,11 +193,41 @@ async function attempt(
       generation: next,
       size: media.size,
       fingerprint: request.fingerprint,
-      ops: [...ops, { opId: request.opId, generation: next, restarted: true }],
+      ops: [...(upload?.ops ?? []), { opId: request.opId, generation: next, restarted: true }],
     },
   });
   await cancelCipher(committed ? upload?.sessionCipher : opened.sessionCipher);
   return committed ? { sessionUri: opened.sessionUri, generation: next, restarted: true } : RETRY;
+}
+
+/** One pass of the contract's checks, in its order, against the job as read. */
+async function attempt(
+  job: JobDoc,
+  request: SessionRequest,
+  origin: string,
+): Promise<SessionReply | typeof RETRY> {
+  await refuseClosed(job);
+  const generation = uploadGeneration(job);
+  if (request.op !== 'confirm') {
+    const replayed = await replay(job, request, generation);
+    if (replayed) return replayed;
+  }
+  if (request.generation !== generation) superseded(job, request.fingerprint);
+  if (request.op === 'confirm') return { current: true };
+  const upload = job.videoUpload;
+  const same = request.op === 'pick' && upload?.size === request.size;
+  return same && upload.fingerprint === request.fingerprint
+    ? resume(job, upload, request.opId, generation)
+    : restart(job, request, generation, origin);
+}
+
+/** Attempts until one commits or answers; a missed commit reads the job again first. */
+async function settle(job: JobDoc, request: SessionRequest, origin: string): Promise<SessionReply> {
+  const reply = await attempt(job, request, origin);
+  if (reply !== RETRY) return reply;
+  const fresh = await getJob(job.id);
+  if (!fresh) throw new ActionError(404, 'Job not found');
+  return settle(fresh, request, origin);
 }
 
 /**
@@ -200,15 +241,7 @@ export async function uploadSession(
   body: Record<string, unknown>,
   origin: string,
 ): Promise<SessionReply> {
-  const request = parseRequest(body);
-  let current = job;
-  for (;;) {
-    const reply = await attempt(current, request, origin);
-    if (reply !== RETRY) return reply;
-    const fresh = await getJob(job.id);
-    if (!fresh) throw new ActionError(404, 'Job not found');
-    current = fresh;
-  }
+  return settle(job, parseRequest(body), origin);
 }
 
 /** How much of the job's upload GCS saved, or null when it has none or GCS or KMS didn't answer. */

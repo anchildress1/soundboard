@@ -121,12 +121,10 @@ const LABELS: Record<JobState, Label> = {
   DISCARDED: fixed('err', 'Discarded', 0),
 };
 
+const NOTHING_SENT: UploadShown = { state: 'sending', saved: 0, total: 0 };
+
 /** The state chip, bar, and label for a job: the named wait when there is one, else the state's. */
-export function jobStatus(
-  view: JobView,
-  wait?: Wait,
-  upload: UploadShown = { state: 'sending', saved: 0, total: 0 },
-): Status {
+export function jobStatus(view: JobView, wait?: Wait, upload: UploadShown = NOTHING_SENT): Status {
   if (wait) return { tone: 'info', text: WAIT_TEXT[wait], progress: runningProgress(view) };
   return LABELS[view.job.state](view, upload);
 }

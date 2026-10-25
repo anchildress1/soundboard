@@ -193,11 +193,11 @@
         fingerprint: print,
         notice: reply.restarted ? 'new-video' : null,
       });
-    } catch (failure) {
+    } catch (error_) {
       // No upload started under this pick: give the lock back.
       stop(job.id);
-      if (failure instanceof UploadConflict) seen = Math.max(seen, failure.generation ?? 0);
-      const { message } = failure as Error;
+      if (error_ instanceof UploadConflict) seen = Math.max(seen, error_.generation ?? 0);
+      const { message } = error_ as Error;
       if (message === ALREADY_DONE) land();
       else if (message === DISCARDED) void refresh();
       else if (message === REPLACED) local = 'replaced';

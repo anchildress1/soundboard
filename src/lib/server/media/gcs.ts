@@ -121,7 +121,8 @@ async function cancelOnce(sessionUri: string): Promise<boolean> {
 
 /** Cancels the session so it can't write; one retry. False when GCS never confirmed. */
 export async function cancelUploadSession(sessionUri: string): Promise<boolean> {
-  return (await cancelOnce(sessionUri)) || (await cancelOnce(sessionUri));
+  if (await cancelOnce(sessionUri)) return true;
+  return cancelOnce(sessionUri);
 }
 
 /**

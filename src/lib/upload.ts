@@ -299,37 +299,39 @@ function end(jobId: string, run: Run, fields: Partial<Upload>) {
   patch(jobId, fields);
 }
 
-async function drive(jobId: string, run: Run) {
-  while (!run.stopped) {
-    const next = await attempt(jobId, run);
-    if (run.stopped) return;
-    switch (next.do) {
-      case 'done':
-        // The job page moves the job on: now, or when it next opens.
-        end(jobId, run, { state: 'done', saved: entry(jobId).size, reason: null });
-        return;
-      case 'conflict': {
-        const state =
-          next.message === REPLACED ? 'replaced' : next.message === MOVED ? 'moved' : 'stopped';
-        const generation = next.generation ?? entry(jobId).generation;
-        end(jobId, run, { state, error: next.message, generation });
-        return;
-      }
-      case 'fail':
-        end(jobId, run, { state: 'stopped', error: next.message });
-        return;
-      case 'renew':
-        run.renewOpId = newOpId();
-        break;
-      case 'pause':
-        pause(jobId, run, next.reason);
-        await backoff(run);
-        break;
-      case 'send':
-        // GCS kept more of the PUT; go again at once.
-        break;
+/** Where a 409 leaves the upload: a newer pick replaced or moved it, or it stops on the message. */
+const CONFLICT_STATES: Record<string, UploadState> = { [REPLACED]: 'replaced', [MOVED]: 'moved' };
+
+/** One attempt and its outcome; anything but an end queues the next attempt. */
+async function drive(jobId: string, run: Run): Promise<void> {
+  const next = await attempt(jobId, run);
+  if (run.stopped) return;
+  switch (next.do) {
+    case 'done':
+      // The job page moves the job on: now, or when it next opens.
+      end(jobId, run, { state: 'done', saved: entry(jobId).size, reason: null });
+      return;
+    case 'conflict': {
+      const state = CONFLICT_STATES[next.message] ?? 'stopped';
+      const generation = next.generation ?? entry(jobId).generation;
+      end(jobId, run, { state, error: next.message, generation });
+      return;
     }
+    case 'fail':
+      end(jobId, run, { state: 'stopped', error: next.message });
+      return;
+    case 'renew':
+      run.renewOpId = newOpId();
+      break;
+    case 'pause':
+      pause(jobId, run, next.reason);
+      await backoff(run);
+      break;
+    case 'send':
+      // GCS kept more of the PUT; go again at once.
+      break;
   }
+  if (!run.stopped) void drive(jobId, run);
 }
 
 let listening = false;

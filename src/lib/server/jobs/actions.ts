@@ -296,20 +296,22 @@ export async function finishDiscardCleanup(job: JobDoc): Promise<void> {
  */
 export async function discard(job: JobDoc): Promise<void> {
   requireState(job, DISCARDABLE);
-  let current = job;
-  for (let tries = 0; tries < DISCARD_TRIES; tries++) {
-    const landed = current.state === 'AWAITING_UPLOAD' && (await landedUpload(current));
-    if (await markDiscarded(current, landed)) {
-      if (current.state !== 'AWAITING_UPLOAD') return;
-      if (landed) await sweepUploads(current.id, current.object);
-      else await finishDiscardCleanup({ ...current, state: 'DISCARDED' });
-      return;
-    }
-    const fresh = await getJob(job.id);
-    if (!fresh || !DISCARDABLE.includes(fresh.state)) throw new ActionError(409, MOVED_ON);
-    current = fresh;
+  await discardFrom(job, DISCARD_TRIES);
+}
+
+/** One read-then-update pass; a missed update reads the job again, `tries` times in all. */
+async function discardFrom(current: JobDoc, tries: number): Promise<void> {
+  if (tries === 0) throw new ActionError(503, UNCHECKED);
+  const landed = current.state === 'AWAITING_UPLOAD' && (await landedUpload(current));
+  if (await markDiscarded(current, landed)) {
+    if (current.state !== 'AWAITING_UPLOAD') return;
+    if (landed) await sweepUploads(current.id, current.object);
+    else await finishDiscardCleanup({ ...current, state: 'DISCARDED' });
+    return;
   }
-  throw new ActionError(503, UNCHECKED);
+  const fresh = await getJob(current.id);
+  if (!fresh || !DISCARDABLE.includes(fresh.state)) throw new ActionError(409, MOVED_ON);
+  await discardFrom(fresh, tries - 1);
 }
 
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";
