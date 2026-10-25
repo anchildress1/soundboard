@@ -1,8 +1,13 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ANALYTICS_SCOPE,
   budgetSignal,
   ChannelMismatch,
+  channelsByIds,
+  quotaSpent,
+  searchVideos,
+  uploadsOf,
   channelsMine,
   channelStats,
   clearStatsCache,
@@ -268,6 +273,20 @@ describe('ownUploads', () => {
     }
     expect(calls()[0]!.searchParams.get('mine')).toBe('true');
     expect(calls()[1]!.searchParams.get('playlistId')).toBe('UUUCx');
+  });
+
+  it('reads each upload with its privacy status', async () => {
+    route(
+      [
+        { ...video('a'), status: { privacyStatus: 'public' } },
+        { ...video('b'), status: { privacyStatus: 'private' } },
+        video('c'),
+      ],
+      ['a', 'b', 'c'],
+    );
+    const videos = await ownUploads(TOKEN, 'UCx', 3, later());
+    expect(calls()[2]!.searchParams.get('part')).toBe('snippet,status');
+    expect(videos.map((v) => v.privacy)).toEqual(['public', 'private', null]);
   });
 
   it('keeps playlist order, limits to count, and asks for a few spare items', async () => {
@@ -888,5 +907,147 @@ describe('videoIdFromUrl', () => {
     `https://www.youtube.com/shorts/${ID}x`,
   ])('rejects %j', (url) => {
     expect(videoIdFromUrl(url)).toBeNull();
+  });
+});
+
+describe('peer reads', () => {
+  const quota = () =>
+    json(
+      { error: { errors: [{ reason: 'quotaExceeded' }] } },
+      { status: 403, statusText: 'Forbidden' },
+    );
+
+  it('searches by relevance in the music category with the snippet, never by view count', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({
+        items: [
+          { id: { videoId: 'v1' }, snippet: { channelId: 'UC1' } },
+          { id: {}, snippet: { channelId: 'UC2' } },
+          { id: { videoId: 'v3' }, snippet: {} },
+          { id: { videoId: 'v4' }, snippet: { channelId: 'UC1' } },
+        ],
+      }),
+    );
+    const hits = await searchVideos(
+      'synthwave retrowave music',
+      { order: 'relevance', maxResults: 50, categoryId: '10' },
+      later(),
+    );
+    expect(hits).toEqual([
+      { videoId: 'v1', channelId: 'UC1' },
+      { videoId: 'v4', channelId: 'UC1' },
+    ]);
+    const url = urlOf(0);
+    expect(url.pathname).toBe('/youtube/v3/search');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      part: 'snippet',
+      q: 'synthwave retrowave music',
+      type: 'video',
+      videoCategoryId: '10',
+      order: 'relevance',
+      maxResults: '50',
+      key: 'key-123',
+    });
+  });
+
+  it('reads channels with statistics as reported, a hidden count as null and hidden', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({
+        items: [
+          {
+            id: 'UC1',
+            snippet: { title: 'Peer One', description: 'Synths.' },
+            statistics: { subscriberCount: '1200', videoCount: '30', viewCount: '99000' },
+            contentDetails: { relatedPlaylists: { uploads: 'UU1' } },
+          },
+          {
+            id: 'UC2',
+            snippet: { title: 'Peer Two' },
+            statistics: { subscriberCount: '0', hiddenSubscriberCount: true, videoCount: '4' },
+          },
+          { snippet: { title: 'no id' } },
+        ],
+      }),
+    );
+    expect(await channelsByIds(['UC1', 'UC2'], later())).toEqual([
+      {
+        channelId: 'UC1',
+        title: 'Peer One',
+        description: 'Synths.',
+        uploadsPlaylist: 'UU1',
+        stats: { subscribers: 1200, hidden: false, videos: 30, views: 99000 },
+      },
+      {
+        channelId: 'UC2',
+        title: 'Peer Two',
+        description: '',
+        uploadsPlaylist: null,
+        stats: { subscribers: null, hidden: true, videos: 4, views: null },
+      },
+    ]);
+    expect(urlOf(0).searchParams.get('part')).toBe('snippet,statistics,contentDetails');
+    expect(urlOf(0).searchParams.get('id')).toBe('UC1,UC2');
+  });
+
+  it('reads no channels without IDs', async () => {
+    expect(await channelsByIds([], later())).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reads the newest uploads of a playlist in order, statistics as reported or null', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes('/playlistItems')
+        ? json(playlist('a', 'b', undefined))
+        : json({
+            items: [
+              {
+                ...video('b'),
+                statistics: { viewCount: '10' },
+                contentDetails: { duration: 'PT3M1S' },
+              },
+              {
+                ...video('a'),
+                statistics: { viewCount: '500', likeCount: '20', commentCount: 'x' },
+                contentDetails: { duration: 'PT2M' },
+              },
+            ],
+          }),
+    );
+    const uploads = await uploadsOf('UU1', 10, later());
+    expect(uploads.map((u) => [u.videoId, u.durationSec, u.stats])).toEqual([
+      ['a', 120, { views: 500, likes: 20, comments: null }],
+      ['b', 181, { views: 10, likes: null, comments: null }],
+    ]);
+    expect(uploads[0]).not.toHaveProperty('views');
+    expect(urlOf(0).searchParams.get('maxResults')).toBe('10');
+    expect(urlOf(1).searchParams.get('part')).toBe('snippet,statistics,contentDetails');
+  });
+
+  it('reads nothing more for an empty playlist', async () => {
+    fetchMock.mockResolvedValueOnce(json({}));
+    expect(await uploadsOf('UU1', 1, later())).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('reads a spent daily quota as quota, and a rate limit as not', async () => {
+    fetchMock.mockResolvedValueOnce(quota());
+    const error = await channelsByIds(['UC1'], later()).catch((e: unknown) => e);
+    expect(quotaSpent(error)).toBe(true);
+    expect(identityFailure(error)).toBe('busy');
+    expect(quotaSpent(new YouTubeError(403, 'x', 'rateLimitExceeded'))).toBe(false);
+    expect(quotaSpent(new YouTubeError(500, 'x', 'quotaExceeded'))).toBe(false);
+    expect(quotaSpent(new Error('quotaExceeded'))).toBe(false);
+  });
+
+  it('starts no read once the deadline is spent', async () => {
+    await expect(
+      searchVideos('q', { order: 'relevance', maxResults: 50, categoryId: '10' }, Date.now() - 1),
+    ).rejects.toBeInstanceOf(DeadlineSpent);
+    await expect(uploadsOf('UU1', 1, Date.now() - 1)).rejects.toBeInstanceOf(DeadlineSpent);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('names the analytics scope', () => {
+    expect(ANALYTICS_SCOPE).toBe('https://www.googleapis.com/auth/yt-analytics.readonly');
   });
 });

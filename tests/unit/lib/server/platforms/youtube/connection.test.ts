@@ -7,6 +7,7 @@ import { db } from '#lib/server/core/db.js';
 import { DeadlineExceeded } from '#lib/server/core/deadline.js';
 import {
   accessTokenFor,
+  analyticsShared,
   getConnection,
   markRevoked,
   ownChannelUploads,
@@ -15,7 +16,11 @@ import {
   type ConnectionRow,
 } from '#lib/server/platforms/youtube/connection.js';
 import { artistGuides } from '#lib/server/core/schema.js';
-import { DeadlineSpent, identityFailure } from '#lib/server/platforms/youtube/youtube.js';
+import {
+  ANALYTICS_SCOPE,
+  DeadlineSpent,
+  identityFailure,
+} from '#lib/server/platforms/youtube/youtube.js';
 import { seed } from '../../../../../helpers/db';
 import { approvedGuide, pendingProposal } from '../../../../../helpers/pipeline';
 
@@ -187,7 +192,25 @@ describe('markRevoked', () => {
   });
 });
 
+describe('analyticsShared', () => {
+  it('is true only for a connected grant with the analytics scope', () => {
+    expect(analyticsShared({ status: 'connected', scopes: [...SCOPES, ANALYTICS_SCOPE] })).toBe(
+      true,
+    );
+    expect(analyticsShared({ status: 'connected', scopes: SCOPES })).toBe(false);
+    expect(analyticsShared({ status: 'revoked', scopes: [ANALYTICS_SCOPE] })).toBe(false);
+    expect(analyticsShared(null)).toBe(false);
+  });
+});
+
 describe('accessTokenFor', () => {
+  it("returns the grant's generation with the token", async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'access-token' });
+    const access = await accessTokenFor(UID, CHANNEL, later());
+    expect(access!.grantAt).toEqual((await getConnection(UID))!.updatedAt);
+  });
+
   it('decrypts the stored token and refreshes it', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });

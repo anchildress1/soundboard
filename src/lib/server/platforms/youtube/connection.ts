@@ -15,6 +15,7 @@ import {
   channelsMine,
   DeadlineSpent,
   identityFailure,
+  ANALYTICS_SCOPE,
   ownUploads,
   YOUTUBE_SCOPES,
   type CatalogVideo,
@@ -45,6 +46,11 @@ export type Connection = ConnectionRow & Pick<Stored, 'uid' | 'updatedAt'>;
 export type ConnectionStatus = Connection['status'];
 
 const mine = (uid: string) => eq(connections.uid, uid);
+
+/** Whether the connection shares the artist's YouTube Analytics right now. */
+export function analyticsShared(connection: Pick<Connection, 'status' | 'scopes'> | null): boolean {
+  return connection?.status === 'connected' && connection.scopes.includes(ANALYTICS_SCOPE);
+}
 
 /** The user's YouTube connection; pass `q` to read it inside the caller's transaction. */
 export async function getConnection(uid: string, q?: Database | Tx): Promise<Connection | null> {
@@ -147,7 +153,12 @@ export async function markRevoked(uid: string, grant: Grant): Promise<void> {
  * never throws: a failed write is reported (with the caller's tags, such as the job), so the caller
  * still answers with its reconnect wait.
  */
-export type Access = { token: string; refused: (tags?: Record<string, string>) => Promise<void> };
+export type Access = {
+  token: string;
+  /** The grant's generation (`connections.updated_at`); a save under it needs the same grant. */
+  grantAt: Date;
+  refused: (tags?: Record<string, string>) => Promise<void>;
+};
 
 // gRPC DEADLINE_EXCEEDED: gax's own timeout, the twin of `within`'s.
 const GRPC_DEADLINE_EXCEEDED = 4;
@@ -207,6 +218,7 @@ export async function accessTokenFor(
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
   return {
     token,
+    grantAt: connection.updatedAt,
     refused: async (tags = {}) => {
       captureMessage('YouTube refused the grant', { level: 'warning', tags });
       try {

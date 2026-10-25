@@ -143,8 +143,8 @@ export function defaultHandlers(): Handler[] {
       reply: (url) => {
         const params = new URL(url).searchParams;
         const id = params.get('id') ?? '';
-        // The upload read-back asks for status; the owner's identity read only for snippets.
-        if (params.get('part')?.includes('status')) {
+        // The upload read-back asks for one video's status; the owner's identity read, for several.
+        if (params.get('part')?.includes('status') && !id.includes(',')) {
           return json({
             items: [{ id, snippet: { title: 't' }, status: { uploadStatus: 'processed' } }],
           });
@@ -160,6 +160,7 @@ export function defaultHandlers(): Handler[] {
               thumbnails:
                 vid === 'v5' ? {} : { medium: { url: `https://i.ytimg.com/${vid}/m.jpg` } },
             },
+            status: { privacyStatus: 'public' },
           })),
         });
       },

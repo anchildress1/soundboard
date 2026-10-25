@@ -12,6 +12,9 @@ export const YOUTUBE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly',
 ];
 
+/** The optional grant that lets learning read the artist's own YouTube Analytics. */
+export const ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+
 export class YouTubeError extends Error {
   constructor(
     readonly status: number,
@@ -110,6 +113,18 @@ export function identityFailure(error: unknown): IdentityFailure {
   );
 }
 
+const QUOTA_REASONS = new Set(['quotaExceeded', 'dailyLimitExceeded']);
+
+/** The project's daily YouTube quota is spent: an empty result for the day, not a failure. */
+export function quotaSpent(error: unknown): boolean {
+  return (
+    error instanceof YouTubeError &&
+    error.status === 403 &&
+    error.reason !== null &&
+    QUOTA_REASONS.has(error.reason)
+  );
+}
+
 export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'denied' | 'other';
 
 /**
@@ -179,7 +194,7 @@ type VideoItem = {
     publishedAt?: string;
     thumbnails?: Thumbs;
   };
-  statistics?: { viewCount?: string };
+  statistics?: { viewCount?: string; likeCount?: string; commentCount?: string };
   contentDetails?: { duration?: string };
   status?: { privacyStatus?: string; uploadStatus?: string };
 };
@@ -234,10 +249,146 @@ export async function videosByIds(ids: string[], deadline: number): Promise<Cata
 
 type ChannelItem = {
   id?: string;
-  snippet?: { customUrl?: string; title?: string };
-  statistics?: { videoCount?: string; subscriberCount?: string };
+  snippet?: { customUrl?: string; title?: string; description?: string };
+  statistics?: {
+    videoCount?: string;
+    subscriberCount?: string;
+    viewCount?: string;
+    hiddenSubscriberCount?: boolean;
+  };
   contentDetails?: { relatedPlaylists?: { uploads?: string } };
 };
+
+/** A statistic exactly as YouTube reported it; null when it sent none. */
+const reported = (value: string | undefined): number | null => {
+  if (value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+/** A channel's statistics as reported; a hidden subscriber count is `null` and `hidden`. */
+export type ChannelStatsReported = {
+  subscribers: number | null;
+  hidden: boolean;
+  videos: number | null;
+  views: number | null;
+};
+
+export type PublicChannel = {
+  channelId: string;
+  title: string;
+  description: string;
+  uploadsPlaylist: string | null;
+  stats: ChannelStatsReported;
+};
+
+const toChannel = (item: ChannelItem & { id: string }): PublicChannel => {
+  const hidden = item.statistics?.hiddenSubscriberCount === true;
+  return {
+    channelId: item.id,
+    title: item.snippet?.title ?? '',
+    description: item.snippet?.description ?? '',
+    uploadsPlaylist: item.contentDetails?.relatedPlaylists?.uploads ?? null,
+    stats: {
+      subscribers: hidden ? null : reported(item.statistics?.subscriberCount),
+      hidden,
+      videos: reported(item.statistics?.videoCount),
+      views: reported(item.statistics?.viewCount),
+    },
+  };
+};
+
+/** Public channels by ID (at most 50, one read), with statistics as reported. */
+export async function channelsByIds(ids: string[], deadline: number): Promise<PublicChannel[]> {
+  if (ids.length === 0) return [];
+  const body = await keyGet<ListResponse<ChannelItem>>(
+    'channels',
+    { part: 'snippet,statistics,contentDetails', id: ids.slice(0, 50).join(','), maxResults: '50' },
+    deadline,
+  );
+  return (body.items ?? [])
+    .filter((item): item is ChannelItem & { id: string } => Boolean(item.id))
+    .map(toChannel);
+}
+
+/** A public upload with its statistics as reported: each a number, or null when YouTube sent none. */
+export type PublicUpload = Omit<CatalogVideo, 'views' | 'thumbnailUrl'> & {
+  stats: { views: number | null; likes: number | null; comments: number | null };
+};
+
+/** The newest `count` uploads of a public uploads playlist, newest first. */
+export async function uploadsOf(
+  playlistId: string,
+  count: number,
+  deadline: number,
+): Promise<PublicUpload[]> {
+  const page = await keyGet<ListResponse<PlaylistItem>>(
+    'playlistItems',
+    { part: 'contentDetails', playlistId, maxResults: String(Math.min(count, 50)) },
+    deadline,
+  );
+  const ids = (page.items ?? [])
+    .map((item) => item.contentDetails?.videoId)
+    .filter((id): id is string => typeof id === 'string' && id !== '');
+  if (ids.length === 0) return [];
+  const body = await keyGet<ListResponse<VideoItem>>(
+    'videos',
+    { part: 'snippet,statistics,contentDetails', id: ids.join(','), maxResults: '50' },
+    deadline,
+  );
+  const order = new Map(ids.map((id, i) => [id, i]));
+  return (body.items ?? [])
+    .toSorted((a, b) => order.get(a.id)! - order.get(b.id)!)
+    .map((item) => {
+      const { videoId, title, description, tags, publishedAt, durationSec } = toCatalog(item);
+      return {
+        videoId,
+        title,
+        description,
+        tags,
+        publishedAt,
+        durationSec,
+        stats: {
+          views: reported(item.statistics?.viewCount),
+          likes: reported(item.statistics?.likeCount),
+          comments: reported(item.statistics?.commentCount),
+        },
+      };
+    });
+}
+
+/** A video found by search, with the channel that published it. */
+export type SearchHit = { videoId: string; channelId: string };
+
+/**
+ * Music videos for a query by relevance (`type=video`), so peers match on sound and genre first.
+ * Never by view count.
+ */
+export async function searchVideos(
+  query: string,
+  options: { order: 'relevance'; maxResults: number; categoryId: string },
+  deadline: number,
+): Promise<SearchHit[]> {
+  const body = await keyGet<
+    ListResponse<{ id?: { videoId?: string }; snippet?: { channelId?: string } }>
+  >(
+    'search',
+    {
+      part: 'snippet',
+      q: query,
+      type: 'video',
+      videoCategoryId: options.categoryId,
+      order: options.order,
+      maxResults: String(options.maxResults),
+    },
+    deadline,
+  );
+  return (body.items ?? []).flatMap((item) =>
+    item.id?.videoId && item.snippet?.channelId
+      ? [{ videoId: item.id.videoId, channelId: item.snippet.channelId }]
+      : [],
+  );
+}
 type PlaylistItem = { contentDetails?: { videoId?: string; videoPublishedAt?: string } };
 
 async function uploadsPage(playlistId: string, deadline: number): Promise<PlaylistItem[]> {
@@ -290,17 +441,20 @@ export function clearStatsCache(): void {
   statsCache.clear();
 }
 
+/** An owner-read upload, with its privacy (`public`, `unlisted`, `private`) when YouTube sent it. */
+export type OwnUpload = CatalogVideo & { privacy: string | null };
+
 /**
  * The newest `count` uploads of `channelId`, read through its owner's own grant (`token`), newest
- * first. Only snippets are read, never statistics, so `views` is 0. A grant that doesn't own the
- * channel throws a 404 `YouTubeError`, which `identityFailure` reads as lost access.
+ * first. Only snippets and status are read, never statistics, so `views` is 0. A grant that doesn't
+ * own the channel throws a 404 `YouTubeError`, which `identityFailure` reads as lost access.
  */
 export async function ownUploads(
   token: string,
   channelId: string,
   count: number,
   deadline: number,
-): Promise<CatalogVideo[]> {
+): Promise<OwnUpload[]> {
   const get = async <T>(path: string, params: Record<string, string>) =>
     readJson<T>(
       await fetch(`${API}/${path}?${new URLSearchParams(params)}`, {
@@ -327,10 +481,13 @@ export async function ownUploads(
     .map((item) => item.contentDetails?.videoId)
     .filter((id): id is string => typeof id === 'string' && id !== '');
   if (ids.length === 0) return [];
-  const body = await get<ListResponse<VideoItem>>('videos', { part: 'snippet', id: ids.join(',') });
+  const body = await get<ListResponse<VideoItem>>('videos', {
+    part: 'snippet,status',
+    id: ids.join(','),
+  });
   const order = new Map(ids.map((id, i) => [id, i]));
   return (body.items ?? [])
-    .map(toCatalog)
+    .map((item) => ({ ...toCatalog(item), privacy: item.status?.privacyStatus ?? null }))
     .toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!)
     .slice(0, count);
 }
