@@ -1,3 +1,5 @@
+import type { Influence, Role } from './influence';
+
 /** Pipeline states. `CLAIMED_COMPLETE` comes from the insert response; only read-back sets `VERIFIED`. */
 export const JOB_STATES = [
   'AWAITING_UPLOAD',
@@ -81,6 +83,19 @@ export type PickFields = {
   tags: string[];
 };
 
+/** A number computed in code from stored YouTube statistics; `null` when an input is unknown. */
+export type Calculated = { value: number | null; calculated: true };
+
+/** What the pick suggests trying and why, by source ref; `limits` are built by the server. */
+export type Recommendation = {
+  approach: string;
+  intendedOutcome: string;
+  follows: 'artist' | 'peers' | 'both' | 'none';
+  followsWhy: string;
+  evidence: string[];
+  limits: string[];
+};
+
 /** Copy for Bandcamp's track editor; artist accounts have no upload API, so the user pastes it. */
 export type BandcampDraft = { about: string; credits: string };
 
@@ -94,6 +109,20 @@ export type Pick = PickFields & {
   modelMs: number;
   /** The artist tag this pick or Short used; null only on picks made before artist profiles. */
   artistName: string | null;
+  // Spec 006; absent on picks made before it.
+  /** The slider settings this pick used. */
+  influence?: Influence;
+  /** Source refs per role. */
+  citations?: Record<Role, string[]>;
+  /** Null on Shorts and when only secondary evidence supported one. */
+  recommendation?: Recommendation | null;
+  influenceWarning?: string | null;
+  /** The research run whose evidence the pick's `P*` refs resolve against. */
+  researchRunId?: string | null;
+  /** When that evidence is hidden: its retrieval time + 29 days, as an ISO string. */
+  evidenceExpiresAt?: string | null;
+  /** `A<n>` → the artist's own video ID. */
+  outcomeRefs?: Record<string, string>;
 };
 
 /** How a landscape frame fits 9:16: a blurred copy of the frame behind it, or a center crop. */
@@ -120,6 +149,7 @@ export type Short = {
 };
 
 export type Wait =
+  | 'researching similar artists'
   | 'model busy'
   | 'model quota spent'
   | 'step running in another tab'

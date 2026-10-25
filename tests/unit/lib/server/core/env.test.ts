@@ -4,8 +4,10 @@ import {
   geminiApiKey,
   kmsKey,
   optional,
+  peerHearing,
   pickModel,
   required,
+  researchQueue,
   signupMode,
 } from '#lib/server/core/env.js';
 
@@ -96,5 +98,54 @@ describe('kmsKey', () => {
       'projects/p/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens',
     );
     expect(kmsKey()).toMatch(/cryptoKeys\/refresh-tokens$/);
+  });
+});
+
+describe('researchQueue', () => {
+  const QUEUE = 'projects/p/locations/us-central1/queues/soundboard-research';
+  const URL = 'https://soundboard-1.us-central1.run.app/api/research/task';
+  const SA = 'runtime@p.iam.gserviceaccount.com';
+
+  it('is null when none of the three is set', () => {
+    for (const name of ['RESEARCH_QUEUE', 'RESEARCH_TASK_URL', 'RESEARCH_TASK_SA']) {
+      vi.stubEnv(name, undefined);
+    }
+    expect(researchQueue()).toBeNull();
+  });
+
+  it('returns all three together', () => {
+    vi.stubEnv('RESEARCH_QUEUE', QUEUE);
+    vi.stubEnv('RESEARCH_TASK_URL', URL);
+    vi.stubEnv('RESEARCH_TASK_SA', SA);
+    expect(researchQueue()).toEqual({ queue: QUEUE, url: URL, serviceAccount: SA });
+  });
+
+  it.each([
+    ['the queue alone', { RESEARCH_QUEUE: QUEUE }],
+    ['no service account', { RESEARCH_QUEUE: QUEUE, RESEARCH_TASK_URL: URL }],
+    ['no queue', { RESEARCH_TASK_URL: URL, RESEARCH_TASK_SA: SA }],
+  ])('throws on a partial config: %s', (_name, set: Record<string, string>) => {
+    for (const name of ['RESEARCH_QUEUE', 'RESEARCH_TASK_URL', 'RESEARCH_TASK_SA']) {
+      vi.stubEnv(name, set[name] ?? '');
+    }
+    expect(() => researchQueue()).toThrow(
+      'Set RESEARCH_QUEUE, RESEARCH_TASK_URL and RESEARCH_TASK_SA together',
+    );
+  });
+});
+
+describe('peerHearing', () => {
+  it('is on only for 1', () => {
+    vi.stubEnv('PEER_HEARING', '1');
+    expect(peerHearing()).toBe(true);
+    vi.stubEnv('PEER_HEARING', '');
+    expect(peerHearing()).toBe(false);
+    vi.stubEnv('PEER_HEARING', undefined);
+    expect(peerHearing()).toBe(false);
+  });
+
+  it.each(['true', '0', 'yes'])('throws on %s', (value) => {
+    vi.stubEnv('PEER_HEARING', value);
+    expect(() => peerHearing()).toThrow(`PEER_HEARING must be 1 or unset, not ${value}`);
   });
 });
