@@ -7,10 +7,10 @@ import { connections } from '#lib/server/core/schema.js';
 import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
 import { load } from '#src/routes/+layout.server.js';
 import { seed, truncate } from '../../helpers/db';
-import { CHANNEL_A, USER_A, USER_B, USERS } from '../../helpers/pipeline';
+import { ARTIST_C, CHANNEL_A, USER_A, USER_B, USER_C, USERS } from '../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];
-type Data = { channel: unknown; user: unknown };
+type Data = { channel: unknown; user: unknown; artist: unknown };
 
 const run = async (user: Event['locals']['user']) =>
   (await load({ locals: { user } } as unknown as Event)) as Data;
@@ -77,7 +77,7 @@ describe('layout load', () => {
       uploadsPlaylist: 'UUflr',
       lastUploadAt: '2026-09-20T00:00:00Z',
     });
-    expect(data.user).toEqual({ email: USER_A.email, artistId: 'flr' });
+    expect(data.user).toEqual({ email: USER_A.email });
   });
 
   it("shows an unlinked user their own channel, never another user's", async () => {
@@ -117,8 +117,31 @@ describe('layout load', () => {
     });
   });
 
-  it('passes only the email and artist link of the user', async () => {
-    expect((await run(USER_B)).user).toEqual({ email: USER_B.email, artistId: null });
+  it("passes the user's email and the profile's name, Bandcamp URL and curated flag", async () => {
+    const data = await run(USER_C);
+    expect(data.user).toEqual({ email: USER_C.email });
+    expect(data.artist).toEqual({
+      name: ARTIST_C.name,
+      bandcampUrl: ARTIST_C.bandcampUrl,
+      curated: false,
+    });
+    expect((await run(USER_A)).artist).toMatchObject({ curated: true });
+  });
+
+  it("never passes the profile's id or contact line", async () => {
+    const data = JSON.stringify(await run(USER_C));
+    expect(data).not.toContain(ARTIST_C.id);
+    expect(data).not.toContain(ARTIST_C.contactLine);
+  });
+
+  it.each([
+    ['signed out', null],
+    ['a user with no profile', USER_B],
+  ])('passes a null artist when %s', async (_label, user) => {
+    expect((await run(user)).artist).toBeNull();
+  });
+
+  it('passes no user when signed out', async () => {
     expect((await run(null)).user).toBeNull();
   });
 

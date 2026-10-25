@@ -6,13 +6,28 @@ import { STALE_ANALYSIS } from '#lib/server/pipeline/short.js';
 import { ActionError } from '#lib/server/core/errors.js';
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
-import { artistMemory, connections, jobAudience, jobs, users } from '#lib/server/core/schema.js';
+import {
+  artistMemory,
+  artists,
+  connections,
+  jobAudience,
+  jobs,
+  users,
+} from '#lib/server/core/schema.js';
 import { createJob, getJob, listPicks, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
 import type { Hook, JobState, Pick, Short } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import {
+  ARTIST,
+  CHANNEL_A,
+  CHANNEL_C,
+  USER_A,
+  USER_B,
+  USER_C,
+  USERS,
+} from '../../../../helpers/pipeline';
 
 /** Objects the bucket's lifecycle already deleted; every other object exists. */
 const deleted = vi.hoisted(() => new Set<string>());
@@ -39,12 +54,14 @@ const RECONNECT = 'Reconnect YouTube to approve.';
 
 const candidates = [SYNTHWAVE_TAG, RETROWAVE, '#NewMusic'];
 
-const pick = (version: number, title = `Title ${version}`): Pick => ({
+/** `artistName` is the profile name the pick ran under; null on a pick made before profiles. */
+const pick = (version: number, artistName: string | null = null): Pick => ({
   version,
-  title,
+  title: `Title ${version}`,
   description: DESCRIPTION,
   hashtags: [SYNTHWAVE_TAG, RETROWAVE],
-  tags: ['synthwave', 'outrun'],
+  tags: artistName ? [artistName, 'synthwave', 'outrun'] : ['synthwave', 'outrun'],
+  artistName,
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
@@ -58,10 +75,10 @@ const patchJob = (fields: JobPatch) =>
     if (fields.audience) await saveAudience(tx, 'job1', fields.audience);
   });
 
-/** B's job by default: no artist link, so its feedback stays on the job. */
+/** B's job by default: a job from before profiles, so its feedback stays on the job. */
 async function makeJob(
   opts: {
-    owner?: typeof USER_A | typeof USER_B;
+    owner?: typeof USER_A | typeof USER_B | typeof USER_C;
     state?: JobState;
     picks?: number;
     patch?: Partial<JobDoc>;
@@ -88,7 +105,10 @@ async function makeJob(
   await db()
     .update(jobs)
     .set({
-      picks: Array.from({ length: picks }, (_, i) => ({ ...pick(i + 1), skipped: false })),
+      picks: Array.from({ length: picks }, (_, i) => ({
+        ...pick(i + 1, owner.artist?.name ?? null),
+        skipped: false,
+      })),
     })
     .where(eq(jobs.id, id));
   await patchJob({
@@ -125,8 +145,12 @@ const input = (over: Partial<Input> = {}): Input => ({
   ...over,
 });
 
-/** An approval of A's job, which shows A's channel. */
-const inputA = (over: Partial<Input> = {}) => input({ channelId: CHANNEL_A, ...over });
+/** An approval of A's job, which shows A's channel and keeps the artist tag. */
+const inputA = (over: Partial<Input> = {}) =>
+  input({ channelId: CHANNEL_A, tags: [ARTIST, 'synthwave', 'outrun'], ...over });
+/** An approval of C's job, on C's own channel and profile name. */
+const inputC = (over: Partial<Input> = {}) =>
+  input({ channelId: CHANNEL_C, tags: ['Test Artist', 'synthwave'], ...over });
 
 const jobRows = async () =>
   (await db().select({ feedback: jobs.feedback }).from(jobs)).flatMap(
@@ -148,7 +172,8 @@ const rejection = async (promise: Promise<unknown>) => {
 };
 
 const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
-const ARTIST = 'Flies Like Robots';
+const renameC = (name: string) =>
+  db().update(artists).set({ name }).where(eq(artists.id, USER_C.artistId));
 
 const setBStatus = (status: 'connected' | 'missing_scopes' | 'no_channel' | 'revoked') =>
   db()
@@ -268,39 +293,62 @@ describe('approve', () => {
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
   });
 
-  it('rejects the artist name as a tag on an unlinked job', async () => {
+  it('stores the artist tag as the pick spelled it, and every tag trimmed', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await approve(job, inputC({ tags: [' test ARTIST ', ' SYNTHWAVE '] }));
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Test Artist', 'SYNTHWAVE']);
+  });
+
+  it('trims tags on a pick with no stored artist name', async () => {
+    const job = await makeJob();
+    await approve(job, input({ tags: [' Synthwave '] }));
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Synthwave']);
+  });
+
+  it('allows no artist tag outside the candidates on a pick with no stored name', async () => {
     const job = await makeJob();
     const error = await rejection(approve(job, input({ tags: ['synthwave', ARTIST] })));
     expect(error.fields).toEqual({ tags: `Not in this job's tag list: ${ARTIST}` });
   });
 
-  it('rejects the artist name even when the genre search returned it, on an unlinked job', async () => {
-    const job = await makeJob({
-      patch: {
-        audience: {
-          retrievedAt: Date.now(),
-          query: 'q',
-          candidateLists: [
-            {
-              videoId: 'peer',
-              title: 'Peer release',
-              hashtags: candidates,
-              tags: [{ tag: ARTIST }],
-            },
-          ],
-          top: [],
-        },
-      },
-    });
-    expect((await rejection(approve(job, input({ tags: [ARTIST] })))).status).toBe(422);
-  });
-
-  it("rejects the artist name once Nathan's job owner is unlinked", async () => {
+  it("keeps allowing the pick's own artist name once Nathan's job owner is unlinked", async () => {
     const job = await makeJob({ owner: USER_A });
     await unlinkA();
-    const error = await rejection(approve(job, inputA({ tags: [ARTIST] })));
-    expect(error.status).toBe(422);
+    await approve(job, inputA({ tags: [ARTIST] }));
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual([ARTIST]);
+  });
+
+  it.each([
+    ['missing', ['synthwave', 'outrun']],
+    ['twice', [ARTIST, 'synthwave', 'flies like robots']],
+  ])('requires the artist tag exactly once: %s', async (_label, tags) => {
+    const job = await makeJob({ owner: USER_A });
+    const error = await rejection(approve(job, inputA({ tags })));
+    expect(error.fields).toEqual({ tags: `Keep the artist tag: ${ARTIST}.` });
     expect((await getJob('job1'))!.state).toBe('REVIEW');
+  });
+
+  it('lets the artist tag hold the song title, for a self-titled song', async () => {
+    const job = await makeJob({ owner: USER_C, patch: { songTitle: 'Test Artist' } });
+    await approve(job, inputC());
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Test Artist', 'synthwave']);
+  });
+
+  it("approves another artist's job with its own name, never Nathan's", async () => {
+    const job = await makeJob({ owner: USER_C });
+    const error = await rejection(approve(job, inputC({ tags: [ARTIST, 'synthwave'] })));
+    expect(error.fields).toEqual({ tags: 'Keep the artist tag: Test Artist.' });
+    await approve(job, inputC());
+    expect((await getJob('job1'))!.state).toBe('PUBLISHING');
+  });
+
+  it('approves the name the pick used after a rename, not the new one (SC-005)', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await renameC('Renamed Band');
+    const error = await rejection(approve(job, inputC({ tags: ['Renamed Band', 'synthwave'] })));
+    expect(error.fields).toEqual({ tags: 'Keep the artist tag: Test Artist.' });
+    await approve(job, inputC());
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Test Artist', 'synthwave']);
   });
 
   it('reports a YouTube limit before the tag list', async () => {
@@ -660,7 +708,7 @@ describe('makeShort', () => {
     makeJob({ state: 'VERIFIED', picks, patch: { probe: PROBE, chunkCount: 3, ...patch } });
 
   it('starts a Short from the approved pick', async () => {
-    const id = await makeShort(await approved({}, 2));
+    const id = await makeShort(await approved({}, 2), ARTIST);
     const short = (await getJob(id))!;
     expect(short).toMatchObject({
       state: 'HOOK',
@@ -684,9 +732,26 @@ describe('makeShort', () => {
       state: 'VERIFIED',
       patch: { probe: PROBE, chunkCount: 3, finalFields: final },
     });
-    const id = await makeShort(job);
+    const id = await makeShort(job, ARTIST);
     const [stored] = await listPicks(id);
-    expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
+    expect(stored).toMatchObject({
+      ...final,
+      tags: [ARTIST, 'synthwave'],
+      artistName: ARTIST,
+      version: 1,
+      brandCheck: '',
+    });
+  });
+
+  it.each([
+    ['the same name', 'Test Artist'],
+    ['a renamed profile', 'Renamed Band'],
+  ])('carries one artist tag from an approval typed in another case: %s', async (_l, name) => {
+    const job = await makeJob({ owner: USER_C, patch: { probe: PROBE, chunkCount: 3 } });
+    await approve(job, inputC({ tags: [' test artist ', 'synthwave'] }));
+    await patchJob({ state: 'VERIFIED' });
+    const id = await makeShort((await getJob('job1'))!, name);
+    expect((await listPicks(id))[0]!.tags).toEqual([name, 'synthwave']);
   });
 
   it("copies the owner and artist link from Nathan's video, never its destination", async () => {
@@ -699,14 +764,14 @@ describe('makeShort', () => {
         destination: { channelId: CHANNEL_A, channelTitle: 'FLR' },
       },
     });
-    const short = (await getJob(await makeShort(job)))!;
+    const short = (await getJob(await makeShort(job, ARTIST)))!;
     expect(short).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr', destination: null });
   });
 
   it('refuses once storage has deleted the video, starting no Short', async () => {
     const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, chunkCount: 3 } });
     deleted.add(job.object);
-    const error = await rejection(makeShort(job));
+    const error = await rejection(makeShort(job, ARTIST));
     expect([error.status, error.message]).toEqual([
       409,
       'This video is gone from storage. Upload it again to make a Short.',
@@ -717,25 +782,25 @@ describe('makeShort', () => {
 
   it('returns the live Short instead of starting another', async () => {
     const job = await approved();
-    const first = await makeShort(job);
-    expect(await makeShort((await getJob('job1'))!)).toBe(first);
+    const first = await makeShort(job, ARTIST);
+    expect(await makeShort((await getJob('job1'))!, ARTIST)).toBe(first);
   });
 
   it('refuses a video under 15 seconds and accepts one of exactly 15', async () => {
     const short = await approved({ probe: { ...PROBE, durationSec: 14.9 }, chunkCount: 1 });
-    const error = await rejection(makeShort(short));
+    const error = await rejection(makeShort(short, ARTIST));
     expect([error.status, error.message]).toEqual([
       409,
       'A Short needs a video of at least 15 seconds.',
     ]);
     expect((await getJob('job1'))!.shortId).toBeNull();
     await patchJob({ probe: { ...PROBE, durationSec: 15 } });
-    expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
+    expect(await makeShort((await getJob('job1'))!, ARTIST)).toEqual(expect.any(String));
   });
 
   it('refuses a video analyzed at another window length, starting no Short', async () => {
     const job = await approved({ chunkCount: 6 });
-    const error = await rejection(makeShort(job));
+    const error = await rejection(makeShort(job, ARTIST));
     expect([error.status, error.message]).toEqual([409, STALE_ANALYSIS]);
     expect((await getJob('job1'))!.shortId).toBeNull();
   });
@@ -744,7 +809,7 @@ describe('makeShort', () => {
     'refuses a video not yet approved (%s)',
     async (state) => {
       const job = await makeJob({ state, patch: { probe: PROBE, chunkCount: 3 } });
-      const error = await rejection(makeShort(job));
+      const error = await rejection(makeShort(job, ARTIST));
       expect([error.status, error.message]).toEqual([
         409,
         `Not allowed while the job is ${state}.`,
@@ -754,21 +819,23 @@ describe('makeShort', () => {
 
   it('refuses a Short of a Short', async () => {
     const job = await approved();
-    const short = (await getJob(await makeShort(job)))!;
-    const error = await rejection(makeShort({ ...short, state: 'REVIEW' }));
+    const short = (await getJob(await makeShort(job, ARTIST)))!;
+    const error = await rejection(makeShort({ ...short, state: 'REVIEW' }, ARTIST));
     expect([error.status, error.message]).toEqual([409, "A Short can't be cut from a Short."]);
   });
 
   it('refuses a video with no known length', async () => {
     const job = await makeJob({ state: 'VERIFIED' });
-    expect((await rejection(makeShort(job))).message).toBe("This video's length is unknown.");
+    expect((await rejection(makeShort(job, ARTIST))).message).toBe(
+      "This video's length is unknown.",
+    );
     const zero = await approved({ probe: { ...PROBE, durationSec: 0 } });
-    expect((await rejection(makeShort(zero))).status).toBe(409);
+    expect((await rejection(makeShort(zero, ARTIST))).status).toBe(409);
   });
 
   it('refuses a video with no recommendation', async () => {
     const job = await approved({}, 0);
-    expect((await rejection(makeShort(job))).message).toBe(
+    expect((await rejection(makeShort(job, ARTIST))).message).toBe(
       'This video has no recommendation to start from.',
     );
   });
@@ -776,7 +843,7 @@ describe('makeShort', () => {
   it('refuses when the video moved on before the transaction', async () => {
     const job = await approved();
     await patchJob({ state: 'DISCARDED' });
-    expect((await rejection(makeShort(job))).message).toBe(
+    expect((await rejection(makeShort(job, ARTIST))).message).toBe(
       'The video moved on before the Short could start.',
     );
   });
@@ -827,6 +894,7 @@ describe('recut', () => {
   it('re-cuts an existing cut after its video went stale under older windows', async () => {
     const id = await makeShort(
       await makeJob({ state: 'VERIFIED', patch: { probe: PROBE_180, chunkCount: 3 } }),
+      ARTIST,
     );
     await patchJob({ chunkCount: 6 });
     await db()

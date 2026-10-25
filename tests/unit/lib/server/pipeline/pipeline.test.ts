@@ -8,7 +8,12 @@ import {
   A_JOB,
   ANALYSIS,
   ARTIST,
+  ARTIST_A,
+  ARTIST_C,
+  C_JOB,
   CHANNEL_A,
+  REFRESH_C,
+  USER_C,
   child,
   REFRESH_A,
   defaultHandlers,
@@ -39,7 +44,7 @@ import { captureException, captureMessage, span, startSpan } from '../../../../m
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { artistMemory, connections, jobs, users } from '#lib/server/core/schema.js';
+import { artistMemory, artists, connections, jobs, users } from '#lib/server/core/schema.js';
 import { discard, retry } from '#lib/server/jobs/actions.js';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
@@ -56,6 +61,8 @@ const RECONNECT = 'reconnect YouTube';
 const OUTCOME_UNKNOWN = 'upload outcome unknown';
 const DAILY_LIMIT = 'Daily upload limit reached. Try tomorrow.';
 const A_TOKEN = `Bearer access:${REFRESH_A}`;
+const C_TOKEN = `Bearer access:${REFRESH_C}`;
+const NO_ARTIST = 'Add your artist name first.';
 const SOURCE_OBJECT = 'uploads/p1';
 // Far from the Pacific midnight reset, so the step and the assertion see the same reset.
 const NOON_PACIFIC = Date.parse('2026-10-18T19:00:00Z');
@@ -195,7 +202,6 @@ beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
   vi.stubEnv('YOUTUBE_API_KEY', 'key');
-  vi.stubEnv('FLR_CHANNEL_ID', 'UCflr');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_ID', 'cid');
   vi.stubEnv('GOOGLE_OAUTH_CLIENT_SECRET', 'secret');
   vi.stubEnv('KMS_KEY', 'projects/p/locations/l/keyRings/r/cryptoKeys/k');
@@ -679,11 +685,14 @@ const chunkDoc = (index: number) => ({
   modelMs: 4000,
 });
 
+/** The last pick request's system rules. */
+const rules = () => JSON.stringify(chatBodies().at(-1)!);
 const context = () => {
   const body = chatBodies().at(-1)!;
   const input = body.input as { content: { type: string; text?: string }[] }[];
-  // The provider joins adjacent text parts, so the thumbnail caption follows the context's line.
-  return JSON.parse(input[0]!.content[0]!.text!.split('\n')[0]!) as {
+  // The provider joins adjacent text parts: the context, then each YouTube part, then the caption.
+  const lines = input[0]!.content[0]!.text!.split('\n').filter((line) => line.startsWith('{'));
+  return Object.assign({}, ...lines.map((line) => JSON.parse(line) as object)) as {
     artist: string | null;
     facts: { key: string }[];
     feedback: unknown[];
@@ -700,9 +709,9 @@ const context = () => {
   };
 };
 
-/** The PICK step's job, with its two analyzed chunks; the chunks need the job row first. */
+/** The PICK step's job, C's by default, with its two analyzed chunks; chunks need the job row. */
 async function pickJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
-  const job = await put({ state: 'PICK', ...patch });
+  const job = await put({ state: 'PICK', ...C_JOB, ...patch });
   await setChunks('j1', [0, 1].map(chunkDoc));
   return job;
 }
@@ -718,44 +727,61 @@ const NATHAN_FEEDBACK = {
   at: 5,
 };
 
+const refusal = (status: number, reason?: string) =>
+  json(reason ? { error: { errors: [{ reason }] } } : {}, { status });
+const connectionOf = async (uid: string) =>
+  (await db().select().from(connections).where(eq(connections.uid, uid)))[0];
+const googleError = (error: string) =>
+  Object.assign(new Error(error), { response: { status: 400, data: { error } } });
+
 describe('runStep: PICK', () => {
-  it('stores candidates and pick version 1 for an unlinked job, with no artist identity', async () => {
+  it("picks another artist's job under its own name, reading its own channel", async () => {
     expect(await runStep(await pickJob({ measurements: MEASURED }))).toEqual({});
     const job = await saved();
     expect(job.state).toBe('REVIEW');
     expect(job.hashtagCandidates).toEqual([SYNTHWAVE, RETROWAVE, '#newmusic']);
     const pick = (await pickAt(1))!;
-    expect(pick).toMatchObject({ version: 1, skipped: false });
+    expect(pick).toMatchObject({ version: 1, skipped: false, artistName: ARTIST_C.name });
+    expect((pick.tags as string[])[0]).toBe(ARTIST_C.name);
     expect(typeof pick.modelMs).toBe('number');
     for (const tag of pick.hashtags as string[]) expect(job.hashtagCandidates).toContain(tag);
+    expect(pick.description).toContain(`\n${ARTIST_C.contactLine}\n\n#`);
 
     const ctx = context();
-    expect(ctx).not.toHaveProperty('artist');
-    expect(ctx.facts).toEqual([]);
+    expect(ctx.artist).toBe(ARTIST_C.name);
+    expect(ctx.facts).toEqual([
+      { key: ARTIST_NAME_KEY, value: ARTIST_C.name, kind: 'FACT', public: true },
+    ]);
     expect(ctx.feedback).toEqual([]);
     expect(ctx.skippedVersions).toBeUndefined();
-    expect(ctx.candidateLists.flatMap((list) => list.tags.map((c) => c.tag))).not.toContain(ARTIST);
-    expect(pick.tags).not.toContain(ARTIST);
-    expect(await artistRowCount()).toBe(0);
+    expect(ctx.recentUploads).toHaveLength(3);
+    const identity = calls.filter((c) => /youtube\/v3\/(channels|playlistItems)/.test(c.url));
+    expect(identity.map((c) => headers(c.init).authorization)).toEqual([C_TOKEN, C_TOKEN]);
+    expect(new URL(identity[0]!.url).searchParams.get('mine')).toBe('true');
+    const sent = rules();
+    for (const flr of [ARTIST, 'flieslikerobots', 'hacked and slashed', ARTIST_C.contactLine]) {
+      expect(sent).not.toContain(flr);
+    }
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(1);
-    expect(called(/playlistItems/)).toHaveLength(0);
-    expect(ctx.recentUploads).toEqual([]);
     expect(job.audience?.candidateLists.flatMap((list) => list.hashtags)).toEqual(
       job.hashtagCandidates,
     );
   });
 
-  it('records the pick request and the stored pick on the smart-pick agent span', async () => {
+  it('records the pick request, with YouTube text as counts, and the stored pick', async () => {
     clearAgentSpan();
     await runStep(await pickJob({ measurements: MEASURED }));
     const { input, output } = agentSpanIO();
     expect(input).toHaveLength(1);
-    expect(input[0]!['gen_ai.input.messages']).toContain('recentUploads');
+    const messages = input[0]!['gen_ai.input.messages'] as string;
+    expect(messages).toContain('[YouTube uploads: 3]');
+    expect(messages).not.toContain('Out now.');
+    expect(messages).not.toContain('Song v1');
     const stored = (await pickAt(1))!;
     expect(JSON.parse(output[0]!)).toMatchObject({ title: stored.title });
   });
 
-  it("compares Nathan's job against every recent FLR upload", async () => {
+  it("writes Nathan's job in his voice, with his contact line, from his own channel", async () => {
     await runStep(await pickJob(A_JOB));
     expect(context().artist).toBe(ARTIST);
     const catalog = called(/com\/youtube\/v3\/videos\?/).map((c) =>
@@ -765,38 +791,255 @@ describe('runStep: PICK', () => {
     // Only the three newest uploads go to the model, each with its thumbnail.
     expect(context().recentUploads).toHaveLength(3);
     expect(called(/i\.ytimg\.com/)).toHaveLength(3);
-    expect(new URL(called(/youtube\/v3\/channels\?/)[0]!.url).searchParams.get('id')).toBe('UCflr');
+    expect(headers(called(/youtube\/v3\/channels\?/)[0]!.init).authorization).toBe(A_TOKEN);
+    expect(rules()).toContain('hacked and slashed');
+    const pick = (await pickAt(1))!;
+    expect(pick).toMatchObject({ artistName: ARTIST });
+    expect(pick.description).toContain(`\n${ARTIST_A.contactLine}\n\n#`);
+  });
+
+  it('waits for a profile on a job whose owner has none, with no YouTube or model call', async () => {
+    const job = await pickJob({ ownerUid: 'uid-b', artistId: null, consecutiveFailures: 1 });
+    expect(await runStep(job)).toEqual({ wait: NO_ARTIST });
+    expect(calls).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('waits on a reconnect when the owner has no connection, with no YouTube or model call', async () => {
+    await db().delete(connections).where(eq(connections.uid, USER_C.uid));
+    expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
+    expect(calls).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0 });
+  });
+
+  it('gives up a grant sealed under another key and waits on a reconnect, with no strike', async () => {
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: 'sealed-under-another-key' })
+      .where(eq(connections.uid, USER_C.uid));
+    expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({
+      status: 'revoked',
+      tokenCiphertext: null,
+    });
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('marks a revoked grant on refresh and waits on a reconnect, with no model call', async () => {
+    h.refreshError = googleError('invalid_grant');
+    expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({ status: 'revoked' });
+    expect(chatBodies()).toHaveLength(0);
+  });
+
+  it.each([
+    ['a 401', refusal(401)],
+    ['a 403 playlistItemsNotAccessible', refusal(403, 'playlistItemsNotAccessible')],
+    ['a 403 forbidden', refusal(403, 'forbidden')],
+  ])('gives up the grant on %s and waits on a reconnect', async (_label, response) => {
+    on(/youtube\/v3\/playlistItems\?/, () => response.clone());
+    expect(await runStep(await pickJob({ consecutiveFailures: 1 }))).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({ status: 'revoked' });
+    expect(captureMessage).toHaveBeenCalledWith('YouTube refused the grant', {
+      level: 'warning',
+      tags: { 'job.id': 'j1' },
+    });
+    expect(await saved()).toMatchObject({ consecutiveFailures: 1 });
+    expect(chatBodies()).toHaveLength(0);
+  });
+
+  it.each([
+    ['a 403 quotaExceeded', refusal(403, 'quotaExceeded')],
+    ['a 429', refusal(429)],
+    ['a 503', refusal(503)],
+  ])('waits on YouTube on %s, leaving the grant and the streak alone', async (_label, response) => {
+    on(/youtube\/v3\/playlistItems\?/, () => response.clone());
+    expect(await runStep(await pickJob({ consecutiveFailures: 1 }))).toEqual({
+      wait: WAITING_ON_YOUTUBE,
+    });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({ status: 'connected' });
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(chatBodies()).toHaveLength(0);
+  });
+
+  it('fails the step when Google rejects the app, and the job on the second', async () => {
+    h.refreshError = googleError('invalid_client');
+    await runStep(await pickJob());
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    await runStep(await saved());
+    expect(await saved()).toMatchObject({ state: 'FAILED', failedState: 'PICK' });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({ status: 'connected' });
+  });
+
+  it('waits on a reconnect when the grant no longer lists the connected channel', async () => {
+    on(/youtube\/v3\/channels\?/, () =>
+      json({
+        items: [{ id: 'UCnew', contentDetails: { relatedPlaylists: { uploads: 'UUnew' } } }],
+      }),
+    );
+    expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
+    expect(chatBodies()).toHaveLength(0);
+    expect(called(/playlistItems/)).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0 });
+  });
+
+  it('stores none of the owner-read upload text anywhere', async () => {
+    const SENTINEL = 'sentinel-7f3a';
+    on(/com\/youtube\/v3\/videos\?/, (url) => {
+      const ids = new URL(url).searchParams.get('id') ?? '';
+      if (!ids.startsWith('v1')) return json({ items: [] });
+      return json({
+        items: ids.split(',').map((id) => ({
+          id,
+          snippet: { title: `${SENTINEL} ${id}`, description: SENTINEL, thumbnails: {} },
+        })),
+      });
+    });
+    await runStep(await pickJob());
+    expect((await saved()).state).toBe('REVIEW');
+    expect(rules()).toContain(SENTINEL);
+    const stored = await db().execute(
+      sql`select (select string_agg(j::text, '') from jobs j) || coalesce((select string_agg(m::text, '') from artist_memory m), '') as text`,
+    );
+    expect((stored as { rows: { text: string }[] }).rows[0]!.text).not.toContain(SENTINEL);
+  });
+
+  it('re-picks under the renamed profile, leaving earlier picks alone (SC-005)', async () => {
+    await runStep(await pickJob());
+    const first = await pickAt(1);
+    await db().update(artists).set({ name: 'Renamed Band' }).where(eq(artists.id, ARTIST_C.id));
+    await patchJob({ state: 'PICK' });
+    await runStep(await saved());
+    expect(await pickAt(1)).toEqual(first);
+    expect(await pickAt(2)).toMatchObject({ artistName: 'Renamed Band' });
+    expect(((await pickAt(2))!.tags as string[])[0]).toBe('Renamed Band');
+  });
+
+  it('leaves approved and verified jobs byte-identical after a rename', async () => {
+    const approved = await put({ ...C_JOB, id: 'done', state: 'VERIFIED', finalFields: FIELDS });
+    const before = await db().select().from(jobs).where(eq(jobs.id, approved.id));
+    await db().update(artists).set({ name: 'Renamed Band' }).where(eq(artists.id, ARTIST_C.id));
+    expect(await db().select().from(jobs).where(eq(jobs.id, approved.id))).toEqual(before);
+  });
+});
+
+describe('runStep: PICK deadline', () => {
+  const slow = (ms: number) => () => {
+    clock! += ms;
+  };
+  const startClock = () => {
+    clock = NOON_PACIFIC;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock!);
+  };
+
+  it('waits on the model when a slow identity read leaves too little time', async () => {
+    startClock();
+    const read = handlers.find((x) =>
+      x.test.test('https://www.googleapis.com/youtube/v3/playlistItems?'),
+    )!;
+    on(/youtube\/v3\/playlistItems\?/, (url, init) => {
+      slow(75_000)();
+      return read.reply(url, init);
+    });
+    expect(await runStep(await pickJob({ consecutiveFailures: 1 }))).toEqual({
+      wait: 'model busy',
+    });
+    expect(chatBodies()).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('waits on the model when slow thumbnails spend the budget', async () => {
+    startClock();
+    on(/i\.ytimg\.com/, () => {
+      slow(25_000)();
+      return new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/jpeg' } });
+    });
+    expect(await runStep(await pickJob())).toEqual({ wait: 'model busy' });
+    expect(chatBodies()).toHaveLength(0);
+    expect((await saved()).consecutiveFailures).toBe(0);
+  });
+
+  it('waits on YouTube when the genre search runs out of time, releasing the claim', async () => {
+    startClock();
+    on(/youtube\/v3\/search\?/, () => {
+      slow(106_000)();
+      return json({ items: [{ id: { videoId: 's1' } }] });
+    });
+    expect(await runStep(await pickJob({ consecutiveFailures: 1 }))).toEqual({
+      wait: WAITING_ON_YOUTUBE,
+    });
+    expect(chatBodies()).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(await claimToken()).toBeNull();
   });
 });
 
 describe("runStep: PICK with Nathan's memory", () => {
-  it("keeps Nathan's memory out of an unlinked job and writes none of it", async () => {
+  it("keeps Nathan's memory out of another artist's job and writes none of it", async () => {
     await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
     await runStep(await pickJob());
     expect((await saved()).state).toBe('REVIEW');
     const ctx = context();
     expect(ctx.feedback).toEqual([]);
-    expect(ctx.facts).toEqual([]);
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
     expect(await artistRowCount()).toBe(1);
   });
 
-  it("treats Nathan's job as unlinked once its owner's link is removed", async () => {
+  it("waits for a profile once Nathan's job owner is unlinked, reading none of his memory", async () => {
     await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
     await approveGuide();
     await unlinkA();
-    await runStep(await pickJob(A_JOB));
-    expect((await saved()).state).toBe('REVIEW');
-    const ctx = context();
-    expect(ctx).not.toHaveProperty('artist');
-    expect(ctx).not.toHaveProperty('brandGuide');
-    expect([ctx.facts, ctx.feedback, ctx.recentUploads]).toEqual([[], [], []]);
-    expect(called(/playlistItems/)).toHaveLength(0);
-    // Nothing was read into the prompt and nothing was seeded.
+    expect(await runStep(await pickJob(A_JOB))).toEqual({ wait: NO_ARTIST });
+    expect(calls).toHaveLength(0);
     expect(await artistRowCount()).toBe(2);
   });
 
+  it("runs a job not linked to the owner's profile without the profile's memory", async () => {
+    await seed({
+      artistMemory: [
+        { artistId: ARTIST_C.id, kind: 'feedback', data: NATHAN_FEEDBACK },
+        {
+          artistId: ARTIST_C.id,
+          kind: 'fact',
+          key: 'home',
+          data: { key: 'home', value: 'Ohio', kind: 'FACT', public: true },
+        },
+      ],
+    });
+    await runStep(await pickJob({ artistId: null }));
+    expect((await saved()).state).toBe('REVIEW');
+    const ctx = context();
+    expect(ctx.artist).toBe(ARTIST_C.name);
+    expect(ctx.feedback).toEqual([]);
+    expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY]);
+  });
+
   it("uses Nathan's facts, feedback, cached candidates, and skipped versions", async () => {
-    await seed({ artistMemory: [{ artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK }] });
+    await seed({
+      artistMemory: [
+        { artistId: 'flr', kind: 'feedback', data: NATHAN_FEEDBACK },
+        {
+          artistId: 'flr',
+          kind: 'fact',
+          key: 'home',
+          data: { key: 'home', value: 'Virginia', kind: 'FACT', public: true },
+        },
+        {
+          artistId: 'flr',
+          kind: 'fact',
+          key: 'mr-kill',
+          data: {
+            key: 'mr-kill',
+            value: 'Connected to Mr. Kill',
+            kind: 'INFERENCE',
+            public: false,
+          },
+        },
+      ],
+    });
     const job = await pickJob({
       ...A_JOB,
       hashtagCandidates: [SYNTHWAVE, RETROWAVE, '#newmusic'],
@@ -853,7 +1096,6 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(ctx.skippedVersions).toEqual([
       { title: 'Old Title', description: 'An older description.' },
     ]);
-    expect((await artistRows('fact')).some((r) => r.key === 'home')).toBe(true);
   });
 
   const GUIDE = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
@@ -864,7 +1106,7 @@ describe("runStep: PICK with Nathan's memory", () => {
           artistId: 'flr',
           kind: 'brand',
           key: 'approved',
-          data: { ...GUIDE, status: 'APPROVED', basedOn: ['v1'], createdAt: 1, approvedAt: 2 },
+          data: { ...GUIDE, status: 'APPROVED', uploadCount: 1, createdAt: 1, approvedAt: 2 },
         },
       ],
     });
@@ -875,8 +1117,18 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(context().brandGuide).toEqual(GUIDE);
   });
 
-  it('keeps the brand guide out of unlinked jobs', async () => {
+  it("keeps a brand guide out of a profile that isn't curated, even one stored for it", async () => {
     await approveGuide();
+    await seed({
+      artistMemory: [
+        {
+          artistId: ARTIST_C.id,
+          kind: 'brand',
+          key: 'approved',
+          data: { ...GUIDE, status: 'APPROVED', uploadCount: 1, createdAt: 1, approvedAt: 2 },
+        },
+      ],
+    });
     await runStep(await pickJob());
     expect(context()).not.toHaveProperty('brandGuide');
   });
@@ -1047,6 +1299,22 @@ describe('runStep: PUBLISHING', () => {
     expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Nothing to upload.' });
   });
 
+  it('waits to reconnect when the grant no longer decrypts, without a strike or YouTube call', async () => {
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: 'sealed-under-another-key' })
+      .where(eq(connections.uid, USER_A.uid));
+    expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_A.uid)).toMatchObject({ status: 'revoked' });
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 0,
+      error: null,
+      uploadStartedAt: null,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
   it('waits to reconnect when the grant is revoked, without calling YouTube', async () => {
     await revokeA();
     expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
@@ -1115,6 +1383,20 @@ describe('runStep: PUBLISHING', () => {
     await db().delete(connections).where(eq(connections.uid, A_JOB.ownerUid));
     expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
   });
+
+  it.each(['PUBLISHING', 'CLAIMED_COMPLETE'] as const)(
+    'waits on YouTube when the refresh stalls to the deadline in %s, counting no failure',
+    async (state) => {
+      h.refreshError = Object.assign(new Error('The operation was aborted.'), {
+        name: 'AbortError',
+      });
+      const job = await publishing({ state, videoId: state === 'PUBLISHING' ? null : 'vid1' });
+      expect(await runStep(job)).toEqual({ wait: WAITING_ON_YOUTUBE });
+      expect(await saved()).toMatchObject({ state, consecutiveFailures: 0, error: null });
+      expect(await connectionOf(A_JOB.ownerUid)).toMatchObject({ status: 'connected' });
+      expect(called(/youtube/)).toHaveLength(0);
+    },
+  );
 
   it("never uploads with another user's grant", async () => {
     expect(await runStep(await publishing({ ownerUid: 'uid-b', artistId: null }))).toEqual({

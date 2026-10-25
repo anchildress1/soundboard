@@ -30,9 +30,16 @@ import {
   type JobDoc,
 } from '#lib/server/jobs/jobs.js';
 import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
+import { artistProfile, type ArtistProfile } from '#lib/server/artist/profile.js';
 import type { Tx } from '#lib/server/core/db.js';
-import { required } from '#lib/server/core/env.js';
-import { ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '#lib/server/ai/model.js';
+import { NO_ARTIST } from '#lib/server/core/errors.js';
+import {
+  hasModelTime,
+  ModelBusy,
+  modelFor,
+  ModelQuotaSpent,
+  stepDeadline,
+} from '#lib/server/ai/model.js';
 import { hookStep, renderStep } from './short';
 import { runPick } from '#lib/server/ai/smart-pick.js';
 import type { JobPatch } from '#lib/server/jobs/rows.js';
@@ -40,9 +47,12 @@ import { invokeAgent } from '#lib/server/core/tracing.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
 import {
   accessTokenFor,
+  ChannelMismatch,
   finalChunk,
+  identityFailure,
+  outOfTime,
+  ownChannelUploads,
   readBack,
-  recentVideos,
   sourceRange,
   startResumableUpload,
   thumbnailImage,
@@ -149,35 +159,46 @@ async function analyze(job: JobDoc, deadline: number): Promise<StepOutput> {
 async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   const held = quotaHold(job);
   if (held) return held;
-  // The budget covers the catalog and search reads too, not only the model calls.
+  // The budget covers the identity, catalog and search reads too, not only the model calls.
   const by = deadline - PERSIST_RESERVE_MS;
-  const artist = await artistJob(job);
-  const [chunks, picks, recent] = await Promise.all([
+  const artist = await artistProfile(job.ownerUid);
+  if (!artist) return { wait: NO_ARTIST };
+  const recent = await ownChannelUploads(job.ownerUid, RECENT_COUNT, by, job.id);
+  if (!Array.isArray(recent)) return recent;
+  const [memory, chunks, picks] = await Promise.all([
+    artistJob(job),
     listChunks(job.id),
     listPicks(job.id),
-    artist ? recentVideos(required('FLR_CHANNEL_ID'), RECENT_COUNT) : [],
   ]);
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
       ...v,
-      thumbnail: v.thumbnailUrl ? await thumbnailImage(v.thumbnailUrl) : null,
+      thumbnail: v.thumbnailUrl ? await thumbnailImage(v.thumbnailUrl, by) : null,
     })),
   );
   return invokeAgent('smart-pick', modelFor('smart-pick'), async (span) => {
-    const audience =
-      job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
+    let audience = job.audience;
     try {
-      return await pickWith(audience, span);
+      audience ??= await audienceEvidence(chunks, job.probe?.durationSec ?? null, by);
     } catch (error) {
-      // The genre search is one per job; a failed model call must not spend it again on retry.
+      if (outOfTime(error)) return { wait: YOUTUBE_BUSY };
+      throw error;
+    }
+    // The genre search is one per job: every outcome from here keeps it.
+    if (!hasModelTime('smart-pick', by)) return { audience, wait: 'model busy' };
+    try {
+      return await pickWith(artist, audience, span);
+    } catch (error) {
       throw new StepFailure(error, { audience });
     }
   });
 
-  async function pickWith(audience: AudienceEvidence, span: Span): Promise<StepOutput> {
-    const [facts, feedback, brand] = artist
-      ? await Promise.all([listFacts(), recentFeedback(), approvedBrand()])
-      : [[], [], null];
+  async function pickWith(
+    artist: ArtistProfile,
+    audience: AudienceEvidence,
+    span: Span,
+  ): Promise<StepOutput> {
+    const [facts, feedback, brand] = await memoryFor(artist, memory);
     const result = await runPick(
       {
         artist,
@@ -214,9 +235,18 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   }
 }
 
+/** Facts, feedback and the brand guide; feedback and the guide only on jobs that use the memory. */
+const memoryFor = (artist: ArtistProfile, memory: boolean) =>
+  Promise.all([
+    listFacts(artist, memory),
+    memory ? recentFeedback(artist.id) : [],
+    memory && artist.curated ? approvedBrand(artist.id) : null,
+  ]);
+
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
 const RECONNECT: Wait = 'reconnect YouTube';
+const YOUTUBE_BUSY: Wait = 'waiting on YouTube';
 const SOURCE_EXPIRED = 'The source video has expired from storage.';
 
 /** A wait is never a failure: it ends the failure streak and clears a stale error. */
@@ -251,19 +281,41 @@ async function youtubeWait(
 }
 
 /**
+ * A fresh token for the job's destination grant, or the step's wait: reconnect when there is no
+ * grant, and waiting on YouTube when the refresh stalls or can't start before `deadline`. A changed
+ * channel and every other refresh error still throw.
+ */
+async function destinationAccess(
+  job: JobDoc,
+  channelId: string,
+  deadline: number,
+): Promise<Access | StepOutput> {
+  try {
+    return (await accessTokenFor(job.ownerUid, channelId, deadline)) ?? pause(RECONNECT);
+  } catch (error) {
+    if (!(error instanceof ChannelMismatch) && identityFailure(error) === 'busy') {
+      return pause(YOUTUBE_BUSY);
+    }
+    throw error;
+  }
+}
+
+const granted = (access: Access | StepOutput): access is Access => 'token' in access;
+
+/**
  * One upload step. The grant is checked before every YouTube call, chunk PUTs included: the session
  * URI alone authorizes a PUT, so a revoked or reconnected-elsewhere grant must stop the upload
  * here. A spent daily limit and a refused grant are waits, never failures.
  */
-async function publishing(job: JobDoc): Promise<StepOutput> {
+async function publishing(job: JobDoc, deadline: number): Promise<StepOutput> {
   if (!job.destination || !job.finalFields) return fail('PUBLISHING', 'Nothing to upload.');
   // No YouTube call at all: the page polls this wait, and polling must spend no quota.
   if (outcomeUnknown(job)) return pause(OUTCOME_UNKNOWN);
   // Nor while the daily limit is spent: the quota is project-wide, so any call fails until reset.
   const now = Date.now();
   if (limited(job, now)) return pause(DAILY_LIMIT);
-  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!access) return pause(RECONNECT);
+  const access = await destinationAccess(job, job.destination.channelId, deadline);
+  if (!granted(access)) return access;
   try {
     return unlimited(
       job,
@@ -346,8 +398,8 @@ async function sendChunk(
 
 /** Verified uploads on artist jobs join the artist's memory; no one else's do. */
 async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<void> {
-  if (!job.finalFields || !(await artistJob(job, tx))) return;
-  await recordPublish(tx, {
+  if (!job.finalFields || !job.artistId || !(await artistJob(job, tx))) return;
+  await recordPublish(tx, job.artistId, {
     videoId,
     url: `https://youtu.be/${videoId}`,
     jobId: job.id,
@@ -357,14 +409,14 @@ async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<voi
   });
 }
 
-async function verify(job: JobDoc): Promise<StepOutput> {
+async function verify(job: JobDoc, deadline: number): Promise<StepOutput> {
   if (!job.destination || !job.videoId) {
     return fail('CLAIMED_COMPLETE', 'Cannot read the upload back.');
   }
   const now = Date.now();
   if (limited(job, now)) return pause(DAILY_LIMIT);
-  const access = await accessTokenFor(job.ownerUid, job.destination.channelId);
-  if (!access) return pause(RECONNECT);
+  const access = await destinationAccess(job, job.destination.channelId, deadline);
+  if (!granted(access)) return access;
   let video: ReadBack | null;
   try {
     video = await readBack(access.token, job.videoId);

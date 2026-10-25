@@ -3,14 +3,29 @@ import { eq, sql, type SQL } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, query, type Database, type Tx } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { artistMemory, connections, jobAudience, jobs, users } from '#lib/server/core/schema.js';
+import {
+  artistMemory,
+  artists,
+  connections,
+  jobAudience,
+  jobs,
+  users,
+} from '#lib/server/core/schema.js';
 import { artistJob, writeFeedback, type Feedback } from '#lib/server/artist/memory.js';
 import { readAudience, saveAudience } from '#lib/server/jobs/audience.js';
 import { markFinalChunk, markUploadStarted } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { jobDoc, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import {
+  ARTIST_A,
+  ARTIST_C,
+  jobDoc,
+  USER_A,
+  USER_B,
+  USER_C,
+  USERS,
+} from '../../../../helpers/pipeline';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const evidence = (retrievedAt = Date.now()): AudienceEvidence => ({
@@ -21,7 +36,14 @@ const evidence = (retrievedAt = Date.now()): AudienceEvidence => ({
 });
 const A_JOB = jobDoc({ id: 'a', ownerUid: USER_A.uid, artistId: USER_A.artistId });
 const B_JOB = jobDoc({ id: 'b', ownerUid: USER_B.uid, artistId: null });
-const TABLES = ['users', 'connections', 'jobs', 'job_audience', 'artist_memory'] as const;
+const TABLES = [
+  'artists',
+  'users',
+  'connections',
+  'jobs',
+  'job_audience',
+  'artist_memory',
+] as const;
 
 function restricted<T>(
   role: 'app' | 'cleanup',
@@ -73,7 +95,7 @@ beforeEach(async () => {
     ],
     artistMemory: [
       { artistId: 'flr', kind: 'fact', key: 'name', data: { value: 'Flies Like Robots' } },
-      { artistId: 'another-artist', kind: 'fact', key: 'name', data: { value: 'Other artist' } },
+      { artistId: 'artist-c', kind: 'fact', key: 'name', data: { value: 'Test Artist' } },
     ],
   });
 });
@@ -232,7 +254,7 @@ describe('job and connection writes', () => {
 
   it.each([
     { name: 'another owner', patch: { ownerUid: USER_B.uid, artistId: null } },
-    { name: 'another artist', patch: { artistId: 'another-artist' } },
+    { name: 'another artist', patch: { artistId: 'artist-c' } },
     { name: 'another owner parent', patch: { parentId: 'b' } },
   ])('rejects a job insert with $name', async ({ patch }) => {
     await denied(
@@ -399,7 +421,7 @@ describe('artist ownership', () => {
   it('rejects artist writes by an unlinked user and writes to another artist', async () => {
     for (const [uid, artistId] of [
       [USER_B.uid, 'flr'],
-      [USER_A.uid, 'another-artist'],
+      [USER_A.uid, 'artist-c'],
     ] as const) {
       await denied(
         restricted('app', uid, (tx) =>
@@ -492,14 +514,146 @@ describe('cleanup privileges', () => {
   });
 });
 
+describe('artist profiles', () => {
+  const asUser = <T>(uid: string, operation: (tx: Tx) => Promise<T>) =>
+    restricted('app', uid, operation);
+  const create = (
+    tx: Tx,
+    name: string,
+    bandcamp: string | null = null,
+    contact: string | null = null,
+  ) =>
+    rows(tx, sql`select * from public.soundboard_create_artist(${name}, ${bandcamp}, ${contact})`);
+  const fail = async (operation: Promise<unknown>, code: string) =>
+    expect(
+      operation.catch((error: unknown) => {
+        throw error instanceof Error && error.cause ? error.cause : error;
+      }),
+    ).rejects.toMatchObject({ code });
+
+  it('lets a user read and update only their own profile', async () => {
+    await asUser(USER_C.uid, async (tx) => {
+      expect(await rows(tx, sql`select id from artists`)).toEqual([{ id: ARTIST_C.id }]);
+      await tx.update(artists).set({ name: 'Renamed', updatedAt: new Date() });
+    });
+    expect(await db().select({ id: artists.id, name: artists.name }).from(artists)).toEqual(
+      expect.arrayContaining([
+        { id: ARTIST_C.id, name: 'Renamed' },
+        { id: ARTIST_A.id, name: ARTIST_A.name },
+      ]),
+    );
+  });
+
+  it("hides another user's profile and changes none of it", async () => {
+    await asUser(USER_C.uid, async (tx) => {
+      expect(await rows(tx, sql`select id from artists where id = 'flr'`)).toEqual([]);
+      const updated = await tx
+        .update(artists)
+        .set({ name: 'Hijacked' })
+        .where(eq(artists.id, 'flr'))
+        .returning();
+      expect(updated).toEqual([]);
+    });
+    expect(
+      await db().select({ name: artists.name }).from(artists).where(eq(artists.id, 'flr')),
+    ).toEqual([{ name: ARTIST_A.name }]);
+  });
+
+  it.each([
+    ['curated', sql`update artists set curated = true`],
+    ['id', sql`update artists set id = 'mine'`],
+    ['a direct insert', sql`insert into artists (id, name) values ('mine', 'Mine')`],
+    ['users.artist_id', sql`update users set artist_id = null`],
+  ])('denies %s', async (_label, statement) => {
+    await denied(asUser(USER_C.uid, (tx) => tx.execute(statement)));
+  });
+
+  it('creates and links one profile for a user without one, once', async () => {
+    const [made] = await asUser(USER_B.uid, (tx) =>
+      create(tx, 'New Band', 'https://new-band.bandcamp.com', 'Booking: new@example.com'),
+    );
+    expect(made).toMatchObject({
+      name: 'New Band',
+      bandcamp_url: 'https://new-band.bandcamp.com',
+      contact_line: 'Booking: new@example.com',
+      curated: false,
+    });
+    expect(
+      await db().select({ artistId: users.artistId }).from(users).where(eq(users.uid, USER_B.uid)),
+    ).toEqual([{ artistId: made!.id }]);
+    await fail(
+      asUser(USER_B.uid, (tx) => create(tx, 'Second Band')),
+      '23505',
+    );
+  });
+
+  it('refuses a profile without a verified identity', async () => {
+    await fail(
+      asUser('', (tx) => create(tx, 'Nobody')),
+      '42501',
+    );
+    await fail(
+      asUser('ghost', (tx) => create(tx, 'Nobody')),
+      '42501',
+    );
+  });
+
+  it.each([
+    ['a 101-character name', 'x'.repeat(101), null, null],
+    ['a name with <', 'A <b>', null, null],
+    ['a name with a comma', 'A, B', null, null],
+    ['a name starting with #', '#band', null, null],
+    ['a non-Bandcamp URL', 'Band', 'https://example.com', null],
+    ['a contact line with #', 'Band', null, 'DM #me'],
+  ])('rejects %s', async (_label, name, bandcamp, contact) => {
+    await fail(
+      asUser(USER_B.uid, (tx) => create(tx, name, bandcamp, contact)),
+      '23514',
+    );
+    expect(
+      await db().select({ artistId: users.artistId }).from(users).where(eq(users.uid, USER_B.uid)),
+    ).toEqual([{ artistId: null }]);
+  });
+
+  it('never links two users to one profile', async () => {
+    await fail(
+      db().update(users).set({ artistId: 'flr' }).where(eq(users.uid, USER_B.uid)),
+      '23505',
+    );
+  });
+
+  it('rejects a top-level job with no artist', async () => {
+    await denied(
+      asUser(USER_A.uid, (tx) =>
+        tx.insert(jobs).values(jobRow({ ...A_JOB, id: 'no-artist', artistId: null })),
+      ),
+    );
+  });
+
+  it('does not grant PUBLIC execution of the create function', async () => {
+    expect(
+      await rows(
+        db(),
+        sql`select acl.privilege_type from pg_proc p,
+          lateral aclexplode(p.proacl) acl
+          where p.oid = 'soundboard_create_artist(text,text,text)'::regprocedure
+          and acl.grantee = 0`,
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('identity bootstrap function', () => {
   it('binds only an unclaimed normalized invitation and preserves its artist link', async () => {
-    await seed({ users: [{ email: 'new@example.test', artistId: 'flr' }] });
+    await seed({
+      artists: [{ id: 'artist-x', name: 'X Band' }],
+      users: [{ email: 'new@example.test', artistId: 'artist-x' }],
+    });
     const admitted = await restricted('app', 'new-sub', (tx) =>
       rows(tx, sql`select * from public.soundboard_admit('new-sub', ' New@Example.Test ', false)`),
     );
     expect(admitted).toMatchObject([
-      { uid: 'new-sub', email: 'new@example.test', artist_id: 'flr', active: true },
+      { uid: 'new-sub', email: 'new@example.test', artist_id: 'artist-x', active: true },
     ]);
   });
 
@@ -540,7 +694,7 @@ describe('identity bootstrap function', () => {
         rows(tx, sql`select * from public.soundboard_admit('new-sub', 'new@example.test', false)`),
       ),
     ).toEqual([]);
-    expect(await db().select().from(users)).toHaveLength(2);
+    expect(await db().select().from(users)).toHaveLength(USERS.users.length);
 
     expect(
       await restricted('app', 'new-sub', (tx) =>

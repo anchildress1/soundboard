@@ -1,13 +1,17 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import { ApiError, createJob } from '#lib/api.js';
+  import ArtistForm from '#lib/components/ArtistForm.svelte';
   import Monitor from '#lib/components/Monitor.svelte';
   import ReleaseBar from '#lib/components/ReleaseBar.svelte';
   import { fingerprint } from '#lib/fingerprint.js';
   import { TITLE_MAX } from '#lib/metadata.js';
   import { acquire, start as startUpload } from '#lib/upload.js';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   const maxMinutes = 15;
 
@@ -75,77 +79,89 @@
 
 <ReleaseBar title="New release" step={0} />
 
-<main class="step">
-  <div class="intro">
-    <h1>Pick the finished video</h1>
-    <p class="help">
-      Up to {maxMinutes} minutes. It plays here the moment you choose it, so you can check it's the right
-      cut.
-    </p>
-  </div>
-
-  <form onsubmit={start} aria-label="Start a release">
-    <div class="field" class:err={tooLong}>
-      <label for="video" class="drop" class:chosen={file}>
-        {#if file}
-          <span>{file.name}</span>
-          <span class="help">Choose a different file</span>
-        {:else}
-          <svg viewBox="0 0 24 24" aria-hidden="true"
-            ><path d="M12 16V4M7 9l5-5 5 5" /><path
-              d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"
-            /></svg
-          >
-          <span>Choose the video</span>
-          <span class="help">Any video file, up to {maxMinutes} min</span>
-        {/if}
-      </label>
-      <input
-        id="video"
-        class="visually-hidden"
-        type="file"
-        accept="video/*"
-        onchange={pick}
-        disabled={busy}
-      />
-      {#if tooLong}<span class="msg">This video runs over {maxMinutes} minutes.</span>{/if}
+{#if !data.artist}
+  <main class="step">
+    <div class="intro">
+      <h1>Who's the artist?</h1>
+      <p class="help">
+        Drafts use this name, Bandcamp page and contact line. Change them in Settings.
+      </p>
+    </div>
+    <ArtistForm submitLabel="Save" onsaved={() => invalidateAll()} />
+  </main>
+{:else}
+  <main class="step">
+    <div class="intro">
+      <h1>Pick the finished video</h1>
+      <p class="help">
+        Up to {maxMinutes} minutes. It plays here the moment you choose it, so you can check it's the
+        right cut.
+      </p>
     </div>
 
-    {#if objectUrl}
-      <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
-    {/if}
+    <form onsubmit={start} aria-label="Start a release">
+      <div class="field" class:err={tooLong}>
+        <label for="video" class="drop" class:chosen={file}>
+          {#if file}
+            <span>{file.name}</span>
+            <span class="help">Choose a different file</span>
+          {:else}
+            <svg viewBox="0 0 24 24" aria-hidden="true"
+              ><path d="M12 16V4M7 9l5-5 5 5" /><path
+                d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"
+              /></svg
+            >
+            <span>Choose the video</span>
+            <span class="help">Any video file, up to {maxMinutes} min</span>
+          {/if}
+        </label>
+        <input
+          id="video"
+          class="visually-hidden"
+          type="file"
+          accept="video/*"
+          onchange={pick}
+          disabled={busy}
+        />
+        {#if tooLong}<span class="msg">This video runs over {maxMinutes} minutes.</span>{/if}
+      </div>
 
-    <div class="field">
-      <label for="song">What's the song called?</label>
-      <input
-        id="song"
-        bind:value={songTitle}
-        maxlength={TITLE_MAX}
-        autocomplete="off"
-        required
-        disabled={busy}
-      />
-      <span class="msg">That's the only thing the model needs from you.</span>
-    </div>
-    <div class="field">
-      <label for="notes">Anything it should know? <span>optional</span></label>
-      <textarea
-        id="notes"
-        rows="3"
-        bind:value={notes}
-        maxlength="1000"
-        disabled={busy}
-        placeholder="Who played on it, where it was shot, what not to mention."></textarea>
-    </div>
-    <div class="actions">
-      <button class="btn primary" type="submit" disabled={!canStart}
-        >{busy ? 'Starting' : 'Start the release'}</button
-      >
-      <span class="help">Goes to YouTube as Private, after you approve it.</span>
-    </div>
-    <p class="toast err" aria-live="polite">{message}</p>
-  </form>
-</main>
+      {#if objectUrl}
+        <Monitor src={objectUrl} filename={file?.name ?? ''} bind:duration />
+      {/if}
+
+      <div class="field">
+        <label for="song">What's the song called?</label>
+        <input
+          id="song"
+          bind:value={songTitle}
+          maxlength={TITLE_MAX}
+          autocomplete="off"
+          required
+          disabled={busy}
+        />
+        <span class="msg">That's the only thing the model needs from you.</span>
+      </div>
+      <div class="field">
+        <label for="notes">Anything it should know? <span>optional</span></label>
+        <textarea
+          id="notes"
+          rows="3"
+          bind:value={notes}
+          maxlength="1000"
+          disabled={busy}
+          placeholder="Who played on it, where it was shot, what not to mention."></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn primary" type="submit" disabled={!canStart}
+          >{busy ? 'Starting' : 'Start the release'}</button
+        >
+        <span class="help">Goes to YouTube as Private, after you approve it.</span>
+      </div>
+      <p class="toast err" aria-live="polite">{message}</p>
+    </form>
+  </main>
+{/if}
 
 <style>
   .step,

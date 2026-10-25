@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { signIn, USER_A, USER_B } from './session';
+import { signIn, USER_A, USER_B, USER_C } from './session';
 
 test.describe('brand guide', () => {
   test('sends a signed-out user home and refuses its API', async ({ page, request, baseURL }) => {
@@ -12,14 +12,19 @@ test.describe('brand guide', () => {
     await expect(page.getByRole('link', { name: 'Brand guide' })).toHaveCount(0);
   });
 
-  test('is a 404 for a user not linked to the artist', async ({ page, baseURL }) => {
-    await signIn(page, USER_B);
-    expect((await page.goto('/brand'))?.status()).toBe(404);
-    const sameOrigin = { headers: { origin: baseURL! } };
-    expect((await page.request.post('/api/brand/propose', sameOrigin)).status()).toBe(404);
-    await page.goto('/');
-    await expect(page.getByRole('link', { name: 'Brand guide' })).toHaveCount(0);
-  });
+  for (const [label, user] of [
+    ['without a profile', USER_B],
+    ['whose profile is not curated', USER_C],
+  ] as const) {
+    test(`is a 404 for a user ${label}`, async ({ page, baseURL }) => {
+      await signIn(page, user);
+      expect((await page.goto('/brand'))?.status()).toBe(404);
+      const sameOrigin = { headers: { origin: baseURL! } };
+      expect((await page.request.post('/api/brand/propose', sameOrigin)).status()).toBe(404);
+      await page.goto('/');
+      await expect(page.getByRole('link', { name: 'Brand guide' })).toHaveCount(0);
+    });
+  }
 
   test('opens for Nathan from the header, with no channel connect links', async ({ page }) => {
     await signIn(page, USER_A);

@@ -6,7 +6,6 @@ import { getJob } from '#lib/server/jobs/jobs.js';
 import { POST } from '#src/routes/api/jobs/[id]/step/+server.js';
 import type { JobState, JobView } from '#lib/types.js';
 import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
-import { busy429 } from '../../../../../../helpers/gemini';
 import { seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 const h = vi.hoisted(() => ({ objects: new Set<string>() }));
@@ -67,14 +66,12 @@ describe('POST /api/jobs/[id]/step', () => {
     expect(view.job.state).toBe('PREP');
   });
 
-  it('names the wait while the model is busy', async () => {
-    const audience = { retrievedAt: Date.now(), query: 'q', candidateLists: [], top: [] };
-    await seedJob({ state: 'PICK', chunkCount: 2, audience });
-    fetchMock.mockImplementation(async () => busy429());
+  it('names the wait for a missing profile, calling nothing', async () => {
+    await seedJob({ state: 'PICK', chunkCount: 2 });
     const view = (await (await step('j1')).json()) as JobView;
-    expect(view.wait).toBe('model busy');
+    expect(view.wait).toBe('Add your artist name first.');
     expect(view.job).toMatchObject({ state: 'PICK', error: null });
-    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/v1beta\/interactions$/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('names the wait while the per-day model quota is spent, calling nothing', async () => {

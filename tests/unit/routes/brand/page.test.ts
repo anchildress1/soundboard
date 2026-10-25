@@ -13,7 +13,7 @@ const GUIDE = {
 const stored = (status: StoredBrand['status']): StoredBrand => ({
   ...GUIDE,
   status,
-  basedOn: ['v1', 'v2', 'v3'],
+  uploadCount: 3,
   createdAt: Date.UTC(2026, 9, 1),
   approvedAt: status === 'APPROVED' ? Date.UTC(2026, 9, 2) : null,
 });
@@ -84,12 +84,15 @@ describe('brand page: proposing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('stops asking and says so once the model quota is spent', async () => {
+  it.each([
+    ['the model quota is spent', 'model quota spent', 'Model quota spent'],
+    ['YouTube needs a reconnect', 'reconnect YouTube', 'Reconnect YouTube'],
+  ])('stops asking and says so once %s', async (_label, wait, text) => {
     vi.useFakeTimers();
-    fetchMock.mockResolvedValue(json({ wait: 'model quota spent' }));
+    fetchMock.mockResolvedValue(json({ wait }));
     setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
-    await waitFor(() => expect(screen.getByText('Model quota spent')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(text)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
     await vi.runAllTimersAsync();
     expect(fetchMock).toHaveBeenCalledTimes(1);

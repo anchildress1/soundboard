@@ -31,7 +31,15 @@ import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
 import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { jobDoc, SESSION_URI, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import {
+  ARTIST,
+  jobDoc,
+  SESSION_URI,
+  seedJob,
+  USER_A,
+  USER_B,
+  USERS,
+} from '../../../../helpers/pipeline';
 
 const SOURCE_OBJECT = 'uploads/source.mp4';
 const REFUSES_MISSING = 'refuses a missing job';
@@ -69,11 +77,12 @@ const pick = (version: number): Pick => ({
   title: `T${version}`,
   description: 'd',
   hashtags: [],
-  tags: [],
+  tags: [ARTIST, 'synthwave'],
   flags: [],
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  artistName: ARTIST,
   modelMs: 1,
 });
 
@@ -604,7 +613,7 @@ describe('createShort', () => {
       .where(eq(jobs.id, 'p'));
     const job = (await getJob('p'))!;
     expect(job.destination).toEqual({ channelId: 'UCflr', channelTitle: 'FLR' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1')).toEqual({ id: 's1' });
     const short = (await getJob('s1'))!;
     expect(short.audience?.retrievedAt).toBe(job.audience?.retrievedAt);
     expect(short).toMatchObject({
@@ -638,32 +647,32 @@ describe('createShort', () => {
 
   it('returns the live Short instead of starting a second one', async () => {
     const job = await parent();
-    await createShort(job, SHORT_SOURCE_STATES, 's1');
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's2')).toEqual({ id: 's1' });
+    await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1');
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's2')).toEqual({ id: 's1' });
     expect(await exists('s2')).toBe(false);
   });
 
   it('starts a new Short once the old one was discarded', async () => {
     const job = await parent();
-    await createShort(job, SHORT_SOURCE_STATES, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1');
     await patch('s1', { state: 'DISCARDED' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's2')).toEqual({ id: 's2' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's2')).toEqual({ id: 's2' });
     expect((await getJob('p'))!.shortId).toBe('s2');
   });
 
   it('starts a new Short when the recorded one is gone', async () => {
     const job = await parent({ shortId: 'vanished' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's3')).toEqual({ id: 's3' });
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's3')).toEqual({ id: 's3' });
   });
 
   it('refuses a parent outside the allowed states, or missing', async () => {
     const job = await parent({ state: 'DISCARDED' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toBeNull();
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1')).toBeNull();
     expect(await exists('s1')).toBe(false);
-    expect(await createShort({ ...job, id: 'ghost' }, SHORT_SOURCE_STATES)).toBeNull();
+    expect(await createShort({ ...job, id: 'ghost' }, SHORT_SOURCE_STATES, ARTIST)).toBeNull();
     // A video still in review has nothing approved to cut from.
     await patch('p', { state: 'REVIEW' });
-    expect(await createShort(job, SHORT_SOURCE_STATES, 's1')).toBeNull();
+    expect(await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1')).toBeNull();
   });
 
   it('starts from the approved fields over the pick, as read inside the transaction', async () => {
@@ -675,16 +684,62 @@ describe('createShort', () => {
       tags: ['synthwave'],
     };
     await patch('p', { finalFields: final });
-    expect(await createShort(stale, SHORT_SOURCE_STATES, 's1')).toEqual({ id: 's1' });
-    expect(await listPicks('s1')).toEqual([{ ...pick(3), ...final, version: 1, skipped: false }]);
+    expect(await createShort(stale, SHORT_SOURCE_STATES, ARTIST, 's1')).toEqual({ id: 's1' });
+    expect(await listPicks('s1')).toEqual([
+      { ...pick(3), ...final, tags: [ARTIST, 'synthwave'], version: 1, skipped: false },
+    ]);
+  });
+
+  it("tags the Short with the owner's current name, swapping out the parent's", async () => {
+    const job = await parent();
+    await patch('p', {
+      finalFields: {
+        title: 'Approved',
+        description: 'Mine.',
+        hashtags: [],
+        tags: ['synthwave', 'FLIES LIKE ROBOTS', 'outrun'],
+      },
+    });
+    expect(await createShort(job, SHORT_SOURCE_STATES, 'New Name', 's1')).toEqual({ id: 's1' });
+    const [short] = await listPicks('s1');
+    expect(short).toMatchObject({
+      tags: ['New Name', 'synthwave', 'outrun'],
+      artistName: 'New Name',
+    });
+    expect((await getJob('s1'))!.artistId).toBe('flr');
+    expect((await getJob('p'))!.finalFields!.tags).toEqual([
+      'synthwave',
+      'FLIES LIKE ROBOTS',
+      'outrun',
+    ]);
+  });
+
+  it('gives a legacy parent pick with no stored name the current name first', async () => {
+    const job = await parent();
+    await db()
+      .update(jobs)
+      .set({
+        picks: [1, 2, 3].map((v) => ({
+          ...pick(v),
+          tags: ['synthwave'],
+          artistName: null,
+          skipped: false,
+        })),
+      })
+      .where(eq(jobs.id, 'p'));
+    await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1');
+    expect((await listPicks('s1'))[0]).toMatchObject({
+      tags: [ARTIST, 'synthwave'],
+      artistName: ARTIST,
+    });
   });
 
   it('starts nothing when the video has no pick on screen', async () => {
     const none = await parent({ pickVersion: null });
-    expect(await createShort(none, SHORT_SOURCE_STATES, 's1')).toEqual({ noPick: true });
+    expect(await createShort(none, SHORT_SOURCE_STATES, ARTIST, 's1')).toEqual({ noPick: true });
     await db().delete(jobs).where(eq(jobs.id, 'p'));
     const gone = await parent({ pickVersion: 9 });
-    expect(await createShort(gone, SHORT_SOURCE_STATES, 's2')).toEqual({ noPick: true });
+    expect(await createShort(gone, SHORT_SOURCE_STATES, ARTIST, 's2')).toEqual({ noPick: true });
     expect((await exists('s1')) || (await exists('s2'))).toBe(false);
     expect(await db().select({ picks: jobs.picks }).from(jobs).where(eq(jobs.id, 's2'))).toEqual(
       [],
@@ -693,7 +748,7 @@ describe('createShort', () => {
 
   it('keeps a filename without an extension readable', async () => {
     const job = await parent({ filename: 'master take' });
-    await createShort(job, SHORT_SOURCE_STATES, 's1');
+    await createShort(job, SHORT_SOURCE_STATES, ARTIST, 's1');
     expect((await getJob('s1'))!.filename).toBe('master take (Short).mp4');
   });
 });
@@ -825,9 +880,9 @@ describe('videoUpload', () => {
     await seedJob({ id: 'v1', state: 'REVIEW', pickVersion: 1 });
     await db()
       .update(jobs)
-      .set({ picks: [{ version: 1, title: 't', skipped: false }] })
+      .set({ picks: [{ ...pick(1), skipped: false }] })
       .where(eq(jobs.id, 'v1'));
-    const started = await createShort((await getJob('v1'))!, ['REVIEW'], 's1');
+    const started = await createShort((await getJob('v1'))!, ['REVIEW'], ARTIST, 's1');
     expect(started).toEqual({ id: 's1' });
     expect((await getJob('s1'))!.videoUpload).toBeNull();
   });

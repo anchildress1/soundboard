@@ -24,6 +24,50 @@ export const appRole = pgRole('soundboard_app').existing();
 export const cleanupRole = pgRole('soundboard_cleanup').existing();
 const principal = sql`nullif(current_setting('app.user_sub', true), '')`;
 const activeUser = sql`exists (select 1 from public.users u where u.uid = ${principal} and u.active)`;
+const callerArtist = sql`(select u.artist_id from public.users u where u.uid = ${principal} and u.active)`;
+
+/**
+ * One artist profile per user, linked by `users.artist_id`. New profiles are created only through
+ * `soundboard_create_artist`; `curated` is migration-only and selects Nathan's voice and brand guide
+ * until spec 005 replaces it.
+ */
+export const artists = pgTable(
+  'artists',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    bandcampUrl: text('bandcamp_url'),
+    contactLine: text('contact_line'),
+    curated: boolean('curated').notNull().default(false),
+    createdAt: at('created_at').notNull().defaultNow(),
+    updatedAt: at('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    pgPolicy('artists_owner_read', {
+      for: 'select',
+      to: appRole,
+      using: sql`${t.id} = ${callerArtist}`,
+    }),
+    pgPolicy('artists_owner_update', {
+      for: 'update',
+      to: appRole,
+      using: sql`${t.id} = ${callerArtist}`,
+      withCheck: sql`${t.id} = ${callerArtist}`,
+    }),
+    check(
+      'artists_name_check',
+      sql`${t.name} = btrim(${t.name}) and char_length(${t.name}) between 1 and 100 and ${t.name} !~ '[<>,]' and ${t.name} !~ '^#'`,
+    ),
+    check(
+      'artists_bandcamp_check',
+      sql`${t.bandcampUrl} is null or ${t.bandcampUrl} ~ '^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.bandcamp\\.com$'`,
+    ),
+    check(
+      'artists_contact_check',
+      sql`${t.contactLine} is null or (${t.contactLine} = btrim(${t.contactLine}) and char_length(${t.contactLine}) between 1 and 200 and ${t.contactLine} !~ '[<>#]')`,
+    ),
+  ],
+).enableRLS();
 
 /**
  * The allowlist and the accounts in one table: add a lowercased email by hand; its first Google
@@ -34,7 +78,9 @@ export const users = pgTable(
   {
     email: text('email').primaryKey(),
     uid: text('uid').unique(),
-    artistId: text('artist_id'),
+    artistId: text('artist_id')
+      .unique()
+      .references(() => artists.id),
     active: boolean('active').notNull().default(true),
     createdAt: at('created_at').notNull().defaultNow(),
   },
@@ -89,7 +135,7 @@ export const jobs = pgTable(
     ownerUid: text('owner_uid')
       .notNull()
       .references(() => users.uid),
-    artistId: text('artist_id'),
+    artistId: text('artist_id').references(() => artists.id),
     parentId: text('parent_id').references((): AnyPgColumn => jobs.id),
     state: text('state', { enum: JOB_STATES }).notNull(),
     createdAt: at('created_at').notNull(),
@@ -116,7 +162,7 @@ export const jobs = pgTable(
     pgPolicy('jobs_insert', {
       for: 'insert',
       to: appRole,
-      withCheck: sql`${t.ownerUid} = ${principal} and ${activeUser} and ((${t.parentId} is null and (${t.artistId} is null or ${t.artistId} = (select u.artist_id from public.users u where u.uid = ${principal}))) or public.soundboard_owns_job(${t.parentId}, ${t.artistId}))`,
+      withCheck: sql`${t.ownerUid} = ${principal} and ${activeUser} and ((${t.parentId} is null and ${t.artistId} is not null and ${t.artistId} = ${callerArtist}) or public.soundboard_owns_job(${t.parentId}, ${t.artistId}))`,
     }),
     pgPolicy('jobs_update', {
       for: 'update',
@@ -186,7 +232,9 @@ export const artistMemory = pgTable(
   'artist_memory',
   {
     id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-    artistId: text('artist_id').notNull(),
+    artistId: text('artist_id')
+      .notNull()
+      .references(() => artists.id),
     kind: text('kind', { enum: ['fact', 'feedback', 'publish', 'brand'] }).notNull(),
     key: text('key'),
     data: jsonb('data').notNull(),

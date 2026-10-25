@@ -403,6 +403,37 @@ describe('chatJson', () => {
     expect(sent(1).body.system_instruction).toBe(request.system);
   });
 
+  it('re-asks with the YouTube part still tagged: the span keeps the placeholder, the SDK the text', async () => {
+    const SENTINEL = 'reask-sentinel-4b2';
+    const tagged: ModelRequest = {
+      system: 'Pick.',
+      turns: [
+        {
+          role: 'user',
+          parts: [
+            { type: 'text', text: 'Pick.' },
+            { type: 'text', text: SENTINEL, source: 'youtube', count: 3 },
+          ],
+        },
+      ],
+    };
+    fetchMock
+      .mockResolvedValueOnce(interaction('{"ok":'))
+      .mockResolvedValueOnce(interaction(OK_JSON));
+    startSpan.mockClear();
+    await chatJson(tagged, 'smart-pick', schema, isOk, stepDeadline());
+    const spans = startSpan.mock.calls.map(([options]) => JSON.stringify(options));
+    expect(spans).toHaveLength(2);
+    for (const recorded of spans) {
+      expect(recorded).toContain('[YouTube uploads: 3]');
+      expect(recorded).not.toContain(SENTINEL);
+    }
+    const reask = JSON.stringify(sent(1).body);
+    expect(reask).toContain(SENTINEL);
+    expect(reask).not.toContain('"source"');
+    expect(reask).not.toContain('"count"');
+  });
+
   it('re-asks without an assistant turn when the reply was empty', async () => {
     fetchMock
       .mockResolvedValueOnce(interaction('', { status: 'incomplete' }))

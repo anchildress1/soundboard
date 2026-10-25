@@ -232,7 +232,10 @@ describe('GET /auth/callback: sign-in', () => {
   });
 
   it('admits a returning user by uid after a Google email change, leaving the row as is', async () => {
-    await seed({ users: [{ email: EMAIL, uid: SUB, artistId: 'flr' }] });
+    await seed({
+      artists: [{ id: 'artist-x', name: 'X' }],
+      users: [{ email: EMAIL, uid: SUB, artistId: 'artist-x' }],
+    });
     const before = await allUsers();
     google(SUB, 'changed@example.com');
     const { thrown, cookies } = await call({ cookie: sign(state()) });

@@ -16,9 +16,98 @@ export class YouTubeError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The first `error.errors[].reason` YouTube sent, when it sent one. */
+    readonly reason: string | null = null,
   ) {
     super(message);
   }
+}
+
+/** The step's budget ran out before a request could start. */
+export class DeadlineSpent extends Error {
+  constructor() {
+    super('The step ran out of time for YouTube.');
+  }
+}
+
+/** The connected channel isn't the one asked for: a reconnect landed in between. */
+export class ChannelMismatch extends Error {
+  constructor() {
+    super("Connected channel doesn't match this job's channel.");
+  }
+}
+
+/**
+ * A signal that aborts at the step's `deadline`. Throws `DeadlineSpent` when no time is left, so no
+ * request starts; `AbortSignal.timeout` would throw a RangeError on a negative wait.
+ */
+export function budgetSignal(deadline: number): AbortSignal {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new DeadlineSpent();
+  return AbortSignal.timeout(remaining);
+}
+
+export type IdentityFailure = 'access-lost' | 'busy' | 'app-rejected';
+
+// Research R8: a 403 is read by its reason, never by its status alone.
+const BUSY_REASONS = new Set([
+  'quotaExceeded',
+  'dailyLimitExceeded',
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+]);
+const REJECTED_REASONS = new Set(['accessNotConfigured', 'keyInvalid', 'keyExpired']);
+const REJECTED_CLIENTS = new Set(['invalid_client', 'unauthorized_client']);
+
+function statusFailure(status: number, reason: string | null): IdentityFailure {
+  if (status === 429 || status >= 500) return 'busy';
+  if (reason && REJECTED_REASONS.has(reason)) return 'app-rejected';
+  if (status === 403) return reason && BUSY_REASONS.has(reason) ? 'busy' : 'access-lost';
+  if (status === 401 || status === 404) return 'access-lost';
+  return 'app-rejected';
+}
+
+type Failed = {
+  name?: unknown;
+  code?: unknown;
+  status?: unknown;
+  config?: unknown;
+  response?: { status?: unknown; data?: { error?: unknown } };
+};
+
+const ABORTED = new Set(['AbortError', 'TimeoutError']);
+
+/** Whether a read stopped at the step's deadline: it never started, or it was aborted. */
+export function outOfTime(error: unknown): boolean {
+  if (error instanceof DeadlineSpent) return true;
+  const { name, code } = (error ?? {}) as Failed;
+  return ABORTED.has(String(name)) || ABORTED.has(String(code));
+}
+
+/** A refresh, fetch or abort failure's outcome; null when `error` is none of those. */
+function requestFailure(error: unknown): IdentityFailure | null {
+  if (error instanceof ChannelMismatch || outOfTime(error)) return 'busy';
+  if (error instanceof YouTubeError) return statusFailure(error.status, error.reason);
+  if (!(error instanceof Error)) return null;
+  const failed = error as Failed;
+  // Gaxios (the token refresh) keeps Google's OAuth error code and the HTTP status on the error.
+  const grant = failed.response?.data?.error;
+  if (typeof grant === 'string' && REJECTED_CLIENTS.has(grant)) return 'app-rejected';
+  const status = failed.status ?? failed.response?.status;
+  if (typeof status === 'number') return statusFailure(status, null);
+  if (failed.config !== undefined || error.message === 'fetch failed') return 'busy';
+  return null;
+}
+
+/**
+ * Classifies a failed identity or brand read (research R8): `access-lost` waits on a reconnect,
+ * `busy` waits and leaves the grant alone, and `app-rejected` (or anything unrecognized) is a
+ * failure.
+ */
+export function identityFailure(error: unknown): IdentityFailure {
+  return (
+    requestFailure(error) ?? requestFailure((error as { cause?: unknown })?.cause) ?? 'app-rejected'
+  );
 }
 
 export type UploadFailure = 'session-lost' | 'quota-spent' | 'access-lost' | 'denied' | 'other';
@@ -42,21 +131,40 @@ export function uploadFailure(error: unknown): UploadFailure {
   return error.status >= 400 && error.status < 500 ? 'denied' : 'other';
 }
 
+function errorReason(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { error?: { errors?: { reason?: unknown }[] } };
+    const reason = parsed.error?.errors?.[0]?.reason;
+    return typeof reason === 'string' ? reason : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readJson<T>(response: Response, what: string): Promise<T> {
   if (!response.ok) {
+    const body = await response.text();
     throw new YouTubeError(
       response.status,
-      `${what} ${response.status}: ${(await response.text()).slice(0, 300)}`,
+      `${what} ${response.status}: ${body.slice(0, 300)}`,
+      errorReason(body),
     );
   }
   return (await response.json()) as T;
 }
 
-/** Catalog reads use the API key from the second project, so they never spend upload quota. */
-async function keyGet<T>(path: string, params: Record<string, string>): Promise<T> {
+/**
+ * Catalog reads use the API key from the second project, so they never spend upload quota. The
+ * caller's `deadline` bounds the request.
+ */
+async function keyGet<T>(
+  path: string,
+  params: Record<string, string>,
+  deadline: number,
+): Promise<T> {
   const query = new URLSearchParams({ ...params, key: required('YOUTUBE_API_KEY') });
   return readJson<T>(
-    await fetch(`${API}/${path}?${query}`, { signal: AbortSignal.timeout(15_000) }),
+    await fetch(`${API}/${path}?${query}`, { signal: budgetSignal(deadline) }),
     path,
   );
 }
@@ -114,51 +222,59 @@ const toCatalog = (item: VideoItem): CatalogVideo => {
   };
 };
 
-export async function videosByIds(ids: string[]): Promise<CatalogVideo[]> {
+export async function videosByIds(ids: string[], deadline: number): Promise<CatalogVideo[]> {
   if (ids.length === 0) return [];
-  const body = await keyGet<ListResponse<VideoItem>>('videos', {
-    part: 'snippet,statistics,contentDetails',
-    id: ids.slice(0, 50).join(','),
-    maxResults: '50',
-  });
+  const body = await keyGet<ListResponse<VideoItem>>(
+    'videos',
+    { part: 'snippet,statistics,contentDetails', id: ids.slice(0, 50).join(','), maxResults: '50' },
+    deadline,
+  );
   return (body.items ?? []).map(toCatalog);
 }
 
 type ChannelItem = {
+  id?: string;
   snippet?: { customUrl?: string; title?: string };
   statistics?: { videoCount?: string; subscriberCount?: string };
   contentDetails?: { relatedPlaylists?: { uploads?: string } };
 };
 type PlaylistItem = { contentDetails?: { videoId?: string; videoPublishedAt?: string } };
 
-async function uploadsPage(playlistId: string, maxResults: number): Promise<PlaylistItem[]> {
-  const body = await keyGet<ListResponse<PlaylistItem>>('playlistItems', {
-    part: 'contentDetails',
-    maxResults: String(maxResults),
-    playlistId,
-  });
+async function uploadsPage(playlistId: string, deadline: number): Promise<PlaylistItem[]> {
+  const body = await keyGet<ListResponse<PlaylistItem>>(
+    'playlistItems',
+    { part: 'contentDetails', maxResults: '1', playlistId },
+    deadline,
+  );
   return body.items ?? [];
 }
 
 // Keyed by channel ID: each user's header shows their own channel, never another's.
 const statsCache = new Map<string, { at: number; value: ChannelStats }>();
 const STATS_TTL_MS = 10 * 60 * 1000;
+/** The header has no step budget; each stats read gets its own. */
+const STATS_BUDGET_MS = 15_000;
 
-const latestUpload = async (playlistId: string): Promise<PlaylistItem | undefined> =>
-  playlistId ? (await uploadsPage(playlistId, 1))[0] : undefined;
+const latestUpload = async (
+  playlistId: string,
+  deadline: number,
+): Promise<PlaylistItem | undefined> =>
+  playlistId ? (await uploadsPage(playlistId, deadline))[0] : undefined;
 
 /** A channel's header stats; cached so the home page doesn't spend a read on every visit. */
 export async function channelStats(channelId: string, now = Date.now()): Promise<ChannelStats> {
   const cached = statsCache.get(channelId);
   if (cached && now - cached.at < STATS_TTL_MS) return cached.value;
-  const body = await keyGet<ListResponse<ChannelItem>>('channels', {
-    part: 'snippet,statistics,contentDetails',
-    id: channelId,
-  });
+  const deadline = Date.now() + STATS_BUDGET_MS;
+  const body = await keyGet<ListResponse<ChannelItem>>(
+    'channels',
+    { part: 'snippet,statistics,contentDetails', id: channelId },
+    deadline,
+  );
   const item = body.items?.[0];
   if (!item) throw new YouTubeError(404, 'Channel not found');
   const uploadsPlaylist = item.contentDetails?.relatedPlaylists?.uploads ?? '';
-  const latest = await latestUpload(uploadsPlaylist);
+  const latest = await latestUpload(uploadsPlaylist, deadline);
   const value: ChannelStats = {
     handle: item.snippet?.customUrl ?? item.snippet?.title ?? '',
     videoCount: Number(item.statistics?.videoCount ?? 0),
@@ -174,16 +290,49 @@ export function clearStatsCache(): void {
   statsCache.clear();
 }
 
-/** A channel's most recent public uploads, newest first. */
-export async function recentVideos(channelId: string, count: number): Promise<CatalogVideo[]> {
-  const { uploadsPlaylist } = await channelStats(channelId);
-  const items = await uploadsPage(uploadsPlaylist, count + 5);
-  const ids = items
+/**
+ * The newest `count` uploads of `channelId`, read through its owner's own grant (`token`), newest
+ * first. Only snippets are read, never statistics, so `views` is 0. A grant that doesn't own the
+ * channel throws a 404 `YouTubeError`, which `identityFailure` reads as lost access.
+ */
+export async function ownUploads(
+  token: string,
+  channelId: string,
+  count: number,
+  deadline: number,
+): Promise<CatalogVideo[]> {
+  const get = async <T>(path: string, params: Record<string, string>) =>
+    readJson<T>(
+      await fetch(`${API}/${path}?${new URLSearchParams(params)}`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: budgetSignal(deadline),
+      }),
+      path,
+    );
+  // `mine=true` lists every channel on the grant, so only the connected one counts.
+  const channels = await get<ListResponse<ChannelItem>>('channels', {
+    part: 'contentDetails',
+    mine: 'true',
+  });
+  const channel = channels.items?.find((item) => item.id === channelId);
+  if (!channel) throw new YouTubeError(404, "channels.list: the grant doesn't own the channel");
+  const playlistId = channel.contentDetails?.relatedPlaylists?.uploads;
+  if (!playlistId) return [];
+  const page = await get<ListResponse<PlaylistItem>>('playlistItems', {
+    part: 'contentDetails',
+    playlistId,
+    maxResults: String(Math.min(count + 5, 50)),
+  });
+  const ids = (page.items ?? [])
     .map((item) => item.contentDetails?.videoId)
     .filter((id): id is string => typeof id === 'string' && id !== '');
-  const videos = await videosByIds(ids);
+  if (ids.length === 0) return [];
+  const body = await get<ListResponse<VideoItem>>('videos', { part: 'snippet', id: ids.join(',') });
   const order = new Map(ids.map((id, i) => [id, i]));
-  return videos.toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!).slice(0, count);
+  return (body.items ?? [])
+    .map(toCatalog)
+    .toSorted((a, b) => order.get(a.videoId)! - order.get(b.videoId)!)
+    .slice(0, count);
 }
 
 export type VideoDuration = 'short' | 'medium' | 'long';
@@ -191,18 +340,23 @@ export type VideoDuration = 'short' | 'medium' | 'long';
 /** Top music videos for a query (`type=video`, `videoCategoryId=10`), optionally by length bucket. */
 export async function searchMusicVideos(
   query: string,
-  maxResults = 25,
-  videoDuration?: VideoDuration,
+  maxResults: number,
+  videoDuration: VideoDuration | undefined,
+  deadline: number,
 ): Promise<string[]> {
-  const body = await keyGet<ListResponse<{ id?: { videoId?: string } }>>('search', {
-    part: 'id',
-    q: query,
-    type: 'video',
-    videoCategoryId: '10',
-    order: 'viewCount',
-    maxResults: String(maxResults),
-    ...(videoDuration ? { videoDuration } : {}),
-  });
+  const body = await keyGet<ListResponse<{ id?: { videoId?: string } }>>(
+    'search',
+    {
+      part: 'id',
+      q: query,
+      type: 'video',
+      videoCategoryId: '10',
+      order: 'viewCount',
+      maxResults: String(maxResults),
+      ...(videoDuration ? { videoDuration } : {}),
+    },
+    deadline,
+  );
   return (body.items ?? [])
     .map((item) => item.id?.videoId)
     .filter((id): id is string => Boolean(id));
@@ -211,10 +365,10 @@ export async function searchMusicVideos(
 /** A thumbnail as the model takes images: base64 bytes and their type. */
 export type Thumbnail = { data: string; mime_type: string };
 
-/** Fetches a thumbnail for the model; null when it can't be read. */
-export async function thumbnailImage(url: string): Promise<Thumbnail | null> {
+/** Fetches a thumbnail for the model by `deadline`; null when it can't be read in time. */
+export async function thumbnailImage(url: string, deadline: number): Promise<Thumbnail | null> {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(url, { signal: budgetSignal(deadline) });
     if (!response.ok) return null;
     const type = response.headers.get('content-type') ?? 'image/jpeg';
     return { data: Buffer.from(await response.arrayBuffer()).toString('base64'), mime_type: type };

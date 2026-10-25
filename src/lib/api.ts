@@ -1,12 +1,15 @@
+import type { ArtistInput, ArtistValue } from './artist';
 import type { BrandGuide, StoredBrand } from './brand';
-import type { FieldErrors } from './metadata';
 import type { JobView, Wait } from './types';
+
+/** Each field's message, keyed by the form's field names. */
+type FormErrors = Partial<Record<string, string>>;
 
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
-    readonly fields: FieldErrors | null = null,
+    readonly fields: FormErrors | null = null,
   ) {
     super(message);
   }
@@ -36,7 +39,7 @@ export class SessionTimeout extends Error {
  */
 export class Unreachable extends Error {}
 
-type ErrorBody = { error?: string; message?: string; fields?: FieldErrors; generation?: number };
+type ErrorBody = { error?: string; message?: string; fields?: FormErrors; generation?: number };
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
@@ -155,6 +158,14 @@ export function approveBrand(guide: BrandGuide, proposedAt: number) {
 
 export function discardBrandProposal() {
   return call<{ proposal: null }>('/api/brand/discard', { method: 'POST' });
+}
+
+/** Creates or updates the caller's artist profile; a 422 carries per-field errors. */
+export function saveArtist(body: ArtistInput) {
+  return call<{ artist: ArtistValue }>('/api/artist', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 }
 
 /** Always forgets the grant here; `revokedAtGoogle` is false when Google didn't confirm. */

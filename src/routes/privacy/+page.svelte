@@ -21,8 +21,10 @@
     </li>
     <li>
       Uploaded media, song titles, notes, analysis, generated drafts, edits, approvals, and upload
-      results support your releases. Linked artist profiles also store identity, feedback, and brand
-      guidance for later drafts.
+      results support your releases. Each account stores an artist name and an optional Bandcamp URL
+      and contact line, used for drafts and display. Artist memory linked to your profile stores
+      feedback and, for the curated profile, brand guidance. Recent uploads read to identify your
+      artist aren't stored.
     </li>
   </ul>
 

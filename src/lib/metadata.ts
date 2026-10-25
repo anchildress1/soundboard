@@ -29,6 +29,23 @@ export function tagsLength(tags: string[]): number {
   return chars + tags.length - 1;
 }
 
+/**
+ * The artist tag first, so its length is reserved, then `others` without any case variant of a tag
+ * already kept, each only while the total still fits YouTube's 500 characters; at most `max` tags.
+ */
+export function withArtistTag(artist: string, others: string[], max = Infinity): string[] {
+  const tags = [artist];
+  const seen = new Set([artist.toLowerCase()]);
+  for (const tag of others) {
+    if (tags.length >= max) break;
+    const key = tag.toLowerCase();
+    if (seen.has(key) || tagsLength([...tags, tag]) > TAGS_MAX) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
 /** Splits the comma-separated tags field the way it is edited in the UI. */
 export function splitTags(field: string): string[] {
   return field

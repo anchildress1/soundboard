@@ -92,6 +92,8 @@ export type Pick = PickFields & {
   bandcamp: BandcampDraft;
   /** Model time across every pick run for this job, this one included. */
   modelMs: number;
+  /** The artist tag this pick or Short used; null only on picks made before artist profiles. */
+  artistName: string | null;
 };
 
 /** How a landscape frame fits 9:16: a blurred copy of the frame behind it, or a center crop. */
@@ -124,7 +126,8 @@ export type Wait =
   | 'waiting on YouTube'
   | 'reconnect YouTube'
   | 'upload outcome unknown'
-  | 'Daily upload limit reached. Try tomorrow.';
+  | 'Daily upload limit reached. Try tomorrow.'
+  | 'Add your artist name first.';
 
 /** The job as the browser sees it: no owner, upload session URIs, or claim tokens. */
 export type PublicJob = {

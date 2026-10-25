@@ -7,15 +7,15 @@ import { getJob } from '#lib/server/jobs/jobs.js';
 import { POST } from '#src/routes/api/jobs/+server.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { gcs, resetGcs } from '../../../../helpers/gcs';
-import { sealed, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { sealed, USER_A, USER_B, USER_C, USERS } from '../../../../helpers/pipeline';
 
 vi.mock('@google-cloud/storage', () => import('../../../../helpers/gcs'));
 vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
 
 type Event = Parameters<typeof POST>[0];
-type User = typeof USER_A | typeof USER_B | null;
+type User = typeof USER_A | typeof USER_B | typeof USER_C | null;
 
-const post = (body: unknown, user: User = USER_B) =>
+const post = (body: unknown, user: User = USER_C) =>
   POST({
     request: new Request('http://localhost/api/jobs', {
       method: 'POST',
@@ -61,6 +61,22 @@ describe('POST /api/jobs', () => {
       state: 'AWAITING_UPLOAD',
       object: gcs.created[0]!.object,
       videoUpload: { sessionCipher: sealed(body.sessionUri), generation: 1 },
+    });
+  });
+
+  it('409s a user with no artist profile, opening no session and storing nothing', async () => {
+    const response = await post(upload, USER_B);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Add your artist name first.', fields: null });
+    expect(gcs.created).toEqual([]);
+    expect(await jobCount()).toBe(0);
+  });
+
+  it("stores the owner's own profile on a non-Nathan job", async () => {
+    const body = (await (await post(upload, USER_C)).json()) as { id: string };
+    expect(await getJob(body.id)).toMatchObject({
+      ownerUid: USER_C.uid,
+      artistId: USER_C.artistId,
     });
   });
 

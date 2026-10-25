@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signIn, USER_A, USER_B } from './session';
+import { signIn, USER_A, USER_C } from './session';
 
 const noHorizontalScroll = async (page: Page) =>
   expect(
@@ -27,7 +27,7 @@ test('analyzes the next window up to the model, then waits while it is busy', as
 });
 
 test('waits while the model is busy during the pick', async ({ page }, testInfo) => {
-  await signIn(page, USER_B);
+  await signIn(page, USER_C);
   const id = `e2e-pick-${testInfo.project.name}`;
   const step = page.waitForResponse((response) => response.url().endsWith(`/jobs/${id}/step`));
   await page.goto(`/jobs/${id}`);

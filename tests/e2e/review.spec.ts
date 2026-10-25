@@ -27,7 +27,8 @@ test('walks the draft one field at a time to approval', async ({ page }) => {
   await button(page, 'Looks right, next').click();
 
   await expect(h1(page)).toHaveText('Check the tags');
-  await expect(page.getByLabel(/^Tags/)).toHaveValue('synthwave, Flies Like Robots');
+  await expect(page.getByLabel(/^Tags/)).toHaveValue('synthwave');
+  await expect(page.locator('.fixed-tag')).toHaveText(/Flies Like Robots/);
   // No ffmpeg flags on this pick, so the check screen is skipped.
   await button(page, 'Fine, next').click();
 

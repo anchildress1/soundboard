@@ -202,6 +202,22 @@ describe('getUser', () => {
     });
   });
 
+  it("joins the user's linked profile, as migration 0005 seeds Nathan's", async () => {
+    await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, artistId: 'flr' }] });
+    expect((await getUser(NATHAN))!.artist).toEqual({
+      id: 'flr',
+      name: 'Flies Like Robots',
+      bandcampUrl: 'https://flieslikerobots.bandcamp.com',
+      contactLine: 'Contact at flieslikerobots@gmail.com.',
+      curated: true,
+    });
+  });
+
+  it('returns a null artist for a user with no profile', async () => {
+    await seed({ users: [{ email: 'b@example.com', uid: OTHER }] });
+    expect((await getUser(OTHER))!.artist).toBeNull();
+  });
+
   it('returns null for a deactivated user', async () => {
     await seed({ users: [{ email: 'nathan@example.com', uid: NATHAN, active: false }] });
     expect(await getUser(NATHAN)).toBeNull();

@@ -36,3 +36,4 @@
 - The four scope questions were answered on 2026-10-23: one profile per user; name, Bandcamp URL and contact line; entered before the first run; voice and brand guide out of scope.
 - "Flies Like Robots", YouTube and Bandcamp are the product's own nouns, not implementation choices.
 - The footer credit, generic voice and brand-guide scope are recorded as assumptions the owner can override.
+- The 2026-10-25 review decisions (grant wait, `curated` flag, Bandcamp URL class, name rules, credit line, Shorts, missing-profile wait) are in Clarifications.

@@ -12,9 +12,10 @@ Audience: AI coding agents. Directives only.
 - Artist name: "Nathan" or "Flies Like Robots". NEVER write his surname in code, fixtures, seeds, prompts, commits, or docs.
 - NEVER filter or redact his surname from runtime data (channel credits, model output).
 - UI text: plain labels. NEVER persona or chatbot copy.
-- Description voice: `ARTIST_VOICE` in `src/lib/server/ai/smart-pick.ts`. Change only on new evidence of how Nathan writes.
+- Description voice: `ARTIST_VOICE` in `src/lib/server/ai/smart-pick.ts`, only for `artists.curated`; everyone else gets `GENERIC_VOICE`. Change `ARTIST_VOICE` only on new evidence of how Nathan writes. Spec 005 removes `curated`.
+- Artist values come from `artists` only. NEVER add an FLR constant to app code.
 - Audio numbers (LUFS, peak, clipping, silence): ffmpeg only. Strip model-emitted numerics (`src/lib/server/ai/numerics.ts`).
-- Hashtags and tags: only from the job's candidate lists (PRD R4). Reject anything else.
+- Hashtags and tags: only from the job's candidate lists (PRD R4), plus the pick's own `artistName` tag exactly once. Reject anything else.
 
 ## Data and access
 
@@ -23,8 +24,10 @@ Audience: AI coding agents. Directives only.
 - A user is their Google `sub` (`users.uid`). Email is the allowlist key and display only.
 - `users` is the allowlist: the operator adds emails by hand. Sign-in needs an active row while `SIGNUP_MODE=invite`. First sign-in binds `uid`; NEVER rebind it. `SIGNUP_MODE=open` adds a permanent active row per new account.
 - Load a job by a request-supplied ID only through `authorizedJob` (owner check); list jobs only through `listJobs(uid)`. Another user's job → 404, never 403.
-- Only a user with `artistId` reads or writes `artist_memory` rows or opens `/brand`.
-- Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.
+- Only a user with a curated profile opens `/brand`.
+- Gate artist memory and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.
+- Identity reads need the owner's profile and grant. Without the grant, the pick waits on `reconnect YouTube`.
+- NEVER store identity-read uploads (titles, descriptions, video IDs) in the database.
 - One YouTube connection per user, bound to their own Google account. Refresh tokens: KMS ciphertext in `connections.token_ciphertext` only. NEVER log, trace, or return a token or ciphertext.
 - GCS upload session URIs: KMS ciphertext in `jobs.data.videoUpload.sessionCipher` only. Requests name a session by `generation`. NEVER log, trace, or put a session URI in a request; return it only from `POST /api/jobs` and `POST /api/jobs/{id}/upload-session`.
 - Upload and verify use only the job's approved destination channel and its owner's grant.
@@ -37,7 +40,7 @@ Audience: AI coding agents. Directives only.
 - NEVER buffer whole media in app memory. Stream in chunks or keep it on disk.
 - Short renders: temp file in `os.tmpdir()` → `uploadFile` → delete in `finally` → ffprobe read-back from GCS.
 - Analyst clips: temp file in `os.tmpdir()`, `stat` ≤ 8,000,000 bytes before reading, sent inline, deleted in `finally`. NEVER send the model a URL.
-- Sentry: NEVER record audio, image or video bytes. Use `{type, mime, bytes}` placeholders; video adds `clip: '<start>s–<end>s'`. Keep prompt and reply text for every agent.
+- Sentry: NEVER record audio, image or video bytes. Use `{type, mime, bytes}` placeholders; video adds `clip: '<start>s–<end>s'`. Keep prompt and reply text for every agent. Replace YouTube-sourced text parts (`source: 'youtube'`) with `[YouTube uploads: <n>]`.
 
 ## Architecture
 

@@ -166,12 +166,12 @@ make dev
   DATABASE_URL_UNPOOLED="$(gcloud secrets versions access latest --secret=DATABASE_URL_UNPOOLED --project=YOUR_GCP_PROJECT_ID)" node scripts/invite.ts list
   ```
 
-  Replace `YOUR_GCP_PROJECT_ID` and use the same prefix for `add`, `revoke`, or `reactivate`. `--artist flr` links the account to Nathan's artist profile. Revoking signs the user out on their next request.
+  Replace `YOUR_GCP_PROJECT_ID` and use the same prefix for `add`, `revoke`, or `reactivate`. `--artist flr` links the account to Nathan's existing artist profile. Every other user enters their artist name on first run, with an optional Bandcamp URL and contact line, and can change them later in _Settings_. Revoking signs the user out on their next request.
 
 - **Connections:** signing in also connects the user's own YouTube channel. The _Connections_ page shows its status and offers Reconnect and Disconnect; a missing or revoked grant blocks approval until it's reconnected. Refresh tokens are stored encrypted with the Cloud KMS key.
 - **Genre research retention:** database reads exclude research at least 30 days old. Deploy and enable the daily Neon cleanup separately using [the retention procedure](docs/operations/youtube-retention.md); an app deployment alone does not create that schedule.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
-- **Brand guide:** accounts linked to Nathan's artist profile get a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
+- **Brand guide:** only the curated profile, Nathan's, gets a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads through the user's own YouTube grant; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
 - **Gemini API key:** create it in a paid-tier project. `make deploy` copies `GEMINI_API_KEY` from `.env` into the `soundboard-gemini-api-key` secret when it changes; dev and prod share the key, its spend, and its daily quota.
 
 ---
@@ -188,7 +188,6 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 | `GEMINI_ANALYST_MODEL`                                  | Model that watches and hears each window (default `gemini-3.8-flash`)                            |
 | `GEMINI_PICK_MODEL`                                     | Model for the draft, the Short hook, and the brand guide (default `gemini-4-argon`)              |
 | `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                                 |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
 | `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |
 | `KMS_KEY`                                               | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service |

@@ -36,7 +36,6 @@ fi
 
 require_env GCP_PROJECT_ID
 require_env GCS_BUCKET
-require_env FLR_CHANNEL_ID
 require_env GOOGLE_OAUTH_CLIENT_ID
 SIGNUP_MODE="${SIGNUP_MODE:-invite}"
 case "$SIGNUP_MODE" in invite | open) ;; *) echo "Error: SIGNUP_MODE must be invite or open." >&2; exit 1 ;; esac
@@ -45,7 +44,7 @@ PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
 KMS_KEYRING="soundboard"
 KMS_KEY_NAME="refresh-tokens"
 KMS_KEY="projects/${GCP_PROJECT_ID}/locations/${REGION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY_NAME}"
-export GCP_PROJECT_ID GCS_BUCKET FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
+export GCP_PROJECT_ID GCS_BUCKET GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
   PUBLIC_SENTRY_DSN
 SERVICE_ACCOUNT="${SERVICE}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 GIT_SHA="$(git rev-parse --short HEAD)"
@@ -183,7 +182,7 @@ trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
 envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${GCP_PROJECT_ID} ${GCS_BUCKET}
-  ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}' \
+  ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}' \
   < service.yaml > "$rendered"
 
 gcloud run services replace "$rendered" --region "$REGION" --project "$GCP_PROJECT_ID"

@@ -98,6 +98,7 @@ describe('jobStatus', () => {
   it.each([
     [BUSY, 'Model busy'],
     ['model quota spent', 'Model quota spent'],
+    ['Add your artist name first.', 'Add your artist name first.'],
   ] as const)(
     'shows the %s wait in plain words with running progress ahead of the state label',
     (wait, text) => {
@@ -336,6 +337,7 @@ describe('modelSeconds', () => {
     brandCheck: '',
     why: { title: '', description: '', tags: '' },
     bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+    artistName: null,
     modelMs: 12_400,
   };
 

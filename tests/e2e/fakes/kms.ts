@@ -13,7 +13,11 @@ export class KeyManagementServiceClient {
 
   async decrypt({ ciphertext }: { name: string; ciphertext: Bytes }) {
     const sealed = bytes(ciphertext);
-    if (!sealed.subarray(0, MARKER.length).equals(MARKER)) throw new Error('INVALID_ARGUMENT');
+    // Real KMS rejects foreign ciphertext with gRPC INVALID_ARGUMENT and this `details` text.
+    if (!sealed.subarray(0, MARKER.length).equals(MARKER)) {
+      const details = 'Decryption failed: the ciphertext is invalid.';
+      throw Object.assign(new Error(`3 INVALID_ARGUMENT: ${details}`), { code: 3, details });
+    }
     return [{ plaintext: sealed.subarray(MARKER.length) }] as const;
   }
 }

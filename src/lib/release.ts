@@ -131,7 +131,19 @@ export function workCopy({ job, wait }: JobView): { title: string; body: string 
       };
     case 'waiting on YouTube':
       return { title: WAIT_TEXT[wait], body: 'This page checks again on its own.' };
+    case 'Add your artist name first.':
+      return {
+        title: WAIT_TEXT[wait],
+        body: 'Picks use your artist name. Add it, then come back.',
+      };
     case 'reconnect YouTube':
+      if (job.state === 'PICK') {
+        return {
+          title: WAIT_TEXT[wait],
+          body: 'The pick reads your recent uploads through your YouTube connection.',
+        };
+      }
+      return { title: 'Upload paused', body: 'It needs you before it can go on.' };
     case 'upload outcome unknown':
       return { title: 'Upload paused', body: 'It needs you before it can go on.' };
     case 'Daily upload limit reached. Try tomorrow.':

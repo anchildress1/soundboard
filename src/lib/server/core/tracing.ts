@@ -9,7 +9,11 @@ export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-p
 export type AgentSpan = Span;
 
 export type Part =
-  | { type: 'text'; text: string }
+  /**
+   * `source: 'youtube'` marks text drawn from YouTube data; spans record only
+   * `[YouTube uploads: <count>]` in its place, while the model still gets the text.
+   */
+  | { type: 'text'; text: string; source?: 'youtube'; count?: number }
   /** Base64 image, such as a thumbnail. */
   | { type: 'image'; data: string; mime_type: string }
   /** One window's inline clip; `start` and `end` are source seconds. */
@@ -40,8 +44,20 @@ const base64Bytes = (b64: string) => {
   return Math.floor((b64.length * 3) / 4) - padding;
 };
 
+/** A text part of YouTube data, `count` naming how many videos it describes. */
+export const youtubePart = (value: unknown, count: number): Part => ({
+  type: 'text',
+  text: JSON.stringify(value),
+  source: 'youtube',
+  count,
+});
+
 function redactPart(part: Part) {
-  if (part.type === 'text') return { type: 'text', content: part.text };
+  if (part.type === 'text') {
+    return part.source === 'youtube'
+      ? { type: 'text', content: `[YouTube uploads: ${part.count ?? 0}]` }
+      : { type: 'text', content: part.text };
+  }
   if (part.type === 'image') {
     return { type: 'image', mime: part.mime_type, bytes: base64Bytes(part.data) };
   }
@@ -54,8 +70,8 @@ function redactPart(part: Part) {
 }
 
 /**
- * Replaces image and video payloads with placeholders, so media never reaches Sentry while the
- * shape of the request and all of its text stay visible.
+ * Replaces image and video payloads and YouTube-sourced text with placeholders, so neither reaches
+ * Sentry while the shape of the request and the rest of its text stay visible.
  */
 export function redactTurns(turns: Turn[]): unknown[] {
   return turns.map((turn) => ({ role: turn.role, parts: turn.parts.map(redactPart) }));

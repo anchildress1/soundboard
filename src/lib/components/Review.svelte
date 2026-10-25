@@ -55,12 +55,18 @@
   const saved = untrack(() => loadDraft(draft));
   let title = $state(saved?.title ?? untrack(() => fields.title));
   let description = $state(saved?.description ?? untrack(() => fields.description));
-  let tagsText = $state(saved?.tags ?? untrack(() => fields.tags.join(', ')));
+  // The artist tag is fixed, outside the editable field, so editing can't drop it (research R9).
+  const artistName = untrack(() => pick.artistName);
+  const artistKey = artistName?.toLowerCase();
+  const editable = (list: string[]) => list.filter((tag) => tag.toLowerCase() !== artistKey);
+  let tagsText = $state(saved?.tags ?? untrack(() => editable(fields.tags).join(', ')));
   if (saved && (REVIEW_STEPS as readonly string[]).includes(saved.step)) {
     step = saved.step as ReviewStep;
   }
 
-  const tags = $derived(splitTags(tagsText));
+  const tags = $derived(
+    artistName ? [artistName, ...editable(splitTags(tagsText))] : splitTags(tagsText),
+  );
   const tagCount = $derived(tagsLength(tags));
   const errors = $derived({
     ...serverErrors,
@@ -154,6 +160,9 @@
     </div>
     <div class="field" class:err={errors.tags}>
       <label for="tags">Tags <span>{tagCount} / {TAGS_MAX}</span></label>
+      {#if artistName}
+        <p class="fixed-tag"><span class="chip">{artistName}</span> Artist tag, always included</p>
+      {/if}
       <textarea id="tags" rows="4" bind:value={tagsText}></textarea>
       {#if errors.tags}<span class="msg">{errors.tags}</span>{/if}
     </div>
@@ -273,6 +282,16 @@
   .title-input {
     font-size: 20px;
     font-weight: 500;
+  }
+
+  .fixed-tag {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
   }
 
   .why {

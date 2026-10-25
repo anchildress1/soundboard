@@ -12,7 +12,6 @@
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
   let menu = $state<HTMLElement>();
-  const artist = $derived(data.user?.artistId === 'flr');
   // Exact counts as YouTube returns them: rounding would be a number derived from its statistics.
   const count = (n: number, noun: string) =>
     `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`;
@@ -28,7 +27,7 @@
   <link rel="preload" href={displayFont} as="font" type="font/woff2" crossorigin="anonymous" />
   <meta
     name="description"
-    content="Release agent for Flies Like Robots: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
+    content="Release agent for musicians: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
   />
 </svelte:head>
 
@@ -38,15 +37,18 @@
   <header>
     <a class="wordmark" href={resolve('/')}><span aria-hidden="true"></span>Soundboard</a>
     {#if data.user}
-      {#if data.channel}
+      {#if data.artist || data.channel}
         <p class="channel">
-          <b>{data.channel.handle}</b>
-          <span class="num"
-            >{count(data.channel.videoCount, 'video')} · {count(
-              data.channel.subscriberCount,
-              'subscriber',
-            )}</span
-          >
+          {#if data.artist}<b>{data.artist.name}</b>{/if}
+          {#if data.channel}
+            <b>{data.channel.handle}</b>
+            <span class="num"
+              >{count(data.channel.videoCount, 'video')} · {count(
+                data.channel.subscriberCount,
+                'subscriber',
+              )}</span
+            >
+          {/if}
         </p>
       {/if}
       <button class="btn small menu-button" type="button" popovertarget="menu" aria-label="Menu">
@@ -55,10 +57,10 @@
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <nav id="menu" aria-label="Menu" popover bind:this={menu} onclick={closeOnLink}>
         <a href={resolve('connections')}>Connections</a>
-        {#if artist}
+        {#if data.artist?.curated}
           <a href={resolve('brand')}>Brand guide</a>
-          <a href={resolve('settings')}>Settings</a>
         {/if}
+        <a href={resolve('settings')}>Settings</a>
         <form method="POST" action="/auth/logout">
           <button type="submit" title={data.user.email}>Sign out</button>
         </form>
@@ -72,7 +74,7 @@
     {@render children()}
   </div>
 
-  <Footer />
+  <Footer artist={data.artist} />
 </div>
 
 <style>

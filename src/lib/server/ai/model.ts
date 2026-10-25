@@ -45,6 +45,10 @@ const AGENTS = {
   { model: () => string; thinkingLevel: 'low' | 'medium'; maxTokens: number; minCallMs: number }
 >;
 
+/** Whether `deadline` still leaves the agent its minimum call time. */
+export const hasModelTime = (agent: Agent, deadline: number, now = Date.now()) =>
+  deadline - now >= AGENTS[agent].minCallMs;
+
 /** The configured model id for an agent. */
 export const modelFor = (agent: Agent) => AGENTS[agent].model();
 

@@ -1,7 +1,4 @@
-import { getBrand, requireArtist } from '#lib/server/artist/brand.js';
+import { getBrand, requireCurated } from '#lib/server/artist/brand.js';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
-  requireArtist(locals.user);
-  return getBrand();
-};
+export const load: PageServerLoad = ({ locals }) => getBrand(requireCurated(locals.user));

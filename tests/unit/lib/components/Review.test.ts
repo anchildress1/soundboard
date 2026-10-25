@@ -18,6 +18,7 @@ const PICK: Pick = {
   brandCheck: '',
   why: { title: 'Matches.', description: 'Plain.', tags: 'Genre first.' },
   bandcamp: { about: '', credits: '' },
+  artistName: null,
   modelMs: 0,
 };
 
@@ -124,6 +125,51 @@ describe('Review: screens', () => {
     await walk('Looks right, next');
     await fireEvent.click(button('Re-run model'));
     expect(onrerun).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('Review: the artist tag', () => {
+  const ARTIST_PICK: Pick = {
+    ...PICK,
+    tags: ['Test Artist', 'synthwave'],
+    artistName: 'Test Artist',
+  };
+
+  it('shows the artist tag fixed outside the editable field, and counts it', () => {
+    setup({ pick: ARTIST_PICK, step: 'tags' });
+    expect(screen.getByText('Test Artist', { selector: '.chip' })).toBeInTheDocument();
+    expect(screen.getByText('Artist tag, always included')).toBeInTheDocument();
+    expect(field(/^Tags/).value).toBe('synthwave');
+    // YouTube counts quotes around a spaced tag: "Test Artist",synthwave.
+    expect(screen.getByText('23 / 500')).toBeInTheDocument();
+  });
+
+  it('submits the artist tag once, first, even when cleared or typed again', async () => {
+    const { onapprove } = setup({ pick: ARTIST_PICK });
+    await walk('Keep it, next', 'Looks right, next');
+    await fireEvent.input(field(/^Tags/), {
+      target: { value: 'test artist, synthwave, TEST ARTIST' },
+    });
+    await walk('Fine, next', 'Understood, next');
+    await fireEvent.click(button(APPROVE));
+    expect(onapprove).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tags: ['Test Artist', 'synthwave'] }),
+    );
+  });
+
+  it('keeps the artist tag when the field is emptied', async () => {
+    const { onapprove } = setup({ pick: ARTIST_PICK });
+    await walk('Keep it, next', 'Looks right, next');
+    await fireEvent.input(field(/^Tags/), { target: { value: '' } });
+    await walk('Fine, next', 'Understood, next');
+    await fireEvent.click(button(APPROVE));
+    expect(onapprove).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['Test Artist'] }));
+  });
+
+  it('shows no fixed tag on a pick made before profiles', () => {
+    setup({ step: 'tags' });
+    expect(screen.queryByText('Artist tag, always included')).toBeNull();
+    expect(field(/^Tags/).value).toBe('synthwave, PeekaBoo');
   });
 });
 

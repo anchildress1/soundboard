@@ -14,10 +14,13 @@ import {
   TOP_VIDEO_COUNT,
   topVideos,
 } from '#lib/server/pipeline/hashtags.js';
-import type { CatalogVideo } from '#lib/server/platforms/youtube/youtube.js';
+import { DeadlineSpent, type CatalogVideo } from '#lib/server/platforms/youtube/youtube.js';
+import { span } from '../../../../mocks/sentry';
 import type { Chunk } from '#lib/types.js';
 
 const SYNTHWAVE_TAG = '#synthwave';
+/** A step deadline with time to spare. */
+const later = () => Date.now() + 60_000;
 const INDUSTRIAL = '#industrial';
 
 const chunk = (genre: string[] | null): Chunk => ({
@@ -251,13 +254,13 @@ describe('audienceEvidence', () => {
     ];
     const search = { items: items.map(({ id }) => ({ id: { videoId: id } })) };
     fetchMock.mockResolvedValueOnce(json(search)).mockResolvedValueOnce(json({ items }));
-    const first = await audienceEvidence([], null);
+    const first = await audienceEvidence([], null, later());
     fetchMock.mockResolvedValueOnce(json(search)).mockResolvedValueOnce(
       json({
         items: items.map((item, i) => ({ ...item, statistics: { viewCount: String(i * 1000) } })),
       }),
     );
-    const second = await audienceEvidence([], null);
+    const second = await audienceEvidence([], null, later());
 
     expect(first.candidateLists).toEqual([
       {
@@ -292,7 +295,7 @@ describe('audienceEvidence', () => {
     fetchMock
       .mockResolvedValueOnce(json({ items: items.map(({ id }) => ({ id: { videoId: id } })) }))
       .mockResolvedValueOnce(json({ items }));
-    const evidence = await audienceEvidence([], null);
+    const evidence = await audienceEvidence([], null, later());
     expect(
       evidence.candidateLists.map(({ videoId, hashtags, tags }) => ({
         videoId,
@@ -318,7 +321,7 @@ describe('audienceEvidence', () => {
         return json({ items: [] });
       });
 
-    expect((await audienceEvidence([], null)).retrievedAt).toBe(RETRIEVED_AT);
+    expect((await audienceEvidence([], null, later())).retrievedAt).toBe(RETRIEVED_AT);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -351,7 +354,7 @@ describe('audienceEvidence', () => {
         }),
       );
 
-    const evidence = await audienceEvidence([chunk(['synthwave'])], null);
+    const evidence = await audienceEvidence([chunk(['synthwave'])], null, later());
 
     expect(evidence.query).toBe('synthwave music video');
     expect(evidence.retrievedAt).toBe(RETRIEVED_AT);
@@ -416,7 +419,7 @@ describe('audienceEvidence', () => {
         }),
       );
 
-    const evidence = await audienceEvidence([chunk(['industrial'])], 78);
+    const evidence = await audienceEvidence([chunk(['industrial'])], 78, later());
 
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
     expect(searchUrl.searchParams.get('maxResults')).toBe('50');
@@ -440,7 +443,7 @@ describe('audienceEvidence', () => {
       .mockResolvedValueOnce(json({ items: ids.map((videoId) => ({ id: { videoId } })) }))
       .mockResolvedValueOnce(json({ items: items.toReversed() }));
 
-    const evidence = await audienceEvidence([], 180);
+    const evidence = await audienceEvidence([], 180, later());
 
     expect(eligible).toHaveLength(12);
     expect(evidence.candidateLists).toEqual(
@@ -464,14 +467,14 @@ describe('audienceEvidence', () => {
     fetchMock
       .mockResolvedValueOnce(json({ items: [{ id: { videoId: 'a' } }, { id: { videoId: 'b' } }] }))
       .mockResolvedValueOnce(json({ items: [] }));
-    await audienceEvidence([chunk(['synthwave'])], null);
+    await audienceEvidence([chunk(['synthwave'])], null, later());
     const videosUrl = new URL(fetchMock.mock.calls[1]![0] as string);
     expect(videosUrl.searchParams.get('id')).toBe('a,b');
   });
 
   it('searches every length when the window crosses a bucket edge', async () => {
     fetchMock.mockResolvedValueOnce(json({ items: [] }));
-    await audienceEvidence([chunk(['synthwave'])], 230);
+    await audienceEvidence([chunk(['synthwave'])], 230, later());
     const searchUrl = new URL(fetchMock.mock.calls[0]![0] as string);
     expect(searchUrl.searchParams.has('videoDuration')).toBe(false);
   });
@@ -486,13 +489,13 @@ describe('audienceEvidence', () => {
           ],
         }),
       );
-    const evidence = await audienceEvidence([], 200);
+    const evidence = await audienceEvidence([], 200, later());
     expect(evidence).toMatchObject({ candidateLists: [], top: [] });
   });
 
   it('returns empty evidence and skips the videos lookup when the search finds nothing', async () => {
     fetchMock.mockResolvedValueOnce(json({}));
-    expect(await audienceEvidence([], null)).toEqual({
+    expect(await audienceEvidence([], null, later())).toEqual({
       retrievedAt: RETRIEVED_AT,
       query: 'music video',
       candidateLists: [],
@@ -503,12 +506,38 @@ describe('audienceEvidence', () => {
 
   it('rejects when the YouTube search fails', async () => {
     fetchMock.mockResolvedValueOnce(new Response('quotaExceeded', { status: 403 }));
-    await expect(audienceEvidence([], null)).rejects.toThrow('search 403: quotaExceeded');
+    await expect(audienceEvidence([], null, later())).rejects.toThrow('search 403: quotaExceeded');
+  });
+
+  it('stops at the deadline without a request', async () => {
+    await expect(audienceEvidence([], null, Date.now() - 1)).rejects.toBeInstanceOf(DeadlineSpent);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('records only counts as the tool result, never the YouTube text', async () => {
+    span.setAttribute.mockClear();
+    fetchMock
+      .mockResolvedValueOnce(json({ items: [{ id: { videoId: 'v1' } }] }))
+      .mockResolvedValueOnce(
+        json({
+          items: [
+            {
+              id: 'v1',
+              snippet: { title: 'Secret Title', description: '#synthwave', tags: ['synthwave'] },
+              statistics: { viewCount: '1' },
+            },
+          ],
+        }),
+      );
+    await audienceEvidence([], null, later());
+    const result = span.setAttribute.mock.calls.find(([key]) => key === 'gen_ai.tool.call.result');
+    expect(JSON.parse(result![1] as string)).toEqual({ candidateLists: 1, top: 1 });
+    expect(JSON.stringify(span.setAttribute.mock.calls)).not.toContain('Secret Title');
   });
 
   it('rejects without an API key and makes no request', async () => {
     vi.stubEnv('YOUTUBE_API_KEY', '');
-    await expect(audienceEvidence([], null)).rejects.toThrow('YOUTUBE_API_KEY');
+    await expect(audienceEvidence([], null, later())).rejects.toThrow('YOUTUBE_API_KEY');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

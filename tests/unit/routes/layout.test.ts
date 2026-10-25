@@ -8,16 +8,22 @@ const NATHAN_EMAIL = 'nathan@example.com';
 const STRANGER_EMAIL = 'someone@example.com';
 const BRAND_GUIDE = 'Brand guide';
 
-type Props = { data: { channel: unknown; user: unknown }; children: unknown };
+type Props = { data: { channel: unknown; user: unknown; artist: unknown }; children: unknown };
 
-const NATHAN = { email: NATHAN_EMAIL, artistId: 'flr' };
-const STRANGER = { email: STRANGER_EMAIL, artistId: null };
+const NATHAN = { email: NATHAN_EMAIL };
+const FLR = {
+  name: 'Flies Like Robots',
+  bandcampUrl: 'https://flieslikerobots.bandcamp.com',
+  curated: true,
+};
+const C = { name: 'Test Artist', bandcampUrl: null, curated: false };
+const STRANGER = { email: STRANGER_EMAIL };
 
 const children = createRawSnippet(() => ({ render: () => '<main>page body</main>' }));
 
 function setup(data: Partial<Props['data']> = {}) {
   return render(Layout, {
-    props: { data: { channel: null, user: null, ...data }, children } as never,
+    props: { data: { channel: null, user: null, artist: null, ...data }, children } as never,
   });
 }
 
@@ -45,16 +51,13 @@ describe('layout', () => {
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
   });
 
-  it('renders the page between header and footer', () => {
+  it('renders the page between header and footer, naming no artist when signed out', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     const footer = screen.getByRole('contentinfo');
-    expect(footer).toHaveTextContent('Built for Flies Like Robots by Ashley Childress');
-    expect(footer).toHaveTextContent('PolyForm Noncommercial 1.0.0');
+    expect(footer).toHaveTextContent('Built by Ashley Childress · PolyForm Noncommercial 1.0.0');
+    expect(document.body).not.toHaveTextContent('Flies Like Robots');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
-    const artist = within(footer).getByRole('link', { name: 'Flies Like Robots' });
-    expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
-    expect(artist).toHaveAttribute('target', '_blank');
     const legal = within(footer).getByRole('navigation', { name: 'Legal' });
     const privacy = within(legal).getByRole('link', { name: 'Privacy policy' });
     expect(privacy).toHaveAttribute('href', '/privacy');
@@ -82,10 +85,37 @@ describe('layout', () => {
     expect(nav.closest('footer')).not.toBeNull();
   });
 
+  it('describes the app without naming an artist', () => {
+    setup({ user: NATHAN, artist: FLR });
+    const meta = document.head.querySelector('meta[name="description"]');
+    expect(meta).toHaveAttribute(
+      'content',
+      'Release agent for musicians: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload.',
+    );
+  });
+
   it("shows the connected channel's handle with its exact counts", () => {
     setup({ channel: { ...channel, subscriberCount: 12_345 }, user: NATHAN });
     expect(screen.getByText(HANDLE).closest('header')).not.toBeNull();
     expect(screen.getByText('12 videos · 12,345 subscribers')).toBeInTheDocument();
+  });
+
+  it("names the user's artist first in the header row, before the channel", () => {
+    setup({ channel, user: STRANGER, artist: C });
+    const name = screen.getByText(C.name);
+    const row = name.closest('header')!;
+    expect(row).not.toBeNull();
+    expect(
+      name.compareDocumentPosition(screen.getByText(HANDLE)) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByRole('contentinfo')).toHaveTextContent(
+      'Built for Test Artist by Ashley Childress',
+    );
+  });
+
+  it('names the artist even without a connected channel', () => {
+    setup({ user: STRANGER, artist: C });
+    expect(screen.getByText(C.name).closest('header')).not.toBeNull();
   });
 
   it('counts one video and one subscriber in the singular', () => {
@@ -116,8 +146,8 @@ describe('layout', () => {
     expect(menu()).toHaveAttribute('popover');
   });
 
-  it('gives an unlinked user Connections and sign-out, without the artist rooms', () => {
-    setup({ user: STRANGER });
+  it('gives a user without a curated profile Connections, Settings and sign-out, no brand guide', () => {
+    setup({ user: STRANGER, artist: C });
     expect(screen.queryByText(STRANGER_EMAIL)).toBeNull();
     const signOut = within(menu()).getByRole('button', { name: 'Sign out', ...hidden });
     expect(signOut).toHaveAttribute('title', STRANGER_EMAIL);
@@ -128,11 +158,20 @@ describe('layout', () => {
       '/connections',
     );
     expect(screen.queryByRole('link', { name: BRAND_GUIDE, ...hidden })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Settings', ...hidden })).toBeNull();
+    expect(within(menu()).getByRole('link', { name: 'Settings', ...hidden })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
   });
 
-  it("gives Nathan's artist the brand guide and settings", () => {
-    setup({ user: NATHAN });
+  it('gives a user with no profile Settings, so they can add one', () => {
+    setup({ user: STRANGER });
+    expect(within(menu()).getByRole('link', { name: 'Settings', ...hidden })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: BRAND_GUIDE, ...hidden })).toBeNull();
+  });
+
+  it("gives Nathan's curated profile the brand guide and settings", () => {
+    setup({ user: NATHAN, artist: FLR });
     expect(within(menu()).getByRole('link', { name: BRAND_GUIDE, ...hidden })).toHaveAttribute(
       'href',
       '/brand',
