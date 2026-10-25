@@ -22,28 +22,31 @@ export type Created = { id: string; uploadUrl: string };
 /** A positive, finite number no larger than `max`. */
 const within = (n: number, max: number) => Number.isFinite(n) && n > 0 && n <= max;
 
-function parseUpload(input: CreateInput) {
-  const songTitle = text(input.songTitle).trim();
-  const notes = text(input.notes).trim();
+export type MediaInput = Pick<CreateInput, 'filename' | 'contentType' | 'size' | 'durationSec'>;
+
+/** The media caps, shared by create and a pick of a different file. */
+export function parseMedia(input: MediaInput) {
   const contentType = text(input.contentType);
   const size = num(input.size);
   const duration = num(input.durationSec);
-  if (!songTitle) throw new ActionError(400, 'Song title is required.');
-  if (songTitle.length > TITLE_MAX)
-    throw new ActionError(400, `Song title is over ${TITLE_MAX} characters.`);
-  if (notes.length > NOTES_MAX)
-    throw new ActionError(400, `Notes are over ${NOTES_MAX} characters.`);
   if (!contentType.startsWith('video/')) throw new ActionError(400, 'Pick a video file.');
   if (!within(size, MAX_BYTES)) throw new ActionError(400, 'Videos must be under 2 GB.');
   if (!within(duration, MAX_MINUTES * 60)) {
     throw new ActionError(400, `Videos are capped at ${MAX_MINUTES} minutes.`);
   }
-  return {
-    songTitle,
-    notes,
-    contentType,
-    filename: text(input.filename, 'video').slice(0, 200),
-  };
+  return { contentType, size, filename: text(input.filename, 'video').slice(0, 200) };
+}
+
+function parseUpload(input: CreateInput) {
+  const songTitle = text(input.songTitle).trim();
+  const notes = text(input.notes).trim();
+  if (!songTitle) throw new ActionError(400, 'Song title is required.');
+  if (songTitle.length > TITLE_MAX)
+    throw new ActionError(400, `Song title is over ${TITLE_MAX} characters.`);
+  if (notes.length > NOTES_MAX)
+    throw new ActionError(400, `Notes are over ${NOTES_MAX} characters.`);
+  const { contentType, filename } = parseMedia(input);
+  return { songTitle, notes, contentType, filename };
 }
 
 /** Creates the user's job and the signed URL the browser uploads the video to. */

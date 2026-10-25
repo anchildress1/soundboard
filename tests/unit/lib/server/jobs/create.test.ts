@@ -4,7 +4,13 @@ import { db } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
 import { ActionError } from '#lib/server/core/errors.js';
 import { resetClients } from '#lib/server/core/clients.js';
-import { create, MAX_BYTES, NOTES_MAX, type CreateInput } from '#lib/server/jobs/create.js';
+import {
+  create,
+  MAX_BYTES,
+  NOTES_MAX,
+  parseMedia,
+  type CreateInput,
+} from '#lib/server/jobs/create.js';
 import { getJob, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { omit } from '../../../../helpers/omit';
@@ -173,5 +179,36 @@ describe('failures', () => {
   it('stores no job for an owner who is not a user', async () => {
     await expect(create(upload(), { uid: 'ghost', artistId: null })).rejects.toThrow();
     expect(await jobCount()).toBe(0);
+  });
+});
+
+describe('parseMedia', () => {
+  const media = { filename: 'b.mp4', contentType: 'video/mp4', size: 1000, durationSec: 60 };
+
+  it('passes a pick payload, which carries no song title', () => {
+    expect(parseMedia(media)).toEqual({ contentType: 'video/mp4', size: 1000, filename: 'b.mp4' });
+  });
+
+  it.each([
+    [{ contentType: 'audio/mpeg' }, 'Pick a video file.'],
+    [{ size: MAX_BYTES + 1 }, TOO_BIG],
+    [{ size: 0 }, TOO_BIG],
+    [{ durationSec: 15 * 60 + 1 }, TOO_LONG],
+    [{ durationSec: Number.NaN }, TOO_LONG],
+  ])('refuses %o with today’s message', (over, message) => {
+    expect(() => parseMedia({ ...media, ...over })).toThrow(message);
+  });
+
+  it('defaults and trims the file name', () => {
+    expect(parseMedia({ ...media, filename: undefined as unknown as string }).filename).toBe(
+      'video',
+    );
+    expect(parseMedia({ ...media, filename: 'x'.repeat(300) }).filename).toHaveLength(200);
+  });
+
+  it('leaves the song title to create', async () => {
+    expect((await rejection(create(upload({ songTitle: '' }), USER_B))).message).toBe(
+      TITLE_REQUIRED,
+    );
   });
 });
