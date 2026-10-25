@@ -65,6 +65,8 @@ const h = vi.hoisted(() => ({
   spawn: vi.fn(),
   upload: vi.fn(),
   refreshError: null as Error | null,
+  exists: null as null | (() => Promise<boolean>),
+  deleted: [] as string[],
 }));
 
 vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
@@ -78,9 +80,20 @@ vi.mock('@google-cloud/storage', () => ({
           getSignedUrl: async ({ action }: { action: string }) => [
             `https://storage.googleapis.com/${name}/${object}?sig=${action}`,
           ],
-          exists: async () => [h.objects.has(object)],
+          exists: async () => [h.exists ? await h.exists() : h.objects.has(object)],
           getMetadata: async () => [h.objects.get(object)],
         }),
+        getFiles: async ({ prefix }: { prefix: string }) => [
+          [...h.objects.keys()]
+            .filter((key) => key.startsWith(prefix))
+            .map((key) => ({
+              name: key,
+              delete: async () => {
+                h.deleted.push(key);
+                h.objects.delete(key);
+              },
+            })),
+        ],
       };
     }
   },
@@ -193,6 +206,8 @@ beforeEach(async () => {
   clearStatsCache();
   h.objects.clear();
   h.refreshError = null;
+  h.exists = null;
+  h.deleted.length = 0;
   h.objects.set('uploads/j1', { size: '1000', contentType: 'video/quicktime' });
   tools = {
     probe: { stdout: probeJson(95) },
@@ -250,6 +265,103 @@ describe('runStep: AWAITING_UPLOAD', () => {
     h.objects.clear();
     expect(await runStep(await put({ state: 'AWAITING_UPLOAD' }))).toEqual({});
     expect((await saved()).state).toBe('AWAITING_UPLOAD');
+    expect(await claimToken()).toBeNull();
+  });
+
+  const UPLOAD = {
+    sessionCipher: 'c2Vzc2lvbg==',
+    generation: 2,
+    size: 1000,
+    fingerprint: 'a'.repeat(64),
+    ops: [],
+  };
+  const CURRENT = 'uploads/j1/current';
+  const ORPHAN = 'uploads/j1/orphan';
+  const awaiting = () =>
+    put({ state: 'AWAITING_UPLOAD', object: CURRENT, videoUpload: UPLOAD, consecutiveFailures: 0 });
+
+  it('moves on for the current object, clears the upload, sweeps orphans and drops the claim', async () => {
+    h.objects.set(CURRENT, { size: '1000', contentType: 'video/mp4' });
+    h.objects.set(ORPHAN, { size: '10' });
+    h.objects.set('uploads/j1-1', { size: '5' });
+    expect(await runStep(await awaiting())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'PREP', videoUpload: null, object: CURRENT });
+    expect(h.deleted).toEqual([ORPHAN]);
+    expect(h.objects.has('uploads/j1-1')).toBe(true);
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('never moves on for an orphan while the current object is missing', async () => {
+    h.objects.set(ORPHAN, { size: '1000' });
+    expect(await runStep(await awaiting())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'AWAITING_UPLOAD', videoUpload: UPLOAD });
+    expect(h.deleted).toEqual([]);
+  });
+
+  it('keeps waiting when a pick swapped the object between the read and the release', async () => {
+    h.objects.set(CURRENT, { size: '1000' });
+    h.exists = async () => {
+      await patchJob({ object: 'uploads/j1/newer' });
+      return true;
+    };
+    expect(await runStep(await awaiting())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'AWAITING_UPLOAD', object: 'uploads/j1/newer' });
+    expect(await claimToken()).toBeNull();
+    expect(h.deleted).toEqual([]);
+  });
+
+  it('still moves on when the sweep fails', async () => {
+    h.objects.set(CURRENT, { size: '1000' });
+    h.objects.set(ORPHAN, { size: '10' });
+    vi.spyOn(h.deleted, 'push').mockImplementation(() => {
+      throw new Error('403');
+    });
+    expect(await runStep(await awaiting())).toEqual({});
+    expect((await saved()).state).toBe('PREP');
+  });
+
+  it('moves the job once when two steps complete it at the same time', async () => {
+    h.objects.set(CURRENT, { size: '1000' });
+    const job = await awaiting();
+    const results = await Promise.all([runStep(job), runStep(job)]);
+    expect(results).toContainEqual({ wait: 'step running in another tab' });
+    expect(results).toContainEqual({});
+    expect((await saved()).state).toBe('PREP');
+  });
+
+  it('waits on a stalled storage read at the step deadline, with no failure counted', async () => {
+    vi.useFakeTimers({ now: NOON_PACIFIC, toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.exists = () => new Promise(() => {});
+    const stepping = runStep(await awaiting());
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await stepping).toEqual({});
+    expect(await saved()).toMatchObject({
+      state: 'AWAITING_UPLOAD',
+      consecutiveFailures: 0,
+      error: null,
+      videoUpload: UPLOAD,
+    });
+    expect(await claimToken()).toBeNull();
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), {
+      tags: { step: 'AWAITING_UPLOAD' },
+    });
+  });
+
+  it('answers the other-tab wait while another step holds the claim', async () => {
+    const job = await awaiting();
+    await db()
+      .update(jobs)
+      .set({ claimToken: 'other', claimUntil: sql`now() + interval '1 minute'` })
+      .where(eq(jobs.id, 'j1'));
+    expect(await runStep(job)).toEqual({ wait: 'step running in another tab' });
+  });
+
+  it('releases without a change when the job left AWAITING_UPLOAD before the claim', async () => {
+    const job = await awaiting();
+    await patchJob({ state: 'DISCARDED' });
+    expect(await runStep(job)).toEqual({});
+    expect((await saved()).state).toBe('DISCARDED');
+    expect(await claimToken()).toBeNull();
   });
 });
 
