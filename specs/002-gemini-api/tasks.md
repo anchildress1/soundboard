@@ -51,7 +51,7 @@ description: 'Task list for the Gemini API swap'
 - [x] T004 👤 Add exact pins to package.json and pnpm-lock.yaml: `pnpm add ai@7.0.153 @ai-sdk/google@4.0.105` (research R2)
 - [x] T005 [P] 👤 Config in .env.example and service.yaml:
   - Remove `MODEL_URL`.
-  - Add `GEMINI_API_KEY`, from Secret Manager `soundboard_gemini_api_key` in service.yaml.
+  - Add `GEMINI_API_KEY`, from Secret Manager `soundboard-gemini-api-key` in service.yaml.
   - Add `GEMINI_ANALYST_MODEL` (default `gemini-3.8-flash`, or T001's choice) and `GEMINI_PICK_MODEL` (default `gemini-4-argon`).
 - [x] T006 [P] 👤 In vite.config.ts, extend the `E2E_FAKES=1` `resolveId` redirect (today only `src/lib/server/core/db.ts`) so `src/lib/server/media/window.ts` resolves to `tests/e2e/fakes/window.ts`. The `$lib` alias rewrites specifiers first, so match the resolved file the same way the db plugin does.
 - [x] T007 [P] 👤 In playwright.config.ts:
@@ -244,7 +244,7 @@ description: 'Task list for the Gemini API swap'
 - [x] T035 [US4] 👤 Delete model/ (including model/Dockerfile) and build-model.sh.
 - [x] T036 [US4] 👤 In deploy.sh:
   - Remove the model image build, the endpoint create/deploy, the `aiplatform` invoke role binding and `MODEL_URL`.
-  - Sync `GEMINI_API_KEY` from `.env` to Secret Manager `soundboard_gemini_api_key` like the other app secrets, never echoing it.
+  - Sync `GEMINI_API_KEY` from `.env` to Secret Manager `soundboard-gemini-api-key` like the other app secrets, never echoing it.
 - [x] T037 [US4] Run the removal sweep: `grep -rn "llama\|gemma\|MODEL_URL\|waking model\|another run\|vertex" src tests deploy.sh service.yaml .env.example` must return nothing. Fix what remains, including the meta description in src/routes/+layout.svelte ("self-hosted Gemma 4").
 
 **Checkpoint**: The repo carries no GPU path.
