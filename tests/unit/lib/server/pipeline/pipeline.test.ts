@@ -46,8 +46,18 @@ import type { BrandGuide } from '#lib/brand.js';
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { artistMemory, artists, connections, jobs, users } from '#lib/server/core/schema.js';
-import { discard, retry } from '#lib/server/jobs/actions.js';
+import {
+  artistMemory,
+  artists,
+  connections,
+  jobAudience,
+  jobs,
+  researchRuns,
+  users,
+} from '#lib/server/core/schema.js';
+import { discard, rerun, retry } from '#lib/server/jobs/actions.js';
+import { runDelivery } from '#lib/server/research/delivery.js';
+import { RESEARCH_MAX_MS } from '#lib/server/research/runs.js';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
@@ -110,6 +120,10 @@ vi.mock('@google-cloud/storage', () => ({
 
 // Each grant mints its own token, so a request's Authorization header names the grant behind it.
 vi.mock('google-auth-library', () => ({
+  // Application Default Credentials, for Cloud Tasks.
+  GoogleAuth: class {
+    getAccessToken = async () => 'ya29.tasks';
+  },
   OAuth2Client: class {
     refresh = '';
     setCredentials(credentials: { refresh_token: string }) {
@@ -711,10 +725,41 @@ const context = () => {
   };
 };
 
-/** The PICK step's job, C's by default, with its two analyzed chunks; chunks need the job row. */
+const PROFILE_OF: Partial<Record<string, string>> = {
+  [USER_A.uid]: USER_A.artistId,
+  [USER_C.uid]: USER_C.artistId,
+};
+
+/**
+ * A finished research run for job `j1` that found no peers, so the pick goes ahead. None for an
+ * owner without a profile, who never gets that far.
+ */
+async function researched(job: Pick<JobDoc, 'ownerUid'>, patch = {}): Promise<void> {
+  const artistId = PROFILE_OF[job.ownerUid];
+  if (!artistId) return;
+  await seed({
+    researchRuns: [
+      {
+        jobId: 'j1',
+        id: 'run-1',
+        ownerUid: job.ownerUid,
+        artistId,
+        stage: 'done',
+        limits: ['analytics-not-shared', 'no-peers'],
+        ...patch,
+      },
+    ],
+  });
+}
+
+/**
+ * The PICK step's job, C's by default, with its two analyzed chunks (they need the job row) and a
+ * finished research run.
+ */
 async function pickJob(patch: Partial<JobDoc> = {}): Promise<JobDoc> {
   const job = await put({ state: 'PICK', ...C_JOB, ...patch });
   await setChunks('j1', [0, 1].map(chunkDoc));
+  await researched(job);
   return job;
 }
 
@@ -976,6 +1021,171 @@ describe('runStep: PICK deadline', () => {
     expect(chatBodies()).toHaveLength(0);
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
     expect(await claimToken()).toBeNull();
+  });
+});
+
+describe('runStep: PICK research', () => {
+  const TASKS = /cloudtasks\.googleapis\.com/;
+  const runs = () => db().select().from(researchRuns).where(eq(researchRuns.jobId, 'j1'));
+  const delivered = () =>
+    called(TASKS).map(({ init }) => {
+      const { task } = JSON.parse(String(init.body)) as { task: { httpRequest: { body: string } } };
+      return JSON.parse(Buffer.from(task.httpRequest.body, 'base64').toString()) as unknown;
+    });
+  const AUDIENCE = {
+    retrievedAt: NOON_PACIFIC,
+    query: 'synthwave music video',
+    candidateLists: [
+      {
+        videoId: 'peer',
+        title: 'Peer release',
+        hashtags: [SYNTHWAVE],
+        tags: [{ tag: 'synthwave' }],
+      },
+    ],
+    top: [],
+  };
+  /** A PICK job with no research run yet. */
+  const unresearched = async (patch: Partial<JobDoc> = {}) => {
+    const job = await put({ state: 'PICK', ...C_JOB, ...patch });
+    await setChunks('j1', [0, 1].map(chunkDoc));
+    return job;
+  };
+
+  beforeEach(() => {
+    vi.stubEnv('RESEARCH_QUEUE', 'projects/p/locations/us-central1/queues/soundboard-research');
+    vi.stubEnv('RESEARCH_TASK_URL', 'https://soundboard-1.us-central1.run.app/api/research/task');
+    vi.stubEnv('RESEARCH_TASK_SA', 'research@p.iam.gserviceaccount.com');
+    on(TASKS, () => json({}));
+  });
+
+  it('starts one run and enqueues its first delivery, then waits without a model call', async () => {
+    const job = await unresearched({ consecutiveFailures: 1 });
+    expect(await runStep(job)).toEqual({ wait: 'researching similar artists' });
+    const [run] = await runs();
+    expect(run).toMatchObject({
+      stage: 'learn',
+      seq: 0,
+      ownerUid: USER_C.uid,
+      artistId: USER_C.artistId,
+    });
+    expect(delivered()).toEqual([{ jobId: 'j1', uid: USER_C.uid, runId: run!.id, seq: 0 }]);
+    expect(chatBodies()).toHaveLength(0);
+    // A wait is never a failure: the streak and claim are as before.
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(await claimToken()).toBeNull();
+  });
+
+  it('only reads the run on later polls while it is running', async () => {
+    const job = await unresearched();
+    await runStep(job);
+    expect(await runStep(job)).toEqual({ wait: 'researching similar artists' });
+    expect(called(TASKS)).toHaveLength(1);
+    expect(await runs()).toHaveLength(1);
+  });
+
+  it('goes ahead without the run 10 minutes after it started', async () => {
+    await unresearched();
+    await researched(C_JOB, {
+      stage: 'match',
+      startedAt: new Date(Date.now() - RESEARCH_MAX_MS),
+      limits: ['analytics-not-shared'],
+    });
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'REVIEW' });
+    expect((await pickAt(1))?.researchRunId).toBe('run-1');
+    expect(called(TASKS)).toHaveLength(0);
+  });
+
+  it('replaces a run that started 29 days ago', async () => {
+    await unresearched();
+    await researched(C_JOB, { startedAt: new Date(Date.now() - 29 * 24 * 60 * 60_000) });
+    expect(await runStep(await saved())).toEqual({ wait: 'researching similar artists' });
+    const [run] = await runs();
+    expect(run).toMatchObject({ stage: 'learn', seq: 0 });
+    expect(run!.id).not.toBe('run-1');
+  });
+
+  it('drafts without research when the queue refuses, and again after a re-run, never failing', async () => {
+    on(TASKS, () => json({}, { status: 500 }));
+    const job = await unresearched();
+    expect(await runStep(job)).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    const [first] = await runs();
+    expect(first).toMatchObject({
+      stage: 'failed',
+      error: 'research-unavailable',
+      limits: ['research-unavailable'],
+    });
+    expect((await pickAt(1))?.researchRunId).toBe(first!.id);
+
+    await withIdentity(USER_C.uid, async () => rerun(await saved()));
+    expect(await runs()).toEqual([]);
+    // A new reply, since the skipped one would be asked again.
+    const fresh = { ...RAW_PICK, title: 'Another take', description: 'A different line.' };
+    on(GEMINI, () => interaction(JSON.stringify(fresh)));
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0 });
+    expect((await pickAt(2))?.researchRunId).not.toBe(first!.id);
+    expect(called(TASKS)).toHaveLength(2);
+  });
+
+  it('keeps a failed run terminal: each poll goes on to the pick and enqueues nothing', async () => {
+    await unresearched();
+    await researched(C_JOB, { stage: 'failed', error: 'boom', limits: [] });
+    on(GEMINI, () => busy429());
+    expect(await runStep(await saved())).toEqual({ wait: 'model busy' });
+    handlers.shift();
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'REVIEW' });
+    expect(called(TASKS)).toHaveLength(0);
+    expect((await runs())[0]).toMatchObject({ id: 'run-1', stage: 'failed' });
+  });
+
+  it('fails the run on an enqueue that spends the step, waits, and drafts on the next step', async () => {
+    clock = NOON_PACIFIC;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock!);
+    on(TASKS, () => {
+      clock! += 106_000;
+      throw new DOMException('The operation timed out.', 'TimeoutError');
+    });
+    // Cached genre evidence, so the model's budget is the only thing the step still needs.
+    await unresearched();
+    await patchJob({ audience: AUDIENCE });
+    expect(await runStep(await saved())).toEqual({ wait: 'model busy' });
+    const [run] = await runs();
+    expect(run).toMatchObject({ stage: 'failed', error: 'research-unavailable' });
+    expect(chatBodies()).toHaveLength(0);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0 });
+
+    // If the queue created the task after all, its delivery finds the run finished.
+    expect(await runDelivery({ jobId: 'j1', uid: USER_C.uid, runId: run!.id, seq: 0 })).toBe(200);
+    expect((await runs())[0]).toEqual(run);
+
+    clock! += 1_000;
+    expect(await runStep(await saved())).toEqual({});
+    expect(await saved()).toMatchObject({ state: 'REVIEW' });
+    expect(called(TASKS)).toHaveLength(1);
+  });
+
+  it('drafts on no genre evidence when the genre search hits the YouTube quota, storing none', async () => {
+    await unresearched();
+    await researched(C_JOB);
+    on(/youtube\/v3\/search\?/, () => refusal(403, 'quotaExceeded'));
+    expect(await runStep(await saved())).toEqual({});
+    const job = await saved();
+    expect(job).toMatchObject({ state: 'REVIEW', consecutiveFailures: 0, audience: null });
+    expect(await db().select().from(jobAudience)).toEqual([]);
+    const pick = (await pickAt(1))!;
+    expect(pick.tags).toEqual([ARTIST_C.name]);
+    expect(pick.hashtags).toEqual([]);
+  });
+
+  it('starts no run for a job whose owner has no profile', async () => {
+    await unresearched({ ownerUid: 'uid-b', artistId: null });
+    await runStep(await saved());
+    expect(await runs()).toEqual([]);
+    expect(called(TASKS)).toHaveLength(0);
   });
 });
 

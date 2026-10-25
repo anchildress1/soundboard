@@ -99,6 +99,7 @@ describe('jobStatus', () => {
     [BUSY, 'Model busy'],
     ['model quota spent', 'Model quota spent'],
     ['Add your artist name first.', 'Add your artist name first.'],
+    ['researching similar artists', 'Researching similar artists'],
   ] as const)(
     'shows the %s wait in plain words with running progress ahead of the state label',
     (wait, text) => {

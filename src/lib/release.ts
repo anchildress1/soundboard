@@ -114,6 +114,11 @@ export const STATE_LABELS: Record<JobState, { text: string; tone: Tone }> = {
 export function workCopy({ job, wait }: JobView): { title: string; body: string } {
   const leave = 'Nothing for you to do yet. Leave if you like; Home brings you back.';
   switch (wait) {
+    case 'researching similar artists':
+      return {
+        title: WAIT_TEXT[wait],
+        body: 'The draft starts when it finishes. ' + leave,
+      };
     case 'model busy':
       return {
         title: WAIT_TEXT[wait],

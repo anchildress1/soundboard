@@ -84,6 +84,7 @@ function uploadStatus(upload: UploadShown): Status {
 
 /** Plain words for each wait, the same on every screen that shows one. */
 export const WAIT_TEXT: Record<Wait, string> = {
+  'researching similar artists': 'Researching similar artists',
   'model busy': 'Model busy',
   'model quota spent': 'Model quota spent',
   'step running in another tab': 'Running in another tab',

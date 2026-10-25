@@ -12,8 +12,11 @@ import {
   connections,
   jobAudience,
   jobs,
+  researchRuns,
   users,
 } from '#lib/server/core/schema.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { claim, commit } from '#lib/server/research/runs.js';
 import { createJob, getJob, listPicks, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
@@ -537,6 +540,14 @@ describe('approve: artist memory follows the current link', () => {
   });
 });
 
+/** A research run for `jobId`, owned by C. */
+const seedRun = (jobId: string, id: string, stage: 'learn' | 'done' | 'failed' = 'learn') =>
+  seed({
+    researchRuns: [{ jobId, id, ownerUid: USER_C.uid, artistId: USER_C.artistId, stage }],
+  });
+const runOf = async (jobId: string) =>
+  (await db().select().from(researchRuns).where(eq(researchRuns.jobId, jobId)))[0];
+
 describe('rerun', () => {
   it('requires REVIEW', async () => {
     const job = await makeJob({ state: 'PUBLISHING' });
@@ -577,6 +588,20 @@ describe('rerun', () => {
     await rerun(job);
     expect(await artistRows()).toHaveLength(0);
     expect(await jobRows()).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
+  });
+
+  it('drops a failed research run so the next pick starts anew', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await seedRun('job1', 'run-1', 'failed');
+    await rerun(job);
+    expect(await runOf('job1')).toBeUndefined();
+  });
+
+  it('keeps a finished research run for the next pick', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await seedRun('job1', 'run-1', 'done');
+    await rerun(job);
+    expect(await runOf('job1')).toMatchObject({ id: 'run-1', stage: 'done' });
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {
@@ -649,6 +674,48 @@ describe('discard', () => {
     const job = await makeJob({ state: 'CLAIMED_COMPLETE', patch: { videoId: 'vid1' } });
     await discard(job);
     expect(await getJob('job1')).toMatchObject({ state: 'DISCARDED', videoId: 'vid1' });
+  });
+
+  it("fails the job's research run mid-batch, so that batch and the queued delivery do nothing", async () => {
+    const job = await makeJob({ owner: USER_C, state: 'PICK' });
+    await createJob(
+      {
+        ownerUid: USER_C.uid,
+        artistId: USER_C.artistId,
+        songTitle: 'Other',
+        notes: '',
+        filename: 'o.mp4',
+        contentType: 'video/mp4',
+        object: 'uploads/o.mp4',
+        trace: null,
+      },
+      'job2',
+    );
+    await seedRun('job1', 'run-1');
+    await seedRun('job2', 'run-2');
+    const delivery = { jobId: 'job1', uid: USER_C.uid, runId: 'run-1', seq: 0 };
+    const claimed = await withIdentity(USER_C.uid, () => claim(delivery));
+    if (claimed.kind !== 'claimed') throw new Error('not claimed');
+
+    await discard(job);
+    expect(await runOf('job1')).toMatchObject({
+      stage: 'failed',
+      error: 'discarded',
+      claimToken: null,
+    });
+    const release = {
+      stage: 'discover' as const,
+      cursor: 0,
+      wait: null,
+      consecutiveFailures: 0,
+      limits: [],
+      error: null,
+    };
+    expect(await withIdentity(USER_C.uid, () => commit(claimed.run, claimed.token, release))).toBe(
+      false,
+    );
+    expect(await withIdentity(USER_C.uid, () => claim(delivery))).toEqual({ kind: 'stale' });
+    expect(await runOf('job2')).toMatchObject({ stage: 'learn', error: null });
   });
 
   it('learns nothing from a discard', async () => {

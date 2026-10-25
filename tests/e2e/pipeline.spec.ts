@@ -26,15 +26,23 @@ test('analyzes the next window up to the model, then waits while it is busy', as
   await noHorizontalScroll(page);
 });
 
-test('waits while the model is busy during the pick', async ({ page }, testInfo) => {
+test('waits on research, then while the model is busy during the pick', async ({
+  page,
+}, testInfo) => {
   await signIn(page, USER_C);
   const id = `e2e-pick-${testInfo.project.name}`;
-  const step = page.waitForResponse((response) => response.url().endsWith(`/jobs/${id}/step`));
-  await page.goto(`/jobs/${id}`);
-  expect(await (await step).json()).toMatchObject({
-    wait: 'model busy',
-    job: { state: 'PICK', error: null },
+  const steps: unknown[] = [];
+  page.on('response', async (response) => {
+    if (response.url().endsWith(`/jobs/${id}/step`)) steps.push(await response.json());
   });
+  await page.goto(`/jobs/${id}`);
+  // The first step starts research and waits; the queue fake finishes it, so the next poll picks.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Researching similar artists');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
+  expect(steps.slice(0, 2)).toMatchObject([
+    { wait: 'researching similar artists', job: { state: 'PICK', error: null } },
+    { wait: 'model busy', job: { state: 'PICK', error: null } },
+  ]);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
   await expect(page.getByText('Configured picker: gemini-4-argon')).toBeVisible();
   await noHorizontalScroll(page);

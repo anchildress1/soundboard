@@ -45,6 +45,15 @@ import { runPick } from '#lib/server/ai/smart-pick.js';
 import type { JobPatch } from '#lib/server/jobs/rows.js';
 import { invokeAgent } from '#lib/server/core/tracing.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
+import { enqueue } from '#lib/server/research/queue.js';
+import {
+  expired,
+  failRun,
+  getRun,
+  RESEARCH_MAX_MS,
+  startRun,
+  type ResearchLimit,
+} from '#lib/server/research/runs.js';
 import {
   accessTokenFor,
   ChannelMismatch,
@@ -52,6 +61,7 @@ import {
   identityFailure,
   outOfTime,
   ownChannelUploads,
+  quotaSpent,
   readBack,
   sourceRange,
   startResumableUpload,
@@ -167,6 +177,9 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
     'job.id': job.id,
   });
   if (!Array.isArray(recent)) return recent;
+  const gate = await researchFor(job, artist.id, by);
+  if ('wait' in gate) return gate;
+  const research: Research = gate;
   const [memory, chunks, picks] = await Promise.all([
     artistJob(job),
     listChunks(job.id),
@@ -184,20 +197,23 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
       audience ??= await audienceEvidence(chunks, job.probe?.durationSec ?? null, by);
     } catch (error) {
       if (outOfTime(error)) return { wait: YOUTUBE_BUSY };
-      throw error;
+      // Not a failure (T056): the draft goes ahead on no genre evidence, and stores none.
+      if (!quotaSpent(error)) throw error;
     }
     // The genre search is one per job: every outcome from here keeps it.
-    if (!hasModelTime('smart-pick', by)) return { audience, wait: 'model busy' };
+    const keep: Patch = audience ? { audience } : {};
+    if (!hasModelTime('smart-pick', by)) return { ...keep, wait: 'model busy' };
     try {
-      return await pickWith(artist, audience, span);
+      return await pickWith(artist, audience ?? noAudience(), keep, span);
     } catch (error) {
-      throw new StepFailure(error, { audience });
+      throw new StepFailure(error, keep);
     }
   });
 
   async function pickWith(
     artist: ArtistProfile,
     audience: AudienceEvidence,
+    keep: Patch,
     span: Span,
   ): Promise<StepOutput> {
     const [facts, feedback, { voice, brand }] = await memoryFor(artist, memory);
@@ -227,15 +243,60 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
     return unlimited(job, {
-      ...ok({
-        state: 'REVIEW',
-        pickVersion: version,
-        audience,
-      }),
+      ...ok({ state: 'REVIEW', pickVersion: version, ...keep }),
       // Each stored pick carries the running total, so a re-run never loses earlier pick time.
-      pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
+      pick: {
+        ...result.pick,
+        version,
+        modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0),
+        researchRunId: research.runId,
+      },
     });
   }
+}
+
+const noAudience = (): AudienceEvidence => ({
+  retrievedAt: Date.now(),
+  query: '',
+  candidateLists: [],
+  top: [],
+});
+
+const RESEARCHING: Wait = 'researching similar artists';
+
+type Research = { runId: string; limits: ResearchLimit[] };
+
+/**
+ * The research gate (research R3), after 004's waits. With no run, or an expired one, it starts
+ * one and waits; while one runs under 10 minutes, it waits. A queue that can't take the first
+ * delivery fails the run and the pick goes ahead without it: never a step failure. A failed run
+ * stays failed until a re-run clears it (T054).
+ */
+async function researchFor(
+  job: JobDoc,
+  artistId: string,
+  deadline: number,
+): Promise<Research | { wait: Wait }> {
+  const run = await getRun(job.id);
+  if (!run || expired(run)) {
+    const started = await startRun(job, artistId);
+    try {
+      await enqueue({ jobId: job.id, uid: job.ownerUid, runId: started.id, seq: 0 }, 0, deadline);
+      return { wait: RESEARCHING };
+    } catch (error) {
+      // A timeout may still have created the task: its delivery then finds the run failed.
+      captureException(error, { tags: { component: 'research-queue', 'job.id': job.id } });
+      await failRun(job.id, 'research-unavailable', 'research-unavailable');
+      return { runId: started.id, limits: ['research-unavailable'] };
+    }
+  }
+  const finished = run.stage === 'done' || run.stage === 'failed';
+  if (!finished && Date.now() - run.startedAt.getTime() < RESEARCH_MAX_MS) {
+    return { wait: RESEARCHING };
+  }
+  const limits = run.limits as ResearchLimit[];
+  const unfinished = run.stage !== 'done' && !limits.includes('research-unavailable');
+  return { runId: run.id, limits: unfinished ? [...limits, 'research-unfinished'] : limits };
 }
 
 /** Facts, feedback and the approved guides; feedback and guides only on jobs that use the memory. */
