@@ -67,6 +67,15 @@
     --control-height: 48px;
 
     --motion: 160ms ease-out;
+    --motion-slow: 500ms ease-out;
+  }
+
+  /* Every transition reads these, so zeroing them is the whole reduced-motion switch. */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --motion: 0s;
+      --motion-slow: 0s;
+    }
   }
 
   @media (width < 640px) {

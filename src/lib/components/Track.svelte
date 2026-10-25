@@ -87,6 +87,6 @@
     height: 100%;
     border-radius: 2px;
     background: var(--signal);
-    transition: width 0.5s ease-out;
+    transition: width var(--motion-slow);
   }
 </style>
