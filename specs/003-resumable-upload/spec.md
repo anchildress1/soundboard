@@ -26,6 +26,13 @@
 - Q: Which browsers? → A: All current browsers, not just Chrome.
 - Q: Testing scope? → A: Web testing only for now. No real-device runs. Phone readability of messages is a later problem.
 
+### Session 2026-10-25
+
+- Q: How is the saved session protected at rest? → A: Encrypted the same way as YouTube refresh tokens. Requests name the session by a version number, never by its address.
+- Q: How is "the same video" recognized? → A: By size, name, last-modified time and dense samples of the file's content, not a whole-file hash. A file that differs only between samples is treated as the same file.
+- Q: What does the page say while storage itself is busy? → A: "Upload paused: storage busy, retrying", at the saved amount.
+- Q: What if the same video is picked on two devices? → A: The newer pick wins. The older sender stops with "The upload moved to another device or window." and shows the file prompt.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1: A dropped connection doesn't restart the upload (Priority: P1)
@@ -99,9 +106,9 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - **A different video after a partial upload.** The old session is cancelled. The job's single file slot can't hold both.
 - **A file over 2 GB, over 15 minutes, or not a video.** It's refused with today's create messages. Storage also refuses any upload that doesn't match its declared size.
 - **Two tabs on the same job.** Only one sends. The other shows "Uploading in another tab" and takes over with the file prompt when the sender's tab closes.
-- **Two tabs or devices with different files.** The newer pick wins. The other stops with "A different video replaced this upload." and shows the file prompt, so picking again makes it the newest. Automatic retries never take the upload back.
+- **Two tabs or devices with different files.** The newer pick wins, even across devices and app addresses. The other stops with "A different video replaced this upload." and shows the file prompt, so picking again makes it the newest. Automatic retries never take the upload back.
 - **The upload already landed.** A late re-pick or a second device can't overwrite it. The page moves on to analysis.
-- **Re-picked on a different app address** (custom domain vs a run.app URL). The upload continues on the same session; the bucket allows every app address.
+- **Re-picked on a different app address** (custom domain vs a run.app URL). The upload continues on the same session; storage accepts it from any address, so the session's secrecy is what protects it.
 - **The last bytes arrived but the reply was lost.** On reconnect, the uploader asks storage, sees the upload is complete, and moves on without resending.
 - **The job page is opened on another device.** It shows the saved amount. The upload continues only where the file is.
 - **Upload left unfinished for days.** The job stays "Uploading" until the session expires (it restarts on the next pick) or the job is discarded. Automatic cleanup of abandoned partials is a later item (TTD).
@@ -113,16 +120,16 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - **FR-001**: The video MUST upload straight from the browser to the project's storage bucket in a resumable session. Media bytes MUST never pass through the app.
 - **FR-002**: The session MUST be created for one job's object, with the file size declared up front. Storage refuses any upload whose size doesn't match.
 - **FR-003**: After any interruption, the uploader MUST ask storage how much it saved and send only the rest. It MUST never trust its own count over storage's.
-- **FR-004**: Network loss, timeouts and storage errors that are safe to retry MUST pause the upload, never fail the job. The upload MUST resume on its own when the connection returns, with growing delays between retries.
+- **FR-004**: Network loss, timeouts and storage errors that are safe to retry MUST pause the upload, never fail the job. A connection pause and a storage-busy pause MUST say which they are. The upload MUST resume on its own when the connection returns, with growing delays between retries.
 - **FR-005**: The upload MUST keep running while the user navigates within the app. It MUST NOT depend on the job page being open.
 - **FR-006**: When the tab was hidden or frozen and sent nothing while hidden, the page MUST say "The upload paused while you were away." with the saved percentage on becoming visible, and continue at once. After a reload or a closed tab, FR-008 and FR-009 apply.
-- **FR-007**: The session MUST be kept with the job, so a reload or a reopened tab can resume it. Only the job's owner MUST be able to get it, and it MUST never be logged, traced or shown.
+- **FR-007**: The session MUST be kept with the job, so a reload or a reopened tab can resume it. Only the job's owner MUST be able to get it. It MUST be encrypted at rest like the YouTube refresh tokens, never sent back in a request, and never logged, traced or shown.
 - **FR-008**: When the browser has no file for an unfinished upload, the job page MUST show the saved percentage (looked up by the server) and a file picker.
-- **FR-009**: A picked file that matches the original's size and content fingerprint MUST resume. Any other file MUST start a new upload: the old session is cancelled, the new file is checked against today's caps, and its name, size and fingerprint are recorded. A different file MUST never be refused for being different.
+- **FR-009**: A picked file whose sampled fingerprint (size, name, last-modified time, first and last 1 MiB, and 64 evenly spread 64 KiB samples) matches the original's MUST resume. A file that differs only between samples is treated as the same file. Any other file MUST start a new upload: the old session is cancelled, the new file is checked against today's caps, and its name, size and fingerprint are recorded. A different file MUST never be refused for being different.
 - **FR-010**: The page states and their text MUST be the list in the contract (`contracts/upload-session.md`, Page states). After a pause, `n` is what storage confirmed.
 - **FR-011**: An expired or missing session with the upload unfinished MUST start a new session from zero, with a plain message. If storage reports the upload complete, the job MUST move on without resending.
-- **FR-012**: Only one sender MUST run for a job at a time, across tabs and devices. A newer pick always wins; the older sender stops and offers the file prompt, and automatic retries never take the upload back.
-- **FR-013**: Discarding a job with an unfinished upload MUST stop sending and cancel its session. An object that lands for that unfinished upload anyway MUST be deleted. Discarding a job whose upload already finished MUST NOT delete its video.
+- **FR-012**: Only one sender MUST run for a job at a time, across tabs and devices. A newer pick always wins, including the same file picked on another device; the older sender stops and offers the file prompt, and automatic retries never take the upload back.
+- **FR-013**: Discarding a job with an unfinished upload MUST stop sending and cancel its session. An object that lands for that unfinished upload anyway MUST be deleted, at once or on the job's next touch; anything missed goes with the bucket's 7-day delete rule. Discarding a job whose upload already finished MUST NOT delete its video. The working screen MUST offer Discard while the upload runs or is paused.
 - **FR-014**: Once the object lands, it MUST NOT be overwritten, and the pipeline MUST behave exactly as today. Analysis starts from the open job page.
 - **FR-015**: Sentry MUST record upload pauses and resumes as breadcrumbs, with amounts only. No session address, no file name beyond today's, and no media.
 - **FR-016**: The upload MUST work in current Chrome, Edge, Firefox and Safari, on desktop and mobile.
@@ -130,7 +137,7 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 
 ### Key Entities
 
-- **Job**: gains its video upload (session, size and fingerprint; owner-only, never logged), used only while the job is uploading. A new file replaces all of it.
+- **Job**: gains its video upload (encrypted session, version number, size and fingerprint; owner-only, never logged), used only while the job is uploading. A new file replaces all of it. Every pick raises the version.
 - **Upload session**: one live session per job, valid up to 7 days, bound to the job's object and declared size. Storage, not the app, tracks how many bytes are saved.
 
 ## Success Criteria _(mandatory)_
@@ -140,7 +147,7 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - **SC-001**: A 1.2 GB upload finishes through 20 simulated network drops with no tap.
 - **SC-002**: After a drop, the upload resends only what storage hadn't saved.
 - **SC-003**: After a reload, picking the same file resumes within 5 seconds.
-- **SC-004**: Picking a different file always starts a new upload. None is refused for being a different file.
+- **SC-004**: Picking a file whose sampled fingerprint differs always starts a new upload. None is refused for being a different file. A file that differs only between samples is treated as the same file (accepted limit).
 - **SC-005**: On a stable connection, the upload takes no longer than today's single upload, within measurement noise.
 - **SC-006**: Navigating within the app never stops the upload.
 
