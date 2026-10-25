@@ -1,11 +1,10 @@
 // One Cloud Tasks delivery runs one claimed batch of the run's stage (research R2 steps 2–7).
 import { captureException, startSpan } from '@sentry/sveltekit';
 import { scrubUrl } from '#lib/scrub.js';
-import { ModelBusy, ModelQuotaSpent, stepDeadline } from '#lib/server/ai/model.js';
-import type { Tx } from '#lib/server/core/db.js';
+import { stepDeadline } from '#lib/server/ai/model.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { quotaResetAt } from '#lib/server/core/quota.js';
-import { identityFailure, outOfTime, quotaSpent } from '#lib/server/platforms/youtube/index.js';
+import { RETRY_MS, waitFor, type Batch, type Stage } from './batch';
+import { discover } from './discover';
 import { enqueue } from './queue';
 import {
   claim,
@@ -18,58 +17,19 @@ import {
   type RunStage,
 } from './runs';
 
-/** Held back at the end of every delivery for the enqueue and the commit. */
-export const RESERVE_MS = 8_000;
-/** A busy provider, a spent step or a batch that did nothing tries again after this. */
-export const RETRY_MS = 60_000;
 /** Consecutive failed batches that end the run. */
 const MAX_FAILURES = 2;
 
-export type StageContext = { run: ResearchRun; deadline: number };
-
-/** One batch's result, kept in memory until the commit. */
-export type Batch = {
-  /** Items finished this delivery. */
-  done: number;
-  /** Where the run goes next; the same stage while items remain. */
-  stage: RunStage;
-  cursor: number;
-  limits?: ResearchLimit[];
-  /** Set when the batch stopped on a wait after finishing `done` items. */
-  wait?: Wait;
-  /** Claim-checked writes for the commit; `token` is the delivery's claim. */
-  writes?: (tx: Tx, token: string) => Promise<void>;
-};
-
-export type Stage = (context: StageContext) => Promise<Batch>;
-
-type Wait = { wait: string; at: number };
-
-/** Whether a stage can take one more item that takes about `estimateMs`. */
-export const hasTime = (deadline: number, estimateMs: number, now = Date.now()) =>
-  deadline - now > RESERVE_MS + estimateMs;
-
 export type Stages = Record<Exclude<RunStage, 'done' | 'failed'>, Stage>;
 
-// Placeholders until the learn (T037) and discover (T019) stages land.
+// learn, match and releases are placeholders until T037, T020 and T021 land.
 const STAGES: Stages = {
-  learn: async () => ({ done: 0, stage: 'discover', cursor: 0, limits: ['analytics-not-shared'] }),
-  discover: async () => ({ done: 0, stage: 'done', cursor: 0, limits: ['no-peers'] }),
-  match: async () => ({ done: 0, stage: 'done', cursor: 0 }),
-  releases: async () => ({ done: 0, stage: 'done', cursor: 0 }),
+  learn: () =>
+    Promise.resolve({ done: 0, stage: 'discover', cursor: 0, limits: ['analytics-not-shared'] }),
+  discover,
+  match: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
+  releases: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
 };
-
-/** A recognized wait, which never counts as a failure (constitution III), or null. */
-function waitFor(error: unknown, now: number): Wait | null {
-  if (error instanceof ModelQuotaSpent) return { wait: 'model quota spent', at: error.until };
-  if (error instanceof ModelBusy) return { wait: 'model busy', at: now + RETRY_MS };
-  // The YouTube quota is project-wide and daily: nothing gets through before it resets.
-  if (quotaSpent(error)) return { wait: 'waiting on YouTube', at: quotaResetAt(now) };
-  if (outOfTime(error) || identityFailure(error) === 'busy') {
-    return { wait: 'waiting on YouTube', at: now + RETRY_MS };
-  }
-  return null;
-}
 
 type Outcome = { release: Release; at: number; writes?: Batch['writes'] };
 

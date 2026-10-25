@@ -6,7 +6,7 @@ import { researchRuns } from '#lib/server/core/schema.js';
 import { DeadlineSpent } from '#lib/server/platforms/youtube/index.js';
 import { enqueue } from '#lib/server/research/queue.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { A_JOB, seedJob, USERS, USER_A } from '../../../../helpers/pipeline';
+import { A_JOB, json, seedJob, USERS, USER_A } from '../../../../helpers/pipeline';
 
 const h = vi.hoisted(() => ({
   getAccessToken: vi.fn<() => Promise<string | null>>(),
@@ -47,7 +47,7 @@ const stalled = (_url: unknown, init?: RequestInit) =>
 
 beforeEach(() => {
   fetchMock.mockReset();
-  h.getAccessToken.mockReset().mockResolvedValue('ya29.token');
+  h.getAccessToken.mockReset().mockResolvedValue('tasks-access-token');
   vi.stubGlobal('fetch', fetchMock);
   vi.stubEnv('RESEARCH_QUEUE', QUEUE);
   vi.stubEnv('RESEARCH_TASK_URL', URL_);
@@ -67,7 +67,7 @@ describe('enqueue', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe(`https://cloudtasks.googleapis.com/v2/${QUEUE}/tasks`);
     expect(init?.method).toBe('POST');
-    expect(init?.headers).toMatchObject({ authorization: 'Bearer ya29.token' });
+    expect(init?.headers).toMatchObject({ authorization: 'Bearer tasks-access-token' });
     expect(h.scopes).toEqual([['https://www.googleapis.com/auth/cloud-platform']]);
     const { task } = bodyOf();
     expect(task).toMatchObject({
@@ -153,6 +153,9 @@ describe('enqueue in dev without a queue', () => {
     vi.stubEnv('RESEARCH_TASK_URL', '');
     vi.stubEnv('RESEARCH_TASK_SA', '');
     vi.stubEnv('DEV', true);
+    vi.stubEnv('YOUTUBE_API_KEY', 'yt-key');
+    // The genre search finds nothing, so discover ends the run.
+    fetchMock.mockImplementation(async () => json({ items: [] }));
   });
 
   it('runs every delivery in-process until the run is done, calling no queue', async () => {
@@ -175,12 +178,14 @@ describe('enqueue in dev without a queue', () => {
         expect(run).toMatchObject({
           stage: 'done',
           seq: 2,
-          limits: ['analytics-not-shared', 'no-peers'],
+          limits: ['analytics-not-shared', 'artist-range-unknown', 'no-peers'],
           claimToken: null,
         });
       },
       { timeout: 10_000, interval: 50 },
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContainEqual(
+      expect.stringContaining('cloudtasks'),
+    );
   });
 });

@@ -122,7 +122,7 @@ vi.mock('@google-cloud/storage', () => ({
 vi.mock('google-auth-library', () => ({
   // Application Default Credentials, for Cloud Tasks.
   GoogleAuth: class {
-    getAccessToken = async () => 'ya29.tasks';
+    getAccessToken = async () => 'tasks-access-token';
   },
   OAuth2Client: class {
     refresh = '';

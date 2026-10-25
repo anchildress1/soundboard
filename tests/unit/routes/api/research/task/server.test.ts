@@ -24,7 +24,7 @@ vi.mock('google-auth-library', () => ({
     verifyIdToken = h.verifyIdToken;
   },
   GoogleAuth: class {
-    getAccessToken = async () => 'ya29.token';
+    getAccessToken = async () => 'tasks-access-token';
   },
 }));
 

@@ -7,20 +7,14 @@ import { db } from '#lib/server/core/db.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
 import { jobResearch, researchRuns } from '#lib/server/core/schema.js';
 import { DeadlineSpent, YouTubeError } from '#lib/server/platforms/youtube/youtube.js';
-import {
-  RETRY_MS,
-  hasTime,
-  runDelivery,
-  type Batch,
-  type Stage,
-  type Stages,
-} from '#lib/server/research/delivery.js';
+import { RETRY_MS, type Batch, type Stage } from '#lib/server/research/batch.js';
+import { runDelivery, type Stages } from '#lib/server/research/delivery.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { A_JOB, seedJob, USERS, USER_A } from '../../../../helpers/pipeline';
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: class {
-    getAccessToken = async () => 'ya29.token';
+    getAccessToken = () => Promise.resolve('tasks-access-token');
   },
 }));
 
@@ -55,15 +49,12 @@ const tasks = () =>
 /** Stages where `learn` is `stage`; the rest end the run. */
 const with_ = (stage: Stage): Stages => ({
   learn: stage,
-  discover: async () => ({ done: 0, stage: 'done', cursor: 0 }),
-  match: async () => ({ done: 0, stage: 'done', cursor: 0 }),
-  releases: async () => ({ done: 0, stage: 'done', cursor: 0 }),
+  discover: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
+  match: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
+  releases: () => Promise.resolve({ done: 0, stage: 'done', cursor: 0 }),
 });
-const returning = (batch: Batch) => with_(async () => batch);
-const throwing = (error: unknown) =>
-  with_(async () => {
-    throw error;
-  });
+const returning = (batch: Batch) => with_(() => Promise.resolve(batch));
+const throwing = (error: Error) => with_(() => Promise.reject(error));
 
 const saveEvidence =
   (query: string): Batch['writes'] =>
@@ -93,13 +84,24 @@ afterEach(() => {
 });
 
 describe('runDelivery', () => {
-  it('runs the placeholder stages to done with their limits', async () => {
-    expect(await runDelivery(DELIVERY)).toBe(200);
+  it('runs stage after stage until done, keeping each limit, then enqueues nothing', async () => {
+    const stages: Stages = {
+      ...with_(() =>
+        Promise.resolve({
+          done: 0,
+          stage: 'discover',
+          cursor: 0,
+          limits: ['analytics-not-shared'],
+        }),
+      ),
+      discover: () => Promise.resolve({ done: 1, stage: 'done', cursor: 0, limits: ['no-peers'] }),
+    };
+    expect(await runDelivery(DELIVERY, stages)).toBe(200);
     expect(await stored()).toMatchObject({ stage: 'discover', seq: 1, claimToken: null });
     expect(tasks()).toEqual([
       { name: `${QUEUE}/tasks/run-1-1`, at: null, delivery: { ...DELIVERY, seq: 1 } },
     ]);
-    expect(await runDelivery({ ...DELIVERY, seq: 1 })).toBe(200);
+    expect(await runDelivery({ ...DELIVERY, seq: 1 }, stages)).toBe(200);
     expect(await stored()).toMatchObject({
       stage: 'done',
       seq: 2,
@@ -126,9 +128,9 @@ describe('runDelivery', () => {
     const before = Date.now();
     await runDelivery(
       DELIVERY,
-      with_(async ({ deadline }) => {
+      with_(({ deadline }) => {
         seen.push(deadline);
-        return { done: 1, stage: 'learn', cursor: 1 };
+        return Promise.resolve({ done: 1, stage: 'learn', cursor: 1 });
       }),
     );
     expect(seen).toHaveLength(1);
@@ -269,12 +271,5 @@ describe('runDelivery', () => {
       await runDelivery({ ...DELIVERY, seq: 1 }, returning({ done: 1, stage: 'learn', cursor: 1 }));
       expect(await stored()).toMatchObject({ consecutiveFailures: 0, error: null });
     });
-  });
-});
-
-describe('hasTime', () => {
-  it('keeps the reserve plus the item estimate', () => {
-    expect(hasTime(10_000 + 8_001, 10_000, 0)).toBe(true);
-    expect(hasTime(10_000 + 8_000, 10_000, 0)).toBe(false);
   });
 });
