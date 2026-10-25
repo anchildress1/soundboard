@@ -89,7 +89,7 @@ description: 'Task list for artist profile inputs and display'
 
 **⚠️ CRITICAL**: no user story work starts until this phase is green.
 
-- [ ] T006 Schema and migration (data-model, research R1–R3, R16, inventory #50):
+- [x] T006 Schema and migration (data-model, research R1–R3, R16, inventory #50):
   - **`src/lib/server/core/schema.ts`:** add `artists` with exactly the data-model rules:
     - `id text PK`
     - `name text not null`, `CHECK name = btrim(name) and char_length(name) between 1 and 100 and name !~ '[<>,]' and name !~ '^#'`
@@ -109,10 +109,10 @@ description: 'Task list for artist profile inputs and display'
     - Append `GRANT SELECT, UPDATE (name, bandcamp_url, contact_line, updated_at) ON artists TO soundboard_app`.
     - Append `CREATE FUNCTION public.soundboard_create_artist(…)` exactly as data-model specifies, with `REVOKE ALL … FROM PUBLIC` and `GRANT EXECUTE … TO soundboard_app`.
   - Never write Nathan's surname or email login anywhere.
-- [ ] T007 Update `tests/helpers/db.ts`:
+- [x] T007 Update `tests/helpers/db.ts`:
   - `truncate()` includes `artists`.
   - `Seed` gains `artists` and inserts them before `users`.
-- [ ] T008 Migration and RLS tests in `tests/unit/lib/server/core/rls.test.ts` (extend) and a new `tests/unit/drizzle/artist-profiles.test.ts`, on a fresh PGlite before `truncate`:
+- [x] T008 Migration and RLS tests in `tests/unit/lib/server/core/rls.test.ts` (extend) and a new `tests/unit/drizzle/artist-profiles.test.ts`, on a fresh PGlite before `truncate`:
   - **Migration:** the `flr` row has the R3 values and `curated = true`. The facts are `home` and `mr-kill`, with no `artist-name`.
   - **Backfill:** in the test, on its own `new PGlite()`:
     1. Apply `drizzle/0000`–`0004` by splitting each file on `--> statement-breakpoint`, in `meta/_journal.json` order.
@@ -140,7 +140,7 @@ description: 'Task list for artist profile inputs and display'
     - no identity raises `42501`
     - a `CHECK` violation raises: a 101-character name, `<`, a comma, a leading `#`, `https://example.com`, a contact line with `#`
   - **Constraints:** two users can't link the same profile (unique). A top-level job insert with `artist_id` null is rejected by `jobs_insert`.
-- [ ] T009 [P] Create `src/lib/artist.ts`:
+- [x] T009 [P] Create `src/lib/artist.ts`:
   - `parseArtist(input: unknown): { value: ArtistInput } | { errors: ArtistFieldErrors }`, implementing research R11 exactly, messages verbatim. The Bandcamp URL is stored normalized as `https://<sub>.bandcamp.com`.
   - Tests in `tests/unit/lib/artist.test.ts`:
     - valid input; empty optional fields → null
@@ -148,7 +148,7 @@ description: 'Task list for artist profile inputs and display'
     - Bandcamp: `https://Name.Bandcamp.com/` normalized; refused: `http:`, `javascript:`, `https://user:pw@x.bandcamp.com`, a port, a path, `https://bandcamp.com`, `https://x.bandcamp.com.evil.com`, a custom domain, an unparsable URL
     - contact: 200 vs 201 characters; `<`/`>`; `#` anywhere (`DM #myband`) → "Contact lines can't contain #."
     - surrounding whitespace; a non-object body
-- [ ] T010 Create `src/lib/server/artist/profile.ts`:
+- [x] T010 Create `src/lib/server/artist/profile.ts`:
   - `type ArtistProfile`
   - `artistProfile(uid, q?)`: joins `users` → `artists`, returns null with no link
   - `createArtist(value)`: calls `soundboard_create_artist`
@@ -161,13 +161,13 @@ description: 'Task list for artist profile inputs and display'
     - another user's profile unreachable
     - invalid input leaving the old values
     - two users saving the same name both succeed (spec edge case)
-- [ ] T011 Put the profile on the session (inventory #45-47):
+- [x] T011 Put the profile on the session (inventory #45-47):
   - `src/lib/server/auth/users.ts` `getUser` returns `artist: ArtistProfile | null`.
   - `src/hooks.server.ts:53-56` and `src/app.d.ts:5` replace `artistId` with `artist`.
   - `src/routes/+layout.server.ts:23` returns `artist: { name, bandcampUrl, curated } | null`.
   - Fix every `locals.user.artistId` reader the typecheck flags.
   - Update `tests/unit/lib/server/auth/users.test.ts`, `tests/unit/hooks.server.test.ts` and `tests/unit/routes/layout.server.test.ts`. Signed out must return `artist: null`, and the layout never returns `contactLine` or `id`.
-- [ ] T012 [P] Shared types and fixtures:
+- [x] T012 [P] Shared types and fixtures:
   - **`src/lib/types.ts`:**
     - `Pick` gains `artistName: string | null`.
     - `Wait` gains `'Add your artist name first.'`.
@@ -198,28 +198,28 @@ description: 'Task list for artist profile inputs and display'
 
 **Independent Test**: sign in as B and open `/new`: the form shows. An empty name is refused. Save a name: the new-release form appears, and the header shows the name.
 
-- [ ] T013 [US1] Create `src/routes/api/artist/+server.ts` (`PUT`, per contract):
+- [x] T013 [US1] Create `src/routes/api/artist/+server.ts` (`PUT`, per contract):
   - 401 signed out
   - 422 with `fields` and "Fix the highlighted fields."
   - 200 `{ artist }`; never `id` or `curated`
   - Add `saveArtist(body)` to `src/lib/api.ts`.
   - Tests in `tests/unit/routes/api/artist/server.test.ts`: 401, 422 per field, create, update, unchanged on 422, a body with `curated: true` or `id` ignored.
-- [ ] T014 [P] [US1] Create `src/lib/components/ArtistForm.svelte`:
+- [x] T014 [P] [US1] Create `src/lib/components/ArtistForm.svelte`:
   - Props `initial`, `submitLabel`, `onsaved`.
   - Labelled inputs Artist name (required, `maxlength=100`), Bandcamp URL (`type=url`, placeholder `https://<name>.bandcamp.com`), Contact line (`maxlength=200`).
   - Always submits all three fields, pre-filled from `initial`.
   - Field errors from the 422 shown under each field. Plain labels only.
   - Tests in `tests/unit/lib/components/ArtistForm.test.ts`: renders `initial`, shows field errors, calls `onsaved` on 200, keeps the input on error, sends untouched optional fields with their initial values.
-- [ ] T015 [US1] Gate `/new`:
+- [x] T015 [US1] Gate `/new`:
   - `src/routes/new/+page.svelte` renders `ArtistForm` (heading "Who's the artist?", button "Save") when `data.artist` is null. On save it calls `invalidateAll()`, and then the existing form shows.
   - Keep the change to a wrapping `{#if}` (research R17).
   - Tests in `tests/unit/routes/new/page.test.ts`.
-- [ ] T016 [US1] Refuse jobs without a profile (FR-003 AS4, research R16, inventory #43-44):
+- [x] T016 [US1] Refuse jobs without a profile (FR-003 AS4, research R16, inventory #43-44):
   - **`src/lib/server/jobs/create.ts`:** `409 "Add your artist name first."` before `signedUploadUrl` when `user.artist` is null, and `artistId: user.artist.id`.
   - **`src/routes/api/jobs/[id]/short/+server.ts`:** the same 409.
   - **Tests:** extend `tests/unit/lib/server/jobs/create.test.ts`, `tests/unit/routes/api/jobs/server.test.ts` and the short route test (409, no job row, no signing call; positive path stores `artist_id`).
-- [ ] T017 [US1] Header name (FR-009, inventory #21): `src/routes/+layout.svelte` renders `data.artist.name` first in the header row, before the channel handle and counts, on its own row on phones like today. Extend `tests/unit/routes/layout.test.ts`.
-- [ ] T018 [US1] E2E `tests/e2e/artist.spec.ts`, US1:
+- [x] T017 [US1] Header name (FR-009, inventory #21): `src/routes/+layout.svelte` renders `data.artist.name` first in the header row, before the channel handle and counts, on its own row on phones like today. Extend `tests/unit/routes/layout.test.ts`.
+- [x] T018 [US1] E2E `tests/e2e/artist.spec.ts`, US1:
   - B on `/new` sees the form.
   - An empty name shows "Add the artist name.", and nothing is saved (reload still shows the form).
   - Saving `B Band` shows the new-release form and `B Band` in the header.
@@ -248,7 +248,7 @@ description: 'Task list for artist profile inputs and display'
 - The YouTube identity calls carry C's bearer token.
 - Disconnected C waits on `reconnect YouTube` with 0 Gemini calls.
 
-- [ ] T019 [P] [US2] Owner-grant uploads and outcomes (research R6, R8, inventory #22):
+- [x] T019 [P] [US2] Owner-grant uploads and outcomes (research R6, R8, inventory #22):
   - **`src/lib/server/platforms/youtube/youtube.ts`:**
     - Add `ownUploads(token, channelId, count, deadline)`:
       1. `channels?mine=true&part=contentDetails`; select the item with `id === channelId`
@@ -267,7 +267,7 @@ description: 'Task list for artist profile inputs and display'
       - `access-lost`: 401; 403 `forbidden`, `insufficientPermissions`, `channelForbidden`, `playlistItemsNotAccessible`, an unlisted 403 reason; 404 `playlistNotFound`
       - `busy`: 403 `quotaExceeded`, `dailyLimitExceeded`, `rateLimitExceeded`, `userRateLimitExceeded`; 429; 503; a network error; an `AbortError`; `DeadlineSpent`; the channel-mismatch throw
       - `app-rejected`: `invalid_client`, `unauthorized_client`, 403 `accessNotConfigured`, 400 `keyInvalid`, a plain 400
-- [ ] T020 [US2] Thread the step deadline through every read the pick and brand make, and reserve model time (research R14, inventory #36-37, #52-54). Needs T005 and T019.
+- [x] T020 [US2] Thread the step deadline through every read the pick and brand make, and reserve model time (research R14, inventory #36-37, #52-54). Needs T005 and T019.
   - **`src/lib/server/platforms/youtube/connection.ts`:** `accessTokenFor(uid, channelId, deadline)` throws `DeadlineSpent` when no time is left, else builds its `OAuth2Client` with `transporterOptions: { signal: budgetSignal(deadline) }`. No other timeout.
   - **`src/lib/server/platforms/youtube/youtube.ts`:** `thumbnailImage(url, deadline)` and `keyGet(path, query, deadline)` use `budgetSignal` and drop their 10 s and 15 s timers. `thumbnailImage` returns null on `DeadlineSpent` or an abort.
   - **`src/lib/server/pipeline/hashtags.ts`:** `audienceEvidence(chunks, durationSec, deadline)` passes it to `searchMusicVideos` and `videosByIds`. `pipeline.ts:163-168` and `brand.ts:201` pass the step deadline.
@@ -283,7 +283,7 @@ description: 'Task list for artist profile inputs and display'
     - the pick step then returns `waiting on YouTube`, releases the claim with its token, and makes 0 Gemini calls
     - publishing and verify on a stalled refresh return a wait, not a failure
     - existing `invalid_grant` → revoked behavior unchanged
-- [ ] T021 [US2] Generalize memory (inventory #1-4, #23-27):
+- [x] T021 [US2] Generalize memory (inventory #1-4, #23-27):
   - **`src/lib/server/artist/memory.ts`:**
     - Delete `ARTIST_ID`, `ARTIST_NAME` and `SEED_FACTS`.
     - `memoryOf(artistId, kind)`.
@@ -296,7 +296,7 @@ description: 'Task list for artist profile inputs and display'
     - C's job writes feedback to `artist-c`, and A's to `flr`.
     - A job whose `artistId` differs from the owner's current link (or a null legacy job) keeps feedback on the job.
     - The derived name always; stored facts only with `memory`.
-- [ ] T022 [P] [US2] Redact YouTube text in spans (research R13, inventory #38):
+- [x] T022 [P] [US2] Redact YouTube text in spans (research R13, inventory #38):
   - **`src/lib/server/core/tracing.ts`:** the text `Part` gains optional `source: 'youtube'`. `redactTurns` replaces such a part with `{ type: 'text', content: '[YouTube uploads: <n>]' }`, `n` passed on the part.
   - **`src/lib/server/ai/model.ts`:** `chatJson`'s re-ask resends the original turns with their `source` tags, so the re-ask's `chat` span is redacted the same way. `sdkMessage` drops `source` before the SDK call.
   - Model replies and reasoning stay traced (AGENTS.md); they're app output (R13).
@@ -305,7 +305,7 @@ description: 'Task list for artist profile inputs and display'
     - the placeholder carries the count
     - untagged text parts are kept verbatim
     - a first reply that fails to parse: the re-ask's `chat` span shows the placeholder too, and the SDK request carries the full upload text without a `source` field
-- [ ] T023 [US2] Prompt and finalize (research R9, R10, R13, inventory #5-12, #29-34):
+- [x] T023 [US2] Prompt and finalize (research R9, R10, R13, inventory #5-12, #29-34):
   - **`src/lib/server/ai/smart-pick.ts`:**
     - `PickContext` and `PickFixups` take `artist: { name, contactLine, curated }` and `memory: boolean`.
     - Add `GENERIC_VOICE`: `ARTIST_VOICE`'s plain-copy lines without the humor, asides and caps lines. Leave `ARTIST_VOICE` unchanged.
@@ -335,7 +335,7 @@ description: 'Task list for artist profile inputs and display'
       - a contact line with a URL is kept exactly
     - Tags: the artist tag exactly once when the candidates include a case variant; a 100-character name survives a 500-character pool; a self-titled song (`songTitle` equal to the name) keeps the artist tag.
     - The request's `recentUploads` part is tagged `source: 'youtube'`.
-- [ ] T024 [US2] Pick step (research R6, R8, R15, inventory #13, #35):
+- [x] T024 [US2] Pick step (research R6, R8, R15, inventory #13, #35):
   - **`src/lib/server/pipeline/pipeline.ts` `pick()`, in this order, before any model call:**
     1. `artistProfile(job.ownerUid)`: null → `{ wait: 'Add your artist name first.' }`.
     2. `getConnection(owner)`: none → `{ wait: 'reconnect YouTube' }`.
@@ -362,7 +362,7 @@ description: 'Task list for artist profile inputs and display'
     - A (curated): `ARTIST_VOICE` and Nathan's contact line.
     - **No persistence:** a sentinel string in a faked upload description appears in no `jobs` or `artist_memory` row after the step (R13).
     - **Revocation:** after `disconnect(owner)`, the next pick makes 0 YouTube calls and waits (R13).
-- [ ] T025 [US2] Approval validation (research R7, R9, inventory #40):
+- [x] T025 [US2] Approval validation (research R7, R9, inventory #40):
   - **`src/lib/server/jobs/actions.ts`:** `tagError` allows `pick.artistName` (not null) instead of a boolean artist flag, requires it exactly once (case-insensitive), and exempts it from the song-title rule at `:48`. `approve` passes the proposed pick.
   - **Tests** in `tests/unit/lib/server/jobs/actions.test.ts`:
     - the pick's `artistName` tag is accepted
@@ -371,7 +371,7 @@ description: 'Task list for artist profile inputs and display'
     - a self-titled song: the artist tag is accepted, other title tags still rejected
     - after renaming the profile, the old pick's name is still accepted (no change to approved fields)
     - a pick with `artistName: null` accepts no artist tag and requires none
-- [ ] T026 [US2] Short creation uses the current name (research R7, inventory #41):
+- [x] T026 [US2] Short creation uses the current name (research R7, inventory #41):
   - **`src/lib/server/jobs/jobs.ts` `createShort`:** keeps the parent's `artistId`, null included (`soundboard_owns_job`, unchanged). `artistName` is the owner's current profile name. Tags: the parent's approved tags without the parent pick's `artistName` (case-insensitive), with the current name first and its length reserved. The parent's fields are untouched.
   - **Tests** in `tests/unit/lib/server/jobs/jobs.test.ts`:
     - same name: tags unchanged, name once
@@ -379,7 +379,7 @@ description: 'Task list for artist profile inputs and display'
     - legacy parent with `artistId: null` and `artistName: null`, created through the request-scoped `soundboard_app` connection: the insert passes RLS, the Short keeps `artistId: null`, and its tags gain the current name
     - a parent linked to the owner's profile: the Short keeps that `artistId`
     - the hook prompt (`short.ts` `buildHookRequest`) is unchanged and names no artist (FR-005 covers only prompts that name one)
-- [ ] T027 [US2] Brand guide on the owner's grant (FR-007, research R8, R13, inventory #14-16, #28, #39, #49):
+- [x] T027 [US2] Brand guide on the owner's grant (FR-007, research R8, R13, inventory #14-16, #28, #39, #49):
   - **`src/lib/server/artist/brand.ts`:**
     - `requireCurated(user)` replaces `requireArtist`.
     - Slots, `getBrand`, `approvedBrand`, `proposeBrand`, `approveBrand` and `discardBrandProposal` take `artistId`.
@@ -397,12 +397,12 @@ description: 'Task list for artist profile inputs and display'
     - a slow successful read that spends the budget: `{ wait: 'model busy' }`, 0 Gemini calls
     - `invalid_client`: error
     - zero uploads: the existing 409
-- [ ] T028 [P] [US2] Review and working screen (research R9, R15, inventory #42):
+- [x] T028 [P] [US2] Review and working screen (research R9, R15, inventory #42):
   - **`src/lib/components/Review.svelte`:** `pick.artistName` shows as a fixed tag outside the editable comma field. The counter includes it, and the submit sends `[artistName, ...splitTags(tagsText)]`, deduplicated case-insensitively. A pick with `artistName: null` shows no fixed tag.
   - **`src/routes/jobs/[id]/+page.svelte`:** `'Add your artist name first.'` with a link to `/settings`; `'reconnect YouTube'` during the pick with a link to Connections.
   - **Tests:** extend `tests/unit/lib/components/Review.test.ts` (fixed tag rendered, not editable, counted, submitted once even when typed again) and the job page test.
   - **E2E** in `tests/e2e/artist.spec.ts`: as C on its seeded review job, the fixed `Test Artist` tag shows, and clearing the comma field still approves with it.
-- [ ] T029 👤 [US2] Delete `FLR_CHANNEL_ID` (config, needs approval; inventory #55): `deploy.sh:39,48,186`, `.env.example:15`, `playwright.config.ts:37`, `README.md:191`.
+- [x] T029 👤 [US2] Delete `FLR_CHANNEL_ID` (config, needs approval; inventory #55): `deploy.sh:39,48,186`, `.env.example:15`, `playwright.config.ts:37`, `README.md:191`.
   - Then `grep -rn FLR_CHANNEL_ID src scripts deploy.sh .env.example playwright.config.ts README.md` returns nothing. `specs/` and `docs/` mentions are history and stay.
 
 **Checkpoint**: US1 and US2 deliver the MVP. A non-Nathan user can run a full release with their own details.
@@ -415,17 +415,17 @@ description: 'Task list for artist profile inputs and display'
 
 **Independent Test**: as C, the footer and Bandcamp screen show only C's values. Signed out, `/`, `/privacy` and `/terms` name no artist.
 
-- [ ] T030 [P] [US3] Footer (FR-009, inventory #18):
+- [x] T030 [P] [US3] Footer (FR-009, inventory #18):
   - `src/lib/components/Footer.svelte` takes `artist: { name; bandcampUrl } | null`.
   - With an artist: "Built for <name> by Ashley Childress · PolyForm Noncommercial 1.0.0", with the name linked to `bandcampUrl` (`target=_blank rel="noopener noreferrer"`) when set, and plain text otherwise.
   - Null: "Built by Ashley Childress · PolyForm Noncommercial 1.0.0".
   - `src/routes/+layout.svelte` passes `data.artist`.
   - Tests in `tests/unit/lib/components/Footer.test.ts`.
-- [ ] T031 [P] [US3] Layout description and menu (FR-010, inventory #19-20):
+- [x] T031 [P] [US3] Layout description and menu (FR-010, inventory #19-20):
   - `src/routes/+layout.svelte` meta description: exactly "Release agent for musicians: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
   - The menu shows Settings for every signed-in user, and Brand guide only when `data.artist?.curated`.
   - Extend `tests/unit/routes/layout.test.ts`.
-- [ ] T032 [P] [US3] Bandcamp screen (FR-008, research R12, inventory #17). Needs T004.
+- [x] T032 [P] [US3] Bandcamp screen (FR-008, research R12, inventory #17). Needs T004.
   - `src/lib/components/Bandcamp.svelte` deletes `EDITOR` and takes `bandcampUrl: string | null`.
   - Set: the editor is `${bandcampUrl}/edit_track`.
   - Null: no editor link, and "Add your Bandcamp URL in Settings" linking to `/settings`. The copy fields stay.
@@ -434,8 +434,8 @@ description: 'Task list for artist profile inputs and display'
     - A's URL → `https://flieslikerobots.bandcamp.com/edit_track`
     - C's URL → `https://test-artist.bandcamp.com/edit_track`
     - null → the note, and no link
-- [ ] T033 [P] [US3] Privacy copy (inventory #51): `src/routes/privacy/+page.svelte:24-25` says each account stores an artist name and an optional Bandcamp URL and contact line, used for drafts and display. Linked artist memory stores feedback and, for the curated profile, the brand guide. Recent uploads read for identity aren't stored. Update its test if one asserts the text.
-- [ ] T034 [US3] E2E `tests/e2e/artist.spec.ts`, US3:
+- [x] T033 [P] [US3] Privacy copy (inventory #51): `src/routes/privacy/+page.svelte:24-25` says each account stores an artist name and an optional Bandcamp URL and contact line, used for drafts and display. Linked artist memory stores feedback and, for the curated profile, the brand guide. Recent uploads read for identity aren't stored. Update its test if one asserts the text.
+- [x] T034 [US3] E2E `tests/e2e/artist.spec.ts`, US3:
   - As C: the header has `Test Artist`; the footer links `https://test-artist.bandcamp.com`; the Bandcamp screen's editor link points at C's `/edit_track`.
   - The page HTML contains none of "Flies Like Robots", `flieslikerobots` or `@flieslikerobots` (SC-002).
   - Signed out on `/`, `/privacy` and `/terms`: no artist name in header or footer, and the meta description is generic (SC-006).
@@ -450,7 +450,7 @@ description: 'Task list for artist profile inputs and display'
 
 **Independent Test**: as C, rename on `/settings`, then re-run a review job: the new pick has the new name tag, and an approved job's `finalFields` are unchanged.
 
-- [ ] T035 [US4] Settings page (FR-011, inventory #48):
+- [x] T035 [US4] Settings page (FR-011, inventory #48):
   - `src/routes/settings/+page.server.ts` drops `requireArtist` and returns the owner's editable `artist: { name, bandcampUrl, contactLine } | null`, from `locals.user.artist` only. Signed-out requests already redirect home through `hooks.server.ts`.
   - `src/routes/settings/+page.svelte` adds an "Artist" section above Peer influence: `ArtistForm` pre-filled from `data.artist`, button "Save changes", then "Saved." and `invalidateAll()` after a 200.
   - `<title>` becomes "Settings · Soundboard".
@@ -458,11 +458,11 @@ description: 'Task list for artist profile inputs and display'
     - the loader returns C's three fields, and never another user's
     - a rename-only save keeps the stored Bandcamp URL and contact line
     - clearing the contact field stores null
-- [ ] T036 [US4] Rename semantics in `tests/unit/lib/server/pipeline/pipeline.test.ts` and `tests/unit/lib/server/jobs/actions.test.ts` (SC-005). Rename C's profile, then:
+- [x] T036 [US4] Rename semantics in `tests/unit/lib/server/pipeline/pipeline.test.ts` and `tests/unit/lib/server/jobs/actions.test.ts` (SC-005). Rename C's profile, then:
   - The next re-run pick stores the new `artistName` and tag.
   - An `APPROVED` or `VERIFIED` job's `finalFields` and stored picks are byte-identical before and after.
   - A 422 on an invalid edit leaves the stored row unchanged.
-- [ ] T037 [US4] E2E `tests/e2e/artist.spec.ts`, US4 (both projects, own user per project):
+- [x] T037 [US4] E2E `tests/e2e/artist.spec.ts`, US4 (both projects, own user per project):
   - Open `/settings` and see all three fields pre-filled.
   - Clear the name and save: "Add the artist name.", and a reload shows the old name.
   - Enter `http://x` for Bandcamp: "Use your https://<name>.bandcamp.com address."
@@ -475,16 +475,16 @@ description: 'Task list for artist profile inputs and display'
 
 ## Phase 7: Polish and validation
 
-- [ ] T038 [P] Update `README.md:163-174` (FR-016):
+- [x] T038 [P] Update `README.md:163-174` (FR-016):
   - New users enter their artist name on first run.
   - `--artist flr` links an invite to Nathan's existing profile.
   - Brand guide is for the curated profile, and reads through the user's own grant.
-- [ ] T039 FR-013 sweep, scoped to app code and executable config:
+- [x] T039 FR-013 sweep, scoped to app code and executable config:
   - `grep -rniE "flies ?like ?robots|flieslikerobots|'flr'|\"flr\"|FLR_CHANNEL_ID|ARTIST_ID|ARTIST_NAME|CONTACT_LINE" src scripts deploy.sh .env.example playwright.config.ts vite.config.ts`
   - Allowed: `scripts/invite.ts:2` (`--artist flr` usage example). `ARTIST_VOICE`'s text stays as is.
   - Review every other match: each is a bug to fix, not an exception to add. `drizzle/`, `tests/` and `specs/` are out of scope.
   - Record the command and its output in the PR description.
-- [ ] T040 Validation loop (max 5 attempts, then stop with the exact errors):
+- [x] T040 Validation loop (max 5 attempts, then stop with the exact errors):
   1. `make ai-checks`: coverage ≥ 85/85/85/80, zero warnings
   2. `pnpm exec playwright test`: both projects
   3. `semgrep scan --config auto --error --metrics=off` on the changed files: zero findings
