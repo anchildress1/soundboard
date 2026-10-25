@@ -708,7 +708,7 @@ describe('guide proposals across grants', () => {
     await putConnection(UID, connected());
   });
 
-  it('drops only the proposals read through the revoked grant, keeping approved guides', async () => {
+  it('drops the revoked grant proposals and the unbound ones, keeping approved guides', async () => {
     const old = await generation();
     await seed({
       artistGuides: [
@@ -718,7 +718,21 @@ describe('guide proposals across grants', () => {
       ],
     });
     await markRevoked(UID, grant('c2VhbGVk', old));
-    expect(await kinds()).toEqual(['approved:kept', 'proposed:edits only']);
+    expect(await kinds()).toEqual(['approved:kept']);
+  });
+
+  it('keeps unbound proposals when a late refusal finds a newer grant', async () => {
+    const old = await generation();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+    await seed({
+      artistGuides: [
+        pendingProposal(ARTIST, 'voice', rules('edits only')),
+        pendingProposal(ARTIST, 'brand', rules('new grant'), { grantAt: await generation() }),
+      ],
+    });
+    await markRevoked(UID, grant('c2VhbGVk', old));
+    expect(await kinds()).toEqual(['proposed:edits only', 'proposed:new grant']);
   });
 
   it('keeps a proposal saved on a new grant when the old one is refused late', async () => {
@@ -760,6 +774,29 @@ describe('guide proposals across grants', () => {
     expect(await revokeGrant(UID)).toBe(true);
     expect(await getConnection(UID)).toMatchObject({ tokenCiphertext: 'bmV3' });
     expect(await kinds()).toEqual(['proposed:new grant']);
+  });
+
+  it('drops unbound proposals with the grant on disconnect', async () => {
+    await seed({
+      artistGuides: [
+        pendingProposal(ARTIST, 'voice', rules('edits only')),
+        pendingProposal(ARTIST, 'brand', rules('old grant'), { grantAt: await generation() }),
+      ],
+    });
+    expect(await revokeGrant(UID)).toBe(true);
+    expect(await getConnection(UID)).toBeNull();
+    expect(await kinds()).toEqual([]);
+  });
+
+  it('keeps unbound proposals when a reconnect lands while Google answers the disconnect', async () => {
+    await seed({ artistGuides: [pendingProposal(ARTIST, 'voice', rules('edits only'))] });
+    fetchMock.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+      return new Response('', { status: 200 });
+    });
+    await revokeGrant(UID);
+    expect(await kinds()).toEqual(['proposed:edits only']);
   });
 
   it("never drops another artist's proposals", async () => {
