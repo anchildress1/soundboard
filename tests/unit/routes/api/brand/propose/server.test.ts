@@ -3,7 +3,7 @@ import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
 import { POST } from '#src/routes/api/brand/propose/+server.js';
-import { busy429, perDay429 } from '../../../../../helpers/gemini';
+import { busy429, GEMINI_INTERACTIONS, perDay429 } from '../../../../../helpers/gemini';
 import { USER_A, USER_B } from '../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
@@ -19,7 +19,7 @@ const json = (body: unknown) =>
 const channelThen = (model: () => Response) =>
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
-    if (url.includes('generativelanguage.googleapis.com')) return model();
+    if (url === GEMINI_INTERACTIONS) return model();
     if (url.includes('/channels?')) {
       return json({ items: [{ contentDetails: { relatedPlaylists: { uploads: 'UU1' } } }] });
     }
