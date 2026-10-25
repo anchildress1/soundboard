@@ -39,7 +39,7 @@ The unit suite covers this:
 
 ## Q5 · Live pick (US2, US4), Gemini share ≤ $0.40
 
-- **Before:** read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md`. Stop if the run's budget is spent.
+- **Before:** read the run's Gemini spend ledger. Stop if the run's budget is spent.
 - **Video:** the shortest `$HOME/Downloads/*.mp4` (read-only), ideally ≤ 60 s. That's one analyst window and one pick. PRD cost: about $0.25 for a 15-minute job, so a one-window job costs a small fraction of the share.
 - **Run:**
   1. As the non-Nathan user, with their own YouTube channel connected (identity reads are read-only), start the release and watch it reach Review.

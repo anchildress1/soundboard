@@ -491,7 +491,7 @@ description: 'Task list for artist profile inputs and display'
   4. SonarQube `analyze_code_snippet` on each changed or added source file (project `anchildress1_soundboard`): zero issues
   5. `pnpm audit --prod` and `pnpm audit`: zero
 - [x] T041 👤 Live local validation (quickstart Q3–Q5). Gemini share ≤ $0.40.
-  - **Before:** read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md`.
+  - **Before:** read the run's Gemini spend ledger.
   - **Database:** apply the migration to the dev Neon branch only after quickstart Q0 passes there (`.env` is dev-only; never print its URLs).
   - **User:** add a non-Nathan invited user with `node --env-file=.env scripts/invite.ts add <email>`. Use Ashley's own non-Nathan account with her own YouTube channel connected, never Nathan's.
   - **Run:** `pnpm dev`, then in the browser:
