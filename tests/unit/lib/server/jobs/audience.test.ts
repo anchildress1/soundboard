@@ -36,6 +36,7 @@ const draft: Pick = {
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
   bandcamp: { about: 'A new song.', credits: 'Written by Nathan.' },
+  artistName: null,
   modelMs: 1,
 };
 

@@ -27,6 +27,7 @@ const PICK: Pick = {
   brandCheck: '',
   why: { title: '', description: '', tags: '' },
   bandcamp: { about: '', credits: '' },
+  artistName: null,
   modelMs: 12_000,
 };
 

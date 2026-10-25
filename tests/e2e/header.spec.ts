@@ -7,7 +7,7 @@ const overlaps = (a: { x: number; y: number; width: number; height: number }, b:
 for (const [who, uid, artist] of [
   ['a signed-out user', null, false],
   ['Nathan', USER_A, true],
-  ['an unlinked user', USER_B, false],
+  ['a user without a profile', USER_B, false],
 ] as const) {
   test(`keeps the header controls clear of the wordmark for ${who}`, async ({ page }) => {
     if (uid) await signIn(page, uid);
@@ -33,7 +33,7 @@ for (const [who, uid, artist] of [
     const menu = page.locator('#menu');
     await expect(menu.getByRole('link', { name: 'Connections' })).toBeVisible();
     await expect(menu.getByRole('link', { name: 'Brand guide' })).toHaveCount(artist ? 1 : 0);
-    await expect(menu.getByRole('link', { name: 'Settings' })).toHaveCount(artist ? 1 : 0);
+    await expect(menu.getByRole('link', { name: 'Settings' })).toBeVisible();
     await expect(menu.getByRole('button', { name: 'Sign out' })).toBeVisible();
   });
 }
@@ -45,7 +45,7 @@ test('the menu links work and close behind the navigation', async ({ page }) => 
   const menu = page.locator('#menu');
   await menu.getByRole('link', { name: 'Settings' }).click();
   await expect(page).toHaveURL('/settings');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Peer influence');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Settings');
   await expect(menu).toBeHidden();
 });
 

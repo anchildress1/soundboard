@@ -52,7 +52,7 @@ const session: Handle = async ({ event, resolve }) => {
     const user = signed ? await getUser(signed.uid) : null;
     event.locals.user =
       user && signed
-        ? { uid: user.uid, sid: signed.sid, email: user.email, artistId: user.artistId }
+        ? { uid: user.uid, sid: signed.sid, email: user.email, artist: user.artist }
         : null;
     return resolve(event);
   });

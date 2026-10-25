@@ -18,6 +18,7 @@ import {
   startJobTrace,
   textTurn,
   toolSpan,
+  youtubePart,
   type ChatReply,
   type ModelRequest,
 } from '#lib/server/core/tracing.js';
@@ -82,6 +83,58 @@ describe('request parts', () => {
   it('adds no caption when there are no images', () => {
     expect(imageParts('Thumbnails:', [])).toEqual([]);
     expect(imageParts('Thumbnails:', [null, null])).toEqual([]);
+  });
+});
+
+const SENTINEL = 'youtube-sentinel-91c';
+const youtubeRequest: ModelRequest = {
+  system: 'Pick.',
+  turns: [
+    {
+      role: 'user',
+      parts: [
+        { type: 'text', text: '{"songTitle":"PeekaBoo"}' },
+        youtubePart({ recentUploads: [{ title: SENTINEL }, { title: 'b' }] }, 2),
+      ],
+    },
+  ],
+};
+
+describe('YouTube text in spans', () => {
+  it('replaces a YouTube part with a counted placeholder and keeps untagged text', () => {
+    expect(redactTurns(youtubeRequest.turns)).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', content: '{"songTitle":"PeekaBoo"}' },
+          { type: 'text', content: '[YouTube uploads: 2]' },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps the YouTube text out of every invoke_agent and chat span attribute', async () => {
+    await invokeAgent(SMART_PICK, FLASH, async (agent) => {
+      agentInput(agent, youtubeRequest);
+      await chatSpan(
+        youtubeRequest,
+        { agent: SMART_PICK, model: FLASH, maxTokens: 1 },
+        async () => ({
+          content: '{}',
+          reasoning: '',
+          usage: {},
+          finishReason: 'stop',
+          responseId: null,
+        }),
+      );
+    });
+    const recorded = JSON.stringify([
+      startSpan.mock.calls.map(([options]) => options),
+      span.setAttribute.mock.calls,
+      span.setAttributes.mock.calls,
+    ]);
+    expect(recorded).toContain('[YouTube uploads: 2]');
+    expect(recorded).not.toContain(SENTINEL);
   });
 });
 

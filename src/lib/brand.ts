@@ -8,7 +8,8 @@ export const RULES_MAX = 6;
 export type BrandGuide = { statement: string; keep: string[]; fix: string[]; drop: string[] };
 export type StoredBrand = BrandGuide & {
   status: 'PROPOSED' | 'APPROVED';
-  basedOn: string[];
+  /** How many uploads the guide was read from; their IDs are never stored. */
+  uploadCount: number;
   createdAt: number;
   approvedAt: number | null;
 };

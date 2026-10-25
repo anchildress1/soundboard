@@ -44,8 +44,9 @@ export default defineConfig({
         E2E_FAKES: '1',
         GEMINI_API_KEY: 'e2e-not-a-key',
         YOUTUBE_API_KEY: 'e2e-not-a-key',
-        // The channel tests/e2e/fakes/youtube.ts answers for.
-        FLR_CHANNEL_ID: 'UC-e2e-artist',
+        // Each owner's grant refreshes through an OAuth client; tests/e2e/fakes/youtube.ts answers it.
+        GOOGLE_OAUTH_CLIENT_ID: 'e2e-client',
+        GOOGLE_OAUTH_CLIENT_SECRET: 'e2e-not-a-secret',
         GCP_PROJECT_ID: 'e2e',
         GCS_BUCKET: 'e2e',
         SESSION_SECRET: sessionSecret,

@@ -44,7 +44,7 @@ export function resetDb(): void {}
 export async function truncate(): Promise<void> {
   await database.execute(sql`drop trigger if exists after_job_update on jobs`);
   await database.execute(
-    sql`truncate users, connections, jobs, job_audience, artist_memory restart identity cascade`,
+    sql`truncate artists, users, connections, jobs, job_audience, artist_memory restart identity cascade`,
   );
 }
 
@@ -73,6 +73,7 @@ type Insert<T extends keyof typeof schema> = (typeof schema)[T] extends {
   : never;
 
 export type Seed = Partial<{
+  artists: Insert<'artists'>[];
   users: Insert<'users'>[];
   connections: Insert<'connections'>[];
   jobs: Insert<'jobs'>[];
@@ -81,7 +82,7 @@ export type Seed = Partial<{
 }>;
 
 // Foreign keys point up this list, so inserting in order never violates one.
-const ORDER = ['users', 'connections', 'jobs', 'jobAudience', 'artistMemory'] as const;
+const ORDER = ['artists', 'users', 'connections', 'jobs', 'jobAudience', 'artistMemory'] as const;
 
 /** Inserts the given rows, parents before children; within a table, rows go in array order. */
 export async function seed(rows: Seed): Promise<void> {

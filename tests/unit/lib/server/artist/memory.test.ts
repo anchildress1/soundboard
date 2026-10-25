@@ -11,24 +11,36 @@ import {
   recentFeedback,
   writeFeedback,
   recordPublish,
-  SEED_FACTS,
   type Fact,
   type Feedback,
 } from '#lib/server/artist/memory.js';
 import type { PickFields } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import {
+  A_JOB,
+  ARTIST_A,
+  ARTIST_C,
+  C_JOB,
+  seedJob,
+  USER_A,
+  USER_B,
+  USER_C,
+  USERS,
+} from '../../../../helpers/pipeline';
 
 const OFFICIAL_TITLE = 'PeekaBoo (Official Video)';
 const RICHMOND: Fact = { key: 'home', value: 'Richmond', kind: 'FACT', public: true };
+const PRIVATE: Fact = { key: 'mr-kill', value: 'x', kind: 'INFERENCE', public: false };
+const NAME_A: Fact = { key: 'artist-name', value: ARTIST_A.name, kind: 'FACT', public: true };
 
 const recordFeedback = (
   entries: Parameters<typeof writeFeedback>[1],
   job: Parameters<typeof writeFeedback>[2],
 ) => db().transaction(async (tx) => writeFeedback(tx, entries, job));
 
-/** The same stored job, as seen on the artist and unlinked. */
+/** The same stored job, as seen on each artist and unlinked. */
 const NATHANS = { id: 'job1', ...A_JOB };
+const CS = { id: 'job1', ...C_JOB };
 const UNLINKED = { id: 'job1', ownerUid: USER_B.uid, artistId: null };
 const unlinkA = () => db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
 
@@ -40,7 +52,6 @@ const entry = (at: number, kind: Feedback['kind'] = 'ACCEPTED'): Feedback => ({
   pickVersion: 1,
 });
 
-const facts = () => db().select().from(artistMemory).where(memoryOf('fact'));
 const artistRows = () =>
   db()
     .select()
@@ -52,7 +63,7 @@ const jobRows = async () =>
   (await db().select({ jobId: jobs.id, feedback: jobs.feedback }).from(jobs)).flatMap(
     ({ jobId, feedback }) => (feedback as Feedback[]).map((data) => ({ jobId, data })),
   );
-const fact = (key: string) => and(memoryOf('fact'), eq(artistMemory.key, key));
+const fact = (key: string) => and(memoryOf('flr', 'fact'), eq(artistMemory.key, key));
 
 beforeEach(async () => {
   await truncate();
@@ -60,17 +71,10 @@ beforeEach(async () => {
   await seedJob({ id: 'job1' });
 });
 
-describe('seed facts', () => {
-  it('uses the stage name and keeps the inference private', () => {
-    const inference = SEED_FACTS.filter((f) => f.kind === 'INFERENCE');
-    expect(inference.length).toBeGreaterThan(0);
-    expect(inference.every((f) => f.public === false)).toBe(true);
-  });
-});
-
 describe('artistJob', () => {
-  it('is true only when the job and its owner are both linked to the artist', async () => {
+  it('is true only when the job and its owner are both linked to the same profile', async () => {
     expect(await artistJob(A_JOB)).toBe(true);
+    expect(await artistJob(C_JOB)).toBe(true);
   });
 
   it('is false for a job created without the link', async () => {
@@ -82,8 +86,9 @@ describe('artistJob', () => {
     expect(await artistJob(A_JOB)).toBe(false);
   });
 
-  it("is false when an unlinked owner's job somehow names the artist", async () => {
+  it("is false when the job names a profile other than the owner's", async () => {
     expect(await artistJob({ ownerUid: USER_B.uid, artistId: 'flr' })).toBe(false);
+    expect(await artistJob({ ownerUid: USER_C.uid, artistId: 'flr' })).toBe(false);
   });
 
   it('is false for an owner that no longer exists', async () => {
@@ -100,46 +105,39 @@ describe('artistJob', () => {
 });
 
 describe('listFacts', () => {
-  it('seeds the facts on first use', async () => {
-    expect(await listFacts()).toEqual(SEED_FACTS);
-    const rows = await facts();
-    expect(rows.map((r) => [r.artistId, r.key]).sort()).toEqual(
-      SEED_FACTS.map((f) => ['flr', f.key]).sort(),
-    );
-    expect(rows.find((r) => r.key === 'mr-kill')!.data).toMatchObject({
-      kind: 'INFERENCE',
-      public: false,
-    });
-  });
-
-  it('reads stored facts instead of reseeding', async () => {
-    await listFacts();
-    await db().update(artistMemory).set({ data: RICHMOND }).where(fact('home'));
-    await db().delete(artistMemory).where(fact('mr-kill'));
-    const read = await listFacts();
-    expect(read).toHaveLength(SEED_FACTS.length - 1);
-    expect(read.find((f) => f.key === 'home')?.value).toBe('Richmond');
-    expect((await facts()).some((r) => r.key === 'mr-kill')).toBe(false);
-  });
-
-  it('reads stored facts without reseeding a partial table', async () => {
-    await seed({ artistMemory: [{ artistId: 'flr', kind: 'fact', key: 'home', data: RICHMOND }] });
-    expect(await listFacts()).toEqual([RICHMOND]);
-    expect(await facts()).toHaveLength(1);
-  });
-
-  it("ignores another artist's facts", async () => {
+  beforeEach(async () => {
     await seed({
-      artistMemory: [{ artistId: 'other', kind: 'fact', key: 'home', data: RICHMOND }],
+      artistMemory: [
+        { artistId: 'flr', kind: 'fact', key: 'home', data: RICHMOND },
+        { artistId: 'flr', kind: 'fact', key: 'mr-kill', data: PRIVATE },
+      ],
     });
-    expect(await listFacts()).toEqual(SEED_FACTS);
   });
 
-  it('survives two first uses racing to seed', async () => {
-    const [a, b] = await Promise.all([listFacts(), listFacts()]);
-    expect(a).toEqual(SEED_FACTS);
-    expect(b).toEqual(SEED_FACTS);
-    expect(await facts()).toHaveLength(SEED_FACTS.length);
+  it("derives the name from the profile, then the artist's stored facts", async () => {
+    expect(await listFacts(ARTIST_A, true)).toEqual([NAME_A, RICHMOND, PRIVATE]);
+  });
+
+  it('gives only the derived name when the job may not use the memory', async () => {
+    expect(await listFacts(ARTIST_A, false)).toEqual([NAME_A]);
+  });
+
+  it('follows a rename at once', async () => {
+    const [name] = await listFacts({ ...ARTIST_A, name: 'FLR' }, true);
+    expect(name).toEqual({ ...NAME_A, value: 'FLR' });
+  });
+
+  it("never reads another artist's facts", async () => {
+    expect(await listFacts(ARTIST_C, true)).toEqual([{ ...NAME_A, value: ARTIST_C.name }]);
+  });
+
+  it('reads stored edits', async () => {
+    await db()
+      .update(artistMemory)
+      .set({ data: { ...RICHMOND, value: 'Norfolk' } })
+      .where(fact('home'));
+    await db().delete(artistMemory).where(fact('mr-kill'));
+    expect(await listFacts(ARTIST_A, true)).toEqual([NAME_A, { ...RICHMOND, value: 'Norfolk' }]);
   });
 });
 
@@ -154,6 +152,22 @@ describe('writeFeedback', () => {
       ['flr', null, 2, 'EDITED'],
     ]);
     expect(await jobRows()).toHaveLength(0);
+  });
+
+  it("routes feedback on C's jobs to C's own memory", async () => {
+    await recordFeedback([entry(1, 'EDITED')], CS);
+    expect((await artistRows()).map((r) => r.artistId)).toEqual([ARTIST_C.id]);
+    expect(await jobRows()).toHaveLength(0);
+  });
+
+  it("keeps feedback on its job when the job's profile isn't the owner's", async () => {
+    await recordFeedback([entry(1, 'EDITED')], {
+      id: 'job1',
+      ownerUid: USER_C.uid,
+      artistId: 'flr',
+    });
+    expect(await artistRows()).toHaveLength(0);
+    expect(await jobRows()).toHaveLength(1);
   });
 
   it("keeps feedback on its job once the owner's artist link is gone", async () => {
@@ -192,20 +206,21 @@ describe('writeFeedback', () => {
 describe('recentFeedback', () => {
   it('returns newest written first, limited, whatever the entries say about time', async () => {
     await recordFeedback([entry(10), entry(30), entry(20)], NATHANS);
-    expect((await recentFeedback()).map((f) => f.at)).toEqual([20, 30, 10]);
-    expect((await recentFeedback(2)).map((f) => f.at)).toEqual([20, 30]);
+    expect((await recentFeedback('flr')).map((f) => f.at)).toEqual([20, 30, 10]);
+    expect((await recentFeedback('flr', 2)).map((f) => f.at)).toEqual([20, 30]);
   });
 
   it('puts a later write ahead of an earlier one', async () => {
     await recordFeedback([entry(30)], NATHANS);
     await recordFeedback([entry(10)], NATHANS);
-    expect((await recentFeedback()).map((f) => f.at)).toEqual([10, 30]);
+    expect((await recentFeedback('flr')).map((f) => f.at)).toEqual([10, 30]);
   });
 
   it('ignores feedback kept on jobs and other artists', async () => {
     await recordFeedback([entry(5)], UNLINKED);
-    await seed({ artistMemory: [{ artistId: 'other', kind: 'feedback', data: entry(6) }] });
-    expect(await recentFeedback()).toEqual([]);
+    await recordFeedback([entry(6)], CS);
+    expect(await recentFeedback('flr')).toEqual([]);
+    expect((await recentFeedback(ARTIST_C.id)).map((f) => f.at)).toEqual([6]);
   });
 
   it('defaults to 20 rows', async () => {
@@ -213,7 +228,7 @@ describe('recentFeedback', () => {
       Array.from({ length: 25 }, (_, i) => entry(i)),
       NATHANS,
     );
-    const rows = await recentFeedback();
+    const rows = await recentFeedback('flr');
     expect(rows).toHaveLength(20);
     expect(rows[0]!.at).toBe(24);
   });
@@ -230,19 +245,28 @@ describe('recordPublish', () => {
     fields,
   };
 
-  const publish = (r: typeof record) => db().transaction((tx) => recordPublish(tx, r));
+  const publish = (r: typeof record, artistId = 'flr') =>
+    db().transaction((tx) => recordPublish(tx, artistId, r));
 
-  it('stores the publish under its video id', async () => {
+  it("stores the publish under its video id, in the job's artist memory", async () => {
     await publish(record);
+    await publish({ ...record, videoId: 'vid2' }, ARTIST_C.id);
     expect(await db().select().from(artistMemory)).toEqual([
       { id: expect.any(Number), artistId: 'flr', kind: 'publish', key: 'vid1', data: record },
+      {
+        id: expect.any(Number),
+        artistId: ARTIST_C.id,
+        kind: 'publish',
+        key: 'vid2',
+        data: { ...record, videoId: 'vid2' },
+      },
     ]);
   });
 
   it('replaces an earlier record of the same video', async () => {
     await publish(record);
     await publish({ ...record, at: 9 });
-    const rows = await db().select().from(artistMemory).where(memoryOf('publish'));
+    const rows = await db().select().from(artistMemory).where(memoryOf('flr', 'publish'));
     expect(rows.map((r) => (r.data as typeof record).at)).toEqual([9]);
   });
 });

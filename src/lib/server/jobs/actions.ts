@@ -2,7 +2,13 @@ import { captureException } from '@sentry/sveltekit';
 import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '#lib/short.js';
 import { containsWords, parseHashtags, validateFields } from '#lib/metadata.js';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '#lib/types.js';
+import {
+  SHORT_SOURCE_STATES,
+  type JobState,
+  type Pick,
+  type PickFields,
+  type Reframe,
+} from '#lib/types.js';
 import { query } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
 import {
@@ -20,8 +26,9 @@ import {
   type JobDoc,
 } from './jobs';
 import { jobSet } from './rows';
-import { approvalFeedback, artistJob, writeFeedback } from '#lib/server/artist/memory.js';
+import { approvalFeedback, writeFeedback } from '#lib/server/artist/memory.js';
 import { tagPool } from '#lib/server/ai/smart-pick.js';
+import { stepDeadline } from '#lib/server/ai/model.js';
 import {
   accessTokenFor,
   getConnection,
@@ -41,20 +48,19 @@ function requireState(job: JobDoc, states: JobState[]): void {
 }
 
 /**
- * Edited tags follow the pick's rules: the job's tag candidates, plus the artist name on an artist
- * job, never the title.
+ * Edited tags follow the pick's rules: the job's tag candidates plus the pick's own artist name,
+ * stored when it ran so a later rename can't break the draft. The artist tag appears exactly once
+ * and is the one tag that may contain the song title (a self-titled song).
  */
-function tagError(
-  tags: string[],
-  job: JobDoc,
-  artist: boolean,
-  draft: PickFields,
-): string | undefined {
-  const titled = tags.filter((tag) => containsWords(tag, job.songTitle));
+function tagError(tags: string[], job: JobDoc, draft: Pick): string | undefined {
+  const artist = draft.artistName;
+  const others = tags.filter((tag) => tag.trim().toLowerCase() !== artist?.toLowerCase());
+  if (artist && tags.length - others.length !== 1) return `Keep the artist tag: ${artist}.`;
+  const titled = others.filter((tag) => containsWords(tag, job.songTitle));
   if (titled.length > 0) return `Tags can't contain the song title: ${titled.join(', ')}`;
   const allowed = new Set(
     tagPool({
-      artist,
+      artistName: artist,
       candidateLists: job.audience?.candidateLists ?? [
         {
           videoId: job.videoId ?? job.id,
@@ -80,15 +86,10 @@ type ApprovalInput = {
 };
 
 /** The approved fields, or a 422 naming each field that breaks the job's rules. */
-function finalFields(
-  input: ApprovalInput,
-  job: JobDoc,
-  artist: boolean,
-  draft: PickFields,
-): PickFields {
+function finalFields(input: ApprovalInput, job: JobDoc, draft: Pick): PickFields {
   const candidates = job.hashtagCandidates ?? [];
   const errors = validateFields(input, candidates);
-  const tags = errors.tags ?? tagError(input.tags, job, artist, draft);
+  const tags = errors.tags ?? tagError(input.tags, job, draft);
   if (tags) errors.tags = tags;
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
@@ -128,7 +129,7 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
     if (connection.channelId !== input.channelId) {
       throw new ActionError(409, 'Your YouTube channel changed. Reload to approve.');
     }
-    const final = finalFields(input, current, await artistJob(current, tx), proposed);
+    const final = finalFields(input, current, proposed);
 
     const feedback = approvalFeedback(proposed, final, {
       jobId: job.id,
@@ -325,7 +326,7 @@ const RECONNECT_TO_CONFIRM = 'Reconnect YouTube to confirm.';
 async function pastedVideo(job: Paused, videoId: string) {
   let access: Access | null;
   try {
-    access = await accessTokenFor(job.ownerUid, job.destination.channelId);
+    access = await accessTokenFor(job.ownerUid, job.destination.channelId, stepDeadline());
   } catch (error) {
     captureException(error, {
       tags: { action: 'confirm-upload', 'job.id': job.id, phase: 'grant' },
@@ -416,7 +417,7 @@ export async function retry(job: JobDoc): Promise<void> {
  * Starts a Short from an approved video whose upload is still stored, or returns the live one it
  * already has. Its metadata starts from what the owner approved.
  */
-export async function makeShort(job: JobDoc): Promise<string> {
+export async function makeShort(job: JobDoc, artistName: string): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
   requireState(job, [...SHORT_SOURCE_STATES]);
   if (!(job.probe && job.probe.durationSec > 0)) {
@@ -430,7 +431,7 @@ export async function makeShort(job: JobDoc): Promise<string> {
   if (!(await objectInfo(job.object))) {
     throw new ActionError(409, 'This video is gone from storage. Upload it again to make a Short.');
   }
-  const started = await createShort(job, SHORT_SOURCE_STATES);
+  const started = await createShort(job, SHORT_SOURCE_STATES, artistName);
   if (!started) throw new ActionError(409, 'The video moved on before the Short could start.');
   if ('noPick' in started) {
     throw new ActionError(409, 'This video has no recommendation to start from.');

@@ -70,6 +70,7 @@ const PICK: Pick = {
   brandCheck: 'Keeps the naming pattern.',
   why: { title: 'Matches.', description: 'Plain.', tags: 'Genre first.' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  artistName: null,
   modelMs: 12_000,
 };
 
@@ -237,6 +238,31 @@ describe('job page: working screens', () => {
     expect(path).toBe(STEP_PATH);
     expect(init!.method).toBe('POST');
     expect(init!.headers).toMatchObject({ 'sentry-trace': 'trace-1', baggage: 'bag-1' });
+  });
+
+  it('links Settings while the pick waits on an artist profile', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(view({ state: 'PICK' }, { wait: 'Add your artist name first.' })))
+      .mockImplementation(hang);
+    setup(view({ state: 'PICK' }));
+    expect(
+      await screen.findByRole('link', { name: 'Add your artist name in Settings' }),
+    ).toHaveAttribute('href', '/settings');
+  });
+
+  it('links Connections while the pick waits on a reconnect, and only during the pick', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(view({ state: 'PICK' }, { wait: 'reconnect YouTube' })))
+      .mockImplementation(hang);
+    const { unmount } = setup(view({ state: 'PICK' }));
+    expect(
+      await screen.findByRole('link', { name: 'Reconnect YouTube on Connections' }),
+    ).toHaveAttribute('href', '/connections');
+    unmount();
+    fetchMock.mockReset().mockImplementation(hang);
+    setup(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: BUSY }));
+    expect(screen.queryByRole('link', { name: 'Reconnect YouTube on Connections' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Add your artist name in Settings' })).toBeNull();
   });
 
   it('shows a named wait from the step', async () => {

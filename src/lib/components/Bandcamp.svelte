@@ -1,15 +1,17 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import type { Pick } from '#lib/types.js';
 
-  const EDITOR = 'https://flieslikerobots.bandcamp.com/edit_track';
-
   let {
+    bandcampUrl,
     jobId,
     songTitle,
     pick,
     tags,
     ondone,
   }: {
+    /** The owner's `https://<name>.bandcamp.com`; null shows where to add it. */
+    bandcampUrl: string | null;
     jobId: string;
     songTitle: string;
     pick: Pick;
@@ -18,6 +20,8 @@
     /** Called with whether every non-empty field has been copied. */
     ondone?: (done: boolean) => void;
   } = $props();
+
+  const editor = $derived(bandcampUrl ? `${bandcampUrl}/edit_track` : null);
 
   const fields = $derived([
     { label: 'Track name', value: songTitle },
@@ -69,10 +73,11 @@
    * window opens blank and drops its opener before it loads Bandcamp, so the page can't reach back.
    */
   const openEditor = (event: MouseEvent) => {
+    if (!editor) return;
     const opened = window.open('', 'bandcamp', 'popup,width=1200,height=900');
     if (!opened) return;
     opened.opener = null;
-    opened.location.href = EDITOR;
+    opened.location.href = editor;
     event.preventDefault();
   };
 </script>
@@ -80,14 +85,18 @@
 <section class="bandcamp" aria-labelledby="bandcamp-title">
   <div class="head">
     <h2 id="bandcamp-title">Bandcamp</h2>
-    <!-- Bandcamp has no artist upload API and refuses to be framed, so the editor opens outside. -->
-    <a
-      class="btn primary"
-      href={EDITOR}
-      target="_blank"
-      rel="noopener noreferrer"
-      onclick={openEditor}>Open Bandcamp's new-track page</a
-    >
+    {#if editor}
+      <!-- Bandcamp has no artist upload API and refuses to be framed, so the editor opens outside. -->
+      <a
+        class="btn primary"
+        href={editor}
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={openEditor}>Open Bandcamp's new-track page</a
+      >
+    {:else}
+      <a href={resolve('settings')}>Add your Bandcamp URL in Settings</a>
+    {/if}
   </div>
   <p class="hint">Copy each field into the track editor. Every field copied marks Bandcamp done.</p>
   <dl>

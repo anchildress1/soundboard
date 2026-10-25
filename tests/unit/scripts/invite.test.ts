@@ -8,14 +8,17 @@ import { db } from '#lib/server/core/db.js';
 import { users } from '#lib/server/core/schema.js';
 import { add, list, reactivate, revoke, run, USAGE } from '../../../scripts/invite';
 import { client, seed, truncate } from '../../helpers/db';
-import { USER_A, USER_B, USERS } from '../../helpers/pipeline';
+import { USER_A, USER_B, USER_C, USERS } from '../../helpers/pipeline';
 
 const userOf = async (email: string) =>
   (await db().select().from(users).where(eq(users.email, email)))[0];
 
+/** A profile nobody is linked to yet, as Nathan's was before his first invite. */
+const UNLINKED = 'artist-x';
+
 beforeEach(async () => {
   await truncate();
-  await seed(USERS);
+  await seed({ ...USERS, artists: [...USERS.artists, { id: UNLINKED, name: 'X' }] });
 });
 
 describe('add', () => {
@@ -29,8 +32,17 @@ describe('add', () => {
   });
 
   it('links the user to an artist', async () => {
-    await add(client(), 'nathan@example.com', 'flr');
-    expect((await userOf('nathan@example.com'))!.artistId).toBe('flr');
+    await add(client(), 'x@example.com', UNLINKED);
+    expect((await userOf('x@example.com'))!.artistId).toBe(UNLINKED);
+  });
+
+  it('refuses a profile another user is already linked to', async () => {
+    await expect(add(client(), 'x@example.com', USER_A.artistId)).rejects.toThrow();
+    expect(await userOf('x@example.com')).toBeUndefined();
+  });
+
+  it('refuses a profile that does not exist', async () => {
+    await expect(add(client(), 'x@example.com', 'nope')).rejects.toThrow();
   });
 
   it('refuses a duplicate email, in any case', async () => {
@@ -92,11 +104,12 @@ describe('reactivate', () => {
 describe('list', () => {
   it('lists every user by email', async () => {
     await revoke(client(), USER_B.email);
-    await add(client(), 'c@example.com', null);
+    await add(client(), 'd@example.com', null);
     expect(await list(client())).toEqual([
       { email: USER_A.email, active: true, artist_id: 'flr', uid: USER_A.uid },
       { email: USER_B.email, active: false, artist_id: null, uid: USER_B.uid },
-      { email: 'c@example.com', active: true, artist_id: null, uid: null },
+      { email: USER_C.email, active: true, artist_id: USER_C.artistId, uid: USER_C.uid },
+      { email: 'd@example.com', active: true, artist_id: null, uid: null },
     ]);
   });
 
@@ -109,10 +122,10 @@ describe('list', () => {
 describe('run', () => {
   it('adds, with or without an artist', async () => {
     expect(await run(['add', 'X@Example.com'], client())).toBe('Invited x@example.com');
-    expect(await run(['add', 'y@example.com', '--artist', 'flr'], client())).toBe(
+    expect(await run(['add', 'y@example.com', '--artist', UNLINKED], client())).toBe(
       'Invited y@example.com',
     );
-    expect((await userOf('y@example.com'))!.artistId).toBe('flr');
+    expect((await userOf('y@example.com'))!.artistId).toBe(UNLINKED);
   });
 
   it('revokes and reactivates', async () => {
@@ -129,12 +142,13 @@ describe('run', () => {
 
   it('prints one tab-separated line per user, with - for an unset artist or uid', async () => {
     await run(['revoke', USER_B.email], client());
-    await add(client(), 'c@example.com', null);
+    await add(client(), 'd@example.com', null);
     expect(await run(['list'], client())).toBe(
       [
         [USER_A.email, 'active', 'flr', USER_A.uid].join('\t'),
         [USER_B.email, 'revoked', '-', USER_B.uid].join('\t'),
-        ['c@example.com', 'active', '-', '-'].join('\t'),
+        [USER_C.email, 'active', USER_C.artistId, USER_C.uid].join('\t'),
+        ['d@example.com', 'active', '-', '-'].join('\t'),
       ].join('\n'),
     );
   });

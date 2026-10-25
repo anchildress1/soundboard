@@ -61,7 +61,7 @@
   const problem = $derived(guide ? guideError(guide) : null);
   const proposing = $derived(wait ? WAIT_TEXT[wait] : 'Reading uploads');
 
-  /** A busy model answers with a wait at once; keep asking until it takes the call. */
+  /** A busy model or YouTube answers with a wait at once; keep asking until the call goes through. */
   const propose = async () => {
     busy = true;
     message = '';
@@ -71,8 +71,10 @@
           if (stopped) throw new AbortError(new Waiting('stopped'));
           const result = await proposeBrand();
           if ('proposal' in result) return result.proposal;
-          // Asking again can't help until the quota resets at midnight Pacific.
-          if (result.wait === 'model quota spent') throw new AbortError(WAIT_TEXT[result.wait]);
+          // Asking again can't help until the quota resets at midnight Pacific, or a reconnect.
+          if (result.wait === 'model quota spent' || result.wait === 'reconnect YouTube') {
+            throw new AbortError(WAIT_TEXT[result.wait]);
+          }
           wait = result.wait;
           throw new Waiting(result.wait);
         },
@@ -154,7 +156,7 @@
           {/each}
         </ul>
         <p class="help">
-          From {approved.basedOn.length} uploads · approved {new Date(
+          From {approved.uploadCount} uploads · approved {new Date(
             approved.approvedAt ?? approved.createdAt,
           ).toLocaleDateString()}
         </p>

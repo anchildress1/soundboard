@@ -4,12 +4,12 @@ import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from 
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
   allowedLinks,
-  ARTIST_CREDITS,
   ARTIST_VOICE,
-  CONTACT_LINE,
   buildPickRequest,
+  CREDIT_LINE,
   digestChunks,
   finalizePick,
+  GENERIC_VOICE,
   isRawPick,
   measuredFlags,
   shortFlag,
@@ -18,6 +18,7 @@ import {
   windowFlags,
   sameText,
   weighFeedback,
+  type PickArtist,
   type PickContext,
   type PickFixups,
   type RawPick,
@@ -34,6 +35,13 @@ import { omit } from '../../../../helpers/omit';
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE_TAG = '#retrowave';
 const ARTIST = 'Flies Like Robots';
+const CONTACT = 'Contact at flieslikerobots@gmail.com.';
+const FLR: PickArtist = { name: ARTIST, contactLine: CONTACT, curated: true };
+const OTHER: PickArtist = {
+  name: 'Test Artist',
+  contactLine: 'Booking: test@example.com',
+  curated: false,
+};
 const FRESH_TITLE = 'Fresh Title';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
@@ -73,7 +81,7 @@ const facts: Fact[] = [
 ];
 
 const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
-  artist: true,
+  artist: FLR,
   songTitle: 'PeekaBoo',
   chunks: [],
   candidateLists,
@@ -123,7 +131,7 @@ const feedback = (kind: Feedback['kind'], over: Partial<Feedback> = {}): Feedbac
 });
 
 const ctx = (over: Partial<PickContext> = {}): PickContext => ({
-  artist: true,
+  artist: FLR,
   songTitle: 'PeekaBoo',
   notes: '',
   chunks: [chunk(0)],
@@ -246,15 +254,18 @@ describe('buildPickRequest', () => {
   it("writes the description in the artist's own voice on runs that may name him", () => {
     const rules = system(buildPickRequest(ctx()));
     expect(rules).toContain(ARTIST_VOICE);
-    expect(rules).toContain(ARTIST_CREDITS);
+    expect(rules).toContain(CREDIT_LINE);
+    expect(rules).not.toContain(GENERIC_VOICE);
     expect(rules).toContain('hacked and slashed');
     expect(rules).toContain('Never copy them word for word, except the credit line.');
     expect(rules).toContain('never on its own line');
     expect(rules).toContain('Never claim what the lyrics say.');
     expect(rules).toContain("bandcamp.about: the same song for Bandcamp's About field");
-    expect(rules).toContain('bandcamp.credits: the credit line and contact line');
-    expect(rules).toContain(`his contact line exactly: "${CONTACT_LINE}"`);
-    expect(CONTACT_LINE).toBe('Contact at flieslikerobots@gmail.com.');
+    expect(rules).toContain(
+      'bandcamp.credits: the credit line from the description, exactly as written there.',
+    );
+    expect(rules).toContain('Write no contact line, in the description or anywhere else.');
+    expect(rules).toContain("Keep the artist's slang");
     expect(rules).toContain('Never write placeholders');
     expect(rules).toContain('Correct spelling, capitalization, and grammar');
     expect(rules).toContain('Never open with or repeat the title');
@@ -268,8 +279,15 @@ describe('buildPickRequest', () => {
 
   type Request = ReturnType<typeof buildPickRequest>;
   const userParts = (request: Request): Part[] => request.turns[0]!.parts;
+  type TextPart = Extract<Part, { type: 'text' }>;
+  /** The job context and the YouTube parts, merged into one object. */
   const context = (request: Request) =>
-    JSON.parse((userParts(request)[0] as { text: string }).text) as Record<string, unknown>;
+    Object.assign(
+      {},
+      ...userParts(request)
+        .filter((part, i): part is TextPart => part.type === 'text' && (i === 0 || !!part.source))
+        .map((part) => JSON.parse(part.text) as object),
+    ) as Record<string, unknown>;
   const system = (request: Request) => request.system;
 
   it('keeps each reference list labeled without pooled terms or frequency fields', () => {
@@ -289,7 +307,7 @@ describe('buildPickRequest', () => {
     expect(JSON.stringify(body)).not.toMatch(/usedBy|views|score|weight/);
   });
 
-  it('names the artist when allowed', () => {
+  it('names the profile artist', () => {
     const messages = buildPickRequest(ctx({ notes: 'live take', measurements: measurements() }));
     expect(messages.turns.map((t) => t.role)).toEqual(['user']);
     const body = context(messages);
@@ -301,32 +319,53 @@ describe('buildPickRequest', () => {
     expect(body.ffmpeg).toEqual(measurements());
     expect(system(messages)).toContain("recentUploads are the artist's own uploads");
     expect(system(messages)).toContain('credit lines');
-    expect(system(messages)).not.toContain('name no artist');
   });
 
-  it('names no artist and asks for no artist tag on an unlinked job', () => {
-    const messages = buildPickRequest(ctx({ artist: false }));
-    const body = context(messages);
-    expect(body).not.toHaveProperty('artist');
-    expect(body.candidateLists).toEqual(candidateLists);
-    expect(system(messages)).not.toContain(ARTIST);
-    expect(system(messages)).not.toContain('recentUploads are');
-    expect(system(messages)).toContain(ARTIST_VOICE);
-  });
-
-  it("keeps the artist's credit and contact lines out of an unlinked job", () => {
-    const rules = system(buildPickRequest(ctx({ artist: false })));
-    expect(rules).not.toContain(ARTIST_CREDITS);
-    expect(rules).not.toContain(CONTACT_LINE);
-    expect(rules).not.toContain('flieslikerobots@');
-    expect(rules).not.toContain('hacked and slashed');
-    expect(rules).not.toContain('the credit line and contact line');
+  it("names another artist's profile and asks for its tag, in the generic voice", () => {
+    const messages = buildPickRequest(ctx({ artist: OTHER }));
+    expect(context(messages).artist).toBe('Test Artist');
+    const rules = system(messages);
+    expect(rules).toContain('Include "Test Artist".');
+    expect(rules).toContain(GENERIC_VOICE);
+    expect(rules).not.toContain(ARTIST_VOICE);
+    expect(rules).not.toContain(CREDIT_LINE);
+    expect(rules).toContain('Write no credit line.');
+    expect(rules).toContain('Write no contact line, in the description or anywhere else.');
     expect(rules).toContain('bandcamp.credits: an empty string.');
+    expect(rules).not.toContain(ARTIST);
+    expect(rules).not.toContain('hacked and slashed');
   });
 
-  it('keeps identity out of the shared voice', () => {
-    expect(ARTIST_VOICE).not.toContain(CONTACT_LINE);
-    expect(ARTIST_VOICE).not.toContain('hacked and slashed');
+  it.each([
+    ['the curated profile', FLR],
+    ['another profile', OTHER],
+  ])('never sends the contact line to the model for %s', (_label, artist) => {
+    const sent = JSON.stringify(buildPickRequest(ctx({ artist })));
+    expect(sent).not.toContain(artist.contactLine!);
+    expect(sent).not.toContain('@example.com');
+    expect(sent).not.toContain('flieslikerobots@');
+  });
+
+  it('keeps identity and humor out of the voices', () => {
+    for (const voice of [ARTIST_VOICE, GENERIC_VOICE]) {
+      expect(voice).not.toContain('flieslikerobots@');
+      expect(voice).not.toContain('hacked and slashed');
+    }
+    expect(GENERIC_VOICE).not.toMatch(/humor|hehe|caps/i);
+  });
+
+  it('sends every YouTube-derived list in a tagged part with its count', () => {
+    const audience = [{ title: 'Top hit', description: 'Credits.', tags: ['outrun'], views: 9 }];
+    const parts = userParts(buildPickRequest(ctx({ audience })));
+    expect(parts[0]).not.toHaveProperty('source');
+    expect(JSON.parse((parts[0] as TextPart).text)).not.toHaveProperty('candidateLists');
+    const youtube = parts.filter((part): part is TextPart => part.type === 'text' && !!part.source);
+    expect(youtube.map((part) => [Object.keys(JSON.parse(part.text)), part.count])).toEqual([
+      [['recentUploads'], 0],
+      [['audienceTopVideos'], 1],
+      [['candidateLists'], 1],
+    ]);
+    expect(youtube.every((part) => part.source === 'youtube')).toBe(true);
   });
 
   it('grounds title, description, and tags in the genre search', () => {
@@ -443,20 +482,20 @@ describe('buildPickRequest', () => {
     ];
     const messages = buildPickRequest(ctx({ recent }));
     const parts = userParts(messages);
-    expect(parts).toHaveLength(4);
-    expect(parts[1]).toEqual({
-      type: 'text',
-      text: 'Thumbnails of the recent uploads, newest first:',
-    });
-    expect(parts[2]).toEqual({ type: 'image', data: 'AAA', mime_type: 'image/jpeg' });
-    expect(parts[3]).toEqual({ type: 'image', data: 'BBB', mime_type: 'image/png' });
+    expect(parts.slice(4)).toEqual([
+      { type: 'text', text: 'Thumbnails of the recent uploads, newest first:' },
+      { type: 'image', data: 'AAA', mime_type: 'image/jpeg' },
+      { type: 'image', data: 'BBB', mime_type: 'image/png' },
+    ]);
     const uploads = context(messages).recentUploads as { description: string }[];
     expect(uploads).toHaveLength(3);
     expect(uploads[0]!.description).toHaveLength(700);
   });
 
-  it('sends only the context text when no thumbnails exist', () => {
-    expect(userParts(buildPickRequest(ctx()))).toHaveLength(1);
+  it('sends only text parts when no thumbnails exist', () => {
+    const parts = userParts(buildPickRequest(ctx()));
+    expect(parts).toHaveLength(4);
+    expect(parts.every((part) => part.type === 'text')).toBe(true);
   });
 
   it('keeps private facts out of the prompt and weighs feedback', () => {
@@ -628,7 +667,9 @@ describe('finalizePick', () => {
   it('closes the description with the picked candidate hashtags', () => {
     const pick = finalizePick(raw(), fix());
     expect(pick.hashtags).toEqual([SYNTHWAVE, RETROWAVE_TAG, '#newmusic']);
-    expect(pick.description).toBe('A bright synth track.\n\n#synthwave #retrowave #newmusic');
+    expect(pick.description).toBe(
+      `A bright synth track.\n${CONTACT}\n\n#synthwave #retrowave #newmusic`,
+    );
     expect(allInCandidates(pick.description)).toBe(true);
   });
 
@@ -685,7 +726,7 @@ describe('finalizePick', () => {
     );
     expect(pick.hashtags).toEqual([SYNTHWAVE, '#electronic', '#indie']);
     expect(pick.description).toBe(
-      'Night drive vibes .\n\nMore soon\n\n#synthwave #electronic #indie',
+      `Night drive vibes .\n\nMore soon\n${CONTACT}\n\n#synthwave #electronic #indie`,
     );
     expect(allInCandidates(pick.description)).toBe(true);
   });
@@ -709,7 +750,7 @@ describe('finalizePick', () => {
       fix({ candidateLists: [source({ hashtags: [SYNTHWAVE] })] }),
     );
     expect(pick.hashtags).toEqual([SYNTHWAVE]);
-    expect(pick.description).toBe('A bright synth track.\n\n#synthwave');
+    expect(pick.description).toBe(`A bright synth track.\n${CONTACT}\n\n#synthwave`);
   });
 
   it('leaves the description without a closing line when there are no candidates', () => {
@@ -718,12 +759,15 @@ describe('finalizePick', () => {
       fix({ candidateLists: [source({ hashtags: [] })] }),
     );
     expect(pick.hashtags).toEqual([]);
-    expect(pick.description).toBe('Body');
+    expect(pick.description).toBe(`Body\n${CONTACT}`);
     expect(parseHashtags(pick.description)).toEqual([]);
   });
 
-  it('returns only the hashtags when the body is empty', () => {
-    const pick = finalizePick(raw({ description: '' }), fix());
+  it('returns only the hashtags when the body is empty and there is no contact line', () => {
+    const pick = finalizePick(
+      raw({ description: '' }),
+      fix({ artist: { ...FLR, contactLine: null } }),
+    );
     expect(pick.description).toBe('#synthwave #retrowave #newmusic');
   });
 
@@ -761,7 +805,7 @@ describe('finalizePick: links, tags, and limits', () => {
       }),
     );
 
-    expect(pick.tags).toEqual(['synthwave', 'outrun', ARTIST]);
+    expect(pick.tags).toEqual([ARTIST, 'synthwave', 'outrun']);
     expect(pick.hashtags).toEqual(['#synthwave', '#outrun']);
     expect(pick.description).not.toContain('#invented');
   });
@@ -776,28 +820,15 @@ describe('finalizePick: links, tags, and limits', () => {
     const pick = finalizePick(
       raw({
         bandcamp: {
-          about: 'Dark synth. #synthwave\n[No contact line found]\nSee https://evil.example/x',
-          credits: 'Written by Nathan.  https://flr.bandcamp.com',
+          about:
+            'Dark synth. #synthwave\n[No contact line found]\nStream https://flr.bandcamp.com not https://evil.example/x',
+          credits: 'Written by Nathan.  #synthwave',
         },
       }),
       fix(),
     );
-    expect(pick.bandcamp.about).toBe('Dark synth.\n\nSee');
-    expect(pick.bandcamp.credits).toBe('Written by Nathan. https://flr.bandcamp.com');
-  });
-
-  it('keeps fact links and removes others from the description', () => {
-    const pick = finalizePick(
-      raw({
-        description:
-          'Stream https://flr.bandcamp.com and https://flieslikerobots.example/ not https://guess.example/x or https://spam.example',
-      }),
-      fix(),
-    );
-    expect(pick.description).toContain('https://flr.bandcamp.com');
-    expect(pick.description).toContain('https://flieslikerobots.example/');
-    expect(pick.description).not.toContain('guess.example');
-    expect(pick.description).not.toContain('spam.example');
+    expect(pick.bandcamp.about).toBe('Dark synth.\n\nStream https://flr.bandcamp.com not');
+    expect(pick.bandcamp.credits).toBe(`Written by Nathan.\n${CONTACT}`);
   });
 
   it('strips < and > and tidies whitespace', () => {
@@ -806,7 +837,7 @@ describe('finalizePick: links, tags, and limits', () => {
       fix(),
     );
     expect(pick.title).toBe('Peeka Boo');
-    expect(pick.description.startsWith('Line one\n\nLine two\n\n')).toBe(true);
+    expect(pick.description.startsWith(`Line one\n\nLine two\n${CONTACT}\n\n`)).toBe(true);
   });
 
   it('keeps only candidate tags, deduped, in the model order with candidate casing', () => {
@@ -814,7 +845,7 @@ describe('finalizePick: links, tags, and limits', () => {
       raw({ tags: ['#Synthwave', '##RETROWAVE', 'synthwave', 'synthpop', 'invented', '  '] }),
       fix(),
     );
-    expect(pick.tags).toEqual(['synthwave', 'retrowave', 'synthpop', ARTIST]);
+    expect(pick.tags).toEqual([ARTIST, 'synthwave', 'retrowave', 'synthpop']);
   });
 
   it('never uses the song title as a tag, even when the search returns it', () => {
@@ -827,7 +858,7 @@ describe('finalizePick: links, tags, and limits', () => {
       }),
     );
     expect(pick.tags.some((t) => t.toLowerCase().includes('peekaboo'))).toBe(false);
-    expect(pick.tags[0]).toBe('synthwave');
+    expect(pick.tags).toEqual([ARTIST, 'synthwave']);
   });
 
   it('rejects tags holding the title as whole words but keeps words that merely contain it', () => {
@@ -836,15 +867,16 @@ describe('finalizePick: links, tags, and limits', () => {
       raw({ tags: names }),
       fix({ songTitle: 'Pop', candidateLists: [source({ tags: cands(...names) })] }),
     );
-    expect(pick.tags).toEqual(['synthpop', 'hyperpop', ARTIST]);
+    expect(pick.tags).toEqual([ARTIST, 'synthpop', 'hyperpop']);
   });
 
   it('lists the artist name once even when the search returned it', () => {
     const messages = buildPickRequest(
       ctx({ candidateLists: [source({ tags: cands('synthwave', 'flies like robots') })] }),
     );
-    const parts = messages.turns[0]!.parts as { text: string }[];
-    expect(JSON.parse(parts[0]!.text).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
+    const parts = messages.turns[0]!.parts as { text: string; source?: string }[];
+    const lists = parts.find((part) => part.source && part.text.includes('candidateLists'))!;
+    expect(JSON.parse(lists.text).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
     expect(finalizePick(raw(), fix()).tags.filter((tag) => tag === ARTIST)).toHaveLength(1);
   });
 
@@ -866,18 +898,18 @@ describe('finalizePick: links, tags, and limits', () => {
     expect(pick.tags).toEqual([ARTIST]);
   });
 
-  it('keeps the artist where the model placed it', () => {
-    const pick = finalizePick(raw({ tags: [ARTIST, 'outrun'] }), fix());
+  it('puts the artist tag first, wherever the model placed it', () => {
+    const pick = finalizePick(raw({ tags: ['outrun', 'flies like robots'] }), fix());
     expect(pick.tags).toEqual([ARTIST, 'outrun']);
   });
 
-  it('caps tags at 10, keeping the artist name', () => {
+  it('caps tags at 10, keeping the artist name first', () => {
     const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
     const pick = finalizePick(
       raw({ tags: names }),
       fix({ candidateLists: [source({ tags: cands(...names) })] }),
     );
-    expect(pick.tags).toEqual([...names.slice(0, 9), ARTIST]);
+    expect(pick.tags).toEqual([ARTIST, ...names.slice(0, 9)]);
   });
 
   it('falls back to the artist name alone when the search found no tags', () => {
@@ -888,25 +920,17 @@ describe('finalizePick: links, tags, and limits', () => {
     expect(pick.tags).toEqual([ARTIST]);
   });
 
-  it('never adds the artist name on an unlinked job, even when the model or search offers it', () => {
-    const unlinked = fix({
-      artist: false,
-      candidateLists: [source({ tags: cands('synthwave', ARTIST) })],
-    });
-    expect(finalizePick(raw({ tags: ['synthwave'] }), unlinked).tags).toEqual(['synthwave']);
-    expect(finalizePick(raw({ tags: [ARTIST, 'synthwave'] }), unlinked).tags).toEqual([
-      'synthwave',
-    ]);
-    expect(finalizePick(raw({ tags: [ARTIST] }), fix({ artist: false })).tags).toEqual([]);
+  it("tags another artist's pick with its own profile name, spelled as the profile has it", () => {
+    const pick = finalizePick(
+      raw({ tags: ['test artist', 'synthwave'] }),
+      fix({ artist: OTHER, candidateLists: [source({ tags: cands('synthwave', 'TEST ARTIST') })] }),
+    );
+    expect(pick.tags).toEqual(['Test Artist', 'synthwave']);
+    expect(pick.artistName).toBe('Test Artist');
   });
 
-  it('caps tags at 10 on an unlinked job without reserving a slot', () => {
-    const names = Array.from({ length: 14 }, (_, i) => `genre ${i}`);
-    const pick = finalizePick(
-      raw({ tags: names }),
-      fix({ artist: false, candidateLists: [source({ tags: cands(...names) })] }),
-    );
-    expect(pick.tags).toEqual(names.slice(0, 10));
+  it('stores the profile name the pick used', () => {
+    expect(finalizePick(raw(), fix()).artistName).toBe(ARTIST);
   });
 
   it('keeps tags within 500 characters by YouTube counting', () => {
@@ -918,7 +942,7 @@ describe('finalizePick: links, tags, and limits', () => {
     expect(tagsLength(pick.tags)).toBeLessThanOrEqual(TAGS_MAX);
     expect(pick.tags.length).toBeGreaterThan(5);
     expect(pick.tags.length).toBeLessThan(names.length);
-    expect(pick.tags[0]).toBe(names[0]);
+    expect(pick.tags.slice(0, 2)).toEqual([ARTIST, names[0]]);
   });
 
   it('skips one oversize tag but keeps later ones that fit', () => {
@@ -927,7 +951,7 @@ describe('finalizePick: links, tags, and limits', () => {
       raw({ tags: pool }),
       fix({ candidateLists: [source({ tags: cands(...pool) })] }),
     );
-    expect(pick.tags).toEqual(['a', 'b', ARTIST]);
+    expect(pick.tags).toEqual([ARTIST, 'a', 'b']);
   });
 
   it('clips the title to 100 characters at a word boundary', () => {
@@ -979,17 +1003,88 @@ describe('finalizePick: links, tags, and limits', () => {
   it('keeps the #fragment of an allowed link', () => {
     const link = 'https://flr.bandcamp.com/track/peekaboo#lyrics';
     const pick = finalizePick(
-      raw({ description: `Listen ${link}` }),
+      raw({ bandcamp: { about: `Listen ${link}`, credits: '' } }),
       fix({ facts: [{ key: 'bc', value: link, kind: 'FACT', public: true }] }),
     );
-    expect(pick.description).toContain(link);
-    expect(allInCandidates(pick.description)).toBe(true);
+    expect(pick.bandcamp.about).toBe(`Listen ${link}`);
   });
 
   it('passes brandCheck and why through', () => {
     const pick = finalizePick(raw(), fix());
     expect(pick.brandCheck).toBe('Matches the recent uploads.');
     expect(pick.why).toEqual({ title: 't', description: 'd', tags: 'g' });
+  });
+});
+
+describe('finalizePick: the contact line', () => {
+  it.each([
+    ['an email', 'Write to me at old@example.org'],
+    ['a phone number', 'Call +1 (555) 010-2030'],
+    ['a URL', 'More at https://old.example/page'],
+    ['a www link', 'See www.old.example'],
+    ['an @handle', 'Follow @oldhandle'],
+    ['a contact label', 'Bookings: ask around'],
+    ['a dm label', 'DMs open'],
+  ])('drops a model line with %s from the description and credits', (_label, line) => {
+    const pick = finalizePick(
+      raw({
+        description: `A bright synth track.\n${line}`,
+        bandcamp: { about: '', credits: `Written by Nathan.\n${line}` },
+      }),
+      fix(),
+    );
+    expect(pick.description).not.toContain(line);
+    expect(pick.bandcamp.credits).toBe(`Written by Nathan.\n${CONTACT}`);
+  });
+
+  it('keeps prose, the credit line, short numbers and an email-less @ alone', () => {
+    const description = [
+      'Written, performed, recorded, hacked and slashed by Flies Like Robots',
+      'Track 3 of 12, recorded in 2024.',
+      'Contacts of the third kind is a movie I like.',
+    ].join('\n');
+    const pick = finalizePick(raw({ description }), fix());
+    expect(pick.description).toContain(description.split('\n').slice(0, 2).join('\n'));
+    // "Contacts" is not the label "contact".
+    expect(pick.description).toContain('Contacts of the third kind');
+  });
+
+  it("closes the body with the profile's contact line exactly, before the hashtags", () => {
+    const pick = finalizePick(raw({ description: `Body\n${CONTACT}` }), fix());
+    expect(pick.description).toBe(`Body\n${CONTACT}\n\n#synthwave #retrowave #newmusic`);
+    expect(pick.description.split(CONTACT)).toHaveLength(2);
+  });
+
+  it("places another profile's contact line, links and all, untouched", () => {
+    const contactLine = 'Booking: test@example.com https://test-artist.example';
+    const pick = finalizePick(
+      raw({ bandcamp: { about: 'About.', credits: '' } }),
+      fix({ artist: { ...OTHER, contactLine } }),
+    );
+    expect(pick.description).toContain(`\n${contactLine}\n\n#synthwave`);
+    expect(pick.bandcamp.credits).toBe(contactLine);
+    expect(pick.bandcamp.about).toBe('About.');
+  });
+
+  it('appends nothing when the profile has no contact line', () => {
+    const pick = finalizePick(
+      raw({ description: 'Body\nmail me at a@b.co', bandcamp: { about: '', credits: '' } }),
+      fix({ artist: { ...FLR, contactLine: null } }),
+    );
+    expect(pick.description).toBe('Body\n\n#synthwave #retrowave #newmusic');
+    expect(pick.bandcamp.credits).toBe('');
+  });
+
+  it('never cuts the contact line when the body runs long', () => {
+    const pick = finalizePick(raw({ description: 'lorem ipsum '.repeat(700) }), fix());
+    expect(pick.description.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
+    expect(pick.description).toContain(`\n${CONTACT}\n\n#synthwave`);
+    const credits = finalizePick(
+      raw({ bandcamp: { about: '', credits: 'word '.repeat(1200) } }),
+      fix(),
+    ).bandcamp.credits;
+    expect(credits.length).toBeLessThanOrEqual(DESCRIPTION_MAX);
+    expect(credits.endsWith(`\n${CONTACT}`)).toBe(true);
   });
 });
 
@@ -1106,7 +1201,7 @@ describe('runPick', () => {
   });
 
   it('retries when only the description repeats a skipped version, hashtags aside', async () => {
-    const skippedDescription = 'A bright synth track.\n\n#synthwave #retrowave #newmusic';
+    const skippedDescription = `A bright synth track.\n${CONTACT}\n\n#synthwave #retrowave #newmusic`;
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'New Title' }))))
       .mockResolvedValueOnce(
@@ -1124,7 +1219,7 @@ describe('runPick', () => {
 
   it('names both fields when the title and description both repeat', async () => {
     fetchMock.mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
-    const skipped = [{ title: 'Old Title', description: 'A bright synth track.' }];
+    const skipped = [{ title: 'Old Title', description: `A bright synth track.\n${CONTACT}` }];
     expect(await runPick(ctx({ skipped }), stepDeadline())).toBeNull();
     expect(lastTurns(1)[1]).toEqual(
       userText(

@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handle, replaceTraceMeta } from '#src/hooks.server.js';
 import { readSession, SESSION_COOKIE, sessionCookie } from '#lib/server/auth/auth.js';
 import { db } from '#lib/server/core/db.js';
-import { users } from '#lib/server/core/schema.js';
+import { artists, users } from '#lib/server/core/schema.js';
 import { reactivate, revoke } from '../../scripts/invite';
 import { client, seed, truncate } from '../helpers/db';
 import { USER_A, USER_B, USERS } from '../helpers/pipeline';
@@ -27,9 +27,12 @@ const JOB_TRACE = `${TRACE_ID}-0123456789abcdef-1`;
 const JOB_BAGGAGE = `sentry-trace_id=${TRACE_ID},sentry-environment=production,sentry-release=soundboard%401.0.0`;
 
 /** The locals `cookie` resolves to for `user`, carrying that cookie's own sid. */
+/** What `locals.user` holds: the row's email and the linked profile, never the cookie's. */
 const signedIn = (user: typeof USER_A | typeof USER_B, cookie: string) => ({
-  ...user,
+  uid: user.uid,
   sid: readSession(cookie)!.sid,
+  email: user.email,
+  artist: user.artist,
 });
 
 function event(
@@ -195,7 +198,15 @@ describe('handle', () => {
     expect(seen.locals?.user).toEqual(signedIn(USER_A, cookie));
   });
 
-  it('resolves an unlinked user with a null artist', async () => {
+  it("resolves the user's current profile, read fresh on each request", async () => {
+    const cookie = sessionCookie(USER_A.uid);
+    await db().update(artists).set({ name: 'FLR' }).where(eq(artists.id, USER_A.artistId));
+    const { resolve, seen } = renderer();
+    await run(event(cookie), resolve);
+    expect(seen.locals?.user).toMatchObject({ artist: { ...USER_A.artist, name: 'FLR' } });
+  });
+
+  it('resolves a user with no profile with a null artist', async () => {
     const { resolve, seen } = renderer();
     const cookie = sessionCookie(USER_B.uid);
     await run(event(cookie), resolve);
@@ -217,7 +228,7 @@ describe('handle', () => {
     const { resolve, seen } = renderer();
     const cookie = sessionCookie(USER_A.uid);
     await run(event(cookie), resolve);
-    expect(seen.locals?.user).toMatchObject({ email: 'moved@example.com', artistId: null });
+    expect(seen.locals?.user).toMatchObject({ email: 'moved@example.com', artist: null });
   });
 
   it('signs out an expired session even while the user is active', async () => {

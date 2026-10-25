@@ -329,6 +329,7 @@
       <p class="help">Bandcamp has no upload API for artists, so this is copy and paste.</p>
     </div>
     <Bandcamp
+      bandcampUrl={data.artist?.bandcampUrl ?? null}
       jobId={job.id}
       songTitle={job.songTitle}
       pick={view.pick}
@@ -402,6 +403,11 @@
       <div class="intro">
         <h1>{work.title}</h1>
         <p class="help">{work.body}</p>
+        {#if view.wait === 'Add your artist name first.'}
+          <a href={resolve('settings')}>Add your artist name in Settings</a>
+        {:else if view.wait === 'reconnect YouTube' && job.state === 'PICK'}
+          <a href={resolve('connections')}>Reconnect YouTube on Connections</a>
+        {/if}
       </div>
       {#if job.state === 'AWAITING_UPLOAD'}
         <BrowserUpload

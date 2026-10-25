@@ -91,6 +91,7 @@ export const WAIT_TEXT: Record<Wait, string> = {
   'reconnect YouTube': 'Reconnect YouTube',
   'upload outcome unknown': 'Upload outcome unknown',
   'Daily upload limit reached. Try tomorrow.': 'Daily upload limit reached',
+  'Add your artist name first.': 'Add your artist name first.',
 };
 
 const fixed =

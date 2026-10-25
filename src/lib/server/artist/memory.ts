@@ -3,12 +3,9 @@ import type { PickFields } from '#lib/types.js';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
 import { artistMemory, jobs, users } from '#lib/server/core/schema.js';
 
-export const ARTIST_ID = 'flr';
-export const ARTIST_NAME = 'Flies Like Robots';
-
-/** The artist's memory rows of one kind. */
-export const memoryOf = (kind: (typeof artistMemory.kind.enumValues)[number]) =>
-  and(eq(artistMemory.artistId, ARTIST_ID), eq(artistMemory.kind, kind));
+/** One artist's memory rows of one kind. */
+export const memoryOf = (artistId: string, kind: (typeof artistMemory.kind.enumValues)[number]) =>
+  and(eq(artistMemory.artistId, artistId), eq(artistMemory.kind, kind));
 
 export type FactKind = 'FACT' | 'INFERENCE' | 'APPROVED';
 export type Fact = { key: string; value: string; kind: FactKind; public: boolean };
@@ -25,51 +22,38 @@ export type Feedback = {
   at: number;
 };
 
-/** Seeded once. The INFERENCE stays out of public copy until Nathan confirms it. */
-export const SEED_FACTS: Fact[] = [
-  { key: 'artist-name', value: ARTIST_NAME, kind: 'FACT', public: true },
-  { key: 'home', value: 'Virginia', kind: 'FACT', public: true },
-  { key: 'mr-kill', value: 'Connected to the artist Mr. Kill', kind: 'INFERENCE', public: false },
-];
-
 /**
- * Whether a job may use the artist's identity and memory: the job was created under the artist and
- * its owner is still linked now, so unlinking a user cuts off their open jobs too. Pass the
+ * Whether a job may use its artist's memory: the job was created under an artist and its owner is
+ * still linked to that artist now, so unlinking a user cuts off their open jobs too. Pass the
  * transaction that writes the feedback, so the link is read where it is used.
  */
 export async function artistJob(
   job: { ownerUid: string; artistId: string | null },
   q?: Database | Tx,
 ): Promise<boolean> {
-  if (job.artistId !== ARTIST_ID) return false;
+  if (job.artistId === null) return false;
   if (!q) return await query((tx) => artistJob(job, tx));
   const [owner] = await q
     .select({ artistId: users.artistId })
     .from(users)
     .where(eq(users.uid, job.ownerUid));
-  return owner?.artistId === ARTIST_ID;
+  return owner?.artistId === job.artistId;
 }
 
-/** Reads Nathan's facts, seeding an empty table on first use. Call only on artist jobs. */
-export async function listFacts(): Promise<Fact[]> {
+/**
+ * The artist's facts: the name, always derived from the profile (FR-014), then the stored facts
+ * when the job may use the artist's memory.
+ */
+export async function listFacts(
+  artist: { id: string; name: string },
+  memory: boolean,
+): Promise<Fact[]> {
+  const name: Fact = { key: 'artist-name', value: artist.name, kind: 'FACT', public: true };
+  if (!memory) return [name];
   const rows = await query((tx) =>
-    tx.select({ data: artistMemory.data }).from(artistMemory).where(memoryOf('fact')),
+    tx.select({ data: artistMemory.data }).from(artistMemory).where(memoryOf(artist.id, 'fact')),
   );
-  if (rows.length > 0) return rows.map((r) => r.data as Fact);
-  await query((tx) =>
-    tx
-      .insert(artistMemory)
-      .values(
-        SEED_FACTS.map((fact) => ({
-          artistId: ARTIST_ID,
-          kind: 'fact' as const,
-          key: fact.key,
-          data: fact,
-        })),
-      )
-      .onConflictDoNothing(),
-  );
-  return SEED_FACTS;
+  return [name, ...rows.map((r) => r.data as Fact)];
 }
 
 /**
@@ -82,10 +66,11 @@ export async function writeFeedback(
   job: { id: string; ownerUid: string; artistId: string | null },
 ): Promise<void> {
   if (entries.length === 0) return;
-  if (await artistJob(job, tx)) {
+  if (job.artistId !== null && (await artistJob(job, tx))) {
+    const { artistId } = job;
     await tx
       .insert(artistMemory)
-      .values(entries.map((data) => ({ artistId: ARTIST_ID, kind: 'feedback' as const, data })));
+      .values(entries.map((data) => ({ artistId, kind: 'feedback' as const, data })));
   } else {
     const kept = await tx
       .update(jobs)
@@ -96,13 +81,13 @@ export async function writeFeedback(
   }
 }
 
-/** Nathan's latest feedback, newest first. */
-export async function recentFeedback(limit = 20): Promise<Feedback[]> {
+/** The artist's latest feedback, newest first. */
+export async function recentFeedback(artistId: string, limit = 20): Promise<Feedback[]> {
   const rows = await query((tx) =>
     tx
       .select({ data: artistMemory.data })
       .from(artistMemory)
-      .where(memoryOf('feedback'))
+      .where(memoryOf(artistId, 'feedback'))
       .orderBy(desc(artistMemory.id))
       .limit(limit),
   );
@@ -111,6 +96,7 @@ export async function recentFeedback(limit = 20): Promise<Feedback[]> {
 
 export async function recordPublish(
   tx: Tx,
+  artistId: string,
   record: {
     videoId: string;
     url: string;
@@ -122,7 +108,7 @@ export async function recordPublish(
 ): Promise<void> {
   await tx
     .insert(artistMemory)
-    .values({ artistId: ARTIST_ID, kind: 'publish', key: record.videoId, data: record })
+    .values({ artistId, kind: 'publish', key: record.videoId, data: record })
     .onConflictDoUpdate({
       target: [artistMemory.artistId, artistMemory.kind, artistMemory.key],
       set: { data: record },

@@ -20,6 +20,14 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   }
   return {
     channel,
-    user: user ? { email: user.email, artistId: user.artistId } : null,
+    user: user ? { email: user.email } : null,
+    // Never the profile's id or contact line: the layout reaches every page.
+    artist: user?.artist
+      ? {
+          name: user.artist.name,
+          bandcampUrl: user.artist.bandcampUrl,
+          curated: user.artist.curated,
+        }
+      : null,
   };
 };

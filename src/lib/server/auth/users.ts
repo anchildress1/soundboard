@@ -2,20 +2,33 @@ import { and, eq, sql } from 'drizzle-orm';
 import { query } from '#lib/server/core/db.js';
 import { signupMode } from '#lib/server/core/env.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { users } from '#lib/server/core/schema.js';
+import { artists, users } from '#lib/server/core/schema.js';
+import type { ArtistProfile } from '#lib/server/artist/profile.js';
 
 /** A user who has signed in: `uid` is bound. */
 export type User = Omit<typeof users.$inferSelect, 'uid'> & { uid: string };
 
-/** The active user bound to `uid`, or null when there is none or it was deactivated. */
-export async function getUser(uid: string): Promise<User | null> {
-  const [user] = await query((tx) =>
+/** The active user bound to `uid` with their artist profile, or null when there is none or it was deactivated. */
+export async function getUser(
+  uid: string,
+): Promise<(User & { artist: ArtistProfile | null }) | null> {
+  const [row] = await query((tx) =>
     tx
-      .select()
+      .select({
+        user: users,
+        artist: {
+          id: artists.id,
+          name: artists.name,
+          bandcampUrl: artists.bandcampUrl,
+          contactLine: artists.contactLine,
+          curated: artists.curated,
+        },
+      })
       .from(users)
+      .leftJoin(artists, eq(artists.id, users.artistId))
       .where(and(eq(users.uid, uid), eq(users.active, true))),
   );
-  return (user as User | undefined) ?? null;
+  return row ? { ...(row.user as User), artist: row.artist } : null;
 }
 
 const normalize = (email: string) => email.trim().toLowerCase();

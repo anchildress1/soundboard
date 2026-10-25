@@ -125,11 +125,13 @@ export function similarLength(videos: CatalogVideo[], seconds: number): CatalogV
 
 /**
  * Keeps each genre result's candidates separate, without pooling different owners' metadata.
- * With the upload's length, only results within a minute of it count.
+ * With the upload's length, only results within a minute of it count. Both reads stop at the
+ * step's `deadline`.
  */
 export function audienceEvidence(
   chunks: Chunk[],
   durationSec: number | null,
+  deadline: number,
 ): Promise<AudienceEvidence> {
   const retrievedAt = Date.now();
   const query = searchQuery(chunks);
@@ -138,8 +140,11 @@ export function audienceEvidence(
       query,
       SEARCH_RESULTS,
       durationSec === null ? undefined : durationBucket(durationSec),
+      deadline,
     );
-    const catalog = new Map((await videosByIds(ids)).map((video) => [video.videoId, video]));
+    const catalog = new Map(
+      (await videosByIds(ids, deadline)).map((video) => [video.videoId, video]),
+    );
     const results = ids.flatMap((id) => {
       const video = catalog.get(id);
       return video ? [video] : [];
@@ -161,9 +166,10 @@ export function audienceEvidence(
       'search.result_count': results.length,
       'search.evidence_count': found.length,
     });
+    // Counts only: the lists are other channels' YouTube text, which never reaches Sentry.
     span.setAttribute(
       'gen_ai.tool.call.result',
-      JSON.stringify({ candidateLists: evidence.candidateLists }),
+      JSON.stringify({ candidateLists: evidence.candidateLists.length, top: evidence.top.length }),
     );
     return evidence;
   });

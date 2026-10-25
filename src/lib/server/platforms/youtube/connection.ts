@@ -6,7 +6,16 @@ import { required } from '#lib/server/core/env.js';
 import { invalidGrant } from '#lib/server/core/errors.js';
 import { decrypt, encrypt } from '#lib/server/core/kms.js';
 import { connections } from '#lib/server/core/schema.js';
-import { channelsMine, YOUTUBE_SCOPES } from './youtube';
+import type { Wait } from '#lib/types.js';
+import {
+  budgetSignal,
+  ChannelMismatch,
+  channelsMine,
+  identityFailure,
+  ownUploads,
+  YOUTUBE_SCOPES,
+  type CatalogVideo,
+} from './youtube';
 
 type Stored = typeof connections.$inferSelect;
 
@@ -118,22 +127,29 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
 
 /**
  * A fresh access token, and how to give up its grant once YouTube refuses the token. `refused`
- * never throws: a failed write is reported, so the caller still answers with its reconnect wait.
+ * never throws: a failed write is reported (tagged with the job, when there is one), so the caller
+ * still answers with its reconnect wait.
  */
-export type Access = { token: string; refused: (jobId: string) => Promise<void> };
+export type Access = { token: string; refused: (jobId?: string) => Promise<void> };
 
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
- * Google rejecting the refresh token marks the connection revoked and returns null. Throws when the
- * connected channel isn't `channelId`, and on any other failure.
+ * Google rejecting the refresh token marks the connection revoked and returns null. The refresh
+ * aborts at the step's `deadline`; throws `DeadlineSpent` when none is left, `ChannelMismatch`
+ * when the connected channel isn't `channelId`, and on any other failure.
  */
-export async function accessTokenFor(uid: string, channelId: string): Promise<Access | null> {
+export async function accessTokenFor(
+  uid: string,
+  channelId: string,
+  deadline: number,
+): Promise<Access | null> {
+  // Made first: it throws with no time left, before any read, and aborts at the same deadline.
+  const signal = budgetSignal(deadline);
   const connection = await getConnection(uid);
   if (connection?.status !== 'connected') return null;
   // The channel lock means a reconnect can't bring the job's channel back, so this throws rather
   // than returning null.
-  if (connection.channelId !== channelId)
-    throw new Error("Connected channel doesn't match this job's channel.");
+  if (connection.channelId !== channelId) throw new ChannelMismatch();
   const cipher = connection.tokenCiphertext;
   const refreshToken = await decrypt(cipher).catch((cause: unknown) => {
     throw new Error("Couldn't unlock the YouTube grant.", { cause });
@@ -141,6 +157,7 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<Ac
   const client = new OAuth2Client({
     clientId: required('GOOGLE_OAUTH_CLIENT_ID'),
     clientSecret: required('GOOGLE_OAUTH_CLIENT_SECRET'),
+    transporterOptions: { signal },
   });
   client.setCredentials({ refresh_token: refreshToken });
   let token: string | null | undefined;
@@ -157,7 +174,7 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<Ac
   return {
     token,
     refused: async (jobId) => {
-      const tags = { 'job.id': jobId };
+      const tags: Record<string, string> = jobId ? { 'job.id': jobId } : {};
       captureMessage('YouTube refused the grant', { level: 'warning', tags });
       try {
         await markRevoked(uid, cipher);
@@ -166,6 +183,35 @@ export async function accessTokenFor(uid: string, channelId: string): Promise<Ac
       }
     },
   };
+}
+
+export type IdentityWait = Extract<Wait, 'reconnect YouTube' | 'waiting on YouTube'>;
+
+/**
+ * The user's newest `count` uploads on their own connected channel, read through their own grant
+ * and only for identity (research R8). A lost grant is given up and waits on a reconnect, a busy or
+ * slow YouTube waits with the grant untouched, and a rejected app throws.
+ */
+export async function ownChannelUploads(
+  uid: string,
+  count: number,
+  deadline: number,
+  jobId?: string,
+): Promise<CatalogVideo[] | { wait: IdentityWait }> {
+  const connection = await getConnection(uid);
+  if (connection?.status !== 'connected') return { wait: 'reconnect YouTube' };
+  let access: Access | null = null;
+  try {
+    access = await accessTokenFor(uid, connection.channelId, deadline);
+    if (!access) return { wait: 'reconnect YouTube' };
+    return await ownUploads(access.token, connection.channelId, count, deadline);
+  } catch (error) {
+    const failure = identityFailure(error);
+    if (failure === 'app-rejected') throw error;
+    if (failure === 'busy') return { wait: 'waiting on YouTube' };
+    await access?.refused(jobId);
+    return { wait: 'reconnect YouTube' };
+  }
 }
 
 /** The parts of a fresh Google grant a connection needs. */

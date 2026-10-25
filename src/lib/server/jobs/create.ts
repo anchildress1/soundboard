@@ -1,5 +1,5 @@
 import { TITLE_MAX } from '#lib/metadata.js';
-import { ActionError } from '#lib/server/core/errors.js';
+import { ActionError, NO_ARTIST } from '#lib/server/core/errors.js';
 import { num, text } from '#lib/server/core/http.js';
 import { encrypt, UPLOAD_KMS_MS } from '#lib/server/core/kms.js';
 import { startJobTrace } from '#lib/server/core/tracing.js';
@@ -67,9 +67,10 @@ function parseUpload(input: CreateInput) {
  */
 export async function create(
   input: CreateInput,
-  user: { uid: string; artistId: string | null },
+  user: { uid: string; artist: { id: string } | null },
   origin: string,
 ): Promise<Created> {
+  if (!user.artist) throw new ActionError(409, NO_ARTIST);
   const id = newJobId();
   const { size, fingerprint, ...fields } = parseUpload(input);
   // Opening and sealing the session can fail; both happen before a job is stored.
@@ -84,7 +85,7 @@ export async function create(
     {
       ...fields,
       ownerUid: user.uid,
-      artistId: user.artistId,
+      artistId: user.artist.id,
       object,
       videoUpload: { sessionCipher, generation: 1, size, fingerprint, ops: [] },
       trace: startJobTrace(id),

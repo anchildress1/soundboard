@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { signIn, USER_A, USER_B } from './session';
+import { signIn, USER_A, USER_B, USER_C } from './session';
 
 const START = 'Start a new release';
 
 test.describe('home page', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page, USER_B);
+    await signIn(page, USER_C);
   });
 
   test('renders the Soundboard frame', async ({ page }) => {
@@ -14,7 +14,7 @@ test.describe('home page', () => {
     await expect(
       page.getByRole('banner').getByRole('link', { name: 'Soundboard', exact: true }),
     ).toHaveAttribute('href', '/');
-    await expect(page.getByRole('contentinfo')).toContainText('Built for Flies Like Robots');
+    await expect(page.getByRole('contentinfo')).toContainText('Built for Test Artist');
   });
 
   test('starts a new release on its own page', async ({ page }) => {
@@ -28,7 +28,7 @@ test.describe('home page', () => {
 
 test.describe('new release', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page, USER_B);
+    await signIn(page, USER_C);
   });
 
   test('keeps Start disabled with no file picked', async ({ page }) => {

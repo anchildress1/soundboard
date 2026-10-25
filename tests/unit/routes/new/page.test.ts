@@ -1,24 +1,30 @@
+import type { ComponentProps } from 'svelte';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fingerprint } from '#lib/fingerprint.js';
 import { stop, uploads } from '#lib/upload.js';
 import Page from '#src/routes/new/+page.svelte';
+import { ARTIST_C } from '../../../helpers/pipeline';
 import { installUploadFakes, type FakeLocks } from '../../../helpers/uploads';
+
+type PageData = ComponentProps<typeof Page>['data'];
 
 const FILE_NAME = 'peekaboo.mp4';
 const LOCAL_BLOB = 'blob:local-1';
 const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
 
-const h = vi.hoisted(() => ({ goto: vi.fn() }));
+const h = vi.hoisted(() => ({ goto: vi.fn(), invalidateAll: vi.fn() }));
 
-vi.mock('$app/navigation', () => ({ goto: h.goto }));
+vi.mock('$app/navigation', () => ({ goto: h.goto, invalidateAll: h.invalidateAll }));
 
 const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const setup = () => render(Page);
+const ARTIST = { name: ARTIST_C.name, bandcampUrl: ARTIST_C.bandcampUrl, curated: false };
+const setup = (artist: PageData['artist'] = ARTIST) =>
+  render(Page, { data: { artist } as PageData });
 
 const start = () => screen.getByRole('button', { name: /Start the release|Starting/ });
 const songTitle = () => screen.getByLabelText("What's the song called?");
@@ -36,6 +42,7 @@ let locks: FakeLocks;
 
 beforeEach(() => {
   h.goto.mockReset();
+  h.invalidateAll.mockReset();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   locks = installUploadFakes();
@@ -60,6 +67,32 @@ const created = (id: string) =>
       ? json({ id, sessionUri: SESSION, generation: 1 })
       : new Promise<Response>(() => {}),
   );
+
+describe('new release: artist gate', () => {
+  it('asks who the artist is before anything else when there is no profile', () => {
+    setup(null);
+    expect(screen.getByRole('heading', { name: "Who's the artist?" })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Artist' })).toBeInTheDocument();
+    expect(screen.queryByLabelText("What's the song called?")).toBeNull();
+  });
+
+  it('saves the profile and reloads the data, which then shows the release form', async () => {
+    fetchMock.mockResolvedValue(
+      json({ artist: { name: 'B Band', bandcampUrl: null, contactLine: null } }),
+    );
+    setup(null);
+    await fireEvent.input(screen.getByLabelText('Artist name'), { target: { value: 'B Band' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledOnce());
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/artist');
+  });
+
+  it('goes straight to the release form with a profile', () => {
+    setup();
+    expect(screen.queryByRole('heading', { name: "Who's the artist?" })).toBeNull();
+    expect(songTitle()).toBeInTheDocument();
+  });
+});
 
 describe('new release: form', () => {
   it('keeps Analyze disabled until a file and a title are given', async () => {

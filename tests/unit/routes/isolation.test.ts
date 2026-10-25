@@ -22,16 +22,20 @@ import { KeyManagementServiceClient } from '../../e2e/fakes/kms';
 import { seed, truncate } from '../../helpers/db';
 import {
   A_JOB,
+  ARTIST_C,
+  C_JOB,
   CHANNEL_A,
+  CHANNEL_C,
   jobDoc,
   sealed,
   seedJob,
   USER_A,
   USER_B,
+  USER_C,
   USERS,
 } from '../../helpers/pipeline';
 
-// One process serving A, then B, then A: nothing one user saw may leak into the next request.
+// One process serving A, then C, then A: nothing one user saw may leak into the next request.
 
 const h = vi.hoisted(() => ({ createResumableUpload: vi.fn() }));
 
@@ -51,7 +55,7 @@ vi.mock('@google-cloud/storage', () => ({
   },
 }));
 
-type User = typeof USER_A | typeof USER_B;
+type User = typeof USER_A | typeof USER_B | typeof USER_C;
 type Layout = { channel: { handle: string } | null };
 type Home = { jobs: { id: string }[] };
 type JobPage = { view: { job: { id: string } }; playbackUrl: string | null };
@@ -109,7 +113,7 @@ beforeEach(async () => {
   });
   for (const [id, owner] of [
     ['a', A_JOB],
-    ['b', { ownerUid: USER_B.uid, artistId: null }],
+    ['b', C_JOB],
   ] as const) {
     const video = jobDoc({
       id,
@@ -120,7 +124,9 @@ beforeEach(async () => {
       chunkCount: 3,
       pickVersion: 1,
     });
-    await seed({ jobs: [{ ...jobRow(video), picks: [{ version: 1, title: id }] }] });
+    const artistName = owner === A_JOB ? 'Flies Like Robots' : ARTIST_C.name;
+    const picks = [{ version: 1, title: id, tags: [artistName], artistName }];
+    await seed({ jobs: [{ ...jobRow(video), picks }] });
     // A rendered Short of each user's video, in review, so its playback URL is signed.
     await seedJob({
       id: `${id}s`,
@@ -179,11 +185,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('one process, A → B → A', () => {
+describe('one process, A → C → A', () => {
   it('serves each user only their own stats, Connections, jobs, media and Shorts', async () => {
     const turns = [
       [USER_A, 'a', 'b', CHANNEL_A, 'Flies Like Robots'],
-      [USER_B, 'b', 'a', CHANNEL_B, 'B'],
+      [USER_C, 'b', 'a', CHANNEL_C, ARTIST_C.name],
       [USER_A, 'a', 'b', CHANNEL_A, 'Flies Like Robots'],
     ] as const;
     const shorts: Record<string, string> = {};
@@ -205,7 +211,7 @@ describe('one process, A → B → A', () => {
       const made = await makeShort(event(user, own));
       expect(made.status).toBe(200);
       const shortId = ((await made.json()) as { job: { id: string } }).job.id;
-      // A's second turn gets A's own live Short back, never B's.
+      // A's second turn gets A's own live Short back, never C's.
       shorts[own] ??= shortId;
       expect(shortId).toBe(shorts[own]);
       expect((await getJob(shortId))!.ownerUid).toBe(user.uid);

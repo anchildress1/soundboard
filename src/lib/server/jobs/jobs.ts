@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { withArtistTag } from '#lib/metadata.js';
 import type { Chunk, JobState, Pick, PublicJob } from '#lib/types.js';
 import { query, type Tx } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
@@ -493,11 +494,13 @@ export type ShortStart = { id: string } | { noPick: true } | null;
  * fields over its approved pick become the Short's pick v1. Candidate lists come along so approve
  * holds the same rules, and the trace is shared, so the Short lands in the video's trace. One live
  * Short per video: an existing one that isn't discarded is returned instead. Null when the parent
- * left `states` before the transaction ran.
+ * left `states` before the transaction ran. `artistName` is the owner's current profile name; the
+ * Short keeps the parent's artist link.
  */
 export async function createShort(
   parent: JobDoc,
   states: readonly JobState[],
+  artistName: string,
   id = newJobId(),
 ): Promise<ShortStart> {
   return await query(async (tx) => {
@@ -507,7 +510,14 @@ export async function createShort(
     const stored =
       current.pickVersion === null ? null : await pickIn(tx, current.id, current.pickVersion);
     if (!stored) return { noPick: true };
-    const pick: StoredPick = { ...stored, ...current.finalFields, version: 1, skipped: false };
+    const fields = { ...stored, ...current.finalFields };
+    // The Short's tag is the owner's current name; the parent's own artist tag is swapped out.
+    const previous = stored.artistName?.toLowerCase();
+    const tags = withArtistTag(
+      artistName,
+      fields.tags.filter((tag) => tag.toLowerCase() !== previous),
+    );
+    const pick: StoredPick = { ...fields, tags, artistName, version: 1, skipped: false };
     await tx.insert(jobs).values({ ...jobRow(shortDoc(current, id)), picks: [pick] });
     if (current.audience) await saveAudience(tx, id, current.audience);
     await tx

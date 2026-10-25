@@ -1,13 +1,22 @@
 import { createHmac, randomBytes } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
 
 /**
- * Seeded in tests/e2e/fakes/fixtures.ts: A is linked to FLR and connected, B is unlinked. The
- * upload user is unlinked and owns no fixture jobs: each upload test makes its own through `/new`.
+ * Seeded in tests/e2e/fakes/fixtures.ts: A is linked to FLR and connected, B has no profile, and C
+ * has a non-Nathan profile and its own connected channel. The upload user owns no fixture jobs:
+ * each upload test makes its own through `/new`.
  */
 export const USER_A = 'uid-a';
 export const USER_B = 'uid-b';
+export const USER_C = 'uid-c';
 export const USER_UPLOAD = 'uid-upload';
+
+const DEVICE: Record<string, string> = { chromium: 'desktop', mobile: 'pixel' };
+
+/** The project's own user with no profile, for tests that save one. */
+export const newUser = ({ project }: TestInfo) => `uid-new-${DEVICE[project.name]}`;
+/** The project's own user with a profile, for tests that edit it. */
+export const renameUser = ({ project }: TestInfo) => `uid-rename-${DEVICE[project.name]}`;
 
 // Mirrors #lib/server/auth sign() with the E2E server's SESSION_SECRET (playwright.config.ts).
 export function sessionCookie(uid: string): string {

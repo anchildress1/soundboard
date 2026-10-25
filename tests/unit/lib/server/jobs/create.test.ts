@@ -16,7 +16,7 @@ import { KeyManagementServiceClient } from '../../../../e2e/fakes/kms';
 import { seed, truncate } from '../../../../helpers/db';
 import { deferred, gcs, resetGcs } from '../../../../helpers/gcs';
 import { omit } from '../../../../helpers/omit';
-import { sealed, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { sealed, USER_A, USER_B, USER_C, USERS } from '../../../../helpers/pipeline';
 
 const ORIGIN = 'http://localhost:5173';
 const TOO_LONG = 'Videos are capped at 15 minutes.';
@@ -65,7 +65,7 @@ afterEach(() => {
 
 describe('create', () => {
   it("makes the user's job awaiting upload, with a resumable session for a fresh object", async () => {
-    const created = await create(upload(), USER_B, ORIGIN);
+    const created = await create(upload(), USER_C, ORIGIN);
     const { id } = created;
     expect(id).toMatch(/^[A-Za-z0-9_-]{22}$/);
     const [session] = gcs.created;
@@ -86,8 +86,8 @@ describe('create', () => {
     });
     expect(JSON.stringify(stored)).not.toContain(sessionUri);
     expect(stored).toMatchObject({
-      ownerUid: USER_B.uid,
-      artistId: null,
+      ownerUid: USER_C.uid,
+      artistId: USER_C.artistId,
       parentId: null,
       destination: null,
       uploadStartedAt: null,
@@ -100,6 +100,13 @@ describe('create', () => {
     });
   });
 
+  it('refuses a user with no artist profile before opening a session, storing nothing', async () => {
+    const error = await rejection(create(upload(), USER_B, ORIGIN));
+    expect([error.status, error.message]).toEqual([409, 'Add your artist name first.']);
+    expect(gcs.created).toHaveLength(0);
+    expect(await jobCount()).toBe(0);
+  });
+
   it("copies the owner's artist link", async () => {
     const { id } = await create(upload(), USER_A, ORIGIN);
     expect(await job(id)).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr' });
@@ -108,7 +115,7 @@ describe('create', () => {
   it('trims the title and notes and caps the filename', async () => {
     const { id } = await create(
       upload({ songTitle: '  PeekaBoo  ', notes: '  n  ', filename: 'f'.repeat(300) }),
-      USER_B,
+      USER_C,
       ORIGIN,
     );
     expect((await job(id)).songTitle).toBe('PeekaBoo');
@@ -117,18 +124,18 @@ describe('create', () => {
   });
 
   it('defaults a missing filename and notes', async () => {
-    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, USER_B, ORIGIN);
+    const { id } = await create(omit(upload(), 'filename', 'notes') as CreateInput, USER_C, ORIGIN);
     expect((await job(id)).filename).toBe('video');
     expect((await job(id)).notes).toBe('');
   });
 
   it('defaults a filename that is not text', async () => {
-    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), USER_B, ORIGIN);
+    const { id } = await create(upload({ filename: { name: 'x.mp4' } }), USER_C, ORIGIN);
     expect((await job(id)).filename).toBe('video');
   });
 
   it('accepts a video at exactly 15 minutes and rejects one over, for every user', async () => {
-    for (const user of [USER_A, USER_B]) {
+    for (const user of [USER_A, USER_C]) {
       await expect(create(upload({ durationSec: 900 }), user, ORIGIN)).resolves.toBeTruthy();
       const error = await rejection(create(upload({ durationSec: 901 }), user, ORIGIN));
       expect([error.status, error.message]).toEqual([400, TOO_LONG]);
@@ -166,7 +173,7 @@ describe('create', () => {
     ['a short fingerprint', upload({ fingerprint: 'c'.repeat(63) }), PICK_AGAIN],
     ['an uppercase fingerprint', upload({ fingerprint: 'C'.repeat(64) }), PICK_AGAIN],
   ])('rejects %s with 400', async (_label, input, message) => {
-    const error = await rejection(create(input as CreateInput, USER_B, ORIGIN));
+    const error = await rejection(create(input as CreateInput, USER_C, ORIGIN));
     expect(error.status).toBe(400);
     expect(error.message).toBe(message);
     expect(await jobCount()).toBe(0);
@@ -177,7 +184,7 @@ describe('create', () => {
     await expect(
       create(
         upload({ songTitle: 'x'.repeat(100), notes: 'n'.repeat(NOTES_MAX), size: MAX_BYTES }),
-        USER_B,
+        USER_C,
         ORIGIN,
       ),
     ).resolves.toBeTruthy();
@@ -187,14 +194,14 @@ describe('create', () => {
 describe('failures', () => {
   it('stores no job when the session cannot be opened', async () => {
     gcs.createResumableUpload.mockRejectedValueOnce(new Error('storage.objects.create denied'));
-    await expect(create(upload(), USER_B, ORIGIN)).rejects.toThrow('denied');
+    await expect(create(upload(), USER_C, ORIGIN)).rejects.toThrow('denied');
     expect(await jobCount()).toBe(0);
   });
 
   it('stores no job when opening the session outlives 10 s', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     gcs.createResumableUpload.mockReturnValueOnce(deferred<string>().promise);
-    const pending = create(upload(), USER_B, ORIGIN).catch((e: unknown) => e);
+    const pending = create(upload(), USER_C, ORIGIN).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await pending).toMatchObject({
       message: 'Opening the upload session took longer than 10000 ms',
@@ -207,12 +214,14 @@ describe('failures', () => {
     vi.spyOn(KeyManagementServiceClient.prototype, 'encrypt').mockRejectedValueOnce(
       new Error('PERMISSION_DENIED'),
     );
-    await expect(create(upload(), USER_B, ORIGIN)).rejects.toThrow('PERMISSION_DENIED');
+    await expect(create(upload(), USER_C, ORIGIN)).rejects.toThrow('PERMISSION_DENIED');
     expect(await jobCount()).toBe(0);
   });
 
   it('stores no job for an owner who is not a user', async () => {
-    await expect(create(upload(), { uid: 'ghost', artistId: null }, ORIGIN)).rejects.toThrow();
+    await expect(
+      create(upload(), { uid: 'ghost', artist: { id: 'flr' } }, ORIGIN),
+    ).rejects.toThrow();
     expect(await jobCount()).toBe(0);
   });
 });
@@ -242,7 +251,7 @@ describe('parseMedia', () => {
   });
 
   it('leaves the song title to create', async () => {
-    expect((await rejection(create(upload({ songTitle: '' }), USER_B, ORIGIN))).message).toBe(
+    expect((await rejection(create(upload({ songTitle: '' }), USER_C, ORIGIN))).message).toBe(
       TITLE_REQUIRED,
     );
   });

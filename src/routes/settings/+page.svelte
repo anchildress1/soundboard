@@ -1,5 +1,10 @@
 <script lang="ts">
+  import { invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import ArtistForm from '#lib/components/ArtistForm.svelte';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
 
   // Spec 006, FR-021: what each role draws on before any slider moves.
   const ROLES = [
@@ -18,12 +23,25 @@
   ];
 </script>
 
-<svelte:head><title>Peer influence · Soundboard</title></svelte:head>
+<svelte:head><title>Settings · Soundboard</title></svelte:head>
 
 <main>
   <a class="back" href={resolve('/')}>Releases</a>
+  <h1>Settings</h1>
+
+  <section class="panel" aria-labelledby="artist">
+    <h2 id="artist">Artist</h2>
+    <p class="help">New drafts use these. Drafts you already approved keep what you approved.</p>
+    <ArtistForm
+      initial={data.artist}
+      submitLabel="Save changes"
+      savedText="Saved."
+      onsaved={() => invalidateAll()}
+    />
+  </section>
+
   <div class="intro">
-    <h1>Peer influence</h1>
+    <h2>Peer influence</h2>
     <p class="help">
       How much each part of a draft leans on artists like you who reach more people, from your own
       history only to the strongest peer influence. The sliders arrive with fanbase learning; until

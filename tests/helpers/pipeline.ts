@@ -109,16 +109,21 @@ export function defaultHandlers(): Handler[] {
     },
     {
       test: /youtube\/v3\/channels\?/,
-      reply: () =>
-        json({
+      // A bearer read (`mine=true`) answers with the grant's own channel; a key read, with A's.
+      reply: (_url, init) => {
+        const id =
+          headers(init).authorization === `Bearer access:${REFRESH_C}` ? CHANNEL_C : CHANNEL_A;
+        return json({
           items: [
             {
+              id,
               snippet: { customUrl: '@flieslikerobots' },
               statistics: { videoCount: '12', subscriberCount: '300' },
-              contentDetails: { relatedPlaylists: { uploads: 'UUflr' } },
+              contentDetails: { relatedPlaylists: { uploads: `UU${id}` } },
             },
           ],
-        }),
+        });
+      },
     },
     {
       test: /youtube\/v3\/playlistItems\?/,
@@ -131,9 +136,11 @@ export function defaultHandlers(): Handler[] {
     },
     {
       test: /com\/youtube\/v3\/videos\?/,
-      reply: (url, init) => {
-        const id = new URL(url).searchParams.get('id') ?? '';
-        if (headers(init).authorization) {
+      reply: (url) => {
+        const params = new URL(url).searchParams;
+        const id = params.get('id') ?? '';
+        // The upload read-back asks for status; the owner's identity read only for snippets.
+        if (params.get('part')?.includes('status')) {
           return json({
             items: [{ id, snippet: { title: 't' }, status: { uploadStatus: 'processed' } }],
           });
@@ -178,41 +185,76 @@ export function defaultHandlers(): Handler[] {
 /** The e2e KMS fake's ciphertext format, so one fixture decrypts in unit tests and the E2E build. */
 export const sealed = (plain: string) => Buffer.from(`e2e-kms:${plain}`).toString('base64');
 
+/** Nathan's profile as migration 0005 inserts it; curated, so his voice and brand guide apply. */
+export const ARTIST_A = {
+  id: 'flr',
+  name: ARTIST,
+  bandcampUrl: 'https://flieslikerobots.bandcamp.com',
+  contactLine: 'Contact at flieslikerobots@gmail.com.',
+  curated: true,
+} as const;
+/** A non-Nathan profile: generic voice, its own Bandcamp URL and contact line. */
+export const ARTIST_C = {
+  id: 'artist-c',
+  name: 'Test Artist',
+  bandcampUrl: 'https://test-artist.bandcamp.com',
+  contactLine: 'Booking: test@example.com',
+  curated: false,
+} as const;
+
 /** Linked to Flies Like Robots, with YouTube connected to the FLR channel. */
 export const USER_A = {
   uid: 'uid-a',
   sid: 'sid-a',
   email: 'a@example.com',
-  artistId: 'flr',
+  artistId: ARTIST_A.id,
+  artist: ARTIST_A,
 } as const;
-/** Invited with no artist link and no connection. */
+/** Invited with no artist profile and no connection. */
 export const USER_B = {
   uid: 'uid-b',
   sid: 'sid-b',
   email: 'b@example.com',
   artistId: null,
+  artist: null,
+} as const;
+/** Linked to a non-Nathan profile, with YouTube connected to its own channel. */
+export const USER_C = {
+  uid: 'uid-c',
+  sid: 'sid-c',
+  email: 'c@example.com',
+  artistId: ARTIST_C.id,
+  artist: ARTIST_C,
 } as const;
 export const CHANNEL_A = 'UCflr';
 export const REFRESH_A = 'refresh-a';
+export const CHANNEL_C = 'UCtest';
+export const REFRESH_C = 'refresh-c';
 
-/** A and B as invited, signed-up users; A's YouTube grant is connected. */
+const connected = (uid: string, channelId: string, channelTitle: string, refresh: string) => ({
+  uid,
+  status: 'connected' as const,
+  channelId,
+  channelTitle,
+  scopes: ['openid', 'email'],
+  tokenCiphertext: sealed(refresh),
+  updatedAt: new Date(0),
+});
+
+/** A, B and C as invited, signed-up users; A's and C's YouTube grants are connected. */
 export const USERS = {
-  users: [USER_A, USER_B].map(({ uid, email, artistId }) => ({ uid, email, artistId })),
+  artists: [ARTIST_A, ARTIST_C].map((artist) => ({ ...artist })),
+  users: [USER_A, USER_B, USER_C].map(({ uid, email, artistId }) => ({ uid, email, artistId })),
   connections: [
-    {
-      uid: USER_A.uid,
-      status: 'connected' as const,
-      channelId: CHANNEL_A,
-      channelTitle: 'Flies Like Robots',
-      scopes: ['openid', 'email'],
-      tokenCiphertext: sealed(REFRESH_A),
-      updatedAt: new Date(0),
-    },
+    connected(USER_A.uid, CHANNEL_A, ARTIST, REFRESH_A),
+    connected(USER_C.uid, CHANNEL_C, ARTIST_C.name, REFRESH_C),
   ],
 } satisfies Seed;
 
 /** Patch for a job owned by A, on the FLR artist. */
 export const A_JOB = { ownerUid: USER_A.uid, artistId: USER_A.artistId } as const;
+/** Patch for a job owned by C, on C's profile. */
+export const C_JOB = { ownerUid: USER_C.uid, artistId: USER_C.artistId } as const;
 
 // ---- jobs ----
 

@@ -1,13 +1,28 @@
 // Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
-// job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
-// backs the Connections page, and an unlinked upload user creates its own jobs through `/new`.
-// Each test owns its job IDs, so parallel tests and both Playwright projects never share mutable
-// state.
+// job but B's and C's; user B is invited with no profile; user C has a non-Nathan profile and its
+// own connected channel. One more user per broken YouTube status backs the Connections page, an
+// upload user with a profile creates its own jobs through `/new`, and each Playwright project has its own
+// no-profile and rename users, since those tests write. Each test owns its job IDs, so parallel
+// tests and both Playwright projects never share mutable state.
 import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import type { Chunk, Pick, Short } from '#lib/types.js';
 import type { Seed } from '../../helpers/db';
-import { A_JOB, CHANNEL_A, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
+import {
+  A_JOB,
+  ARTIST_A,
+  ARTIST_C,
+  C_JOB,
+  CHANNEL_A,
+  CHANNEL_C,
+  jobDoc,
+  USER_B,
+  USERS,
+} from '../../helpers/pipeline';
+
+/** Playwright's project names, and the device each project's own users are named after. */
+const PROJECTS = ['chromium', 'mobile'] as const;
+const DEVICE = { chromium: 'desktop', mobile: 'pixel' } as const;
 
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE = '#retrowave';
@@ -24,7 +39,17 @@ const PICK: Pick = {
   brandCheck: '',
   why: { title: 'Matches the genre.', description: 'Plain.', tags: 'Genre first.' },
   bandcamp: { about: 'A night drive.', credits: 'Written by Flies Like Robots.' },
+  artistName: ARTIST_A.name,
   modelMs: 12_000,
+};
+
+/** C's pick: its own name as the fixed tag, and its contact line closing the body. */
+const C_PICK: Pick = {
+  ...PICK,
+  description: 'Night drive in a borrowed car.\nBooking: test@example.com\n\n#synthwave #retrowave',
+  tags: [ARTIST_C.name, 'synthwave'],
+  bandcamp: { about: 'A night drive.', credits: 'Booking: test@example.com' },
+  artistName: ARTIST_C.name,
 };
 
 const chunk = (index: number): Chunk => ({
@@ -156,7 +181,30 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   },
   {
     job: job('e2e-b-review', { ownerUid: USER_B.uid, artistId: null, songTitle: 'Vaporgram' }),
-    pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
+    pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'], artistName: null },
+    chunks: [0, 1, 2].map(chunk),
+  },
+  ...PROJECTS.map((project) => ({
+    job: job(`e2e-c-review-${project}`, { ...C_JOB, songTitle: 'Vaporgram' }),
+    pick: C_PICK,
+    chunks: [0, 1, 2].map(chunk),
+  })),
+  // C's release already on its own channel, read-only: it backs the Bandcamp screen check.
+  {
+    job: job('e2e-c-done', {
+      ...C_JOB,
+      songTitle: 'Vaporgram',
+      state: 'VERIFIED',
+      destination: { channelId: CHANNEL_C, channelTitle: ARTIST_C.name },
+      finalFields: {
+        title: C_PICK.title,
+        description: C_PICK.description,
+        hashtags: C_PICK.hashtags,
+        tags: C_PICK.tags,
+      },
+      videoId: 'e2e-c-done-video',
+    }),
+    pick: C_PICK,
     chunks: [0, 1, 2].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
@@ -192,11 +240,11 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   })),
 ];
 
-// Picking for user B, unlinked: no catalog read, and the cached genre search means no YouTube call.
+// Picking for user C: the identity read goes through C's grant (tests/e2e/fakes/youtube.ts), and
+// the cached genre search means no search call.
 const PICKING = ['e2e-pick-chromium', 'e2e-pick-mobile'].map((id) => ({
   job: job(id, {
-    ownerUid: USER_B.uid,
-    artistId: null,
+    ...C_JOB,
     songTitle: 'Vaporgram',
     state: 'PICK',
     pickVersion: null,
@@ -213,12 +261,40 @@ const broken = BROKEN_STATUSES.map((status) => ({
   email: `${status}@example.com`,
 }));
 
+/** Each project's own users for tests that write: one with no profile, one that renames its own. */
+const perProject = PROJECTS.flatMap((project) => {
+  const device = DEVICE[project];
+  return [
+    { user: { uid: `uid-new-${device}`, email: `new-${device}@example.com` }, artist: null },
+    {
+      user: {
+        uid: `uid-rename-${device}`,
+        email: `rename-${device}@example.com`,
+        artistId: `artist-r${device[0]}`,
+      },
+      artist: {
+        id: `artist-r${device[0]}`,
+        name: 'Rename Band',
+        bandcampUrl: 'https://rename-band.bandcamp.com',
+        contactLine: 'Booking: rename@example.com',
+      },
+    },
+  ];
+});
+
 /** Every row the E2E database starts with, in `seed()` order. */
 export const SEED: Seed = {
+  // The real migrations already inserted `flr`.
+  artists: [
+    ...USERS.artists.filter((artist) => artist.id !== ARTIST_A.id),
+    { id: 'artist-upload', name: 'Upload Band' },
+    ...perProject.flatMap(({ artist }) => (artist ? [artist] : [])),
+  ],
   users: [
     ...USERS.users,
     ...broken.map(({ uid, email }) => ({ uid, email })),
-    { uid: 'uid-upload', email: 'upload@example.com' },
+    { uid: 'uid-upload', email: 'upload@example.com', artistId: 'artist-upload' },
+    ...perProject.map(({ user }) => user),
   ],
   connections: [
     ...USERS.connections,

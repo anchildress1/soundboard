@@ -10,11 +10,21 @@ import { POST } from '#src/routes/api/jobs/[id]/short/+server.js';
 import type { JobView } from '#lib/types.js';
 import { afterJobUpdate, seed, truncate } from '../../../../../../helpers/db';
 import { gcs, resetGcs } from '../../../../../../helpers/gcs';
-import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
+import {
+  A_JOB,
+  ARTIST,
+  ARTIST_C,
+  C_JOB,
+  seedJob,
+  USER_A,
+  USER_B,
+  USER_C,
+  USERS,
+} from '../../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
 
-const make = async (id: string, user: typeof USER_A | typeof USER_B = USER_B) =>
+const make = async (id: string, user: typeof USER_A | typeof USER_B | typeof USER_C = USER_C) =>
   POST({ params: { id }, locals: { user } } as unknown as Event);
 
 const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
@@ -22,6 +32,7 @@ const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
 async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
   await seedJob({
     id,
+    ...C_JOB,
     state: 'VERIFIED',
     object: `uploads/${id}`,
     probe: PROBE,
@@ -33,7 +44,17 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
   });
   await db()
     .update(jobs)
-    .set({ picks: [{ version: 1, title: 'First', skipped: false }] })
+    .set({
+      picks: [
+        {
+          version: 1,
+          title: 'First',
+          tags: [patch.artistId === 'flr' ? ARTIST : ARTIST_C.name, 'synthwave'],
+          artistName: patch.artistId === 'flr' ? ARTIST : ARTIST_C.name,
+          skipped: false,
+        },
+      ],
+    })
     .where(eq(jobs.id, id));
 }
 
@@ -91,6 +112,25 @@ describe('POST /api/jobs/[id]/short', () => {
     await put('n', A_JOB);
     const view = (await (await make('n', USER_A)).json()) as JobView;
     expect(await getJob(view.job.id)).toMatchObject(A_JOB);
+    expect(view.pick).toMatchObject({ artistName: ARTIST, tags: [ARTIST, 'synthwave'] });
+  });
+
+  it("tags the Short with the owner's current profile name", async () => {
+    await put('j');
+    const renamed = { ...USER_C, artist: { ...ARTIST_C, name: 'Renamed Band' } };
+    const view = (await (await make('j', renamed as never)).json()) as JobView;
+    expect(view.pick).toMatchObject({
+      artistName: 'Renamed Band',
+      tags: ['Renamed Band', 'synthwave'],
+    });
+  });
+
+  it('409s for an owner without a profile and starts nothing', async () => {
+    await put('b', { ownerUid: USER_B.uid, artistId: null });
+    const response = await make('b', USER_B);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Add your artist name first.', fields: null });
+    expect((await db().select({ id: jobs.id }).from(jobs)).map((r) => r.id)).toEqual(['b']);
   });
 
   it('404s an unknown job', async () => {
