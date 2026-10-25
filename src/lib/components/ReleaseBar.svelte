@@ -85,7 +85,7 @@
     white-space: nowrap;
   }
 
-  /* Phones: the step name drops under the back link, the bar stays one row tall. */
+  /* Phones: the step name drops under the back link so the song title keeps the width. */
   @media (width < 560px) {
     .row {
       grid-template-columns: minmax(0, 1fr) auto;

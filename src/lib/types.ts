@@ -27,7 +27,7 @@ export const DRIVEN_STATES: readonly JobState[] = [
   'CLAIMED_COMPLETE',
 ];
 
-/** Video job states whose chunk analysis is finished, so a Short can be cut from them. */
+/** Approved video job states, the only ones a Short can be cut from. */
 export const SHORT_SOURCE_STATES: readonly JobState[] = [
   'PUBLISHING',
   'CLAIMED_COMPLETE',
