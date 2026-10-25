@@ -23,12 +23,12 @@ describe('SignInNotice', () => {
 
   it('says an uninvited account was turned away', () => {
     visit('?signin=denied');
-    expect(screen.getByRole('status')).toHaveTextContent("That Google account isn't invited.");
+    expect(screen.getByRole('status')).toHaveTextContent("That Google account isn't invited");
   });
 
   it('says an expired sign-in should be retried', () => {
     visit('?signin=expired');
-    expect(screen.getByRole('status')).toHaveTextContent('Sign-in expired. Try again.');
+    expect(screen.getByRole('status')).toHaveTextContent('Your sign-in expired');
   });
 
   it.each(['?signin=other', '?signin=', '?signin=constructor'])(

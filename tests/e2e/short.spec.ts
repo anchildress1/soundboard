@@ -1,59 +1,40 @@
 import { expect, test, type Page } from '@playwright/test';
 import { signIn, USER_A } from './session';
 
-const TABS_JOB = '/jobs/e2e-tabs';
+const REVIEW_JOB = '/jobs/e2e-tabs';
 
-const tab = (page: Page, name: 'YouTube' | 'Short' | 'Bandcamp') =>
-  page.getByRole('tab', { name: new RegExp(name) });
-const shortPanel = (page: Page) => page.locator('#panel-short');
+const offers = (page: Page) => page.getByRole('region', { name: 'Up next, if you want' });
+const theShort = (page: Page) => page.getByRole('region', { name: 'The Short' });
 
-// Every job here is user A's, linked to FLR.
+// Every job here is user A's, linked to FLR. Shorts hang off releases already on YouTube.
 test.beforeEach(async ({ page }) => {
   await signIn(page, USER_A);
 });
 
-test.describe('destination tabs', () => {
-  test('lists YouTube, Short, and Bandcamp, each to do, with YouTube open', async ({ page }) => {
-    await page.goto(TABS_JOB);
-    const tabs = page.getByRole('tablist', { name: 'Where it goes' }).getByRole('tab');
-    await expect(tabs).toHaveCount(3);
-    await expect(tabs.nth(0)).toContainText('YouTube');
-    await expect(tabs.nth(1)).toContainText('Short');
-    await expect(tabs.nth(2)).toContainText('Bandcamp');
-    for (const t of await tabs.all()) await expect(t).toContainText('To do');
-    await expect(tab(page, 'YouTube')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#panel-youtube')).toBeVisible();
-    await expect(shortPanel(page)).toBeHidden();
+test.describe('up next', () => {
+  test('offers nothing until the release is approved', async ({ page }) => {
+    await page.goto(REVIEW_JOB);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Does this title work?');
+    await expect(offers(page)).toHaveCount(0);
   });
 
-  test('moves between tabs from the keyboard', async ({ page }) => {
-    await page.goto(TABS_JOB);
-    // A key pressed before hydration attaches the tablist's handler does nothing, so retry it.
-    await expect(async () => {
-      await tab(page, 'YouTube').focus();
-      await page.keyboard.press('ArrowRight');
-      await expect(tab(page, 'Short')).toBeFocused({ timeout: 1000 });
-    }).toPass();
-    await expect(tab(page, 'Short')).toHaveAttribute('aria-selected', 'true');
-    await expect(shortPanel(page)).toBeVisible();
-    await page.keyboard.press('End');
-    await expect(tab(page, 'Bandcamp')).toBeFocused();
-    await page.keyboard.press('ArrowRight');
-    await expect(tab(page, 'YouTube')).toBeFocused();
-    await page.keyboard.press('ArrowLeft');
-    await expect(tab(page, 'Bandcamp')).toBeFocused();
-    await page.keyboard.press('Home');
-    await expect(tab(page, 'YouTube')).toBeFocused();
-    await expect(page.locator('#panel-youtube')).toBeVisible();
+  test('offers a Short and Bandcamp once the release is up', async ({ page }, testInfo) => {
+    await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText("It's on your channel");
+    await expect(offers(page).getByRole('button', { name: /Make a Short/ })).toBeEnabled();
+    await expect(offers(page).getByRole('button', { name: /Put it on Bandcamp/ })).toBeEnabled();
+    await expect(offers(page).getByRole('link', { name: "I'm done for now" })).toHaveAttribute(
+      'href',
+      '/',
+    );
   });
 
-  test('keeps the tab row inside the screen', async ({ page }) => {
-    // The load-in animation slides by fractions of a pixel; measure the settled layout.
+  test('keeps the offers inside the screen', async ({ page }, testInfo) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto(TABS_JOB);
+    await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
     const width = page.viewportSize()!.width;
-    for (const name of ['YouTube', 'Short', 'Bandcamp'] as const) {
-      const box = (await tab(page, name).boundingBox())!;
+    for (const offer of await offers(page).getByRole('button').all()) {
+      const box = (await offer.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       expect(box.height).toBeGreaterThanOrEqual(44);
@@ -64,7 +45,17 @@ test.describe('destination tabs', () => {
     expect(overflow).toBe(0);
   });
 
-  test('shows no tabs while the video is still being analyzed', async ({ page }) => {
+  test('opens Bandcamp as a side trip and comes back', async ({ page }, testInfo) => {
+    await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
+    await offers(page)
+      .getByRole('button', { name: /Put it on Bandcamp/ })
+      .click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Copy these into Bandcamp');
+    await page.getByRole('button', { name: 'Back to the release' }).click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText("It's on your channel");
+  });
+
+  test('shows no offers while the video is still being analyzed', async ({ page }) => {
     const step = page.waitForResponse((response) =>
       response.url().endsWith('/jobs/e2e-analyzing/step'),
     );
@@ -73,20 +64,22 @@ test.describe('destination tabs', () => {
       wait: 'waking model',
       job: { state: 'ANALYZE', error: null },
     });
-    await expect(page.getByText('waking model')).toBeVisible();
-    await expect(page.getByRole('tablist')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Waking the model');
+    await expect(offers(page)).toHaveCount(0);
   });
 });
 
-test.describe('Short tab', () => {
+test.describe('the Short', () => {
   test('recovers an uncertain Short upload and discards only the Short', async ({
     page,
   }, testInfo) => {
     const id = `e2e-short-paused-${testInfo.project.name}`;
     await page.goto(`/jobs/${id}`);
-    await tab(page, 'Short').click();
-    const panel = shortPanel(page);
-    const recovery = panel.getByRole('region', { name: 'Upload outcome unknown' });
+    await offers(page)
+      .getByRole('button', { name: /Finish the Short/ })
+      .click();
+    const main = page.getByRole('main');
+    const recovery = main.getByRole('region', { name: 'Upload outcome unknown' });
     await expect(recovery).toBeVisible();
     await expect(
       recovery.getByRole('link', { name: 'Open YouTube Studio uploads' }),
@@ -99,44 +92,47 @@ test.describe('Short tab', () => {
         response.request().method() === 'POST' &&
         response.url().endsWith(`/api/jobs/${id}-short/discard`),
     );
-    await panel.getByRole('button', { name: 'Discard' }).click();
+    await main.getByRole('button', { name: 'Discard', exact: true }).click();
     expect((await discarded).status()).toBe(200);
-    await expect(panel.getByRole('button', { name: 'Make a Short' })).toBeVisible();
+    await expect(offers(page).getByRole('button', { name: /Make a Short/ })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/jobs/${id}$`));
-    await tab(page, 'YouTube').click();
-    await expect(page.getByRole('button', { name: 'Approve & upload' })).toBeEnabled();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText("It's on your channel");
   });
 
   test('makes a Short and waits on the model for the hook', async ({ page }, testInfo) => {
     await page.goto(`/jobs/e2e-make-${testInfo.project.name}`);
-    await tab(page, 'Short').click();
     const step = page.waitForResponse(
       (response) => response.request().method() === 'POST' && response.url().endsWith('/step'),
     );
-    await shortPanel(page).getByRole('button', { name: 'Make a Short' }).click();
+    await offers(page)
+      .getByRole('button', { name: /Make a Short/ })
+      .click();
     // The test model's health endpoint returns 503, so no hook or media call starts.
     expect(await (await step).json()).toMatchObject({
       wait: 'waking model',
       job: { state: 'HOOK', error: null },
     });
-    await expect(shortPanel(page).getByRole('status')).toHaveText(/waking model/i);
-    await expect(shortPanel(page).getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Is this the hook?');
+    await expect(theShort(page).getByRole('status')).toHaveText('Waking the model');
+    await expect(page.getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
   });
 
   test('reviews a cut Short in a 9:16 frame with an accessible cut form', async ({ page }) => {
     await page.goto('/jobs/e2e-cut');
-    await tab(page, 'Short').click();
-    const panel = shortPanel(page);
-    const monitor = (await panel.locator('.monitor').boundingBox())!;
+    await offers(page)
+      .getByRole('button', { name: /Finish the Short/ })
+      .click();
+    const short = theShort(page);
+    const monitor = (await short.locator('.monitor').boundingBox())!;
     expect(monitor.width / monitor.height).toBeCloseTo(9 / 16, 2);
-    await expect(panel.getByText('00:01:10 – 00:01:40 · 30s')).toBeVisible();
-    await expect(panel.getByText('The chorus lands with the full band.')).toBeVisible();
+    await expect(short.getByText('00:01:10 – 00:01:40 · 30s')).toBeVisible();
+    await expect(short.getByText('The chorus lands with the full band.')).toBeVisible();
 
-    const start = panel.getByRole('spinbutton', { name: /^Start/ });
-    const length = panel.getByRole('spinbutton', { name: /^Length/ });
+    const start = short.getByRole('spinbutton', { name: /^Start/ });
+    const length = short.getByRole('spinbutton', { name: /^Length/ });
     await expect(start).toHaveValue('70');
     await expect(length).toHaveValue('30');
-    const recut = panel.getByRole('button', { name: 'Re-cut' });
+    const recut = short.getByRole('button', { name: 'Re-cut' });
     await expect(recut).toBeDisabled();
 
     await length.fill('75');
@@ -145,13 +141,14 @@ test.describe('Short tab', () => {
     await expect(recut).toBeDisabled();
     await length.fill('30');
 
-    const group = panel.getByRole('group', { name: 'Fit to 9:16' });
+    const group = short.getByRole('group', { name: 'Fit to 9:16' });
     await expect(group.getByRole('radio', { name: 'Blur fill' })).toBeChecked();
     await group.getByRole('radio', { name: 'Center crop' }).check();
     await expect(recut).toBeEnabled();
 
-    await expect(panel.getByRole('button', { name: 'Re-pick hook' })).toBeEnabled();
-    await expect(panel.getByLabel(/^Title/)).toHaveValue('PeekaBoo (Official Video)');
+    const main = page.getByRole('main');
+    await expect(main.getByRole('button', { name: 'Re-pick hook' })).toBeEnabled();
+    await expect(main.getByLabel(/^Title/)).toHaveValue('PeekaBoo (Official Video)');
   });
 
   test("sends a Short's own URL to its video's page", async ({ page }) => {

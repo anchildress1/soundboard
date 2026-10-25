@@ -82,7 +82,7 @@
     <h2 id="bandcamp-title">Bandcamp</h2>
     <!-- Bandcamp has no artist upload API and refuses to be framed, so the editor opens outside. -->
     <a
-      class="btn ghost small"
+      class="btn primary"
       href={EDITOR}
       target="_blank"
       rel="noopener noreferrer"
@@ -95,11 +95,11 @@
       {@const done = isCopied(field.label, field.value)}
       <div class="field" class:copied={done}>
         <dt>
-          <span class="mark" aria-hidden="true">{done ? '✓' : '●'}</span>{field.label}
+          <span class="dot" data-tone={done ? 'ok' : 'idle'}></span>{field.label}
         </dt>
         <dd>{field.value}</dd>
         <button
-          class="btn ghost small"
+          class="btn small"
           type="button"
           disabled={!field.value}
           aria-label="Copy {field.label}"
@@ -113,10 +113,8 @@
 
 <style>
   .bandcamp {
-    background: var(--panel);
-    padding: 12px 14px;
     display: grid;
-    gap: 10px;
+    gap: 16px;
   }
 
   .head {
@@ -124,71 +122,47 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 12px;
   }
 
   h2 {
-    margin: 0;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--orange);
-  }
-
-  .head a {
-    text-decoration: none;
-  }
-
-  .hint {
-    margin: 0;
-    color: var(--muted);
-    font-size: 13px;
+    font: 600 16px/1.4 var(--font-body);
   }
 
   dl {
-    margin: 0;
     display: grid;
     gap: 10px;
+    margin: 0;
   }
 
   .field {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 12px;
-    align-items: start;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
   }
 
   dt {
-    grid-column: 1 / -1;
     display: flex;
     align-items: center;
-    gap: 6px;
-    font: 600 12px/1 var(--sans);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    gap: 8px;
+    font-size: 13px;
     color: var(--muted);
   }
 
-  .mark {
-    font-size: 10px;
-    color: var(--yellow);
-  }
-
-  .copied .mark {
-    color: var(--green);
-  }
-
   dd {
+    grid-column: 1;
     margin: 0;
-    padding: 8px 10px;
-    background: var(--well);
-    border-left: 3px solid var(--yellow);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 14px;
   }
 
-  .copied dd {
-    border-left-color: var(--green);
+  .field .btn {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 </style>

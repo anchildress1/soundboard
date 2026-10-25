@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { signIn, USER_A, USER_B } from './session';
 
+const START = 'Start a new release';
+
 test.describe('home page', () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page, USER_B);
@@ -9,36 +11,39 @@ test.describe('home page', () => {
   test('renders the Soundboard frame', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle('Soundboard');
-    const heading = page.getByRole('heading', { level: 1 });
-    await expect(heading).toContainText('Soundboard');
-    await expect(heading.getByRole('link', { name: 'Soundboard' })).toHaveAttribute('href', '/');
-    await expect(page.getByText('Flies Like Robots · Release agent')).toBeVisible();
+    await expect(
+      page.getByRole('banner').getByRole('link', { name: 'Soundboard', exact: true }),
+    ).toHaveAttribute('href', '/');
+    await expect(page.getByRole('contentinfo')).toContainText('Built for Flies Like Robots');
   });
 
-  test('keeps Analyze disabled with no file picked', async ({ page }) => {
+  test('starts a new release on its own page', async ({ page }) => {
     await page.goto('/');
-    const analyze = page.getByRole('button', { name: 'Analyze' });
-    await expect(analyze).toBeDisabled();
-    await page.getByLabel(/^Song title/).fill('PeekaBoo');
-    await expect(analyze).toBeDisabled();
-    await expect(page.getByText('up to 15 min')).toBeVisible();
+    await page.getByRole('link', { name: START }).click();
+    await expect(page).toHaveURL('/new');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Pick the finished video');
+    await expect(page.getByRole('form', { name: 'Start a release' })).toBeVisible();
+  });
+});
+
+test.describe('new release', () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page, USER_B);
   });
 
-  test('stacks the tape above the form on phones and side by side on desktop', async ({
-    page,
-  }, testInfo) => {
-    // Measure the settled layout: the sections ease in on load, a beat apart.
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/');
-    const tape = await page.getByRole('region', { name: 'The video' }).boundingBox();
-    const form = await page.getByRole('form', { name: 'Start a run' }).boundingBox();
-    expect(tape && form).toBeTruthy();
+  test('keeps Start disabled with no file picked', async ({ page }) => {
+    await page.goto('/new');
+    const start = page.getByRole('button', { name: 'Start the release' });
+    await expect(start).toBeDisabled();
+    await page.getByLabel("What's the song called?").fill('PeekaBoo');
+    await expect(start).toBeDisabled();
+    await expect(page.getByText('Any video file, up to 15 min')).toBeVisible();
+  });
+
+  test('fits the screen, with Start pinned in view on phones', async ({ page }, testInfo) => {
+    await page.goto('/new');
     if (testInfo.project.name === 'mobile') {
-      expect(tape!.y + tape!.height).toBeLessThanOrEqual(form!.y);
-      expect(Math.abs(tape!.x - form!.x)).toBeLessThan(2);
-    } else {
-      expect(tape!.x + tape!.width).toBeLessThanOrEqual(form!.x);
-      expect(Math.abs(tape!.y - form!.y)).toBeLessThan(2);
+      await expect(page.getByRole('button', { name: 'Start the release' })).toBeInViewport();
     }
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(page.viewportSize()!.width);
@@ -51,15 +56,13 @@ test('health endpoint reports ok', async ({ request }) => {
   expect(await response.json()).toEqual({ ok: true });
 });
 
-test.describe('job list', () => {
-  test("lists only the signed-in user's runs and continues one", async ({ page }) => {
+test.describe('releases', () => {
+  test("puts the signed-in user's review up next and continues it", async ({ page }) => {
     await signIn(page, USER_B);
     await page.goto('/');
-    const runs = page.getByRole('region', { name: 'Your runs' });
-    await expect(runs.getByRole('listitem')).toHaveCount(1);
-    await expect(runs.getByRole('listitem')).toContainText('Vaporgram');
-    await expect(runs.getByRole('listitem')).toContainText('Needs review');
-    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    const next = page.getByRole('region', { name: 'Review the draft for Vaporgram' });
+    await expect(page.getByRole('region', { name: 'Earlier' })).toHaveCount(0);
+    await next.getByRole('link', { name: 'Continue Vaporgram' }).click();
     await expect(page).toHaveURL('/jobs/e2e-b-review');
     await expect(page.getByLabel(/^Title/)).toHaveValue('Vaporgram');
   });
@@ -67,32 +70,33 @@ test.describe('job list', () => {
   test('sends a client navigation home once the session is gone', async ({ page }) => {
     await signIn(page, USER_B);
     await page.goto('/');
-    const runs = page.getByRole('region', { name: 'Your runs' });
-    await expect(runs.getByRole('link', { name: 'Continue Vaporgram' })).toBeVisible();
+    const resume = page.getByRole('link', { name: 'Continue Vaporgram' });
+    await expect(resume).toBeVisible();
     await page.context().clearCookies();
-    await runs.getByRole('link', { name: 'Continue Vaporgram' }).click();
+    await resume.click();
     await expect(page).toHaveURL('/');
     await expect(page.getByLabel(/^Title/)).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
-    await expect(page.getByRole('region', { name: 'Your runs' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
   });
 
-  test('continues a run whose media expired, keeping its details', async ({ page }) => {
+  test('continues a release whose media expired, keeping its details', async ({ page }) => {
     await signIn(page, USER_A);
     await page.goto('/');
-    await page.getByRole('link', { name: 'Continue Gone Song' }).click();
+    // Every fixture shares a created time, so this review may be up next or under Earlier.
+    await page.getByRole('link', { name: /^(Continue|Open) Gone Song$/ }).click();
     await expect(page).toHaveURL('/jobs/e2e-expired');
     await expect(page.getByRole('note')).toContainText('upload it again');
     await expect(page.getByLabel(/^Title/)).toHaveValue('PeekaBoo (Official Video)');
   });
 
-  test("leaves another user's runs and every Short off the list", async ({ page }) => {
+  test("leaves another user's releases and every Short off the list", async ({ page }) => {
     await signIn(page, USER_A);
     await page.goto('/');
-    const runs = page.getByRole('region', { name: 'Your runs' });
-    await expect(runs.getByRole('link', { name: 'Continue PeekaBoo' }).first()).toBeVisible();
-    await expect(runs).not.toContainText('Vaporgram');
-    await expect(runs.locator('a[href="/jobs/e2e-cut-short"]')).toHaveCount(0);
-    await expect(runs.locator('a[href="/jobs/e2e-cut"]')).toHaveCount(1);
+    const main = page.getByRole('main');
+    await expect(main.getByRole('link', { name: /PeekaBoo$/ }).first()).toBeVisible();
+    await expect(main).not.toContainText('Vaporgram');
+    await expect(main.locator('a[href="/jobs/e2e-cut-short"]')).toHaveCount(0);
+    await expect(main.locator('a[href="/jobs/e2e-cut"]')).toHaveCount(1);
   });
 });

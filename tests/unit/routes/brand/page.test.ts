@@ -71,7 +71,7 @@ describe('brand page: proposing', () => {
     setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'waking model' })).toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Waking the model' })).toBeDisabled(),
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
@@ -119,6 +119,12 @@ describe('brand page: reviewing a proposal', () => {
       proposedAt: Date.UTC(2026, 9, 1),
     });
     expect(screen.queryByLabelText(/^Statement/)).toBeNull();
+  });
+
+  it('marks the proposal as waiting on a decision and tags each approved rule', () => {
+    setup({ approved: stored('APPROVED'), proposal: stored('PROPOSED') });
+    expect(screen.getByText('Needs your decision')).toHaveAttribute('data-tone', 'attention');
+    expect(screen.getByText(GUIDE.drop[0]!).querySelector('.chip')).toHaveTextContent('Drop');
   });
 
   it('blocks approval of an invalid edit and says why', async () => {

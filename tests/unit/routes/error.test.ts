@@ -18,7 +18,7 @@ describe('error page', () => {
     render(ErrorPage);
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
     expect(screen.getByText('404')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Back to Soundboard' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Back to releases' })).toHaveAttribute('href', '/');
     expect(screen.queryByText('Not Found')).toBeNull();
   });
 

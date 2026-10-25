@@ -6,6 +6,17 @@ export type Status = { tone: Tone; text: string; progress: number };
 
 type Label = (view: JobView, uploadPct: number) => Status;
 
+/** Plain words for each wait, the same on every screen that shows one. */
+export const WAIT_TEXT: Record<Wait, string> = {
+  'waking model': 'Waking the model',
+  'waiting on another run': 'Waiting on another release',
+  'step running in another tab': 'Running in another tab',
+  'waiting on YouTube': 'Waiting on YouTube',
+  'reconnect YouTube': 'Reconnect YouTube',
+  'upload outcome unknown': 'Upload outcome unknown',
+  'Daily upload limit reached. Try tomorrow.': 'Daily upload limit reached',
+};
+
 const fixed =
   (tone: Tone, text: string, progress: number): Label =>
   () => ({ tone, text, progress });
@@ -19,7 +30,7 @@ const LABELS: Record<JobState, Label> = {
   PREP: fixed('info', 'Measuring audio', 4),
   ANALYZE: (view) => ({
     tone: 'info',
-    text: `Chunk ${Math.min(view.job.chunkIndex + 1, view.job.chunkCount)} / ${view.job.chunkCount}`,
+    text: `Window ${Math.min(view.job.chunkIndex + 1, view.job.chunkCount)} of ${view.job.chunkCount}`,
     progress: runningProgress(view),
   }),
   PICK: fixed('info', 'Smart pick', 92),
@@ -38,9 +49,9 @@ const LABELS: Record<JobState, Label> = {
   DISCARDED: fixed('err', 'Discarded', 0),
 };
 
-/** The state chip, bar, and label for a job. Chunk N/M or a named wait is always shown while running. */
+/** The state chip, bar, and label for a job: the named wait when there is one, else the state's. */
 export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
-  if (wait) return { tone: 'info', text: wait, progress: runningProgress(view) };
+  if (wait) return { tone: 'info', text: WAIT_TEXT[wait], progress: runningProgress(view) };
   return LABELS[view.job.state](view, uploadPct);
 }
 

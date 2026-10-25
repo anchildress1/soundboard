@@ -83,10 +83,10 @@ describe('publishPaused', () => {
 });
 
 describe('jobStatus', () => {
-  it('shows a named wait with running progress ahead of the state label', () => {
+  it('shows a named wait in plain words with running progress ahead of the state label', () => {
     expect(jobStatus(view({ state: 'ANALYZE' }), WAKING)).toEqual({
       tone: 'info',
-      text: WAKING,
+      text: 'Waking the model',
       progress: 6 + 21,
     });
   });
@@ -103,12 +103,12 @@ describe('jobStatus', () => {
   it('shows chunk N / M during analysis, clamped to the count', () => {
     expect(jobStatus(view({ state: 'ANALYZE', chunkIndex: 0, chunkCount: 4 }))).toEqual({
       tone: 'info',
-      text: 'Chunk 1 / 4',
+      text: 'Window 1 of 4',
       progress: 6,
     });
     expect(jobStatus(view({ state: 'ANALYZE', chunkIndex: 4, chunkCount: 4 }))).toEqual({
       tone: 'info',
-      text: 'Chunk 4 / 4',
+      text: 'Window 4 of 4',
       progress: 90,
     });
   });

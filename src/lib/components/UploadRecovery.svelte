@@ -17,7 +17,7 @@
 </script>
 
 {#if publishPaused(view) && view.wait === 'reconnect YouTube'}
-  <section class="paused" aria-labelledby={`${id}-title`}>
+  <section class="paused notice" data-tone="warn" aria-labelledby={`${id}-title`}>
     <h2 id={`${id}-title`}>Upload paused</h2>
     <p>
       YouTube access is lost. <a href={resolve('/connections')}>Reconnect on Connections</a>
@@ -25,7 +25,7 @@
     </p>
   </section>
 {:else if publishPaused(view) && view.wait === 'upload outcome unknown' && view.job.destination}
-  <section class="paused" aria-labelledby={`${id}-title`}>
+  <section class="paused notice" data-tone="warn" aria-labelledby={`${id}-title`}>
     <h2 id={`${id}-title`}>Upload outcome unknown</h2>
     <p>
       YouTube lost the upload session after its last bytes may have gone out, so the video may be
@@ -63,34 +63,25 @@
 
 <style>
   .paused {
-    display: grid;
-    gap: 10px;
     justify-items: start;
-    padding: 12px 14px;
-    border: 1px solid var(--yellow);
-    border-left-width: 4px;
-    background: color-mix(in srgb, var(--yellow) 8%, var(--panel));
+    gap: 12px;
   }
 
   h2 {
-    margin: 0 0 6px;
-    font: 900 12px/1.2 var(--display);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--yellow);
-  }
-
-  p {
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.5;
+    color: var(--warn);
   }
 
   form {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
+  }
+
+  @media (width < 560px) {
+    form {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>

@@ -319,9 +319,8 @@ export async function retry(job: JobDoc): Promise<void> {
 }
 
 /**
- * Starts a Short from a video whose analysis is done and whose upload is still stored, or returns
- * the live one it already has. Its metadata starts from what the owner approved, else the
- * recommendation on screen.
+ * Starts a Short from an approved video whose upload is still stored, or returns the live one it
+ * already has. Its metadata starts from what the owner approved.
  */
 export async function makeShort(job: JobDoc): Promise<string> {
   if (job.short) throw new ActionError(409, "A Short can't be cut from a Short.");
