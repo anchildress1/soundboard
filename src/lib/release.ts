@@ -144,7 +144,7 @@ export function workCopy({ job, wait }: JobView): { title: string; body: string 
     case 'AWAITING_UPLOAD':
       return {
         title: 'Uploading your video',
-        body: 'Keep this page open until the upload finishes. After that, leaving is safe.',
+        body: 'Keep this tab open until the upload finishes. Other pages in the app are fine.',
       };
     case 'PREP':
       return { title: 'Measuring the audio', body: leave };

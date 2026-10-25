@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   heardTags,
   jobStatus,
+  savedPercent,
+  UPLOAD_NOTICE,
+  type UploadShown,
   modelLabel,
   modelRole,
   modelSeconds,
@@ -106,13 +109,77 @@ describe('jobStatus', () => {
     },
   );
 
-  it('shows upload percent while awaiting the browser upload', () => {
-    expect(jobStatus(view({ state: 'AWAITING_UPLOAD' }), undefined, 42)).toEqual({
-      tone: 'info',
-      text: 'Uploading 42%',
-      progress: 42,
+  describe('browser upload', () => {
+    const uploading = (upload: UploadShown) =>
+      jobStatus(view({ state: 'AWAITING_UPLOAD' }), undefined, upload);
+
+    it('shows the confirmed percent, rounded down, while sending', () => {
+      expect(uploading({ state: 'sending', saved: 42, total: 100 })).toEqual({
+        tone: 'info',
+        text: 'Uploading 42%',
+        progress: 42,
+      });
+      expect(uploading({ state: 'sending', saved: 999, total: 1000 }).text).toBe('Uploading 99%');
+      expect(uploading({ state: 'sending', saved: 1000, total: 1000 }).text).toBe('Uploading 100%');
+      expect(jobStatus(view({ state: 'AWAITING_UPLOAD' })).text).toBe('Uploading 0%');
     });
-    expect(jobStatus(view({ state: 'AWAITING_UPLOAD' })).text).toBe('Uploading 0%');
+
+    it.each([
+      ['offline', 'Upload paused: no connection'],
+      ['stall', 'Upload paused: no connection'],
+      ['no-reply', 'Upload paused: no connection'],
+      ['timeout', 'Upload paused: no connection'],
+      ['408', 'Upload paused: no connection'],
+      ['429', 'Upload paused: storage busy, retrying'],
+      ['5xx', 'Upload paused: storage busy, retrying'],
+    ] as const)('names a %s pause at the confirmed amount', (reason, text) => {
+      expect(uploading({ state: 'paused', reason, saved: 30, total: 120 })).toEqual({
+        tone: 'warn',
+        text,
+        progress: 25,
+      });
+    });
+
+    it('asks for the file with the saved percent, or without one when it is unknown', () => {
+      expect(uploading({ state: 'pick', saved: 0, total: 10 }).text).toBe(
+        'Upload paused at 0%. Pick the video to continue.',
+      );
+      expect(uploading({ state: 'pick', saved: 5, total: 10 })).toEqual({
+        tone: 'warn',
+        text: 'Upload paused at 50%. Pick the video to continue.',
+        progress: 50,
+      });
+      expect(uploading({ state: 'pick', saved: 9, total: 10 }).text).toBe(
+        'Upload paused at 90%. Pick the video to continue.',
+      );
+      expect(uploading({ state: 'pick', saved: null, total: 10 })).toEqual({
+        tone: 'warn',
+        text: 'Pick the video to continue.',
+        progress: 0,
+      });
+    });
+
+    it.each([
+      ['away', 'warn', 'The upload paused while you were away.'],
+      ['unreadable', 'err', "Couldn't read this video. Pick it again."],
+      ['other-tab', 'info', 'Uploading in another tab'],
+      ['replaced', 'warn', 'A different video replaced this upload.'],
+      ['moved', 'warn', 'The upload moved to another device or window.'],
+      ['discarded', 'err', 'This job was discarded.'],
+    ] as const)('shows the %s state', (state, tone, text) => {
+      expect(uploading({ state })).toEqual({ tone, text, progress: 0 });
+    });
+
+    it('reads 0% for an empty total', () => {
+      expect(savedPercent(0, 0)).toBe(0);
+    });
+
+    it('keeps the two start-over notices verbatim', () => {
+      expect(UPLOAD_NOTICE).toEqual({
+        'new-video': 'New video: starting the upload over.',
+        renewed: 'The saved upload expired; starting again.',
+      });
+    });
   });
 
   it('shows chunk N / M during analysis, clamped to the count', () => {

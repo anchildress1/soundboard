@@ -4,7 +4,78 @@ import type { JobState, JobView, PublicJob, Wait } from './types';
 export type Tone = 'info' | 'warn' | 'ok' | 'err';
 export type Status = { tone: Tone; text: string; progress: number };
 
-type Label = (view: JobView, uploadPct: number) => Status;
+type Label = (view: JobView, upload: UploadShown) => Status;
+
+/** Why a browser upload is paused (data-model "Browser state"). */
+export type PauseReason = 'offline' | 'stall' | 'no-reply' | 'timeout' | '408' | '429' | '5xx';
+
+/**
+ * What the job page shows for its upload. `pick` is a tab with no file, `saved` null when GCS
+ * didn't say how much it has. `saved` and `total` are bytes GCS confirmed, not bytes sent.
+ */
+export type UploadShown =
+  | { state: 'sending'; saved: number; total: number }
+  | { state: 'paused'; reason: PauseReason; saved: number; total: number }
+  | { state: 'pick'; saved: number | null; total: number }
+  | { state: 'away' | 'unreadable' | 'other-tab' | 'replaced' | 'moved' | 'discarded' };
+
+/** One-off lines the page shows while sending, after the upload started over. */
+export const UPLOAD_NOTICE = {
+  'new-video': 'New video: starting the upload over.',
+  renewed: 'The saved upload expired; starting again.',
+} as const;
+
+const PAUSE_TEXT: Record<PauseReason, string> = {
+  offline: 'Upload paused: no connection',
+  stall: 'Upload paused: no connection',
+  'no-reply': 'Upload paused: no connection',
+  timeout: 'Upload paused: no connection',
+  '408': 'Upload paused: no connection',
+  '429': 'Upload paused: storage busy, retrying',
+  '5xx': 'Upload paused: storage busy, retrying',
+};
+
+/** `n` in the page states: whole percent, rounded down so 100 means every byte. */
+export const savedPercent = (saved: number, total: number): number =>
+  total > 0 ? Math.floor((saved / total) * 100) : 0;
+
+function uploadStatus(upload: UploadShown): Status {
+  switch (upload.state) {
+    case 'sending': {
+      const n = savedPercent(upload.saved, upload.total);
+      return { tone: 'info', text: `Uploading ${n}%`, progress: n };
+    }
+    case 'paused':
+      return {
+        tone: 'warn',
+        text: PAUSE_TEXT[upload.reason],
+        progress: savedPercent(upload.saved, upload.total),
+      };
+    case 'pick': {
+      if (upload.saved === null) {
+        return { tone: 'warn', text: 'Pick the video to continue.', progress: 0 };
+      }
+      const n = savedPercent(upload.saved, upload.total);
+      return {
+        tone: 'warn',
+        text: `Upload paused at ${n}%. Pick the video to continue.`,
+        progress: n,
+      };
+    }
+    case 'away':
+      return { tone: 'warn', text: 'The upload paused while you were away.', progress: 0 };
+    case 'unreadable':
+      return { tone: 'err', text: "Couldn't read this video. Pick it again.", progress: 0 };
+    case 'other-tab':
+      return { tone: 'info', text: 'Uploading in another tab', progress: 0 };
+    case 'replaced':
+      return { tone: 'warn', text: 'A different video replaced this upload.', progress: 0 };
+    case 'moved':
+      return { tone: 'warn', text: 'The upload moved to another device or window.', progress: 0 };
+    case 'discarded':
+      return { tone: 'err', text: 'This job was discarded.', progress: 0 };
+  }
+}
 
 /** Plain words for each wait, the same on every screen that shows one. */
 export const WAIT_TEXT: Record<Wait, string> = {
@@ -22,11 +93,7 @@ const fixed =
   () => ({ tone, text, progress });
 
 const LABELS: Record<JobState, Label> = {
-  AWAITING_UPLOAD: (_view, uploadPct) => ({
-    tone: 'info',
-    text: `Uploading ${uploadPct}%`,
-    progress: uploadPct,
-  }),
+  AWAITING_UPLOAD: (_view, upload) => uploadStatus(upload),
   PREP: fixed('info', 'Measuring audio', 4),
   ANALYZE: (view) => ({
     tone: 'info',
@@ -50,9 +117,13 @@ const LABELS: Record<JobState, Label> = {
 };
 
 /** The state chip, bar, and label for a job: the named wait when there is one, else the state's. */
-export function jobStatus(view: JobView, wait?: Wait, uploadPct = 0): Status {
+export function jobStatus(
+  view: JobView,
+  wait?: Wait,
+  upload: UploadShown = { state: 'sending', saved: 0, total: 0 },
+): Status {
   if (wait) return { tone: 'info', text: WAIT_TEXT[wait], progress: runningProgress(view) };
-  return LABELS[view.job.state](view, uploadPct);
+  return LABELS[view.job.state](view, upload);
 }
 
 /** The model role the job's current work uses; a failed job counts as the step it failed at. */

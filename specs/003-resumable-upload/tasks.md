@@ -103,7 +103,7 @@ description: 'Task list for the resumable video upload'
   - While sending, `confirm` every 30 s; a 409 aborts the `PUT` at once (state `replaced` or `moved`); a failed or timed-out confirm pauses the `PUT`, so no sender runs unconfirmed past one interval plus the 10 s timeout.
   - The holder releases the lock on done, on a 400 or 409 stop, on `stop`, and when its tab closes.
   - Tests in tests/unit/lib/upload.test.ts with a fake `navigator.locks`: the holder sends and a second store doesn't; `holder` reports another tab without anything picked; the queued tab takes over after release and calls `onTakeover`; an aborted queue never sends; a 409 from the 30 s confirm aborts the in-flight `PUT`; a confirm timeout pauses it.
-- [ ] T019 [P] Status texts in src/lib/status.ts and src/lib/release.ts, exactly the contract's Page states table and working-screen copy (FR-010):
+- [x] T019 [P] Status texts in src/lib/status.ts and src/lib/release.ts, exactly the contract's Page states table and working-screen copy (FR-010):
   - status.ts: every Page states text, including `Upload paused: storage busy, retrying` for reasons `429`/`5xx`, `Upload paused: no connection` for `offline`, `stall`, `no-reply`, `timeout`, `408`, "Couldn't read this video. Pick it again." and "The upload moved to another device or window." `n` is `floor(saved / total * 100)`.
   - release.ts `workCopy` for `AWAITING_UPLOAD`: body "Keep this tab open until the upload finishes. Other pages in the app are fine."
   - Tests in tests/unit/lib/status.test.ts and tests/unit/lib/release.test.ts: each text and reason, `n` at 0, mid and just under total, and an unknown saved amount.

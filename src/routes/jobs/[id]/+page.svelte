@@ -81,7 +81,13 @@
   const paused = $derived(publishPaused(view));
   // The headline already names a wait, so the status row shows the state's progress instead. A
   // paused upload has none to show, so the row names what it's waiting on.
-  const status = $derived(jobStatus(view, paused ? view.wait : undefined, uploadPct));
+  const status = $derived(
+    jobStatus(view, paused ? view.wait : undefined, {
+      state: 'sending',
+      saved: uploadPct,
+      total: 100,
+    }),
+  );
   const tooShortForShort = $derived(!!job.probe && !canCutShort(job.probe.durationSec));
   const current = $derived(stepIndex(job.state, reviewStep, job.failedState));
   const work = $derived(workCopy(view));
