@@ -59,7 +59,7 @@ description: 'Task list for the resumable video upload'
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T007 [P] In src/lib/server/core/kms.ts give `encrypt` and `decrypt` an optional `{ timeout }` passed as the gax call option (5 s on the upload path; refresh-token callers unchanged). Tests in tests/unit/lib/server/core/kms.test.ts: the option reaches the mocked client; a call past it rejects.
+- [x] T007 [P] In src/lib/server/core/kms.ts give `encrypt` and `decrypt` an optional `{ timeout }` passed as the gax call option (5 s on the upload path; refresh-token callers unchanged). Tests in tests/unit/lib/server/core/kms.test.ts: the option reaches the mocked client; a call past it rejects.
 - [ ] T008 In src/lib/server/media/gcs.ts (contract "Server ↔ GCS and KMS"). Add only; `signedUploadUrl` and today's `uploadObjectName(jobId)` stay until T022:
   - `newUploadObject(jobId)`: `uploads/<jobId>/<objectId>`, `objectId` 16 random bytes base64url.
   - `createUploadSession(object, { origin, contentType, size })`: `bucket().file(object).createResumableUpload({ origin, metadata: { contentType, contentLength: size } })` with a 10 s timeout and SDK retries bounded inside it; returns the session URI.
