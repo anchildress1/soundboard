@@ -5,7 +5,14 @@
 //     -vf hue=h=90 -c:v libvpx-vp9 -b:v 1500k -c:a libopus tests/e2e/fixtures/clip-b.webm
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Browser,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from '@playwright/test';
 import { signIn, USER_UPLOAD } from './session';
 
 // The fake GCS session server (tests/e2e/fakes/gcs-session.ts) sends at 128 KiB/s by default, so a
@@ -27,17 +34,31 @@ type FakeSession = {
   cancelled: boolean;
 };
 
+type Files = Parameters<Locator['setInputFiles']>[0];
+
+/**
+ * Picks `files` until `done` shows. A pick before hydration lands on the server-rendered input with
+ * no handler attached, and nothing happens. Chromium fires no change for the same file again, so
+ * each try clears the input first.
+ */
+async function choose(input: Locator, files: Files, done: Locator) {
+  await expect(async () => {
+    await input.setInputFiles([]);
+    await input.setInputFiles(files);
+    await expect(done).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 /** Starts a release on /new with `clip`; returns the job ID once the job page opens. */
 async function startRelease(page: Page, name = 'Upload check', clip = CLIP_A): Promise<string> {
   // Both projects share the upload user, so a title names its project to stay unique.
   const title = `${name} (${test.info().project.name})`;
   await signIn(page, USER_UPLOAD);
   await page.goto('/new');
-  await page.locator('#video').setInputFiles(clip);
+  await choose(page.locator('#video'), clip, page.locator('video'));
   await page.getByLabel("What's the song called?").fill(title);
   const start = page.getByRole('button', { name: 'Start the release' });
-  // Enabled once the video's metadata loads, which a loaded machine can slow past 5 s.
-  await expect(start).toBeEnabled({ timeout: 15_000 });
+  await expect(start).toBeEnabled();
   await start.click();
   await page.waitForURL(/\/jobs\/[\w-]+$/);
   return page.url().split('/').pop()!;
@@ -188,7 +209,7 @@ test.describe('after a reload', () => {
     await expect(status(page)).toHaveText(/^Upload paused at [1-9]\d*%\. Pick the video/);
     const [before] = await sessions(page, id);
     await control(page, 'throttle', { session: before!.id, bytesPerSec: 1024 * KIB });
-    await picker(page).setInputFiles(CLIP_A);
+    await choose(picker(page), CLIP_A, page.locator('video'));
     await leftUpload(page, id);
     const all = await sessions(page, id);
     expect(all).toHaveLength(1);
@@ -206,7 +227,7 @@ test.describe('after a reload', () => {
     await savedOver(page, id, 0);
     await page.reload();
     await expect(picker(page)).toBeVisible();
-    await picker(page).setInputFiles(CLIP_B);
+    await choose(picker(page), CLIP_B, page.locator('video'));
     await expect(page.getByRole('note')).toHaveText('New video: starting the upload over.');
     await leftUpload(page, id);
     const [old, current] = await sessions(page, id);
@@ -224,11 +245,13 @@ test.describe('after a reload', () => {
     const id = await startRelease(page, 'Upload unreadable');
     await midUpload(page, id);
     await page.reload();
-    await picker(page).setInputFiles({
+    const bogus = {
       name: 'not-a-video.webm',
       mimeType: 'video/webm',
       buffer: Buffer.from('this is not a video'),
-    });
+    };
+    const unreadable = page.getByText("Couldn't read this video. Pick it again.");
+    await choose(picker(page), bogus, unreadable);
     await expect(status(page)).toHaveText("Couldn't read this video. Pick it again.");
     await expect(picker(page)).toBeVisible();
     expect(await sessions(page, id)).toHaveLength(1);
@@ -278,7 +301,7 @@ test.describe('one sender', () => {
     const device = await otherDevice(browser, testInfo);
     try {
       await device.goto(`/jobs/${id}`);
-      await picker(device).setInputFiles(CLIP_A);
+      await choose(picker(device), CLIP_A, device.locator('video'));
       await expect(status(device)).toHaveText(/^Uploading \d+%$/);
       await expect(status(page)).toHaveText('The upload moved to another device or window.', {
         timeout: 45_000,

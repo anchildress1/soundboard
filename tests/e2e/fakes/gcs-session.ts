@@ -90,13 +90,17 @@ function put(req: IncomingMessage, res: ServerResponse, session: Session) {
   const started = Date.now();
   const index = session.puts.push(0) - 1;
   let read = 0;
+  let dropped = false;
   req.on('data', (chunk: Buffer) => {
+    // Chunks already buffered still arrive after a drop destroys the socket; a dropped PUT is over.
+    if (dropped) return;
     session.received += chunk.length;
     session.puts[index]! += chunk.length;
     read += chunk.length;
     const end = position + chunk.length;
     const drop = session.drops.find((at) => at > session.saved && at <= end);
     if (drop !== undefined) {
+      dropped = true;
       session.saved = drop;
       session.drops = session.drops.filter((at) => at !== drop);
       req.socket.destroy();
