@@ -1,3 +1,8 @@
+// Fixtures are synthetic (never Nathan's media), VP9 + Opus so Chromium plays them:
+//   ffmpeg -f lavfi -i testsrc2=size=320x240:rate=24 -f lavfi -i sine=frequency=440 -t 4 \
+//     -c:v libvpx-vp9 -b:v 1500k -c:a libopus tests/e2e/fixtures/clip-a.webm
+//   ffmpeg -f lavfi -i testsrc2=size=320x240:rate=24 -f lavfi -i sine=frequency=660 -t 4 \
+//     -vf hue=h=90 -c:v libvpx-vp9 -b:v 1500k -c:a libopus tests/e2e/fixtures/clip-b.webm
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test';

@@ -26,12 +26,14 @@ Audience: AI coding agents. Directives only.
 - Only a user with `artistId` reads or writes `artist_memory` rows or opens `/brand`.
 - Gate artist memory, identity, and feedback on `artistJob` (job and owner both linked). Otherwise run the pick without them and write feedback to the job's `feedback` array.
 - One YouTube connection per user, bound to their own Google account. Refresh tokens: KMS ciphertext in `connections.token_ciphertext` only. NEVER log, trace, or return a token or ciphertext.
+- GCS upload session URIs: KMS ciphertext in `jobs.data.videoUpload.sessionCipher` only. Requests name a session by `generation`. NEVER log, trace, or put a session URI in a request; return it only from `POST /api/jobs` and `POST /api/jobs/{id}/upload-session`.
 - Upload and verify use only the job's approved destination channel and its owner's grant.
 - Short approvals write EDITED feedback only, never ACCEPTED.
 
 ## Media
 
 - ffmpeg and the YouTube upload read sources from GCS by signed URL.
+- Each upload session writes its own object `uploads/<jobId>/<objectId>`; read the video only through `job.object`. NEVER call GCS or KMS inside a database transaction.
 - NEVER buffer whole media in app memory. Stream in chunks or keep it on disk.
 - Short renders: temp file in `os.tmpdir()` → `uploadFile` → delete in `finally` → ffprobe read-back from GCS.
 - Analyst clips: temp file in `os.tmpdir()`, `stat` ≤ 8,000,000 bytes before reading, sent inline, deleted in `finally`. NEVER send the model a URL.
@@ -64,7 +66,7 @@ Audience: AI coding agents. Directives only.
 - NEVER mock the database. `#lib/server/core/db` aliases to `tests/helpers/db.ts` (PGlite, real migrations) in `vitest.config.ts`; seed rows through it.
 - `@sentry/sveltekit` is mocked globally (`tests/mocks/sentry.ts`). Assert through that mock. NEVER load the real SDK in tests.
 - E2E projects: desktop Chrome and Pixel 7. Pixel 7 is the primary path.
-- E2E builds swap the db module, KMS, Storage, and window media (`src/lib/server/media/window.ts`) for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
+- E2E builds swap the db module, KMS, Storage, and window media (`src/lib/server/media/window.ts`) for `tests/e2e/fakes/` (`E2E_FAKES=1`, set by `playwright.config.ts`; wired in `vite.config.ts`). `tests/e2e/fakes/gcs-session.ts` runs as its own Playwright `webServer` on port 4174 and holds every resumable session's offset and landed objects; drive it through its `/control/*` routes. Seed users and jobs in `tests/e2e/fakes/fixtures.ts`; give each test its own job IDs, per Playwright project when the test writes.
 - E2E has no live model and no ffmpeg: the `tests/e2e/fakes/gemini.ts` preload answers Gemini HTTP with 429, so model steps end at the "model busy" wait.
 
 ## Workflow
