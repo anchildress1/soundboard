@@ -10,6 +10,7 @@ import type {
   SourceSummary,
   VoiceRules,
 } from '#lib/brand.js';
+import { DEFAULT_INFLUENCE, type Influence } from '#lib/influence.js';
 import type { Wait } from '#lib/types.js';
 import { ModelBusy, ModelQuotaSpent, stepDeadline } from '#lib/server/ai/model.js';
 import { query, type Tx } from '#lib/server/core/db.js';
@@ -72,18 +73,65 @@ export async function getGuides(
   return { voice: state('voice'), brand: state('brand') };
 }
 
-/** The artist's approved voice and brand guide, as picks and hooks read them. */
-export async function approvedGuides(
-  artistId: string,
-): Promise<{ voice: VoiceRules | null; brand: BrandGuide | null }> {
-  const rows = await query((tx) =>
+const approvedRows = (artistId: string) =>
+  query((tx) =>
     tx
-      .select({ kind: artistGuides.kind, body: artistGuides.body })
+      .select({
+        kind: artistGuides.kind,
+        body: artistGuides.body,
+        influence: artistGuides.influence,
+      })
       .from(artistGuides)
       .where(and(eq(artistGuides.artistId, artistId), eq(artistGuides.status, 'approved'))),
   );
+
+/**
+ * The artist's approved voice and brand guide, as picks and hooks read them, with the saved
+ * peer-influence settings or the defaults.
+ */
+export async function approvedGuides(
+  artistId: string,
+): Promise<{ voice: VoiceRules | null; brand: BrandGuide | null; influence: Influence }> {
+  const rows = await approvedRows(artistId);
   const body = (kind: GuideKind) => rows.find((r) => r.kind === kind)?.body ?? null;
-  return { voice: body('voice') as VoiceRules | null, brand: body('brand') as BrandGuide | null };
+  return {
+    voice: body('voice') as VoiceRules | null,
+    brand: body('brand') as BrandGuide | null,
+    influence:
+      (rows.find((r) => r.kind === 'brand')?.influence as Influence | null) ?? DEFAULT_INFLUENCE,
+  };
+}
+
+/**
+ * What Settings shows: the saved settings or the defaults, whether they are saved, and whether an
+ * approved brand guide exists to save them on.
+ */
+export async function influenceSettings(
+  artistId: string,
+): Promise<{ influence: Influence; saved: boolean; canSave: boolean }> {
+  const brand = (await approvedRows(artistId)).find((r) => r.kind === 'brand');
+  const stored = (brand?.influence as Influence | null | undefined) ?? null;
+  return {
+    influence: stored ?? DEFAULT_INFLUENCE,
+    saved: stored !== null,
+    canSave: Boolean(brand),
+  };
+}
+
+export const NO_BRAND_GUIDE = 'Approve your brand guide to save your own settings.';
+
+/**
+ * Saves the caller's peer-influence settings on their approved brand guide through
+ * `soundboard_save_influence`. Without one the update matches no row: a 409.
+ */
+export async function saveInfluence(influence: Influence): Promise<void> {
+  const saved = await query(async (tx) => {
+    const result = (await tx.execute(
+      sql`select public.soundboard_save_influence(${JSON.stringify(influence)}::jsonb) as saved`,
+    )) as { rows: { saved: number }[] };
+    return result.rows[0]!.saved;
+  });
+  if (saved === 0) throw new ActionError(409, NO_BRAND_GUIDE);
 }
 
 export type Claim = { token: string } | { wait: 'model quota spent'; limitUntil: number };

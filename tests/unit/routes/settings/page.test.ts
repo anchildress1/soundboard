@@ -2,6 +2,7 @@ import type { ComponentProps } from 'svelte';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Page from '#src/routes/settings/+page.svelte';
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import { ARTIST_C } from '../../../helpers/pipeline';
 
 type PageData = ComponentProps<typeof Page>['data'];
@@ -18,8 +19,10 @@ const C = {
   bandcampUrl: ARTIST_C.bandcampUrl,
   contactLine: ARTIST_C.contactLine,
 };
-const renderPage = (artist: PageData['artist'] = C) =>
-  render(Page, { data: { artist } as PageData });
+const renderPage = (artist: PageData['artist'] = C, canSave = true) =>
+  render(Page, {
+    data: { artist, influence: DEFAULT_INFLUENCE, saved: false, canSave } as PageData,
+  });
 
 beforeEach(() => {
   h.invalidateAll.mockReset();
@@ -54,19 +57,43 @@ describe('settings page', () => {
     expect(h.invalidateAll).toHaveBeenCalledOnce();
   });
 
-  it('lists every spec 006 role with its default source', () => {
+  it('shows a slider per role at its default, with the role’s default source', () => {
     renderPage();
-    const defaults = screen.getByRole('region', { name: 'Default sources' });
-    const roles = within(defaults)
-      .getAllByRole('term')
-      .map((term) => term.textContent);
-    expect(roles).toEqual(['Sound', 'Feel', 'Wording', 'Discovery', 'Structure']);
-    expect(defaults).toHaveTextContent("The artist's own writing and approved edits");
+    const influence = screen.getByRole('form', { name: 'Peer influence' });
+    const sliders = within(influence).getAllByRole('slider');
+    expect(sliders.map((s) => s.getAttribute('id'))).toEqual([
+      'influence-sound',
+      'influence-feel',
+      'influence-wording',
+      'influence-discovery',
+      'influence-structure',
+    ]);
+    expect(sliders.map((s) => (s as HTMLInputElement).value)).toEqual(['1', '0', '0', '4', '4']);
+    expect(influence).toHaveTextContent("The artist's own writing and approved edits");
   });
 
-  it('has no sliders yet, and links home', () => {
+  it('saves the sliders, then says so and reloads the data', async () => {
+    fetchMock.mockResolvedValue(json({ influence: { ...DEFAULT_INFLUENCE, feel: 2 } }));
     renderPage();
-    expect(screen.queryByRole('slider')).toBeNull();
+    await fireEvent.input(screen.getByRole('slider', { name: /^Feel/ }), {
+      target: { value: '2' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByText('Saved. Applies to later drafts.')).toBeInTheDocument();
+    const [path, init] = fetchMock.mock.calls[0]!;
+    expect([path, init?.method]).toEqual(['/api/influence', 'PUT']);
+    expect(JSON.parse(String(init?.body))).toEqual({ ...DEFAULT_INFLUENCE, feel: 2 });
+    expect(h.invalidateAll).toHaveBeenCalledOnce();
+  });
+
+  it('disables saving the sliders until a brand guide is approved', () => {
+    renderPage(C, false);
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Brand' })).toHaveAttribute('href', '/brand');
+  });
+
+  it('links home', () => {
+    renderPage();
     expect(screen.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/');
   });
 });
