@@ -79,10 +79,11 @@ description: 'Task list for learning what grows the fanbase'
     - "YouTube Analytics only with the optional `yt-analytics.readonly` grant. Revocation deletes outcomes (database trigger); a save needs the same live grant."
   - Sentry line, add: "`peer-match` and `smart-pick`: record reply and reasoning as placeholders, including a re-ask's resent reply."
   - Tests, add: "Mock Cloud Tasks and Google certificate HTTP via `fetch`. E2E swaps the queue for `tests/e2e/fakes/tasks.ts`; research results come from fixtures."
-- [ ] T005 👤 Gate G1, run by the orchestrator (research R5, [quickstart G1](quickstart.md#g1--gemini-hears-a-public-youtube-url-gate-before-hearing-code)). Before T012's hearing part and T020. Gemini ≤ $0.05 of the $0.50 share.
+- [x] T005 👤 Gate G1, run by the orchestrator (research R5, [quickstart G1](quickstart.md#g1--gemini-hears-a-public-youtube-url-gate-before-hearing-code)). Before T012's hearing part and T020. Gemini ≤ $0.05 of the $0.50 share.
   - Write `specs/006-fanbase-learning/gates/g1/g1.mjs`: two `generateText` calls with the Interactions model and the analyst model, `low` thinking, `mediaResolution: 'low'`, 2048 tokens; a file part with a public music-video watch URL, `mediaType: 'video/mp4'`, `providerOptions.google.processing = { type: 'static', startOffset: 0, endOffset: 60 }`; then a private or removed video ID. A `fetch` wrapper logs request hosts only.
   - Run from an isolated directory with the repo's pinned `ai` and `@ai-sdk/google`. Read and append `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` before each call.
   - Record `gates/g1/result.json`: the five pass checks. No key, no URL query.
+  - **Result (2026-10-25, `gates/g1/result.json`): passed.** Heard and described; the only host our process called was `generativelanguage.googleapis.com`; 5,500 input tokens for the 60 s clip of a 3.5-minute video; a missing ID answers 403 before any tokens (→ `metadata-only`); one sample at 4.1 s, so `minCallMs` = 5,000. Gemini $0.004.
   - **Pass:** `PEER_HEARING=1` goes into `service.yaml` (T046); `minCallMs` = p95 latency rounded up to the next second, used by T012. **Fail:** `PEER_HEARING` stays unset, T012 skips the `youtube` part, T020 is metadata-only.
 
 ---
