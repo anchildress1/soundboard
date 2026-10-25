@@ -1037,6 +1037,15 @@ describe('finalizePick: the contact line', () => {
     expect(pick.bandcamp.credits).toBe(`Written by Nathan.\n${CONTACT}`);
   });
 
+  it.each([
+    ['the shortest email', 'Write a@b.c', false],
+    ['an @ with no domain dot', 'Ping user@host', true],
+    ['a trailing domain dot', 'Ping user@host.', true],
+  ])('treats %s by the email shape', (_label, line, kept) => {
+    const pick = finalizePick(raw({ description: `Body\n${line}` }), fix());
+    expect(pick.description.includes(line)).toBe(kept);
+  });
+
   it('keeps prose, the credit line, short numbers and an email-less @ alone', () => {
     const description = [
       'Written, performed, recorded, hacked and slashed by Flies Like Robots',

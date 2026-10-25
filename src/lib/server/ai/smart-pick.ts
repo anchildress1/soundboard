@@ -388,7 +388,8 @@ const cleanText = (text: string, facts: Fact[]) =>
  * not every way to write a contact; the Review step is the backstop.
  */
 const CONTACT_PATTERNS = [
-  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/,
+  // Presence only (`.test`), so the shortest email shape matches the same lines without backtracking.
+  /[\w.+-]@[\w-]+\.[\w-]/,
   /https?:\/\/|www\./i,
   /(?<![\w@])@[\w.]{2,}/,
   /^\s*(?:bookings?|contact|e-?mail|dms?|inquiries|enquiries|management|press)\b\s*[:-]?/i,
