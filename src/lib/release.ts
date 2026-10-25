@@ -68,7 +68,7 @@ export function previousReviewStep(step: ReviewStep, hasFlags: boolean): ReviewS
 
 export type ReleaseItem = { id: string; songTitle: string; state: JobState; createdAt: number };
 
-const RUNNING: readonly JobState[] = [
+const RUNNING: ReadonlySet<JobState> = new Set<JobState>([
   'AWAITING_UPLOAD',
   'PREP',
   'ANALYZE',
@@ -77,7 +77,7 @@ const RUNNING: readonly JobState[] = [
   'RENDER',
   'PUBLISHING',
   'CLAIMED_COMPLETE',
-];
+]);
 
 /**
  * Home's three groups: the newest release waiting on the user, the ones still running, and the
@@ -87,8 +87,8 @@ export function groupReleases<T extends ReleaseItem>(jobs: readonly T[]) {
   const next = jobs.find((job) => job.state === 'REVIEW') ?? null;
   return {
     next,
-    running: jobs.filter((job) => RUNNING.includes(job.state)),
-    earlier: jobs.filter((job) => job !== next && !RUNNING.includes(job.state)),
+    running: jobs.filter((job) => RUNNING.has(job.state)),
+    earlier: jobs.filter((job) => job !== next && !RUNNING.has(job.state)),
   };
 }
 
