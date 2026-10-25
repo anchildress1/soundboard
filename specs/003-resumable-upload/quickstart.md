@@ -27,15 +27,30 @@ Follow-ups, ran 2026-10-22 on the same bucket and engines (research R13). The tw
 
 Not run: Gemini checks (spec 002's own gate).
 
-## Gate G2 (constitution V): open, blocks T011 and T017
+## Gate G2 (constitution V): passed 2026-10-25
 
-One gate. Run on the dev bucket (`GCS_BUCKET` in `.env`) with throwaway objects under `g2-check/`, deleted afterwards. Desktop Chromium, Firefox and WebKit through Playwright, from `http://localhost:5173`.
+Ran on the dev bucket (`GCS_BUCKET` in `.env`) with throwaway objects under `g2-check/`, deleted afterwards (a final listing of `g2-check/` was empty).
 
-| Check                                                                                                                                                                                                                                                                                                                                                             | Result |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| G2 Two clients `PUT` the same bytes from the same offset to one session at once, and a third sends a status query during it. Pass: the object lands once, byte-identical to the file (`gcloud storage hash` vs a local SHA-256), and every request either succeeds or fails with a status the uploader recovers from (`308`, `200`/`201`, `4xx`/`5xx`, status 0). |        |
+- **Setup:**
+  - Each run created a JSON API session with `Origin: http://localhost:5173` and a declared 48 MiB (50,331,648 bytes) of deterministic bytes.
+  - Playwright 1.63.0 desktop Chromium, Firefox and WebKit, on that origin.
+  - Two `XMLHttpRequest` `PUT`s of the same bytes from the same offset started together; a status query (`Content-Range: bytes */<size>`) went out 400 ms later, while both were in flight.
+  - Two variants per engine: from offset 0, and from 8 MiB after an 8 MiB partial `PUT` saved `bytes=0-8388607`.
+  - The whole run went twice.
+- **Pass rule:** the object lands once, byte-identical (GCS `md5Hash` vs a local MD5 of the same bytes; one version under the name), and every request ends in a status the uploader recovers from.
 
-**If G2 fails:** a same-file pick from a stale generation gets a fresh session for a new object and restarts from 0 (research R6, R13). Record the failing status in this table, update contract and tasks to the fallback, and build nothing else.
+| Engine   | Variant          | `PUT` A | `PUT` B | Status query mid-flight  | Query after | Landed                     | Result |
+| -------- | ---------------- | ------- | ------- | ------------------------ | ----------- | -------------------------- | ------ |
+| Chromium | from 0           | 503     | 200     | `308`, no `Range`        | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+| Chromium | from 8 MiB saved | 200     | 503     | `308`, `bytes=0-8388607` | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+| Firefox  | from 0           | 200     | 503     | `308`, no `Range`        | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+| Firefox  | from 8 MiB saved | 200     | 503     | `308`, `bytes=0-8388607` | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+| WebKit   | from 0           | 503     | 200     | `308`, no `Range`        | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+| WebKit   | from 8 MiB saved | 503     | 200     | `308`, `bytes=0-8388607` | `200`       | once, 50,331,648 B, MD5 ok | ✅     |
+
+- Both runs matched: GCS serves one `PUT` per session at a time and answers the other `503`. The uploader already treats `503` as "storage busy": pause, back off, status query, resume.
+- The status query never disturbed the active `PUT`.
+- **Decision:** a same-file takeover reuses the session. The fallback (research R13) is not built.
 
 ## Automated
 

@@ -19,48 +19,51 @@ Owner-only through `authorizedJob` (and RLS), so another user's job returns 404.
 One JSON body per op:
 
 ```text
-{ "op": "pick", "opId": "<random>", "size": 123, "fingerprint": "<64 hex>", "filename": "…", "contentType": "video/mp4", "durationSec": 180 }
+{ "op": "pick", "opId": "<random>", "generation": 4, "size": 123, "fingerprint": "<64 hex>", "filename": "…", "contentType": "video/mp4", "durationSec": 180 }
 { "op": "renew", "opId": "<random>", "generation": 4, "fingerprint": "<64 hex>" }
 { "op": "confirm", "generation": 4, "fingerprint": "<64 hex>" }
 ```
 
-- `pick` is a file the user chose. Only the tab holding the Web Lock sends it (research R8). It bumps the generation.
+- `pick` is a file the user chose. Only the tab holding the Web Lock sends it (research R8). It bumps the generation. Its `generation` is the one the client last observed: from the job page load (`uploadGeneration`) or the last `upload-session` reply, 409s included.
 - `renew` is the uploader recovering on its own after a `404`, `410` or `499` from GCS. The new session uses the stored size and `contentType`.
 - `confirm` is a read. Senders send it before every attempt and every 30 s while a `PUT` is in flight.
 - `opId` is stable across one request's retries. The server keeps the last 20 applied `{ opId, generation, restarted }` in `videoUpload.ops`.
+- A conditional commit that matches no row re-reads the job and runs these checks again from the top, opId replay included, before it answers a conflict. So a retry that overlapped its own slower first attempt gets the first attempt's answer, never a 409.
+- Every 409 below that names replaced or moved carries `{ error, generation }`, the current generation, so the client's next pick is not stale.
 
 Checks run in this order.
 
-| Response | Body                                                           | When                                                                                                                                                        |
-| -------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 404      | —                                                              | Not the caller's job.                                                                                                                                       |
-| 400      | `{ message }`                                                  | Malformed body: unknown `op`, missing `opId` or `generation`, bad fingerprint.                                                                              |
-| 409      | `{ message: "This job was discarded." }`                       | The job is `DISCARDED`. Repeats any owed discard cleanup first (research R10).                                                                              |
-| 409      | `{ message: "This upload is already done." }`                  | The job has left `AWAITING_UPLOAD`, or `job.object` already landed.                                                                                         |
-| 200      | `{ sessionUri, generation, restarted }`                        | `pick` or `renew` whose `opId` is in `ops` at the current generation: already applied, nothing changes; `restarted` as recorded. **Carries the URI.**       |
-| 409      | replaced or moved (below)                                      | `pick` or `renew` whose `opId` is in `ops` at a stale generation: superseded, nothing changes.                                                              |
-| 200      | `{ sessionUri, generation, restarted: false }`                 | `pick` whose size and fingerprint match: the current session, generation bumped. **Carries the URI.**                                                       |
-| 400      | `{ message }`                                                  | `pick` of a different file that fails `parseMedia`. Nothing changes.                                                                                        |
-| 200      | `{ sessionUri, generation, restarted: true }`                  | `pick` of a different file that passes: a session for a new object committed, generation bumped, then the displaced session cancelled. **Carries the URI.** |
-| 200      | `{ sessionUri, generation, restarted: true }`                  | `renew` from the current generation: a session for a new object committed, generation bumped, old session cancelled. **Carries the URI.**                   |
-| 200      | `{ current: true }`                                            | `confirm` from the current generation.                                                                                                                      |
-| 409      | `{ message: "A different video replaced this upload." }`       | `renew`, `confirm`, or a `pick` that lost the commit race, whose `fingerprint` differs from the current one.                                                |
-| 409      | `{ message: "The upload moved to another device or window." }` | The same, with the current `fingerprint` (the same file, picked elsewhere).                                                                                 |
+| Response | Body                                                           | When                                                                                                                                                                                   |
+| -------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 404      | —                                                              | Not the caller's job.                                                                                                                                                                  |
+| 400      | `{ message }`                                                  | Malformed body: unknown `op`, missing `opId` or `generation`, bad fingerprint.                                                                                                         |
+| 409      | `{ message: "This job was discarded." }`                       | The job is `DISCARDED`. Repeats any owed discard cleanup first (research R10).                                                                                                         |
+| 409      | `{ message: "This upload is already done." }`                  | The job has left `AWAITING_UPLOAD`, or `job.object` already landed.                                                                                                                    |
+| 200      | `{ sessionUri, generation, restarted }`                        | `pick` or `renew` whose `opId` is in `ops` at the current generation: already applied, nothing changes; `restarted` as recorded. **Carries the URI.**                                  |
+| 409      | replaced or moved (below)                                      | `pick` or `renew` whose `opId` is in `ops` at a stale generation: superseded, nothing changes.                                                                                         |
+| 409      | replaced or moved (below)                                      | `pick` whose `opId` is not in `ops` and whose observed `generation` isn't the current one: the client hasn't seen a newer pick, or its `opId` was evicted from `ops`. Nothing changes. |
+| 200      | `{ sessionUri, generation, restarted: false }`                 | `pick` whose size and fingerprint match: the current session, generation bumped. **Carries the URI.**                                                                                  |
+| 400      | `{ message }`                                                  | `pick` of a different file that fails `parseMedia`. Nothing changes.                                                                                                                   |
+| 200      | `{ sessionUri, generation, restarted: true }`                  | `pick` of a different file that passes: a session for a new object committed, generation bumped, then the displaced session cancelled. **Carries the URI.**                            |
+| 200      | `{ sessionUri, generation, restarted: true }`                  | `renew` from the current generation: a session for a new object committed, generation bumped, old session cancelled. **Carries the URI.**                                              |
+| 200      | `{ current: true }`                                            | `confirm` from the current generation.                                                                                                                                                 |
+| 409      | `{ message: "A different video replaced this upload." }`       | `renew`, `confirm`, or a `pick` that lost the commit race, whose `fingerprint` differs from the current one.                                                                           |
+| 409      | `{ message: "The upload moved to another device or window." }` | The same, with the current `fingerprint` (the same file, picked elsewhere).                                                                                                            |
 
-If gate G2 fails, a `pick` whose fingerprint matches gets a session for a new object, like a different file, with `restarted: true` (research R13).
+Gate G2 passed (research R13), so a `pick` whose fingerprint matches always resumes the current session, after a reload or as a takeover from another tab or device.
 
 ## Server ↔ GCS and KMS
 
 No call runs inside a database transaction. Each has an explicit deadline; inside a step, the smaller of it and the step's remaining deadline.
 
-| Call                                                  | When                                                           | Deadline       | Notes                                                                                                                             |
-| ----------------------------------------------------- | -------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Create session (`createResumableUpload`, JSON API)    | create, pick of a new file, renew                              | 10 s           | `origin`, `contentType`, `contentLength`; a new object name each time                                                             |
-| KMS `encrypt` / `decrypt`                             | after create; pick, renew, status, cancel                      | 5 s            | `core/kms.ts`, gax `timeout`                                                                                                      |
-| Status query (`PUT`, `Content-Range: bytes */<size>`) | job page server load for `AWAITING_UPLOAD`                     | 5 s            | fills page data `uploadSaved`; no media; a failure leaves it null                                                                 |
-| Cancel (`DELETE` session URI)                         | after a swap or renew commits; discard of an unfinished upload | 5 s, one retry | `2xx`, `404`, `410`, `499` count as done; after a swap a failure leaves an orphan at worst; on discard it leaves the cleanup owed |
-| `objectInfo(job.object)`                              | completion, pick, renew; discard, before its commit            | 5 s            | today's `exists` + `getMetadata`; a failed read on discard answers 503 and changes nothing                                        |
-| Prefix sweep (`getFiles({ prefix })` + `delete` each) | after completion; on discard                                   | 10 s           | `uploads/<jobId>/`; keeps the named object; best effort                                                                           |
+| Call                                                  | When                                                           | Deadline       | Notes                                                                                                                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create session (`createResumableUpload`, JSON API)    | create, pick of a new file, renew                              | 10 s           | `origin`, `contentType`, `contentLength`; a new object name each time                                                                                           |
+| KMS `encrypt` / `decrypt`                             | after create; pick, renew, status, cancel                      | 5 s            | `core/kms.ts`, gax `timeout`                                                                                                                                    |
+| Status query (`PUT`, `Content-Range: bytes */<size>`) | job page server load for `AWAITING_UPLOAD`                     | 5 s            | fills page data `uploadSaved`; no media; a failure leaves it null                                                                                               |
+| Cancel (`DELETE` session URI)                         | after a swap or renew commits; discard of an unfinished upload | 5 s, one retry | `2xx`, `404`, `410`, `499` count as done; after a swap a failure leaves an orphan at worst; on discard it leaves the cleanup owed                               |
+| `objectInfo(job.object)`                              | completion, pick, renew, confirm; discard, before its commit   | 5 s            | today's `exists` + `getMetadata`; a failed read on discard answers 503 and changes nothing. Completion runs it under a step claim and the step's 110 s deadline |
+| Prefix sweep (`getFiles({ prefix })` + `delete` each) | after completion; on discard                                   | 10 s           | `uploads/<jobId>/`; keeps the named object; best effort                                                                                                         |
 
 ## Browser ↔ GCS (session URI)
 
