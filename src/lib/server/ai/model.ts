@@ -14,6 +14,7 @@ import {
   chatSpan,
   GUIDE_AGENTS,
   textTurn,
+  VALUE_AGENTS,
   type AgentName,
   type ChatReply,
   type ModelRequest,
@@ -38,6 +39,8 @@ export const stepDeadline = (now = Date.now()) => now + STEP_BUDGET_MS;
  */
 const AGENTS = {
   'chunk-analyst': { model: analystModel, thinkingLevel: 'low', maxTokens: 2048, minCallMs: 8_000 },
+  // Gate G1 measured 4.1 s for a 60 s YouTube clip.
+  'peer-match': { model: analystModel, thinkingLevel: 'low', maxTokens: 2048, minCallMs: 5_000 },
   'smart-pick': { model: pickModel, thinkingLevel: 'medium', maxTokens: 8192, minCallMs: 33_000 },
   'hook-pick': { model: pickModel, thinkingLevel: 'low', maxTokens: 8192, minCallMs: 35_000 },
   'brand-guide': { model: pickModel, thinkingLevel: 'medium', maxTokens: 8192, minCallMs: 33_000 },
@@ -115,8 +118,23 @@ const usageOf = (usage: LanguageModelUsage | undefined): ChatReply['usage'] => (
   reasoningTokens: usage?.outputTokenDetails.reasoningTokens,
 });
 
+const WATCH_URL = /^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/;
+
 function sdkPart(part: Part) {
   if (part.type === 'text') return { type: 'text' as const, text: part.text };
+  if (part.type === 'youtube') {
+    // The Interactions model passes a YouTube watch URL to Gemini instead of downloading it (G1);
+    // any other URL would be fetched by the SDK, so it never gets this far.
+    if (!WATCH_URL.test(part.url)) throw new Error('Only a YouTube watch URL can be heard.');
+    return {
+      type: 'file' as const,
+      mediaType: 'video/mp4',
+      data: new URL(part.url),
+      providerOptions: {
+        google: { processing: { type: 'static', startOffset: part.start, endOffset: part.end } },
+      },
+    };
+  }
   // Inline bytes only: given a URL, the SDK would download it.
   return { type: 'file' as const, mediaType: part.mime_type, data: part.data };
 }
@@ -141,7 +159,12 @@ function provider() {
   return gemini;
 }
 
+const LOW_RESOLUTION: ReadonlySet<Agent> = new Set(['chunk-analyst', 'peer-match']);
+
 export type ChatResult = ChatReply & { ms: number };
+
+/** Re-asks left for one pick: its parse, repeat and check failures all spend this one allowance. */
+export type Asks = { left: number };
 
 /**
  * One schema-constrained call. A reply that can't be parsed comes back with its raw text and finish
@@ -176,7 +199,7 @@ export function chat(
             store: false,
             thinkingLevel: settings.thinkingLevel,
             // Applies to image parts too; pick and brand need full-resolution thumbnails.
-            ...(agent === 'chunk-analyst' ? { mediaResolution: 'low' } : {}),
+            ...(LOW_RESOLUTION.has(agent) ? { mediaResolution: 'low' } : {}),
           },
         },
       });
@@ -206,9 +229,23 @@ const REASK =
   'That reply was not complete JSON matching the schema. Answer again with only the JSON.';
 
 /**
- * `chat`, parsed and validated. A reply that doesn't parse, is empty, or was cut off gets one re-ask
- * (the earlier answer resent as an assistant turn) while the agent's minimum budget remains; after
- * that the raw text comes back with a null value.
+ * An earlier reply resent for a re-ask. A guide's restates its sources and a `VALUE_AGENTS` reply
+ * can restate YouTube data, so span inputs record them redacted like the reply itself.
+ */
+export function resentReply(agent: Agent, content: string): Turn {
+  if (GUIDE_AGENTS.has(agent)) {
+    return { role: 'assistant', parts: [{ type: 'text', text: content, source: 'guide' }] };
+  }
+  if (VALUE_AGENTS.has(agent)) {
+    return { role: 'assistant', parts: [{ type: 'text', text: content, source: 'reply' }] };
+  }
+  return textTurn('assistant', content);
+}
+
+/**
+ * `chat`, parsed and validated. A reply that doesn't parse, is empty, or was cut off gets a re-ask
+ * (the earlier answer resent as an assistant turn) while `asks` has one left and the agent's
+ * minimum budget remains; after that the raw text comes back with a null value.
  */
 export async function chatJson<T>(
   request: ModelRequest,
@@ -216,22 +253,23 @@ export async function chatJson<T>(
   schema: Record<string, unknown>,
   validate: (value: unknown) => value is T,
   deadline = stepDeadline(),
-): Promise<{ value: T | null; raw: string; ms: number }> {
+  asks: Asks = { left: 1 },
+): Promise<{ value: T | null; raw: string; ms: number; turns: Turn[] }> {
   let ms = 0;
   let turns = request.turns;
-  for (let attempt = 0; ; attempt++) {
+  for (;;) {
     const reply = await chat({ system: request.system, turns }, agent, schema, deadline);
     ms += reply.ms;
     const value = reply.finishReason === 'stop' ? parse(reply.content) : undefined;
-    if (value !== undefined && validate(value)) return { value, raw: reply.content, ms };
-    if (attempt > 0 || deadline - Date.now() < AGENTS[agent].minCallMs) {
-      return { value: null, raw: reply.content, ms };
+    const answered = [...turns, ...(reply.content ? [resentReply(agent, reply.content)] : [])];
+    if (value !== undefined && validate(value)) {
+      return { value, raw: reply.content, ms, turns: answered };
     }
-    // A guide's earlier reply restates its sources, so its span input records a placeholder.
-    const resent: Turn = GUIDE_AGENTS.has(agent)
-      ? { role: 'assistant', parts: [{ type: 'text', text: reply.content, source: 'guide' }] }
-      : textTurn('assistant', reply.content);
-    turns = [...turns, ...(reply.content ? [resent] : []), textTurn('user', REASK)];
+    if (asks.left < 1 || !hasModelTime(agent, deadline)) {
+      return { value: null, raw: reply.content, ms, turns: answered };
+    }
+    asks.left -= 1;
+    turns = [...answered, textTurn('user', REASK)];
   }
 }
 

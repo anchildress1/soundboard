@@ -1,4 +1,3 @@
-import pRetry from 'p-retry';
 import type { BrandGuide, VoiceRules } from '#lib/brand.js';
 import {
   containsWords,
@@ -8,9 +7,8 @@ import {
   withArtistTag,
 } from '#lib/metadata.js';
 import type { Chunk, Measurements, Pick, Probe } from '#lib/types.js';
-import { REASK_ONCE } from '#lib/retry.js';
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
-import { chatJson } from './model';
+import { chatJson, hasModelTime, type Asks } from './model';
 import { stripDeep } from './numerics';
 import { isString, isStrings, shape } from './shape';
 import type { AudienceVideo, CandidateList, TagCandidate } from '#lib/server/pipeline/hashtags.js';
@@ -476,72 +474,47 @@ const normText = (t: string) =>
 /** Same words, ignoring case, spacing, and hashtags, so a reshuffled closing line doesn't count as new. */
 export const sameText = (a: string, b: string) => normText(a) === normText(b);
 
-class Repeated extends Error {
-  constructor(
-    readonly value: RawPick,
-    readonly fields: string[],
-  ) {
-    super('The pick repeats a skipped version.');
-  }
+/** Skipped versions the pick repeats: title, description, or both. */
+export function repeatedFields(pick: FinalPick, skipped: PickContext['skipped']): string[] {
+  const fields = skipped.flatMap((s) => [
+    ...(sameText(s.title, pick.title) ? ['title'] : []),
+    ...(sameText(s.description, pick.description) ? ['description'] : []),
+  ]);
+  return [...new Set(fields)];
+}
+
+function repeatAsk(fields: string[]): string {
+  const named = fields.join(' and ');
+  return `That ${named} ${fields.length > 1 ? 'repeat' : 'repeats'} a skipped version. Write a different ${named}.`;
 }
 
 /**
- * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the
- * model's reply never parses. The step's `deadline` covers every call, re-asks included.
+ * Runs the pick under one re-ask allowance shared by every check: a reply that doesn't parse, and
+ * a title or description that repeats a skipped version. Returns null when the reply never parses
+ * or still repeats once the allowance is spent. The step's `deadline` covers every call.
  */
 export async function runPick(
   ctx: PickContext,
   deadline: number,
   span?: AgentSpan,
 ): Promise<{ pick: FinalPick; ms: number } | null> {
+  const asks: Asks = { left: 1 };
   let ms = 0;
   let request = buildPickRequest(ctx);
   if (span) agentInput(span, request);
-  try {
-    return await pRetry(
-      async () => {
-        const { value, ms: took } = await chatJson(
-          request,
-          'smart-pick',
-          PICK_SCHEMA,
-          isRawPick,
-          deadline,
-        );
-        ms += took;
-        if (!value) return null;
-        const pick = finalizePick(value, ctx);
-        const repeated = ctx.skipped.flatMap((s) => [
-          ...(sameText(s.title, pick.title) ? ['title'] : []),
-          ...(sameText(s.description, pick.description) ? ['description'] : []),
-        ]);
-        if (repeated.length > 0) throw new Repeated(value, [...new Set(repeated)]);
-        if (span) agentOutput(span, JSON.stringify(pick));
-        return { pick, ms };
-      },
-      {
-        ...REASK_ONCE,
-        onFailedAttempt: ({ error }) => {
-          if (!(error instanceof Repeated)) return;
-          const fields = error.fields.join(' and ');
-          const verb = error.fields.length > 1 ? 'repeat' : 'repeats';
-          request = {
-            ...request,
-            turns: [
-              ...request.turns,
-              textTurn('assistant', JSON.stringify(error.value)),
-              textTurn(
-                'user',
-                `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
-              ),
-            ],
-          };
-        },
-        shouldRetry: ({ error }) => error instanceof Repeated,
-      },
-    );
-  } catch (error) {
-    // A re-run must produce a new title and description; a second repeat fails the pick so the step retries.
-    if (error instanceof Repeated) return null;
-    throw error;
+  for (;;) {
+    const reply = await chatJson(request, 'smart-pick', PICK_SCHEMA, isRawPick, deadline, asks);
+    ms += reply.ms;
+    if (!reply.value) return null;
+    const pick = finalizePick(reply.value, ctx);
+    const repeated = repeatedFields(pick, ctx.skipped);
+    if (repeated.length === 0) {
+      if (span) agentOutput(span, JSON.stringify(pick), 'smart-pick');
+      return { pick, ms };
+    }
+    // A re-run must produce a new title and description; a repeat that survives fails the step.
+    if (asks.left < 1 || !hasModelTime('smart-pick', deadline)) return null;
+    asks.left -= 1;
+    request = { ...request, turns: [...reply.turns, textTurn('user', repeatAsk(repeated))] };
   }
 }

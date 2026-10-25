@@ -1173,7 +1173,13 @@ describe('runPick', () => {
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).not.toContain('repeats a skipped version');
     expect(input[0]!['gen_ai.system_instructions']).toBeDefined();
-    expect(output).toEqual([JSON.stringify(result!.pick)]);
+    // The pick's own words stay; values from the prompt's YouTube parts, like its tags, don't.
+    expect(output).toHaveLength(1);
+    expect(output[0]).toContain(FRESH_TITLE);
+    expect(output[0]).toContain('[YouTube data]');
+    for (const tag of result!.pick.tags.filter((t) => t !== FLR.name)) {
+      expect(output[0]).not.toContain(`"${tag}"`);
+    }
   });
 
   it('records no agent output when the pick fails', async () => {
@@ -1289,25 +1295,44 @@ describe('runPick', () => {
     expect(await runPick(ctx(), stepDeadline())).toBeNull();
   });
 
-  it('returns null when the retry after a skipped repeat never parses', async () => {
+  it('shares one re-ask: a repeat, then a reply that never parses, is 2 calls and null', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
       .mockImplementation(async () => reply('{'));
     expect(
       await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
     ).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('fails the step when no time is left to re-ask a repeated title', async () => {
+  it('shares one re-ask: a malformed reply, then a repeat, is 2 calls and null', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply('{'))
+      .mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
+    ).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a malformed reply, then a valid one, is 2 calls and the pick', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply('{'))
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
+    const result = await runPick(ctx(), stepDeadline());
+    expect(result!.pick.title).toBe(FRESH_TITLE);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails the pick without a re-ask when no time is left after a repeated title', async () => {
     const now = Date.now();
     fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))));
     vi.spyOn(Date, 'now')
       .mockReturnValueOnce(now)
       .mockReturnValue(now + 80_000);
-    await expect(
-      runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), now + 110_000),
-    ).rejects.toThrow('ran out of time');
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), now + 110_000),
+    ).toBeNull();
     vi.restoreAllMocks();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

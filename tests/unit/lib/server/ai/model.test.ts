@@ -99,6 +99,7 @@ const AGENT_SETTINGS: [Agent, string, string, number][] = [
   ['hook-pick', 'gemini-4-argon', 'low', 8192],
   ['brand-guide', 'gemini-4-argon', 'medium', 8192],
   ['voice-guide', 'gemini-4-argon', 'medium', 8192],
+  ['peer-match', 'gemini-3.8-flash', 'low', 2048],
 ];
 
 describe('chat request', () => {
@@ -153,6 +154,52 @@ describe('chat request', () => {
       },
     ]);
     expect(JSON.stringify(sent().body)).not.toContain('uri');
+  });
+
+  it('sends a peer upload as a YouTube URL clipped to its first 60 s, at low resolution', async () => {
+    fetchMock.mockResolvedValue(interaction(OK_JSON));
+    const url = 'https://www.youtube.com/watch?v=abcdefghijk';
+    await chat(
+      {
+        system: 'Match.',
+        turns: [
+          {
+            role: 'user',
+            parts: [
+              { type: 'text', text: 'Peer.' },
+              { type: 'youtube', url, start: 0, end: 60 },
+            ],
+          },
+        ],
+      },
+      'peer-match',
+      schema,
+      stepDeadline(),
+    );
+    const [part] = sent().body.input[0]!.content.slice(1);
+    expect(part).toMatchObject({ type: 'video', uri: url, resolution: 'low' });
+    expect(JSON.stringify(part)).toContain('"start_offset":"0s"');
+    expect(JSON.stringify(part)).toContain('"end_offset":"60s"');
+  });
+
+  it.each([
+    'https://youtube.com/watch?v=abcdefghijk',
+    'https://www.youtube.com/watch?v=abcdefghijk&t=10',
+    'https://example.com/watch?v=abcdefghijk',
+    'https://www.youtube.com/watch?v=short',
+  ])('refuses to hear %s', async (url) => {
+    await expect(
+      chat(
+        {
+          system: 'Match.',
+          turns: [{ role: 'user', parts: [{ type: 'youtube', url, start: 0, end: 60 }] }],
+        },
+        'peer-match',
+        schema,
+        stepDeadline(),
+      ),
+    ).rejects.toThrow('Only a YouTube watch URL can be heard.');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('keeps full resolution for pick thumbnails', async () => {
@@ -366,6 +413,7 @@ describe('step budget', () => {
     ['hook-pick', 34_999],
     ['brand-guide', 32_999],
     ['voice-guide', 32_999],
+    ['peer-match', 4_999],
     ['smart-pick', -1],
   ] as [Agent, number][])('%s refuses to start with %i ms left', async (agent, left) => {
     await expect(chat(request, agent, schema, now + left)).rejects.toThrow('ran out of time');
@@ -382,7 +430,7 @@ describe('step budget', () => {
 describe('chatJson', () => {
   it('returns the parsed value on the first valid reply', async () => {
     fetchMock.mockResolvedValue(interaction(OK_JSON));
-    expect(await chatJson(request, 'smart-pick', schema, isOk, stepDeadline())).toEqual({
+    expect(await chatJson(request, 'smart-pick', schema, isOk, stepDeadline())).toMatchObject({
       value: { ok: true },
       raw: OK_JSON,
       ms: 0,
@@ -485,7 +533,7 @@ describe('chatJson', () => {
       .mockResolvedValueOnce(interaction('first'))
       .mockResolvedValueOnce(interaction('second'));
     startSpan.mockClear();
-    expect(await chatJson(request, 'brand-guide', schema, isOk, stepDeadline())).toEqual({
+    expect(await chatJson(request, 'brand-guide', schema, isOk, stepDeadline())).toMatchObject({
       value: null,
       raw: 'second',
       ms: 0,
@@ -508,12 +556,32 @@ describe('chatJson', () => {
       now += 2_000;
       return interaction('nope');
     });
-    expect(await chatJson(request, 'smart-pick', schema, isOk, now + 34_000)).toEqual({
+    expect(await chatJson(request, 'smart-pick', schema, isOk, now + 34_000)).toMatchObject({
       value: null,
       raw: 'nope',
       ms: 2000,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('re-asks only while the shared allowance has one left, and spends it', async () => {
+    fetchMock.mockImplementation(async () => interaction('nope'));
+    const spent = { left: 0 };
+    await chatJson(request, 'smart-pick', schema, isOk, stepDeadline(), spent);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const asks = { left: 1 };
+    await chatJson(request, 'smart-pick', schema, isOk, stepDeadline(), asks);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(asks.left).toBe(0);
+  });
+
+  it('returns the conversation with the answered reply resent', async () => {
+    fetchMock.mockResolvedValue(interaction(OK_JSON));
+    const { turns } = await chatJson(request, 'smart-pick', schema, isOk, stepDeadline());
+    expect(turns).toEqual([
+      ...request.turns,
+      { role: 'assistant', parts: [{ type: 'text', text: OK_JSON, source: 'reply' }] },
+    ]);
   });
 
   it('propagates typed errors rather than re-asking', async () => {
