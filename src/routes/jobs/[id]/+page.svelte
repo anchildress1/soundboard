@@ -2,11 +2,13 @@
   import { onDestroy, onMount } from 'svelte';
   import { goto, invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { action, ApiError, step, type ActionName } from '#lib/api.js';
+  import { action, ApiError, rejectPeer, step, type ActionName } from '#lib/api.js';
   import Bandcamp from '#lib/components/Bandcamp.svelte';
   import BrowserUpload from '#lib/components/BrowserUpload.svelte';
   import Heard from '#lib/components/Heard.svelte';
   import Monitor from '#lib/components/Monitor.svelte';
+  import Peers from '#lib/components/Peers.svelte';
+  import Recommendation from '#lib/components/Recommendation.svelte';
   import ReleaseBar from '#lib/components/ReleaseBar.svelte';
   import Review from '#lib/components/Review.svelte';
   import Short from '#lib/components/Short.svelte';
@@ -76,6 +78,24 @@
           }
         : null),
   );
+  // A new pick or reload brings its own evidence; the page only drops a peer the artist rejects.
+  let research = $derived(data.research);
+
+  const notAPeer = async (ref: string) => {
+    busy = true;
+    message = '';
+    try {
+      await rejectPeer(job.id, ref);
+      if (research?.peers) {
+        research = { ...research, peers: research.peers.filter((peer) => peer.ref !== ref) };
+      }
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Could not record that';
+    } finally {
+      busy = false;
+    }
+  };
+
   const approved = $derived(['PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED'].includes(job.state));
   const paused = $derived(publishPaused(view));
   // The headline already names a wait, so the status row shows the state's progress instead. A
@@ -265,6 +285,18 @@
 
 <svelte:head><title>{job.songTitle} · Soundboard</title></svelte:head>
 
+{#snippet summary()}
+  {#if research}
+    <Recommendation data={research} />
+    <Peers
+      peers={research.peers}
+      expiresAt={research.evidenceExpiresAt}
+      {busy}
+      onreject={notAPeer}
+    />
+  {/if}
+{/snippet}
+
 <ReleaseBar
   title={job.songTitle}
   step={current}
@@ -351,6 +383,8 @@
           {busy}
           {serverErrors}
           bind:step={reviewStep}
+          sources={research?.sources}
+          summary={research ? summary : undefined}
           onapprove={async (f) => {
             const key = draftKey(job.id, pick.version);
             await act('approve', {

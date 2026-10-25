@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draftKey } from '#lib/draft.js';
+import type { ReviewData } from '#lib/review.js';
 import { POLL_BACKOFF, UPLOAD_BACKOFF } from '#lib/retry.js';
 import type { Chunk, JobState, JobView, Pick, PublicJob, Short, UploadSaved } from '#lib/types.js';
 import {
@@ -15,6 +16,7 @@ import {
   uploads,
 } from '#lib/upload.js';
 import Page from '#src/routes/jobs/[id]/+page.svelte';
+import { REVIEW } from '../../../../helpers/review';
 import { FakeXhr, installUploadFakes, type FakeLocks } from '../../../../helpers/uploads';
 
 const PLAYBACK_URL = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
@@ -133,12 +135,14 @@ function setup(
     approveTo?: typeof CONNECTED | null;
     uploadSaved?: UploadSaved | null;
     uploadGeneration?: number;
+    research?: ReviewData | null;
   } = {},
 ) {
   return render(Page, {
     props: {
       data: {
         view: v,
+        research: extra.research ?? null,
         playbackUrl: extra.playbackUrl === undefined ? PLAYBACK_URL : extra.playbackUrl,
         short: extra.short ?? null,
         shortExpired: extra.shortExpired ?? false,
@@ -471,6 +475,63 @@ describe('job page: review', () => {
     expect(await screen.findByText('The job moved on.')).toBeInTheDocument();
     expect(h.goto).not.toHaveBeenCalled();
     expect(heading(APPROVE_SCREEN)).toBeInTheDocument();
+  });
+});
+
+describe('job page: evidence', () => {
+  const reviewing = (research: ReviewData | null = REVIEW) =>
+    setup(view({ state: 'REVIEW' }, { pick: PICK }), { research });
+
+  it('shows the recommendation and peers on the approval screen', async () => {
+    reviewing();
+    expect(screen.queryByRole('heading', { name: 'Recommendation' })).toBeNull();
+    await toApprove();
+    expect(screen.getByRole('heading', { name: 'Recommendation' })).toBeInTheDocument();
+    expect(screen.getByText('Similar artists (2)')).toBeInTheDocument();
+  });
+
+  it('shows the cited sources under Why this', () => {
+    reviewing();
+    expect(screen.getByText('Sources: P1-R1 · Night Drive')).toBeInTheDocument();
+  });
+
+  it('shows neither for a pick with no evidence data', async () => {
+    reviewing(null);
+    await toApprove();
+    expect(screen.queryByRole('heading', { name: 'Recommendation' })).toBeNull();
+    expect(screen.queryByText(/Similar artists/)).toBeNull();
+    expect(screen.queryByText(/^Sources:/)).toBeNull();
+  });
+
+  it('removes a peer after Not a peer is recorded', async () => {
+    fetchMock.mockResolvedValueOnce(json({ rejected: 'P2' }));
+    reviewing();
+    await toApprove();
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Not a peer' })[1]!);
+    await waitFor(() => expect(screen.queryByText('Quiet Signal')).toBeNull());
+    expect(screen.getByText('Neon Harbor')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs/j1/peers/P2/reject');
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST' });
+  });
+
+  it('keeps the peer and shows why when the evidence has expired', async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ error: "That peer's evidence has expired. Reload to see it." }, 409),
+    );
+    reviewing();
+    await toApprove();
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Not a peer' })[0]!);
+    expect(
+      await screen.findByText("That peer's evidence has expired. Reload to see it."),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Neon Harbor')).toBeInTheDocument();
+  });
+
+  it('does not ask for any extra step to approve', async () => {
+    reviewing();
+    await toApprove();
+    expect(button(APPROVE)).toBeEnabled();
   });
 });
 

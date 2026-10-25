@@ -3,7 +3,7 @@ import { signedReadUrl } from '#lib/server/media/gcs.js';
 import { finishDiscardCleanup } from '#lib/server/jobs/actions.js';
 import { getJob, uploadGeneration } from '#lib/server/jobs/jobs.js';
 import { savedAmount } from '#lib/server/jobs/upload-session.js';
-import { authorizedJob, buildView, mediaExpired } from '#lib/server/jobs/view.js';
+import { authorizedJob, buildView, mediaExpired, reviewData } from '#lib/server/jobs/view.js';
 import { getConnection } from '#lib/server/platforms/youtube/index.js';
 import type { Destination } from '#lib/types.js';
 import type { PageServerLoad } from './$types';
@@ -25,6 +25,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   ]);
   return {
     view,
+    // Page loads only read; nothing here starts research.
+    research: await reviewData(view.pick),
     playbackUrl,
     short,
     shortExpired,

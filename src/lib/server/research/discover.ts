@@ -1,9 +1,7 @@
 // Discover (research R4): the genre search finds candidate channels; later batches read each one's
 // newest upload as the sample to hear. Cursor 0 is the search; cursor k samples candidate k - 1.
 import { sql } from 'drizzle-orm';
-import { query } from '#lib/server/core/db.js';
 import { toolSpan } from '#lib/server/core/tracing.js';
-import { peerRejections } from '#lib/server/core/schema.js';
 import { listChunks } from '#lib/server/jobs/jobs.js';
 import { genreTerms } from '#lib/server/pipeline/hashtags.js';
 import {
@@ -15,7 +13,13 @@ import {
 } from '#lib/server/platforms/youtube/index.js';
 import { eachItem, type Batch, type StageContext } from './batch';
 import { bracketOf, relation, type Bracket, type Relation } from './brackets';
-import { readEvidence, saveEvidence, type Candidate, type PeerEvidence } from './evidence';
+import {
+  readEvidence,
+  rejectedChannels,
+  saveEvidence,
+  type Candidate,
+  type PeerEvidence,
+} from './evidence';
 import type { ResearchLimit } from './runs';
 
 /** Candidates kept for matching, after brackets are applied (#18). */
@@ -40,7 +44,7 @@ async function search(run: StageContext['run'], deadline: number): Promise<Batch
   const [chunks, connection, rejected] = await Promise.all([
     listChunks(run.jobId),
     getConnection(run.ownerUid),
-    freshRejections(),
+    rejectedChannels(),
   ]);
   const terms = [...genreTerms(chunks), 'music'].join(' ');
   const own = connection?.channelId ?? null;
@@ -163,11 +167,3 @@ async function sample(
 // Drizzle spreads a JS array into a parameter list, so the IDs travel as one JSON value.
 const textArray = (values: string[]) =>
   sql`array(select jsonb_array_elements_text(${JSON.stringify(values)}::jsonb))`;
-
-/** The artist's fresh rejections; RLS shows only their own. */
-async function freshRejections(): Promise<string[]> {
-  const rows = await query((tx) =>
-    tx.select({ channelId: peerRejections.channelId }).from(peerRejections),
-  );
-  return rows.map((row) => row.channelId);
-}

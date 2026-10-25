@@ -2,7 +2,7 @@
 // after 29 days and written only under the run's claim.
 import { eq, sql } from 'drizzle-orm';
 import { query, type Tx } from '#lib/server/core/db.js';
-import { jobResearch } from '#lib/server/core/schema.js';
+import { jobResearch, peerRejections } from '#lib/server/core/schema.js';
 import type { ChannelStatsReported } from '#lib/server/platforms/youtube/index.js';
 import type { Bracket, Relation } from './brackets';
 
@@ -116,4 +116,24 @@ export function resolveRef(
   }
   const peer = evidence?.peers.find((p) => p.ref === ref);
   return peer ? { ref, peer } : { ref, expired: true, expiresAt };
+}
+
+/** The artist's fresh "Not a peer" channel IDs; RLS shows only their own. */
+export async function rejectedChannels(): Promise<string[]> {
+  const rows = await query((tx) =>
+    tx.select({ channelId: peerRejections.channelId }).from(peerRejections),
+  );
+  return rows.map((row) => row.channelId);
+}
+
+/** The evidence without the rejected channels' peers and their releases. */
+export function withoutRejected(evidence: PeerEvidence, rejected: string[]): PeerEvidence {
+  const dropped = new Set(
+    evidence.peers.filter((peer) => rejected.includes(peer.channelId)).map((peer) => peer.ref),
+  );
+  return {
+    ...evidence,
+    peers: evidence.peers.filter((peer) => !dropped.has(peer.ref)),
+    releases: evidence.releases.filter((release) => !dropped.has(release.peer)),
+  };
 }

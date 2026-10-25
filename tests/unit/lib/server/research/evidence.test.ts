@@ -3,12 +3,14 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, query } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { jobResearch } from '#lib/server/core/schema.js';
+import { jobResearch, peerRejections } from '#lib/server/core/schema.js';
 import {
   evidenceExpiry,
   readEvidence,
+  rejectedChannels,
   resolveRef,
   saveEvidence,
+  withoutRejected,
   type Peer,
   type PeerEvidence,
   type PeerRelease,
@@ -187,5 +189,51 @@ describe('resolveRef', () => {
 describe('evidenceExpiry', () => {
   it('is 29 days after retrieval', () => {
     expect(evidenceExpiry(new Date('2026-10-01T12:00:00Z'))).toBe('2026-10-30T12:00:00.000Z');
+  });
+});
+
+describe('rejectedChannels', () => {
+  const rejection = (artistId: string, channelId: string, ageDays = 1) => ({
+    artistId,
+    channelId,
+    retrievedAt: new Date(Date.now() - ageDays * DAY),
+  });
+
+  it("lists the artist's fresh rejections only", async () => {
+    await seed({
+      peerRejections: [
+        rejection(USER_A.artistId, 'UC1'),
+        rejection(USER_A.artistId, 'UC-old', 29),
+        rejection(USER_C.artistId, 'UC-other'),
+      ],
+    });
+    expect(await asA(rejectedChannels)).toEqual(['UC1']);
+  });
+
+  it('is empty with no rejections', async () => {
+    expect(await asA(rejectedChannels)).toEqual([]);
+    expect(await db().select().from(peerRejections)).toEqual([]);
+  });
+});
+
+describe('withoutRejected', () => {
+  const body = evidence({
+    peers: [peer('P1', 'One'), peer('P2', 'Two')],
+    releases: [release('P1-R1', 'P1'), release('P2-R1', 'P2'), release('P2-R2', 'P2')],
+  });
+
+  it("drops a rejected channel's peer and every release of it", () => {
+    const kept = withoutRejected(body, ['UCP2']);
+    expect(kept.peers.map((p) => p.ref)).toEqual(['P1']);
+    expect(kept.releases.map((r) => r.ref)).toEqual(['P1-R1']);
+  });
+
+  it('leaves the evidence whole when nothing matches', () => {
+    expect(withoutRejected(body, ['UCnobody'])).toEqual(body);
+  });
+
+  it('does not change the evidence it was given', () => {
+    withoutRejected(body, ['UCP1']);
+    expect(body.peers).toHaveLength(2);
   });
 });

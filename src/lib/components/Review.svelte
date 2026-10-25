@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { resolve } from '$app/paths';
   import { loadDraft, saveDraft } from '#lib/draft.js';
   import {
@@ -18,6 +18,7 @@
     REVIEW_STEPS,
     type ReviewStep,
   } from '#lib/release.js';
+  import { citationText, type FieldName, type ReviewData } from '#lib/review.js';
   import type { Destination, Pick, PickFields } from '#lib/types.js';
 
   type Fields = { title: string; description: string; tags: string[] };
@@ -31,6 +32,8 @@
     busy = false,
     serverErrors = {},
     step = $bindable('title'),
+    sources,
+    summary,
     onapprove,
     onrerun,
     ondiscard,
@@ -46,6 +49,10 @@
     busy?: boolean;
     serverErrors?: FieldErrors;
     step?: ReviewStep;
+    /** The sources behind each field, when the pick has any to show. */
+    sources?: ReviewData['sources'];
+    /** What the Approve screen adds under its facts: recommendation, peers. */
+    summary?: Snippet;
     onapprove: (fields: Fields) => void;
     onrerun: () => void;
     ondiscard: () => void;
@@ -90,11 +97,20 @@
   const approve = () => onapprove({ title, description, tags });
 </script>
 
-{#snippet why(text: string)}
+{#snippet why(text: string, field: FieldName)}
+  {@const cited = sources?.[field] ?? []}
   {#if text}
     <div class="why">
       <h2>Why this</h2>
       <p class="help">{text}</p>
+      {#if cited.length > 0}
+        <p class="help">
+          Sources:
+          {#each cited as citation, i (citation.ref)}{i > 0 ? '; ' : ''}{citationText(
+              citation,
+            )}{/each}
+        </p>
+      {/if}
     </div>
   {/if}
 {/snippet}
@@ -122,7 +138,7 @@
       />
       {#if errors.title}<span class="msg">{errors.title}</span>{/if}
     </div>
-    {@render why(pick.why.title)}
+    {@render why(pick.why.title, 'title')}
     <div class="actions">
       {@render rerun()}
       <button class="btn primary" type="button" disabled={busy || !!errors.title} onclick={next}
@@ -142,7 +158,7 @@
       <textarea id="desc" rows="10" bind:value={description}></textarea>
       {#if errors.description}<span class="msg">{errors.description}</span>{/if}
     </div>
-    {@render why(pick.why.description)}
+    {@render why(pick.why.description, 'description')}
     <div class="actions">
       <button class="btn" type="button" onclick={back}>Back</button>
       {@render rerun()}
@@ -166,7 +182,7 @@
       <textarea id="tags" rows="4" bind:value={tagsText}></textarea>
       {#if errors.tags}<span class="msg">{errors.tags}</span>{/if}
     </div>
-    {@render why(pick.why.tags)}
+    {@render why(pick.why.tags, 'tags')}
     <div class="actions">
       <button class="btn" type="button" onclick={back}>Back</button>
       {@render rerun()}
@@ -232,6 +248,7 @@
           <dd>{pick.flags.length} noted</dd>
         </div>{/if}
     </dl>
+    {@render summary?.()}
     {#if firstError}
       <div class="notice" data-tone="err" role="alert">
         <strong>{errors[firstError]}</strong>
