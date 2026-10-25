@@ -72,6 +72,11 @@ const failed = (overrides: Partial<Failed> = {}): Failed => ({
 const unchecked = (overrides: Record<string, unknown>) =>
   ({ ...connected(), ...overrides }) as ConnectionRow;
 
+const DECRYPTION_FAILED = "Decryption failed: verify that 'name' refers to the correct CryptoKey.";
+/** The shape @google-cloud/kms rejects with for an INVALID_ARGUMENT request. */
+const kmsRefusal = (details: string) =>
+  Object.assign(new Error(`3 INVALID_ARGUMENT: ${details}`), { code: 3, details });
+
 const invalidGrant = () =>
   Object.assign(new Error('reauth required'), { response: { data: { error: 'invalid_grant' } } });
 
@@ -357,6 +362,39 @@ describe('accessTokenFor', () => {
     expect(vi.mocked(captureMessage)).not.toHaveBeenCalled();
   });
 
+  it('gives up a grant KMS cannot decrypt under its key and returns null, without refreshing', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValueOnce(kmsRefusal(DECRYPTION_FAILED));
+    expect(await accessTokenFor(UID, CHANNEL, later())).toBeNull();
+    expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(vi.mocked(captureMessage)).toHaveBeenCalledWith('YouTube grant does not decrypt', {
+      level: 'warning',
+    });
+    expect(oauth.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('keeps a grant a reconnect replaced while KMS refused the old one', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockImplementationOnce(async () => {
+      await putConnection(UID, connected({ tokenCiphertext: 'bmV3ZXI=' }));
+      throw kmsRefusal(DECRYPTION_FAILED);
+    });
+    expect(await accessTokenFor(UID, CHANNEL, later())).toBeNull();
+    expect(await getConnection(UID)).toMatchObject({
+      status: 'connected',
+      tokenCiphertext: 'bmV3ZXI=',
+    });
+  });
+
+  it('throws on a malformed key name, keeping the grant', async () => {
+    await putConnection(UID, connected());
+    const cause = kmsRefusal('Resource name [k] does not match any known resource name pattern.');
+    kms.decrypt.mockRejectedValueOnce(cause);
+    const error = await accessTokenFor(UID, CHANNEL, later()).catch((e: unknown) => e as Error);
+    expect(error).toMatchObject({ message: "Couldn't unlock the YouTube grant.", cause });
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
   it('wraps KMS failures with their cause, without refreshing', async () => {
     await putConnection(UID, connected());
     const cause = new Error('PERMISSION_DENIED');
@@ -415,6 +453,21 @@ describe('ownChannelUploads', () => {
 
   it('waits on a reconnect with no connection at all', async () => {
     expect(await ownChannelUploads('sub-b', 3, later())).toEqual({ wait: 'reconnect YouTube' });
+  });
+
+  it('gives up a grant KMS cannot decrypt and waits on a reconnect, with no YouTube call', async () => {
+    kms.decrypt.mockRejectedValueOnce(kmsRefusal(DECRYPTION_FAILED));
+    expect(await ownChannelUploads(UID, 3, later())).toEqual({ wait: 'reconnect YouTube' });
+    expect(await getConnection(UID)).toMatchObject({ status: 'revoked' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('throws when KMS itself fails, keeping the grant', async () => {
+    kms.decrypt.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+    await expect(ownChannelUploads(UID, 3, later())).rejects.toThrow(
+      "Couldn't unlock the YouTube grant.",
+    );
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
   });
 
   it('marks a revoked grant on refresh and waits on a reconnect', async () => {

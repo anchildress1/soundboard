@@ -283,12 +283,28 @@ describe('POST /api/jobs/[id]/confirm-upload', () => {
     expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
   });
 
-  it.each<[string, Partial<typeof connections.$inferInsert>]>([
-    ['the grant is on another channel', { channelId: 'UCother' }],
-    ['the grant will not decrypt', { tokenCiphertext: 'unsealed' }],
-  ])('502s and reports it when %s, without a YouTube call', async (_label, connection) => {
+  it('asks for a reconnect when the grant no longer decrypts, giving it up', async () => {
     await seedJob(PAUSED);
-    await db().update(connections).set(connection).where(eq(connections.uid, USER_A.uid));
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: 'unsealed' })
+      .where(eq(connections.uid, USER_A.uid));
+    const response = await confirm({ url: `https://youtu.be/${ID}` });
+    expect(response.status).toBe(409);
+    expect(await errorOf(response)).toBe('Reconnect YouTube to confirm.');
+    expect(captureException).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const [row] = await db().select().from(connections).where(eq(connections.uid, USER_A.uid));
+    expect(row).toMatchObject({ status: 'revoked', tokenCiphertext: null });
+    expect(await getJob('j1')).toMatchObject({ state: 'PUBLISHING', videoId: null });
+  });
+
+  it('502s and reports it when the grant is on another channel, without a YouTube call', async () => {
+    await seedJob(PAUSED);
+    await db()
+      .update(connections)
+      .set({ channelId: 'UCother' })
+      .where(eq(connections.uid, USER_A.uid));
     const response = await confirm({ url: `https://youtu.be/${ID}` });
     expect(response.status).toBe(502);
     expect(await errorOf(response)).toBe(

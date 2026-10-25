@@ -3,7 +3,7 @@ import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
 import { required } from '#lib/server/core/env.js';
-import { invalidGrant } from '#lib/server/core/errors.js';
+import { invalidGrant, undecryptable } from '#lib/server/core/errors.js';
 import { decrypt, encrypt } from '#lib/server/core/kms.js';
 import { connections } from '#lib/server/core/schema.js';
 import type { Wait } from '#lib/types.js';
@@ -134,9 +134,9 @@ export type Access = { token: string; refused: (jobId?: string) => Promise<void>
 
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
- * Google rejecting the refresh token marks the connection revoked and returns null. The refresh
- * aborts at the step's `deadline`; throws `DeadlineSpent` when none is left, `ChannelMismatch`
- * when the connected channel isn't `channelId`, and on any other failure.
+ * Google rejecting the refresh token, or KMS refusing its ciphertext, marks the connection revoked
+ * and returns null. The refresh aborts at the step's `deadline`; throws `DeadlineSpent` when none is
+ * left, `ChannelMismatch` when the connected channel isn't `channelId`, and on any other failure.
  */
 export async function accessTokenFor(
   uid: string,
@@ -151,9 +151,15 @@ export async function accessTokenFor(
   // than returning null.
   if (connection.channelId !== channelId) throw new ChannelMismatch();
   const cipher = connection.tokenCiphertext;
-  const refreshToken = await decrypt(cipher).catch((cause: unknown) => {
-    throw new Error("Couldn't unlock the YouTube grant.", { cause });
-  });
+  let refreshToken: string;
+  try {
+    refreshToken = await decrypt(cipher);
+  } catch (cause) {
+    if (!undecryptable(cause)) throw new Error("Couldn't unlock the YouTube grant.", { cause });
+    captureMessage('YouTube grant does not decrypt', { level: 'warning' });
+    await markRevoked(uid, cipher);
+    return null;
+  }
   const client = new OAuth2Client({
     clientId: required('GOOGLE_OAUTH_CLIENT_ID'),
     clientSecret: required('GOOGLE_OAUTH_CLIENT_SECRET'),

@@ -813,6 +813,20 @@ describe('runStep: PICK', () => {
     expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0 });
   });
 
+  it('gives up a grant sealed under another key and waits on a reconnect, with no strike', async () => {
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: 'sealed-under-another-key' })
+      .where(eq(connections.uid, USER_C.uid));
+    expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_C.uid)).toMatchObject({
+      status: 'revoked',
+      tokenCiphertext: null,
+    });
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 0, error: null });
+    expect(calls).toHaveLength(0);
+  });
+
   it('marks a revoked grant on refresh and waits on a reconnect, with no model call', async () => {
     h.refreshError = googleError('invalid_grant');
     expect(await runStep(await pickJob())).toEqual({ wait: RECONNECT });
@@ -1283,6 +1297,22 @@ describe('runStep: PUBLISHING', () => {
   it('fails when no destination was pinned', async () => {
     await runStep(await publishing({ destination: null }));
     expect(await saved()).toMatchObject({ state: 'FAILED', error: 'Nothing to upload.' });
+  });
+
+  it('waits to reconnect when the grant no longer decrypts, without a strike or YouTube call', async () => {
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: 'sealed-under-another-key' })
+      .where(eq(connections.uid, USER_A.uid));
+    expect(await runStep(await publishing())).toEqual({ wait: RECONNECT });
+    expect(await connectionOf(USER_A.uid)).toMatchObject({ status: 'revoked' });
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      consecutiveFailures: 0,
+      error: null,
+      uploadStartedAt: null,
+    });
+    expect(calls).toHaveLength(0);
   });
 
   it('waits to reconnect when the grant is revoked, without calling YouTube', async () => {
