@@ -109,7 +109,7 @@ describe('runtime role isolation', () => {
     ).toEqual([]);
   });
 
-  it.each([USER_A.uid, USER_B.uid, USER_A.uid])(
+  it.each([USER_A.uid, USER_B.uid])(
     'limits all ordinary table reads to subject %s',
     async (uid) => {
       const own = uid === USER_A.uid ? 'a' : 'b';
