@@ -788,6 +788,31 @@ describe('guide proposals across grants', () => {
     expect(await kinds()).toEqual([]);
   });
 
+  it('drops proposals of a grant a reconnect replaced, with the current one, on disconnect', async () => {
+    const first = await generation();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+    await seed({
+      artistGuides: [
+        pendingProposal(ARTIST, 'voice', rules('first grant'), { grantAt: first }),
+        pendingProposal(ARTIST, 'brand', rules('second grant'), { grantAt: await generation() }),
+      ],
+    });
+    expect(await revokeGrant(UID)).toBe(true);
+    expect(await kinds()).toEqual([]);
+  });
+
+  it('drops proposals of a replaced grant when the current one is refused', async () => {
+    const first = await generation();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
+    await seed({
+      artistGuides: [pendingProposal(ARTIST, 'voice', rules('first grant'), { grantAt: first })],
+    });
+    await markRevoked(UID, grant('bmV3', await generation()));
+    expect(await kinds()).toEqual([]);
+  });
+
   it('keeps unbound proposals when a reconnect lands while Google answers the disconnect', async () => {
     await seed({ artistGuides: [pendingProposal(ARTIST, 'voice', rules('edits only'))] });
     fetchMock.mockImplementation(async () => {

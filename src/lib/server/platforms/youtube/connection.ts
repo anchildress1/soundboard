@@ -96,10 +96,10 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
 
 /**
  * Disconnects YouTube: revokes the stored grant at Google, then deletes the row unless a reconnect
- * replaced its grant meanwhile, with the guide proposals read through that grant and, once the row
- * is gone, those saved with no grant. A failed revoke is reported and the row is deleted anyway, so
- * the revoked token is never kept. Returns whether Google confirmed the revoke; true when there was
- * no token to revoke.
+ * replaced its grant meanwhile, with the guide proposals read through that grant or an older one
+ * and, once the row is gone, those saved with no grant. A failed revoke is reported and the row is
+ * deleted anyway, so the revoked token is never kept. Returns whether Google confirmed the revoke;
+ * true when there was no token to revoke.
  */
 export async function revokeGrant(uid: string): Promise<boolean> {
   const connection = await getConnection(uid);
@@ -127,9 +127,9 @@ export type Grant = { tokenCiphertext: string; updatedAt: Date };
 
 /**
  * Marks the grant revoked, dropping its token in the same write, and deletes the guide proposals
- * read through it, plus those saved with no grant when it was still current; a dead token is never
- * kept. A newer grant from a reconnect that landed mid-refresh is left alone, and so are its
- * proposals.
+ * read through it or an older grant, plus those saved with no grant when it was still current; a
+ * dead token is never kept. A newer grant from a reconnect that landed mid-refresh is left alone,
+ * and so are its proposals.
  */
 export async function markRevoked(uid: string, grant: Grant): Promise<void> {
   await query(async (tx) => {

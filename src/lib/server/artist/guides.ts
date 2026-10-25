@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type {
   Approved,
   BrandGuide,
@@ -221,8 +221,9 @@ export async function discardProposal(
 
 /**
  * Deletes the caller's proposals read through the grant of generation `grantAt` (its connection's
- * `updated_at`), in the transaction that revokes it. With `unbound`, set when this revoke removed
- * the user's current grant, proposals saved with no grant go too. A newer grant's proposals stay.
+ * `updated_at`) or any older grant it replaced, in the transaction that revokes it. With `unbound`,
+ * set when this revoke removed the user's current grant, proposals saved with no grant go too. A
+ * newer grant's proposals stay.
  */
 export async function dropProposals(
   tx: Tx,
@@ -230,7 +231,7 @@ export async function dropProposals(
   grantAt: Date,
   unbound: boolean,
 ): Promise<void> {
-  const bound = eq(artistGuides.grantAt, grantAt);
+  const bound = lte(artistGuides.grantAt, grantAt);
   await tx.delete(artistGuides).where(
     and(
       eq(artistGuides.status, 'proposed'),

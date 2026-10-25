@@ -237,7 +237,7 @@ description: 'Task list for per-artist voice and brand guide'
 - [x] T037 Connection-generation binding (Codex final #3). Part of T005, T009, T013 and T016:
   - The generation is `connections.updated_at` of the `connected` row: every new grant writes it, and nothing else changes a connected row. It isn't secret.
   - The claim copies it into `guide_claims.grant_at` (null when not connected). The save requires, whenever the claim saw a grant, a `connected` row with `updated_at = grant_at` (`FOR SHARE`), else `28000`; uploads or drafts on a claim with no grant are also `28000`. It stores `grant_at` on the proposal.
-  - `revokeGrant` and `markRevoked` delete proposals whose `grant_at` is the revoked grant's generation, and the unbound ones (`grant_at` null) when the write removed the current grant, in the same transaction as the connection write; `markRevoked` takes the connection it refused (`{ tokenCiphertext, updatedAt }`).
+  - `revokeGrant` and `markRevoked` delete proposals whose `grant_at` is the revoked grant's generation or an older one a reconnect replaced, and the unbound ones (`grant_at` null) when the write removed the current grant, in the same transaction as the connection write; `markRevoked` takes the connection it refused (`{ tokenCiphertext, updatedAt }`).
   - Tests: claim → read → disconnect → reconnect → save is refused with `reconnect YouTube` and stores nothing (reconnect-before-save); a proposal saved on the new grant survives a stale `markRevoked` / `revokeGrant` of the old one (stale-revocation-after-reconnect), and a proposal of the old grant is deleted by it.
 
 **Checkpoint**: `make ai-checks` green. Nathan's picks unchanged (T014 golden test, T007 migration replay). Brand page works on the new table.
