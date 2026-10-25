@@ -8,7 +8,7 @@ import { authorizedJob } from '#lib/server/jobs/view.js';
 import { readEvidence } from '#lib/server/research/evidence.js';
 import type { RequestHandler } from './$types';
 
-export const EXPIRED = "That peer's evidence has expired. Reload to see it.";
+const EXPIRED = "That peer's evidence has expired. Reload to see it.";
 
 /** Records "Not a peer" for one of the pick's peers; later research skips its channel. */
 export const POST: RequestHandler = ({ params, locals }) =>
