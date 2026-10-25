@@ -145,7 +145,7 @@ description: 'Task list for the resumable video upload'
 
 **Independent Test**: Start an upload, navigate within the app, come back. Bytes kept arriving. Simulate the browser stopping it: on return the page shows the away message and continues.
 
-- [ ] T025 [US2] In src/routes/jobs/[id]/+page.svelte (depends on T022):
+- [x] T025 [US2] In src/routes/jobs/[id]/+page.svelte (depends on T022):
   - On mount with a store entry: this page's own object URL from `store.file` for the Monitor, revoked in `onDestroy`.
   - On mount with the store `done` while the user was elsewhere: the post-upload step poll at once (US2 scenario 2).
   - Away (research R9): the store records `saved` when `visibilitychange` goes hidden; on visible (or `resume`), if no progress arrived while hidden, show "The upload paused while you were away." with the saved percentage until bytes flow, and resume at once.
@@ -162,7 +162,7 @@ description: 'Task list for the resumable video upload'
 
 **Independent Test**: Reload at 30% and pick the same file: it continues from about 30%. Reload and pick a different file: it starts from zero, and that file is the one that lands.
 
-- [ ] T027 [US3] Page entry and re-pick in src/routes/jobs/[id]/+page.svelte (depends on T014, T018, T020, T025):
+- [x] T027 [US3] Page entry and re-pick in src/routes/jobs/[id]/+page.svelte (depends on T014, T018, T020, T025):
   - No store entry, `AWAITING_UPLOAD`, `uploadSaved.done` → no picker: drive the step loop, so a job closed after its last byte moves on (today's recovery, kept).
   - No store entry and `holder(jobId)` says another tab holds the lock → "Uploading in another tab", no picker, and `waitFor` with an `AbortSignal` aborted on destroy. On takeover, re-fetch the view, then show analysis, the discarded text or the prompt.
   - Otherwise: `Upload paused at n%. Pick the video to continue.` from `data.uploadSaved`, or "Pick the video to continue." when it's null, with a file input (`accept="video/*"`).

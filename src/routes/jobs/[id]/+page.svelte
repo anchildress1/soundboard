@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { action, ApiError, step, type ActionName } from '#lib/api.js';
   import Bandcamp from '#lib/components/Bandcamp.svelte';
@@ -222,6 +222,13 @@
     }
   };
 
+  /** Another tab or device changed the upload: reload what the page knows and carry on from it. */
+  const refresh = async () => {
+    await invalidateAll();
+    view = data.view;
+    if (DRIVEN_STATES.includes(view.job.state)) void run();
+  };
+
   onMount(() => {
     hydrated = true;
     if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
@@ -375,7 +382,14 @@
         <p class="help">{work.body}</p>
       </div>
       {#if job.state === 'AWAITING_UPLOAD'}
-        <BrowserUpload {view} {model} saved={data.uploadSaved} onlanded={landed} />
+        <BrowserUpload
+          {view}
+          {model}
+          saved={data.uploadSaved}
+          generation={data.uploadGeneration}
+          onlanded={landed}
+          onrefresh={refresh}
+        />
       {:else}
         <Monitor
           src={data.playbackUrl}

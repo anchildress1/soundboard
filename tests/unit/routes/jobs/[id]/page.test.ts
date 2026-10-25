@@ -1,9 +1,19 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draftKey } from '#lib/draft.js';
-import { POLL_BACKOFF } from '#lib/retry.js';
+import { POLL_BACKOFF, UPLOAD_BACKOFF } from '#lib/retry.js';
 import type { Chunk, JobState, JobView, Pick, PublicJob, Short, UploadSaved } from '#lib/types.js';
-import { acquire, start, stop } from '#lib/upload.js';
+import {
+  acquire,
+  ALREADY_DONE,
+  DISCARDED,
+  MOVED,
+  REPLACED,
+  start,
+  stop,
+  uploads,
+} from '#lib/upload.js';
 import Page from '#src/routes/jobs/[id]/+page.svelte';
 import { FakeXhr, installUploadFakes, type FakeLocks } from '../../../../helpers/uploads';
 
@@ -21,8 +31,8 @@ const APPROVE_SCREEN = 'Ready to upload';
 const BACK_TO_RELEASE = 'Back to the release';
 const OFFERS = 'Up next, if you want';
 
-const h = vi.hoisted(() => ({ goto: vi.fn() }));
-vi.mock('$app/navigation', () => ({ goto: h.goto }));
+const h = vi.hoisted(() => ({ goto: vi.fn(), invalidateAll: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: h.goto, invalidateAll: h.invalidateAll }));
 
 const TRACE = { sentryTrace: 'trace-1', baggage: 'bag-1' };
 
@@ -160,6 +170,7 @@ let locks: FakeLocks;
 
 beforeEach(() => {
   h.goto.mockReset();
+  h.invalidateAll.mockReset().mockResolvedValue(undefined);
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   locks = installUploadFakes();
@@ -800,6 +811,319 @@ describe('job page: browser upload', () => {
     setup(awaitingView(), { playbackUrl: null });
     expect(chip()).toHaveTextContent('Pick the video to continue.');
     expect(steps()).toEqual([]);
+  });
+
+  describe('away', () => {
+    const AWAY = 'The upload paused while you were away.';
+    const visibility = (state: 'hidden' | 'visible') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+
+    afterEach(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    });
+
+    it('names a pause that happened while away, with the saved amount, and resumes', async () => {
+      serveUpload();
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(308, { range: 'bytes=0-2' });
+      await waitFor(() => expect(chip()).toHaveTextContent('Uploading 30%'));
+      FakeXhr.all.at(-1)!.drop();
+      await waitFor(() => expect(chip()).toHaveTextContent('Upload paused: no connection'));
+      const before = FakeXhr.all.length;
+      visibility('hidden');
+      visibility('visible');
+      await waitFor(() => expect(chip()).toHaveTextContent(AWAY));
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '30');
+      await waitFor(() => expect(FakeXhr.all.length).toBeGreaterThan(before));
+    });
+
+    it('shows nothing new when bytes went out while hidden', async () => {
+      serveUpload();
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(308);
+      await waitFor(() => expect(FakeXhr.all.at(-1)?.isQuery).toBe(false));
+      visibility('hidden');
+      FakeXhr.all.at(-1)!.progress(5);
+      visibility('visible');
+      await waitFor(() => expect(chip()).toHaveTextContent('Uploading 50%'));
+      expect(screen.queryByText(AWAY)).toBeNull();
+    });
+
+    it('drives the step at once when the upload finished while the page was away', async () => {
+      serveUpload(prep());
+      await handedOver();
+      (await query()).respond(200);
+      setup(awaitingView(), { playbackUrl: null });
+      await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    });
+  });
+});
+
+describe('job page: picking the video again', () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s2';
+  const SESSION_PATH = '/api/jobs/j1/upload-session';
+  const PICK_PROMPT = 'Pick the video to continue.';
+  const UNREADABLE = "Couldn't read this video. Pick it again.";
+  const OTHER_TAB = 'Uploading in another tab';
+  const video = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
+  const awaitingView = () => view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 });
+  const picked = { sessionUri: SESSION, generation: 2, restarted: false };
+
+  type Answer = Response | (() => Promise<Response>);
+  /** Each upload-session call takes the next answer; the last one repeats. Steps hang. */
+  const serve = (...answers: Answer[]) => {
+    fetchMock.mockImplementation(async (path) => {
+      if (!String(path).endsWith('/upload-session')) return hang();
+      const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
+      return typeof answer === 'function' ? answer() : answer.clone();
+    });
+  };
+  const bodies = () =>
+    fetchMock.mock.calls
+      .filter(([path]) => String(path) === SESSION_PATH)
+      .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>);
+  const picks = () => bodies().filter((body) => body.op === 'pick');
+  const filePicker = () => screen.queryByLabelText('Pick the video') as HTMLInputElement | null;
+
+  /** Picks `file`; `duration` null leaves the video unplayable, so it errors. */
+  const pick = async (container: HTMLElement, file = video, duration: number | null = 140) => {
+    await fireEvent.change(filePicker()!, { target: { files: [file] } });
+    const el = container.querySelector('video')!;
+    if (duration === null) {
+      await fireEvent.error(el);
+      return;
+    }
+    Object.defineProperty(el, 'duration', { configurable: true, get: () => duration });
+    await fireEvent(el, new Event('durationchange'));
+  };
+
+  /** Another tab holds the job's lock until the returned release runs. */
+  const otherTab = () => {
+    let release!: () => void;
+    void locks.request('upload:j1', {}, () => new Promise<void>((done) => (release = done)));
+    return () => release();
+  };
+
+  it('reads the file, takes the lock, then resumes under the newest generation', async () => {
+    serve(json(picked), json({ current: true }));
+    const { container } = setup(awaitingView(), {
+      playbackUrl: null,
+      uploadSaved: { saved: 4, total: 10, done: false },
+      uploadGeneration: 2,
+    });
+    expect(chip()).toHaveTextContent('Upload paused at 40%. Pick the video to continue.');
+    await pick(container);
+    await waitFor(() => expect(picks()).toHaveLength(1));
+    expect(picks()[0]).toEqual({
+      op: 'pick',
+      opId: expect.any(String),
+      generation: 2,
+      size: 10,
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      filename: 'peekaboo.mp4',
+      contentType: 'video/mp4',
+      durationSec: 140,
+    });
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+    expect(filePicker()).toBeNull();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('says the upload starts over when the server restarted it for a new video', async () => {
+    serve(json({ ...picked, restarted: true }), json({ current: true }));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container, new File(['x'], 'other.webm', { type: '' }));
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      'New video: starting the upload over.',
+    );
+    expect(picks()[0]).toMatchObject({ contentType: 'video/mp4', filename: 'other.webm' });
+  });
+
+  it('asks again when the video cannot play, with no lock and no request', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container, video, null);
+    await waitFor(() => expect(chip()).toHaveTextContent(UNREADABLE));
+    expect(filePicker()).not.toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+    expect(locks.holders.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('asks again when the video gives no duration within 15 s', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await fireEvent.change(filePicker()!, { target: { files: [video] } });
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(chip()).toHaveTextContent(PICK_PROMPT);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(chip()).toHaveTextContent(UNREADABLE);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.querySelector('video')).toBeNull();
+  });
+
+  it('asks again when the file cannot be read for its fingerprint', async () => {
+    serve(json(picked));
+    vi.spyOn(Blob.prototype, 'arrayBuffer').mockRejectedValueOnce(
+      new DOMException('The file could not be read.', 'NotReadableError'),
+    );
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(UNREADABLE));
+    expect(locks.holders.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('resends the same pick after a timeout or a 503, backing off', async () => {
+    const timedOut = () => Promise.reject(new DOMException('signal timed out', 'TimeoutError'));
+    serve(timedOut, json({ error: 'busy' }, 503), json(picked), json({ current: true }));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pick(container);
+      await vi.waitFor(() => expect(picks()).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(UPLOAD_BACKOFF.minTimeout);
+      expect(picks()).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(UPLOAD_BACKOFF.minTimeout * UPLOAD_BACKOFF.factor);
+      expect(picks()).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(new Set(picks().map((body) => body.opId)).size).toBe(1);
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+  });
+
+  it('shows a refused pick, lets the lock go and keeps the picker', async () => {
+    serve(json({ error: "This video doesn't match the size of the saved upload." }, 400));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    expect(await screen.findByRole('alert')).toHaveTextContent("doesn't match the size");
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+    expect(filePicker()).not.toBeNull();
+    expect(get(uploads).j1).toBeUndefined();
+  });
+
+  it.each([
+    [REPLACED, 'A different video replaced this upload.'],
+    [MOVED, 'The upload moved to another device or window.'],
+  ])('names a 409 "%s" and picks next under its generation', async (error, text) => {
+    serve(json({ error, generation: 5 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(text));
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await pick(container);
+    await waitFor(() => expect(picks()).toHaveLength(2));
+    expect(picks()[1]!.generation).toBe(5);
+  });
+
+  it('moves the job on when the pick finds the upload already done', async () => {
+    fetchMock.mockImplementation(async (path) =>
+      String(path).endsWith('/upload-session')
+        ? json({ error: ALREADY_DONE, generation: 1 }, 409)
+        : json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })),
+    );
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+  });
+
+  it('reloads the job when the pick finds it discarded', async () => {
+    serve(json({ error: DISCARDED, generation: 1 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('reloads the job when a running upload hears it was discarded', async () => {
+    serve(json(picked), json({ error: DISCARDED, generation: 2 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('waits on another tab, then takes over and asks for the file', async () => {
+    const release = otherTab();
+    serve(json(picked));
+    setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    expect(filePicker()).toBeNull();
+    release();
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(chip()).toHaveTextContent(PICK_PROMPT);
+    expect(filePicker()).not.toBeNull();
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+  });
+
+  it('moves the job on when the upload landed before the takeover', async () => {
+    const release = otherTab();
+    fetchMock.mockImplementation(async () =>
+      json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })),
+    );
+    const { rerender } = setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    h.invalidateAll.mockImplementation(async () => {
+      await rerender({
+        data: {
+          view: awaitingView(),
+          playbackUrl: null,
+          short: null,
+          shortExpired: false,
+          expired: false,
+          approveTo: CONNECTED,
+          trace: TRACE,
+          channel: null,
+          user: null,
+          uploadSaved: { saved: 10, total: 10, done: true },
+          uploadGeneration: 1,
+        },
+      } as never);
+    });
+    release();
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+  });
+
+  it('shows the other tab when a pick finds the lock taken', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    otherTab();
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lets the lock go when the page closes with no upload running', async () => {
+    const release = otherTab();
+    serve(json(picked));
+    const { unmount } = setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    release();
+    await waitFor(() => expect(locks.holders).toEqual(new Set(['upload:j1'])));
+    unmount();
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+  });
+
+  it('keeps a running upload going when the page closes', async () => {
+    serve(json(picked), json({ current: true }));
+    const { container, unmount } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+    unmount();
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+    expect(get(uploads).j1?.state).toBe('sending');
   });
 });
 

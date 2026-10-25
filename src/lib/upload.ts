@@ -43,8 +43,11 @@ export type Next =
 
 type Step = Next | { do: 'conflict'; message: string; generation: number | null };
 
-const REPLACED = 'A different video replaced this upload.';
-const MOVED = 'The upload moved to another device or window.';
+// The server's 409 messages (contract), which decide where a stopped upload goes next.
+export const REPLACED = 'A different video replaced this upload.';
+export const MOVED = 'The upload moved to another device or window.';
+export const DISCARDED = 'This job was discarded.';
+export const ALREADY_DONE = 'This upload is already done.';
 
 const QUERY_MS = 15_000;
 const STALL_MS = 60_000;

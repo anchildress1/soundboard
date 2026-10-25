@@ -159,8 +159,15 @@ describe('jobStatus', () => {
       });
     });
 
+    it('says the upload paused while away, at the saved percent', () => {
+      expect(uploading({ state: 'away', saved: 3, total: 4 })).toEqual({
+        tone: 'warn',
+        text: 'The upload paused while you were away.',
+        progress: 75,
+      });
+    });
+
     it.each([
-      ['away', 'warn', 'The upload paused while you were away.'],
       ['unreadable', 'err', "Couldn't read this video. Pick it again."],
       ['other-tab', 'info', 'Uploading in another tab'],
       ['replaced', 'warn', 'A different video replaced this upload.'],

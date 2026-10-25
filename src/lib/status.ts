@@ -17,7 +17,8 @@ export type UploadShown =
   | { state: 'sending'; saved: number; total: number }
   | { state: 'paused'; reason: PauseReason; saved: number; total: number }
   | { state: 'pick'; saved: number | null; total: number }
-  | { state: 'away' | 'unreadable' | 'other-tab' | 'replaced' | 'moved' | 'discarded' };
+  | { state: 'away'; saved: number; total: number }
+  | { state: 'unreadable' | 'other-tab' | 'replaced' | 'moved' | 'discarded' };
 
 /** One-off lines the page shows while sending, after the upload started over. */
 export const UPLOAD_NOTICE = {
@@ -63,7 +64,11 @@ function uploadStatus(upload: UploadShown): Status {
       };
     }
     case 'away':
-      return { tone: 'warn', text: 'The upload paused while you were away.', progress: 0 };
+      return {
+        tone: 'warn',
+        text: 'The upload paused while you were away.',
+        progress: savedPercent(upload.saved, upload.total),
+      };
     case 'unreadable':
       return { tone: 'err', text: "Couldn't read this video. Pick it again.", progress: 0 };
     case 'other-tab':
