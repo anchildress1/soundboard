@@ -1,7 +1,13 @@
 <script lang="ts">
   import pRetry from 'p-retry';
   import { onDestroy, onMount } from 'svelte';
-  import { ApiError, SessionTimeout, UploadConflict, uploadSession } from '#lib/api.js';
+  import {
+    ApiError,
+    SessionTimeout,
+    Unreachable,
+    UploadConflict,
+    uploadSession,
+  } from '#lib/api.js';
   import { fingerprint } from '#lib/fingerprint.js';
   import { UPLOAD_BACKOFF } from '#lib/retry.js';
   import { jobStatus, UPLOAD_NOTICE, type UploadShown } from '#lib/status.js';
@@ -136,7 +142,7 @@
 
   const retryable = (failure: unknown) =>
     failure instanceof SessionTimeout ||
-    failure instanceof TypeError ||
+    failure instanceof Unreachable ||
     (failure instanceof ApiError && !(failure instanceof UploadConflict) && failure.status >= 500);
 
   const unreadable = () => {

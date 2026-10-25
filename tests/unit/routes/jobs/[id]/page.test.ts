@@ -777,30 +777,34 @@ describe('job page: browser upload', () => {
     });
   };
 
-  it('asks again after a step with no reply or a 5xx, showing the error until it lands', async () => {
-    serveSteps(
-      () => Promise.reject(new TypeError('Failed to fetch')),
-      async () => json({ error: 'Internal' }, 503),
-      async () => json(prep()),
-    );
-    await handedOver();
-    setup(awaitingView(), { playbackUrl: null });
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      (await query()).respond(200);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(screen.getByText('Failed to fetch')).toBeInTheDocument();
-      await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
-      expect(screen.getByText('Internal')).toBeInTheDocument();
-      await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout * POLL_BACKOFF.factor);
-      // Three tries to land, then the driver's first step.
-      expect(steps()).toHaveLength(4);
-      expect(chip()).toHaveTextContent('Measuring audio');
-      expect(screen.queryByText('Internal')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+  // Safari's 'Load failed' carries the stack Sentry's fetch wrapper backfills, as a Node error does.
+  it.each(['Failed to fetch', 'Load failed'])(
+    'asks again after a step with no reply (%s) or a 5xx, showing the error until it lands',
+    async (dropped) => {
+      serveSteps(
+        () => Promise.reject(new TypeError(dropped)),
+        async () => json({ error: 'Internal' }, 503),
+        async () => json(prep()),
+      );
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        (await query()).respond(200);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByText(dropped)).toBeInTheDocument();
+        await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
+        expect(screen.getByText('Internal')).toBeInTheDocument();
+        await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout * POLL_BACKOFF.factor);
+        // Three tries to land, then the driver's first step.
+        expect(steps()).toHaveLength(4);
+        expect(chip()).toHaveTextContent('Measuring audio');
+        expect(screen.queryByText('Internal')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('stops looking on a 4xx step reply and shows it', async () => {
     serveSteps(async () => json({ error: 'Not found' }, 404));

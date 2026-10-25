@@ -8,6 +8,7 @@ import {
   proposeBrand,
   SessionTimeout,
   step,
+  Unreachable,
   UploadConflict,
   uploadSession,
 } from '#lib/api.js';
@@ -82,9 +83,18 @@ describe('createJob', () => {
     expect(await createJob(BODY)).toEqual({});
   });
 
-  it('propagates network failures', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-    await expect(createJob(BODY)).rejects.toThrow('Failed to fetch');
+  it('turns a request with no response into Unreachable, keeping the message', async () => {
+    const cause = new TypeError('Load failed');
+    fetchMock.mockRejectedValue(cause);
+    const error = await createJob(BODY).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Unreachable);
+    expect(error).toMatchObject({ message: 'Load failed', cause });
+  });
+
+  it('passes an abort through as it is', async () => {
+    const abort = new DOMException('aborted', 'AbortError');
+    fetchMock.mockRejectedValue(abort);
+    await expect(createJob(BODY)).rejects.toBe(abort);
   });
 });
 
@@ -234,6 +244,6 @@ describe('uploadSession', () => {
 
   it('passes other network failures through', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-    await expect(uploadSession('j1', CONFIRM)).rejects.toThrow('Failed to fetch');
+    await expect(uploadSession('j1', CONFIRM)).rejects.toBeInstanceOf(Unreachable);
   });
 });

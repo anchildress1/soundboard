@@ -29,13 +29,27 @@ export class SessionTimeout extends Error {
   }
 }
 
+/**
+ * The request got no response. fetch's own TypeError won't do: p-retry retries a TypeError only
+ * when it looks like a network error, and in Safari, Sentry's fetch wrapper gives it a stack that
+ * makes it look like a bug, so every retry loop gave up on the first drop.
+ */
+export class Unreachable extends Error {}
+
 type ErrorBody = { error?: string; message?: string; fields?: FieldErrors; generation?: number };
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { 'content-type': 'application/json', ...init.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: { 'content-type': 'application/json', ...init.headers },
+    });
+  } catch (error) {
+    // fetch rejects with a TypeError when no response arrived; an abort stays a DOMException.
+    if (error instanceof TypeError) throw new Unreachable(error.message, { cause: error });
+    throw error;
+  }
   const body = (await response.json().catch(() => ({}))) as ErrorBody;
   if (!response.ok) {
     const message = body.error ?? body.message ?? `Request failed (${response.status})`;
