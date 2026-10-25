@@ -14,6 +14,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 | `sources`     | `jsonb` NN                    | Proposed: `ProposalSources`. Approved: `SourceSummary` (below).                          |
 | `proposed_at` | `timestamptz` NN              | The claim's `claimed_at`, taken before the first input read (R4). Approved rows keep it. |
 | `approved_at` | `timestamptz` null            | `CHECK (status = 'approved') = (approved_at is not null)`.                               |
+| `grant_at`    | `timestamptz` null            | The connection generation the uploads were read through (T037). Null when approved.      |
 
 - **Unique** `artist_guides_slot` on `(artist_id, kind, status)`: at most one proposal and one approved version per artist and kind (FR-001).
 - **Check** `artist_guides_sources_check`: exact keys and types, null-safe (R4). Every comparison uses `IS NOT DISTINCT FROM`, so a missing key fails instead of passing as SQL `NULL`:
@@ -45,21 +46,22 @@ One row per artist and kind, made on first propose. Holds no YouTube data.
 | `claimed_at`  | `timestamptz` null | Database `now()` at claim; becomes the proposal's `proposed_at`.                    |
 | `claim_until` | `timestamptz` null | `claimed_at + 3 minutes`. A past value frees the slot.                              |
 | `limit_until` | `timestamptz` null | The model's per-day quota reset (`ModelQuotaSpent.until`). Holds claims until then. |
+| `grant_at`    | `timestamptz` null | The `connected` row's `updated_at` at claim time (T037); database-set.              |
 
 - **RLS** (`ENABLE` + `FORCE`): `claims_own` `FOR ALL TO soundboard_app` `USING` and `WITH CHECK` own, with `guide_claims.artist_id` qualified as above.
-- **Grants:** `soundboard_app`: `SELECT`, `INSERT (artist_id, kind)`, `UPDATE (claim_token, claimed_at, claim_until, limit_until)`. No `DELETE`; rows are tiny and reused.
-- **Claim** (R8): `INSERT INTO guide_claims (artist_id, kind) VALUES (…) ON CONFLICT DO NOTHING`, then `UPDATE guide_claims SET claim_token = $token, claimed_at = now(), claim_until = now() + interval '3 minutes' WHERE artist_id = $a AND kind = $k AND (claim_until IS NULL OR claim_until <= now()) AND (limit_until IS NULL OR limit_until <= now()) RETURNING claim_token, claimed_at`.
+- **Grants:** `soundboard_app`: `SELECT`, `UPDATE (claim_token, claim_until, limit_until)`. No `INSERT`, no `DELETE`, no write to `claimed_at` or `grant_at` (T036).
+- **Claim** (R8, T036): `public.soundboard_claim_proposal(p_kind, p_token)` (definer, as below) inserts the row once, then `UPDATE … SET claim_token = p_token, claimed_at = now(), claim_until = now() + interval '3 minutes', grant_at = <the caller's connected updated_at> WHERE` free and not quota-held, and returns the row either way.
 - **Release:** `UPDATE guide_claims SET claim_token = null, claim_until = null [, limit_until = $until] WHERE artist_id = $a AND kind = $k AND claim_token = $token`. A wrong token changes 0 rows.
 
 ### Function `soundboard_save_proposal(p_kind text, p_body jsonb, p_sources jsonb, p_claim_token text) RETURNS SETOF public.artist_guides`
 
-- `LANGUAGE plpgsql SECURITY DEFINER`, `SET search_path = pg_catalog, public`, `REVOKE ALL … FROM PUBLIC`, `EXECUTE` only to `soundboard_app`. Same pattern as `soundboard_save_audience` (0004).
+- `LANGUAGE plpgsql SECURITY DEFINER`, `SET search_path = pg_catalog, public, pg_temp`, every relation `public.`-qualified (T035), `REVOKE ALL … FROM PUBLIC`, `EXECUTE` only to `soundboard_app`.
 - In order:
   1. The caller's active `users` row (`app.user_sub`) with an `artist_id`; else raise `42501`.
-  2. `SELECT claimed_at FROM guide_claims WHERE artist_id = <caller's> AND kind = p_kind AND claim_token = p_claim_token AND claim_until > now() FOR UPDATE`; not found → raise `55000` ("Proposal claim lost"). It locks the slot, so saves for one artist and kind serialize.
-  3. When `jsonb_array_length(p_sources->'uploads') + jsonb_array_length(p_sources->'drafts') > 0`: `PERFORM 1 FROM connections WHERE uid = <caller> AND status = 'connected' FOR SHARE`; not found → raise `28000` ("YouTube disconnected"). The app maps it to `{ wait: 'reconnect YouTube' }` (R4).
+  2. `SELECT claimed_at FROM guide_claims WHERE artist_id = <caller's> AND kind = p_kind AND claim_token = p_claim_token AND claim_until > now() AND claimed_at <= now() AND claimed_at > now() - interval '3 minutes' FOR UPDATE`; not found → raise `55000` ("Proposal claim lost") (T036). It locks the slot, so saves for one artist and kind serialize.
+  3. When `jsonb_array_length(p_sources->'uploads') + jsonb_array_length(p_sources->'drafts') > 0`: `PERFORM 1 FROM public.connections WHERE uid = <caller> AND status = 'connected' AND updated_at = <claim's grant_at> FOR SHARE`; not found → raise `28000` ("YouTube disconnected"). The app maps it to `{ wait: 'reconnect YouTube' }` (R4).
   4. Delete the artist's `proposed` row of `p_kind`, of any age.
-  5. Insert the new row with `proposed_at = claimed_at`.
+  5. Insert the new row with `proposed_at = claimed_at` and the claim's `grant_at`.
   6. Release the claim (`claim_token = null, claim_until = null`), and return the row.
 - **Why a function:** under RLS, an `INSERT … ON CONFLICT DO UPDATE` that meets an expired (hidden) proposal raises instead of replacing it, and the app can't delete a row it can't see. Expired rows live up to a day before the daily delete, so a plain upsert would fail in that window. The function also checks the claim and the connection in the same transaction as the write.
 
@@ -96,7 +98,7 @@ stateDiagram-v2
 - **`proposed_at`** is the claim's `claimed_at`, the database's `now()` before the first YouTube read. Never an app value.
 - **Approve:** lock the pending row, check `id`, then `INSERT … ON CONFLICT (artist_id, kind, status) DO UPDATE SET body, sources, proposed_at, approved_at` for the approved row, and delete the proposal. Only those four columns change, so spec 006's column survives (R10).
 - **Discard:** lock, check `id`, delete.
-- **Disconnect:** `revokeGrant` and `markRevoked` delete the artist's proposals after the connection write, in the same transaction (R4).
+- **Disconnect:** `revokeGrant` and `markRevoked` delete the artist's proposals read through the revoked grant (`grant_at` = its `updated_at`) after the connection write, in the same transaction (R4, T037).
 - **Expire:** invisible to the app at 29 days; deleted by the daily job within the next 24 hours.
 - **Nothing deletes an approved row.** It's replaced only by approval (US4 AS2).
 

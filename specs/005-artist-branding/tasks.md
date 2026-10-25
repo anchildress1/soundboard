@@ -225,6 +225,19 @@ description: 'Task list for per-artist voice and brand guide'
     - for the tests that write (T020 approve, T027 race): per-project users `brand-desktop@example.com` / `brand-pixel@example.com` (profiles `artist-bd` / `artist-bp`) and `race-desktop@example.com` / `race-pixel@example.com` (profiles `artist-rcd` / `artist-rcp`), each with one seeded pending voice proposal. `tests/e2e/session.ts` picks the user by `testInfo.project.name`, as 004 does.
   - `tests/e2e/fakes/youtube.ts`: the owner-grant upload reads answer for user C's channel `UCtest` with 3 uploads with prose descriptions, so voice and brand proposals reach the model call (which the Gemini preload answers 429).
 
+- [ ] T035 Definer-function hardening (Codex final #1). Part of T005 and T007:
+  - `soundboard_save_proposal` and `soundboard_claim_proposal` use `SET search_path = pg_catalog, public, pg_temp` (`pg_temp` last) and qualify every relation with `public.`.
+  - Test in `rls.test.ts`: under `soundboard_app`, a `CREATE TEMP TABLE connections (…)` holding a `connected` row and a temp `guide_claims` holding a fresh claim change nothing: a save with uploads while the real connection is gone still raises `28000`, and a save on a token only the temp table holds raises `55000`.
+- [ ] T036 Database-controlled claim times (Codex final #2). Part of T005, T007 and T009:
+  - The claim runs through `public.soundboard_claim_proposal(p_kind, p_token)`, which sets `claimed_at = now()`, `claim_until = now() + 3 minutes` and the connection generation itself. `soundboard_app` gets `SELECT` and `UPDATE (claim_token, claim_until, limit_until)` on `guide_claims` only: no `INSERT`, no write to `claimed_at` or `grant_at`.
+  - `soundboard_save_proposal` refuses (`55000`) a claim whose `claimed_at` is in the future or more than 3 minutes old, whatever `claim_until` says.
+  - Tests: an app `UPDATE guide_claims SET claimed_at = …` is denied (`42501`); a claim row a privileged write moved 365 days ahead, or 4 minutes back, can't be saved through the function; a direct `INSERT` is denied.
+- [ ] T037 Connection-generation binding (Codex final #3). Part of T005, T009, T013 and T016:
+  - The generation is `connections.updated_at` of the `connected` row: every new grant writes it, and nothing else changes a connected row. It isn't secret.
+  - The claim copies it into `guide_claims.grant_at` (null when not connected). The save requires, when the proposal lists uploads or drafts, a `connected` row with `updated_at = grant_at` (`FOR SHARE`), else `28000`; it stores `grant_at` on the proposal.
+  - `revokeGrant` and `markRevoked` delete only proposals whose `grant_at` is the revoked grant's generation, in the same transaction as the connection write; `markRevoked` takes the connection it refused (`{ tokenCiphertext, updatedAt }`).
+  - Tests: claim → read → disconnect → reconnect → save is refused with `reconnect YouTube` and stores nothing (reconnect-before-save); a proposal saved on the new grant survives a stale `markRevoked` / `revokeGrant` of the old one (stale-revocation-after-reconnect), and a proposal of the old grant is deleted by it.
+
 **Checkpoint**: `make ai-checks` green. Nathan's picks unchanged (T014 golden test, T007 migration replay). Brand page works on the new table.
 
 ---
@@ -373,7 +386,7 @@ description: 'Task list for per-artist voice and brand guide'
 ## Dependencies and execution order
 
 - **Setup (T001–T004)** first. T001 is the PR's first commit; T002 and T003 run in parallel after it. T004 runs at implementation start and blocks T011 and T016.
-- **Foundational (T005–T015)** blocks every story and lands green as a group:
+- **Foundational (T005–T015, T035–T037)** blocks every story and lands green as a group. T035–T037 fold the Codex final-pass findings into T005, T007, T009, T013 and T016:
   - T005 → T006 → T007.
   - T008, T010, T011 [P] beside T005 (T011 after T004).
   - T009 needs T005, T006, T008.

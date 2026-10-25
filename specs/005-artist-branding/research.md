@@ -120,6 +120,7 @@ Editing an unapplied migration is allowed; AGENTS.md bars editing applied ones. 
   - one live `voice-guide`-shaped call at the caps (30 descriptions of 1,500 characters and 60 edits), logged in the ledger
   - **pass:** latency ≤ `minCallMs`, and the YouTube reads (≤ 15 s) + 2 × `minCallMs` ≤ 110 s, so a re-ask still fits
   - **fail:** `minCallMs` becomes the measured value rounded up to the next second. If the re-ask then doesn't fit, lower `VOICE_UPLOADS` and the edit count and measure again.
+- **T004 result (2026-10-25):** 7.6 s at the caps (29,111 input and 402 output tokens, about $0.06), synthetic plain prose because the test channel has no public uploads. Pass: `minCallMs` stays 33,000, and 15 s + 2 × 33 s ≤ 110 s.
 - **Prompt rules (system):**
   - Write the rules a writer needs to sound like this artist in a YouTube description: tone, sentence shape, recurring lines (quoted exactly), things the artist avoids.
   - "Written by the artist" is the artist's writing. "Approved Soundboard drafts (lower weight)" were drafted by Soundboard and approved by the artist: weigh them below the artist's own writing and edits.
