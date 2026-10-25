@@ -323,6 +323,22 @@ describe('finalizePick: citations and the recommendation', () => {
     expect(pick.recommendation!.followsWhy).toBe('P1 and P2 agree.');
   });
 
+  it('replaces a title every time it appears, and leaves a blank or length-changing one safe', () => {
+    const odd = evidence();
+    odd.peers[1]!.title = 'İstanbul Nights';
+    odd.peers[2]!.title = '  ';
+    const pick = finalizePick(
+      raw({
+        recommendation: {
+          ...raw().recommendation,
+          approach: `${PEER_TITLE} and ${PEER_TITLE.toLowerCase()} again; İstanbul Nights too.`,
+        },
+      }),
+      fix({ evidence: odd }),
+    );
+    expect(pick.recommendation!.approach).toBe('P1 and P1 again; P2 too.');
+  });
+
   it('removes a statistic the model wrote into the recommendation', () => {
     const pick = finalizePick(
       raw({

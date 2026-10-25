@@ -625,18 +625,39 @@ function pickTags(raw: string[], pool: string[], fix: PickFixups): string[] {
 /** The model never writes a statistic: sentences that state one are removed (research R7). */
 const unstated = (text: string) => stripStats(text).text;
 
-const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * `text` with every case-insensitive `needle` replaced. It scans by index over a folded copy that
+ * remembers where each folded unit came from, so a character whose lowercase is longer (İ) can't
+ * shift the cuts, and no pattern is built from a channel title.
+ */
+function replaceFolded(text: string, needle: string, replacement: string): string {
+  const target = needle.toLowerCase();
+  if (!target) return text;
+  let folded = '';
+  const origin: number[] = [];
+  let index = 0;
+  for (const char of text) {
+    const lower = char.toLowerCase();
+    for (let unit = 0; unit < lower.length; unit += 1) origin.push(index);
+    folded += lower;
+    index += char.length;
+  }
+  origin.push(text.length);
+  let out = '';
+  let from = 0;
+  let at = folded.indexOf(target);
+  while (at >= 0) {
+    const next = at + target.length;
+    out += text.slice(from, origin[at]) + replacement;
+    from = origin[next]!;
+    at = folded.indexOf(target, next);
+  }
+  return out + text.slice(from);
+}
 
 /** `text` with each peer's channel title replaced by the peer's ref. */
-function byRefOnly(text: string, peers: { ref: string; title: string }[]): string {
-  return peers.reduce(
-    (acc, peer) =>
-      peer.title.trim()
-        ? acc.replaceAll(new RegExp(escapeRegExp(peer.title.trim()), 'giu'), peer.ref)
-        : acc,
-    text,
-  );
-}
+const byRefOnly = (text: string, peers: { ref: string; title: string }[]): string =>
+  peers.reduce((acc, peer) => replaceFolded(acc, peer.title.trim(), peer.ref), text);
 
 /**
  * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
