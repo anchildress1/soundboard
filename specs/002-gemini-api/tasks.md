@@ -257,20 +257,20 @@ description: 'Task list for the Gemini API swap'
 
 **No standalone deploy**: 002 ships in the next combined release, after Google approves the request (FR-023). Building continues meanwhile; T045 and T046 run at that release and block nothing here. The GPU version is never redeployed, so T047 doesn't wait on either.
 
-- [ ] T038 [P] Update src/routes/privacy/+page.svelte (FR-018):
+- [x] T038 [P] Update src/routes/privacy/+page.svelte (FR-018):
   - Name paid-tier Gemini as the processor of video clips and YouTube metadata, and Sentry as the processor of text traces.
   - Explain that `store: false` turns off interaction storage only, that implicit caching happens, and that abuse logs are kept up to 55 days.
   - Say that authorized Google staff may review flagged prompts, that a deletion request can't reach Google's abuse-monitoring copy, and what Sentry's actual retention is.
   - Say content is not used to improve Google products.
   - No zero-retention claim, no cache expiry.
   - Tests in tests/unit/routes/privacy.test.ts.
-- [ ] T039 [P] Update README.md for the same FR-016 lines as T002.
-- [ ] T040 [P] Update docs/youtube-audit/architecture.md and docs/youtube-audit/user-flows.md:
+- [x] T039 [P] Update README.md for the same FR-016 lines as T002.
+- [x] T040 [P] Update docs/youtube-audit/architecture.md and docs/youtube-audit/user-flows.md:
   - Show Gemini in the diagram and data flow.
   - Cover implicit caching, the 55-day abuse log, full-text Sentry retention and the approval gate.
   - Drop the "planned spec 002" section.
   - Validate every Mermaid diagram with mcp-mermaid.
-- [ ] T041 Confirm .specify/memory/constitution.md already carries the 2.0.0 III/IV/V amendments the plan lists; change nothing if it does.
+- [x] T041 Confirm .specify/memory/constitution.md already carries the 2.0.0 III/IV/V amendments the plan lists; change nothing if it does.
 - [ ] T042 Run `make ai-checks`: format, lint, typecheck, unit coverage floors at 85/85/85/80, build. Zero warnings.
 - [ ] T043 Run `make e2e` on desktop Chrome and Pixel 7, then the Semgrep and Sonar scans.
 - [ ] T044 Walk every Automated bullet in specs/002-gemini-api/quickstart.md and confirm a test covers it.

@@ -34,7 +34,7 @@ import {
 } from '$lib/server/platforms/youtube';
 
 const DESCRIPTION_CHARS = 200;
-/** Uploads carry 14 to 44 tags each; uncapped, they filled the 8K context and cut off the reply. */
+/** Uploads carry 14 to 44 tags each; the leading few show the pattern without paying for the rest. */
 const TAGS_PER_VIDEO = 8;
 /** A count cap alone still lets long tags through, so the text is capped too. */
 const TAG_CHARS = 120;
