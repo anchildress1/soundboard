@@ -12,6 +12,7 @@ import {
 import { analystModel, geminiApiKey, pickModel } from '#lib/server/core/env.js';
 import {
   chatSpan,
+  textTurn,
   type AgentName,
   type ChatReply,
   type ModelRequest,
@@ -218,10 +219,8 @@ export async function chatJson<T>(
     }
     turns = [
       ...turns,
-      ...(reply.content
-        ? [{ role: 'assistant' as const, parts: [{ type: 'text' as const, text: reply.content }] }]
-        : []),
-      { role: 'user', parts: [{ type: 'text', text: REASK }] },
+      ...(reply.content ? [textTurn('assistant', reply.content)] : []),
+      textTurn('user', REASK),
     ];
   }
 }

@@ -10,11 +10,13 @@ import {
   agentInput,
   agentOutput,
   chatSpan,
+  imageParts,
   invokeAgent,
   PIPELINE,
   PROVIDER,
   redactTurns,
   startJobTrace,
+  textTurn,
   toolSpan,
   type ChatReply,
   type ModelRequest,
@@ -56,6 +58,31 @@ beforeEach(() => {
   startSpan.mockClear();
   span.setAttribute.mockClear();
   span.setAttributes.mockClear();
+});
+
+describe('request parts', () => {
+  const thumb = { data: 'AA', mime_type: 'image/jpeg' };
+
+  it('builds a text turn for either role', () => {
+    expect(textTurn('assistant', 'earlier')).toEqual({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'earlier' }],
+    });
+    expect(textTurn('user', 'again').role).toBe('user');
+  });
+
+  it('captions the images it has and skips missing ones', () => {
+    expect(imageParts('Thumbnails:', [thumb, null, thumb])).toEqual([
+      { type: 'text', text: 'Thumbnails:' },
+      { type: 'image', ...thumb },
+      { type: 'image', ...thumb },
+    ]);
+  });
+
+  it('adds no caption when there are no images', () => {
+    expect(imageParts('Thumbnails:', [])).toEqual([]);
+    expect(imageParts('Thumbnails:', [null, null])).toEqual([]);
+  });
 });
 
 describe('redactTurns', () => {

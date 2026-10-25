@@ -18,9 +18,10 @@ import type { AudienceVideo, CandidateList, TagCandidate } from '#lib/server/pip
 import {
   agentInput,
   agentOutput,
+  imageParts,
+  textTurn,
   type AgentSpan,
   type ModelRequest,
-  type Part,
 } from '#lib/server/core/tracing.js';
 import type { CatalogVideo, Thumbnail } from '#lib/server/platforms/youtube/index.js';
 
@@ -233,9 +234,6 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,
   };
-  const thumbnails = ctx.recent.flatMap((v): Part[] =>
-    v.thumbnail ? [{ type: 'image', ...v.thumbnail }] : [],
-  );
   return {
     system: rules.join('\n'),
     turns: [
@@ -243,12 +241,10 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
         role: 'user',
         parts: [
           { type: 'text', text: JSON.stringify(context) },
-          ...(thumbnails.length > 0
-            ? [
-                { type: 'text' as const, text: 'Thumbnails of the recent uploads, newest first:' },
-                ...thumbnails,
-              ]
-            : []),
+          ...imageParts(
+            'Thumbnails of the recent uploads, newest first:',
+            ctx.recent.map((v) => v.thumbnail),
+          ),
         ],
       },
     ],
@@ -498,16 +494,11 @@ export async function runPick(
             ...request,
             turns: [
               ...request.turns,
-              { role: 'assistant', parts: [{ type: 'text', text: JSON.stringify(error.value) }] },
-              {
-                role: 'user',
-                parts: [
-                  {
-                    type: 'text',
-                    text: `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
-                  },
-                ],
-              },
+              textTurn('assistant', JSON.stringify(error.value)),
+              textTurn(
+                'user',
+                `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
+              ),
             ],
           };
         },

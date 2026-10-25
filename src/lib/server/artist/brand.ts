@@ -28,9 +28,9 @@ import { isString, isStrings, shape } from '#lib/server/ai/shape.js';
 import {
   agentInput,
   agentOutput,
+  imageParts,
   invokeAgent,
   type ModelRequest,
-  type Part,
 } from '#lib/server/core/tracing.js';
 import {
   recentVideos,
@@ -100,9 +100,6 @@ export function buildBrandRequest(
     tags: leadingTags(v.tags),
     publishedAt: v.publishedAt,
   }));
-  const thumbnails = videos.flatMap((v): Part[] =>
-    v.thumbnail ? [{ type: 'image', ...v.thumbnail }] : [],
-  );
   return {
     system: RULES,
     turns: [
@@ -110,9 +107,10 @@ export function buildBrandRequest(
         role: 'user',
         parts: [
           { type: 'text', text: JSON.stringify({ uploads }) },
-          ...(thumbnails.length > 0
-            ? [{ type: 'text' as const, text: 'Thumbnails of the newest uploads:' }, ...thumbnails]
-            : []),
+          ...imageParts(
+            'Thumbnails of the newest uploads:',
+            videos.map((v) => v.thumbnail),
+          ),
         ],
       },
     ],

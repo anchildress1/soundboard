@@ -20,6 +20,21 @@ export type Turn = { role: 'user' | 'assistant'; parts: Part[] };
 
 export type ModelRequest = { system: string; turns: Turn[] };
 
+/** A turn of plain text, such as a re-ask or the earlier answer it resends. */
+export const textTurn = (role: Turn['role'], text: string): Turn => ({
+  role,
+  parts: [{ type: 'text', text }],
+});
+
+/** A caption followed by each image, or nothing when there are no images. */
+export function imageParts(
+  caption: string,
+  images: ({ data: string; mime_type: string } | null)[],
+): Part[] {
+  const parts = images.flatMap((image): Part[] => (image ? [{ type: 'image', ...image }] : []));
+  return parts.length > 0 ? [{ type: 'text', text: caption }, ...parts] : [];
+}
+
 const base64Bytes = (b64: string) => {
   const padding = b64.endsWith('==') ? 2 : Number(b64.endsWith('='));
   return Math.floor((b64.length * 3) / 4) - padding;

@@ -25,6 +25,7 @@ import {
   agentInput,
   agentOutput,
   invokeAgent,
+  textTurn,
   type AgentSpan,
   type ModelRequest,
 } from '#lib/server/core/tracing.js';
@@ -161,16 +162,12 @@ export async function runHook(
         ...REASK_ONCE,
         onFailedAttempt: ({ error }) => {
           if (!(error instanceof RepeatedHook)) return;
-          const text = (role: 'assistant' | 'user', text: string) => ({
-            role,
-            parts: [{ type: 'text' as const, text }],
-          });
           request = {
             ...request,
             turns: [
               ...request.turns,
-              text('assistant', JSON.stringify(error.value)),
-              text('user', 'That repeats a skipped hook. Pick a different one.'),
+              textTurn('assistant', JSON.stringify(error.value)),
+              textTurn('user', 'That repeats a skipped hook. Pick a different one.'),
             ],
           };
         },
