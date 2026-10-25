@@ -353,6 +353,29 @@ describe('gate', () => {
     },
   );
 
+  it('lets a signed-out POST reach the research task route, which checks its own token', async () => {
+    const { resolve, seen } = renderer();
+    const ev = event(undefined, {}, '/api/research/task');
+    const response = await run(
+      { ...ev, request: new Request(ev.url, { method: 'POST', body: '{}' }) },
+      resolve,
+    );
+    expect(seen.resolved).toBe(1);
+    expect(seen.locals?.user).toBeNull();
+    expect(response.headers.get('content-security-policy')).toBe(CSP);
+  });
+
+  it.each(['GET', 'PUT', 'DELETE'])(
+    'gates a signed-out %s to the research task route',
+    async (method) => {
+      const { resolve, seen } = renderer();
+      const ev = event(undefined, {}, '/api/research/task');
+      const response = await run({ ...ev, request: new Request(ev.url, { method }) }, resolve);
+      expect(seen.resolved).toBe(0);
+      expect(response.status).toBe(401);
+    },
+  );
+
   it.each(['/api', '/connections', '/nowhere', '/healthz', '/auth', '/auth/login/x'])(
     'gates %s, which is no exempt path',
     async (path) => {

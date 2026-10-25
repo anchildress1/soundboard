@@ -73,6 +73,8 @@ const OPEN = new Set([
   '/health',
 ]);
 
+const RESEARCH_TASK = '/api/research/task';
+
 const gate: Handle = ({ event, resolve }) => {
   const { pathname } = event.url;
   if (event.locals.user) return resolve(event);
@@ -81,6 +83,8 @@ const gate: Handle = ({ event, resolve }) => {
   if (event.isDataRequest)
     return new Response(null, { status: 303, headers: { location: '/auth/signed-out' } });
   if (OPEN.has(pathname)) return resolve(event);
+  // Cloud Tasks has no session: the route checks the queue's OIDC token itself.
+  if (pathname === RESEARCH_TASK && event.request.method === 'POST') return resolve(event);
   if (pathname === '/api' || pathname.startsWith('/api/'))
     return Response.json({ message: 'Sign in first.' }, { status: 401 });
   return new Response(null, { status: 303, headers: { location: '/' } });
