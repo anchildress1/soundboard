@@ -8,10 +8,27 @@ vi.mock('$app/navigation', () => nav);
 type Status = 'connected' | 'missing_scopes' | 'no_channel' | 'revoked';
 type Notice = 'missing_scopes' | 'no_channel' | 'mismatch' | 'wrong-account' | 'failed';
 
+type AnalyticsNotice = 'shared' | 'declined';
+
 const setup = (
-  youtube: { status: Status; channelTitle: string | null; channelId?: string | null } | null,
+  youtube: {
+    status: Status;
+    channelTitle: string | null;
+    channelId?: string | null;
+    analytics?: boolean;
+  } | null,
   notice: Notice | null = null,
-) => render(Page, { props: { data: { youtube, notice } } as never });
+  analyticsNotice: AnalyticsNotice | null = null,
+) =>
+  render(Page, {
+    props: {
+      data: {
+        youtube: youtube && { analytics: false, ...youtube },
+        notice,
+        analyticsNotice,
+      },
+    } as never,
+  });
 
 const CHANNEL_URL = 'https://www.youtube.com/channel/UCflr';
 
@@ -103,6 +120,40 @@ describe('connections page', () => {
     ['failed', "Couldn't connect YouTube. Try again."],
   ])('explains the %s callback outcome', (notice, line) => {
     setup({ status: 'connected', channelTitle: 'Flies Like Robots' }, notice);
+    expect(screen.getByRole('status')).toHaveTextContent(line);
+  });
+
+  it('says analytics is not shared and links Share analytics to the consent flow', () => {
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots' });
+    expect(screen.getByText(/Analytics: Not shared/)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Share analytics' });
+    expect(link).toHaveAttribute('href', '/auth/login?connect=analytics');
+    expect(link).toHaveAttribute('data-sveltekit-reload');
+    expect(
+      screen.getByText(
+        'Stop sharing by disconnecting YouTube; Soundboard deletes your stored results.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('says analytics is shared and offers no second consent', () => {
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots', analytics: true });
+    expect(screen.getByText(/Analytics: Shared/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Share analytics' })).toBeNull();
+    expect(screen.getByText(/Stop sharing by disconnecting YouTube/)).toBeInTheDocument();
+  });
+
+  it('hides the analytics line while YouTube is not connected', () => {
+    setup({ status: 'revoked', channelTitle: null });
+    expect(screen.queryByText(/Analytics:/)).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Share analytics' })).toBeNull();
+  });
+
+  it.each<[AnalyticsNotice, string]>([
+    ['shared', 'Analytics shared. The next draft can learn from your own results.'],
+    ['declined', "Analytics wasn't shared. Drafts keep working without it."],
+  ])('explains the %s analytics outcome', (analyticsNotice, line) => {
+    setup({ status: 'connected', channelTitle: 'Flies Like Robots' }, null, analyticsNotice);
     expect(screen.getByRole('status')).toHaveTextContent(line);
   });
 

@@ -9,6 +9,7 @@ import {
   oauthClient,
   readOAuthState,
   readSession,
+  ANALYTICS_SCOPES,
   SCOPES,
   SESSION_TTL_SEC,
   sessionCookie,
@@ -238,6 +239,24 @@ describe('oauthClient / authUrl', () => {
       prompt: 'select_account consent',
       login_hint: NATHAN_EMAIL,
     });
+  });
+
+  it('adds the Analytics scope for the analytics purpose only, with consent and a hint', () => {
+    const state = newOAuthState('analytics', { uid: UID, sid: 'sid-1' });
+    authUrl(ORIGIN, state, NATHAN_EMAIL);
+    expect(oauth.generateAuthUrl).toHaveBeenCalledWith({
+      scope: ANALYTICS_SCOPES,
+      state: state.nonce,
+      access_type: 'offline',
+      include_granted_scopes: true,
+      prompt: 'select_account consent',
+      login_hint: NATHAN_EMAIL,
+    });
+    expect(ANALYTICS_SCOPES).toEqual([
+      ...SCOPES,
+      'https://www.googleapis.com/auth/yt-analytics.readonly',
+    ]);
+    expect(SCOPES).not.toContain('https://www.googleapis.com/auth/yt-analytics.readonly');
   });
 
   it('requires the client secret', () => {

@@ -56,3 +56,12 @@ export {
   type VideoDuration,
   type VideoOwner,
 } from './youtube';
+export {
+  addDays,
+  analyticsFailure,
+  coverageDay,
+  pacificDate,
+  videoReport,
+  type AnalyticsFailure,
+  type VideoTotals,
+} from './analytics';

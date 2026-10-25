@@ -17,6 +17,11 @@
     failed: "Couldn't connect YouTube. Try again.",
   };
 
+  const ANALYTICS_NOTICES = {
+    shared: 'Analytics shared. The next draft can learn from your own results.',
+    declined: "Analytics wasn't shared. Drafts keep working without it.",
+  };
+
   const FIXES = {
     missing_scopes: 'Upload and read access are missing. Reconnect and allow both.',
     no_channel: 'This Google account has no YouTube channel. Create one, then reconnect.',
@@ -55,6 +60,9 @@
   {#if data.notice}
     <p class="notice" data-tone="warn" role="status">{NOTICES[data.notice]}</p>
   {/if}
+  {#if data.analyticsNotice}
+    <p class="notice" data-tone="warn" role="status">{ANALYTICS_NOTICES[data.analyticsNotice]}</p>
+  {/if}
 
   <div class="platforms">
     <section class="platform" aria-labelledby="youtube">
@@ -83,6 +91,18 @@
                 target="_blank"
                 rel="noopener noreferrer">{name}</a
               >{:else}{name}{/if}.
+          </p>
+          <p class="help">
+            Analytics: {data.youtube.analytics ? 'Shared' : 'Not shared'}.
+            {#if !data.youtube.analytics}
+              <!-- A page load, not client routing: the route redirects to Google. -->
+              <a href="{resolve('/auth/login')}?connect=analytics" data-sveltekit-reload
+                >Share analytics</a
+              >
+            {/if}
+          </p>
+          <p class="help">
+            Stop sharing by disconnecting YouTube; Soundboard deletes your stored results.
           </p>
         {:else}
           <p class="help">{data.youtube ? FIXES[data.youtube.status] : 'Not connected.'}</p>

@@ -2,7 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { OAuth2Client, type Credentials } from 'google-auth-library';
 import { required } from '#lib/server/core/env.js';
 import { invalidGrant } from '#lib/server/core/errors.js';
-import { YOUTUBE_SCOPES } from '#lib/server/platforms/youtube/index.js';
+import { ANALYTICS_SCOPE, YOUTUBE_SCOPES } from '#lib/server/platforms/youtube/index.js';
 
 export const SESSION_COOKIE = 'sb_session';
 export const OAUTH_COOKIE = 'sb_oauth';
@@ -11,6 +11,9 @@ export const OAUTH_TTL_SEC = 10 * 60;
 
 /** One consent covers identity and the YouTube channel, so sign-in also connects it. */
 export const SCOPES = ['openid', 'email', ...YOUTUBE_SCOPES];
+
+/** The optional Share analytics connect adds the read-only Analytics scope, never at sign-in. */
+export const ANALYTICS_SCOPES = [...SCOPES, ANALYTICS_SCOPE];
 
 /** `sid` is random per sign-in, so each browser session is distinct; `exp` never slides. */
 export type Session = { uid: string; sid: string; exp: number };
@@ -61,7 +64,7 @@ export function readSession(cookie: string | undefined, now = Date.now()): Sessi
 /** On `connect`, `uid` and `sid` name the session that started it, so a stale callback fails. */
 export type OAuthState = {
   nonce: string;
-  purpose: 'sign-in' | 'connect';
+  purpose: 'sign-in' | 'connect' | 'analytics';
   uid: string | null;
   sid: string | null;
   exp: number;
@@ -97,14 +100,15 @@ export function oauthClient(origin: string): OAuth2Client {
 }
 
 /**
- * Every flow asks for all scopes offline, folding in earlier grants. Sign-in shows the account
- * chooser; connect also forces consent so Google returns a refresh token, and passes `loginHint`
- * (the user's email) because the grant must belong to them. Sign-in ignores `loginHint`.
+ * Every flow asks for all scopes offline, folding in earlier grants; only the analytics connect
+ * adds the Analytics scope. Sign-in shows the account chooser; connect and analytics also force
+ * consent so Google returns a refresh token, and pass `loginHint` (the user's email) because the
+ * grant must belong to them. Sign-in ignores `loginHint`.
  */
 export function authUrl(origin: string, state: OAuthState, loginHint?: string): string {
-  const connect = state.purpose === 'connect';
+  const connect = state.purpose !== 'sign-in';
   return oauthClient(origin).generateAuthUrl({
-    scope: SCOPES,
+    scope: state.purpose === 'analytics' ? ANALYTICS_SCOPES : SCOPES,
     state: state.nonce,
     access_type: 'offline',
     include_granted_scopes: true,

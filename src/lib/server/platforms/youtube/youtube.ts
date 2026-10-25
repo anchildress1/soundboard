@@ -156,7 +156,7 @@ function errorReason(body: string): string | null {
   }
 }
 
-async function readJson<T>(response: Response, what: string): Promise<T> {
+export async function readJson<T>(response: Response, what: string): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
     throw new YouTubeError(

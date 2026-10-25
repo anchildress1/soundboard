@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { captureException, captureMessage } from '@sentry/sveltekit';
+import { readFileSync } from 'node:fs';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
@@ -15,7 +16,9 @@ import {
   revokeGrant,
   type ConnectionRow,
 } from '#lib/server/platforms/youtube/connection.js';
-import { artistGuides } from '#lib/server/core/schema.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { query } from '#lib/server/core/db.js';
+import { artistGuides, artistOutcomes } from '#lib/server/core/schema.js';
 import {
   ANALYTICS_SCOPE,
   DeadlineSpent,
@@ -855,5 +858,104 @@ describe('guide proposals across grants', () => {
     });
     await revokeGrant(UID);
     expect(await kinds()).toEqual(['proposed:theirs']);
+  });
+});
+
+describe('artist outcomes across sharing', () => {
+  const SHARED = [...SCOPES, ANALYTICS_SCOPE];
+  const outcome = (artistId: string, videoId: string) => ({
+    artistId,
+    videoId,
+    retrievedAt: new Date(),
+    publishedAt: new Date(Date.now() - 40 * 24 * 60 * 60_000),
+    requestedStart: '2026-09-01',
+    requestedEnd: '2026-09-28',
+    coverage: 'complete' as const,
+    metrics: { views: 10, subscribersGained: 1, subscribersLost: 0 },
+    live: { title: 'Song', description: '', tags: [] },
+  });
+  const stored = async () =>
+    (await db().select({ artistId: artistOutcomes.artistId }).from(artistOutcomes))
+      .map((row) => row.artistId)
+      .toSorted();
+  /** What review reads: the caller's outcomes under RLS. */
+  const visible = () => withIdentity(UID, () => query((tx) => tx.select().from(artistOutcomes)));
+
+  beforeEach(async () => {
+    await db().execute(sql`truncate artists cascade`);
+    await seed({
+      artists: [
+        { id: 'art-1', name: 'Artist One' },
+        { id: 'art-2', name: 'Artist Two' },
+      ],
+      users: [
+        { uid: UID, email: 'a@example.com', artistId: 'art-1' },
+        { uid: 'sub-b', email: 'b@example.com', artistId: 'art-2' },
+      ],
+    });
+    await putConnection(UID, connected({ scopes: SHARED }));
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SHARED }));
+    await seed({ artistOutcomes: [outcome('art-1', 'v1'), outcome('art-2', 'v2')] });
+  });
+
+  it('shows the artist their own results while the grant is shared', async () => {
+    expect((await visible()).map((row) => row.videoId)).toEqual(['v1']);
+  });
+
+  it('deletes them when the grant is marked revoked, sparing every other artist', async () => {
+    await markRevoked(UID, grant('c2VhbGVk'));
+    expect(await stored()).toEqual(['art-2']);
+    expect(await visible()).toEqual([]);
+  });
+
+  it('keeps them when a stale token is refused after a reconnect', async () => {
+    await putConnection(UID, connected({ scopes: SHARED, tokenCiphertext: 'bmV3' }));
+    await markRevoked(UID, grant('b2xk'));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('deletes them when Disconnect removes the connection', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 200 })),
+    );
+    await revokeGrant(UID);
+    expect(await stored()).toEqual(['art-2']);
+    expect(await visible()).toEqual([]);
+  });
+
+  it('deletes them when a reconnect drops the Analytics scope', async () => {
+    await putConnection(UID, connected({ scopes: SCOPES }));
+    expect(await stored()).toEqual(['art-2']);
+  });
+
+  it('keeps them when a reconnect keeps the scope', async () => {
+    await putConnection(UID, connected({ scopes: SHARED, tokenCiphertext: 'bmV3' }));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('hides them at once, before any delete, while sharing is off', async () => {
+    await db().execute(sql`update connections set scopes = '{}' where uid = ${UID}`);
+    await seed({ artistOutcomes: [outcome('art-1', 'v3')] });
+    expect(await visible()).toEqual([]);
+  });
+
+  it('has nothing to delete for a connection that never shared', async () => {
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SCOPES }));
+    await seed({ artistOutcomes: [outcome('art-2', 'v4')] });
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SCOPES }));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('keeps platform code free of the research and artist-memory domains', () => {
+    const imports = (file: string) =>
+      readFileSync(`src/lib/server/platforms/youtube/${file}`, 'utf8').match(
+        /#lib\/server\/(?:artist|research)\/[\w-]+\.js/g,
+      ) ?? [];
+    expect(imports('analytics.ts')).toEqual([]);
+    expect(imports('youtube.ts')).toEqual([]);
+    expect(imports('index.ts')).toEqual([]);
+    // Dropping guide proposals with a grant is 005's only dependency.
+    expect(imports('connection.ts')).toEqual(['#lib/server/artist/guides.js']);
   });
 });
