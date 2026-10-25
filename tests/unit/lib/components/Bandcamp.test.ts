@@ -119,7 +119,7 @@ describe('Bandcamp', () => {
     const open = screen.getByRole('link', { name: "Open Bandcamp's new-track page" });
     expect(open).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com/edit_track');
     expect(open).toHaveAttribute('target', '_blank');
-    expect(open).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(open).toHaveAttribute('rel', 'external noopener noreferrer');
   });
 
   it("links the profile's own editor", () => {

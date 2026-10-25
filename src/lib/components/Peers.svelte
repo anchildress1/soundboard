@@ -66,7 +66,7 @@
               <ul class="releases">
                 {#each peer.releases as release (release.ref)}
                   <li>
-                    <a href={release.url} target="_blank" rel="noopener noreferrer"
+                    <a href={release.url} target="_blank" rel="external noopener noreferrer"
                       >{release.title}</a
                     >
                     <span class="help">

@@ -10,7 +10,9 @@
     {#if artist}
       Built for
       {#if artist.bandcampUrl}
-        <a href={artist.bandcampUrl} target="_blank" rel="noopener noreferrer">{artist.name}</a>
+        <a href={artist.bandcampUrl} target="_blank" rel="external noopener noreferrer"
+          >{artist.name}</a
+        >
       {:else}
         {artist.name}
       {/if}
@@ -21,13 +23,19 @@
   </p>
   <div class="links">
     <nav aria-label="Ashley Childress">
-      <a href="https://anchildress1.dev" target="_blank" rel="noopener noreferrer">Site</a>
-      <a href="https://github.com/anchildress1" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a href="https://dev.to/anchildress1" target="_blank" rel="noopener noreferrer">DEV</a>
-      <a href="https://www.linkedin.com/in/anchildress1" target="_blank" rel="noopener noreferrer"
-        >LinkedIn</a
+      <a href="https://anchildress1.dev" target="_blank" rel="external noopener noreferrer">Site</a>
+      <a href="https://github.com/anchildress1" target="_blank" rel="external noopener noreferrer"
+        >GitHub</a
       >
-      <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
+      <a href="https://dev.to/anchildress1" target="_blank" rel="external noopener noreferrer"
+        >DEV</a
+      >
+      <a
+        href="https://www.linkedin.com/in/anchildress1"
+        target="_blank"
+        rel="external noopener noreferrer">LinkedIn</a
+      >
+      <a href="https://x.com/anchildress1" target="_blank" rel="external noopener noreferrer">X</a>
     </nav>
     <nav aria-label="Legal">
       <a href={resolve('terms')} data-sveltekit-reload>Terms of Service</a>

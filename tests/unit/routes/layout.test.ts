@@ -79,7 +79,7 @@ describe('layout', () => {
     ]);
     for (const link of links) {
       expect(link).toHaveAttribute('target', '_blank');
-      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
     }
     expect(nav.closest('footer')).not.toBeNull();
   });

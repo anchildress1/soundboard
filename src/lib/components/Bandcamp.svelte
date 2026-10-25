@@ -91,7 +91,7 @@
         class="btn primary"
         href={editor}
         target="_blank"
-        rel="noopener noreferrer"
+        rel="external noopener noreferrer"
         onclick={openEditor}>Open Bandcamp's new-track page</a
       >
     {:else}

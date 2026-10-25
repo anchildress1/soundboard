@@ -52,7 +52,7 @@ describe('Peers', () => {
     setup();
     const link = within(card('Neon Harbor')).getByRole('link', { name: 'Night Drive' });
     expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=v-1');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
     const line = link.nextElementSibling!;
     expect(line).toHaveTextContent('Most engaged');
     expect(line).toHaveTextContent('1,000 views');

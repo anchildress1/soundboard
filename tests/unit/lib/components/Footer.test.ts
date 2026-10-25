@@ -15,7 +15,7 @@ describe('Footer', () => {
     const link = within(credit()).getByRole('link', { name: 'Test Artist' });
     expect(link).toHaveAttribute('href', 'https://test-artist.bandcamp.com');
     expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
   });
 
   it('names the artist as plain text without a Bandcamp URL', () => {
