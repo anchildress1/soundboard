@@ -50,6 +50,13 @@
       "when": 1792945087689,
       "tag": "0006_artist_guides",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792950320648,
+      "tag": "0007_fanbase_learning",
+      "breakpoints": true
     }
   ]
 }
