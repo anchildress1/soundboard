@@ -14,6 +14,7 @@ export const startNewTrace = vi.fn((fn: () => unknown) => fn());
 export const getTraceData = vi.fn((): Record<string, string> => ({}));
 export const captureException = vi.fn();
 export const captureMessage = vi.fn();
+export const addBreadcrumb = vi.fn();
 export const browserTracingIntegration = vi.fn(() => ({ name: 'BrowserTracing' }));
 export const sentryHandle = vi.fn(
   (): Handle =>

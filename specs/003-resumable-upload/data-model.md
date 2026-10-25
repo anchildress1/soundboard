@@ -51,8 +51,9 @@ The content type is the existing `JobDoc.contentType`. `newJobDoc` sets `videoUp
 
 ## Browser state (`src/lib/upload.ts`)
 
-- A module-level store, one entry per job uploading in this tab: `{ file, sessionUri, generation, fingerprint, size, saved, state, reason }`.
-  - `state`: `sending`, `paused`, `away`, `other-tab`, `replaced`, `moved`, `stopped`, `done`.
+- A module-level store, one entry per job uploading in this tab: `{ file, sessionUri, generation, fingerprint, size, saved, state, reason, notice, error }`.
+  - `state`: `sending`, `paused`, `away`, `replaced`, `moved`, `stopped`, `done`. "Uploading in another tab" is a page state: that tab has no entry.
+  - `notice` (while sending): `new-video` or `renewed`. `error`: the message a stop ended on.
   - `reason` (while paused): `offline`, `stall`, `no-reply`, `timeout`, `408`, `429`, `5xx`.
 - Object URLs belong to the page showing the Monitor: each page makes its own from `file` and revokes it on destroy.
 - It survives in-app navigation and is empty after a page load. `stop(jobId)` aborts the request in flight and releases the lock.
