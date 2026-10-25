@@ -61,6 +61,8 @@ export type ReviewData = {
   evidence: Citation[];
   influence: Influence | null;
   influenceWarning: string | null;
+  /** What the draft couldn't use, as the server built it; the reason when there is no recommendation. */
+  limits: string[];
   /** Null when the artist's count is hidden or the evidence is gone. */
   ranges: { current: Range; target: Range | null } | null;
   /** Null once the pick's evidence is hidden or deleted. */

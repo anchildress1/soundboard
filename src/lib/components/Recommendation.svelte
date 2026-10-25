@@ -70,9 +70,9 @@
     <p class="help">No recommendation for this draft.</p>
   {/if}
 
-  {#if recommendation && recommendation.limits.length > 0}
+  {#if data.limits.length > 0}
     <ul class="limits">
-      {#each recommendation.limits as limit (limit)}
+      {#each data.limits as limit (limit)}
         <li class="help">{limitText(limit)}</li>
       {/each}
     </ul>

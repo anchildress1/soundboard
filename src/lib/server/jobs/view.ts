@@ -197,6 +197,7 @@ export async function reviewData(pick: Pick | null): Promise<ReviewData | null> 
     evidence: (pick.recommendation?.evidence ?? []).map(cite),
     influence: pick.influence,
     influenceWarning: pick.influenceWarning ?? null,
+    limits: pick.limits ?? pick.recommendation?.limits ?? [],
     ranges: current === null ? null : { current, target: nextBracket(current) },
     peers: stored && evidence ? peersOf(evidence, stored.retrievedAt) : null,
     evidenceExpiresAt: pick.evidenceExpiresAt ?? null,

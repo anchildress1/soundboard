@@ -59,6 +59,13 @@ describe('Recommendation', () => {
     expect(screen.queryByText('Try', { selector: 'dt' })).toBeNull();
   });
 
+  it('gives the reason when there is no recommendation', () => {
+    setup({ recommendation: null, evidence: [], limits: ['secondary-only'] });
+    expect(
+      screen.getByText('No recommendation: only secondary evidence supported it.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows an influence warning', () => {
     setup({ influenceWarning: 'Influence settings not met' });
     expect(screen.getByRole('note')).toHaveTextContent('Influence settings not met');

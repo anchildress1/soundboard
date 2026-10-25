@@ -420,6 +420,7 @@ describe('reviewData', () => {
       'evidenceExpiresAt',
       'influence',
       'influenceWarning',
+      'limits',
       'peers',
       'ranges',
       'recommendation',
@@ -478,6 +479,16 @@ describe('reviewData', () => {
     await saveEvidence();
     const data = await asA(() => reviewData(stored({ recommendation: null })));
     expect(data).toMatchObject({ recommendation: null, evidence: [] });
+  });
+
+  it('carries the pick’s limits, which say why there is no recommendation', async () => {
+    await saveEvidence();
+    const data = await asA(() =>
+      reviewData(
+        stored({ recommendation: null, limits: ['analytics-not-shared', 'secondary-only'] }),
+      ),
+    );
+    expect(data?.limits).toEqual(['analytics-not-shared', 'secondary-only']);
   });
 
   it('reads expired evidence as expired, with the date the pick recorded', async () => {

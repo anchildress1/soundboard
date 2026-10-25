@@ -50,6 +50,7 @@ export const REVIEW: ReviewData = {
   ],
   influence: { sound: 1, feel: 0, wording: 0, discovery: 4, structure: 4 },
   influenceWarning: null,
+  limits: ['analytics-not-shared', 'something-new'],
   ranges: { current: 100, target: 1000 },
   peers: [PEER, SECOND_PEER],
   evidenceExpiresAt: '2026-11-20T00:00:00.000Z',
