@@ -177,7 +177,7 @@ describe('Review: approval', () => {
   });
 
   it('sends YouTube reconnection instead of approval without a channel', async () => {
-    setup({ destination: null });
+    const { ondiscard } = setup({ destination: null });
     await toApprove();
     expect(fact('Channel')).toHaveTextContent('Not connected');
     expect(screen.getByText('Reconnect YouTube to upload.')).toBeInTheDocument();
@@ -186,7 +186,12 @@ describe('Review: approval', () => {
       '/connections',
     );
     expect(screen.queryByRole('button', { name: APPROVE })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Discard release' })).toBeNull();
+    await fireEvent.click(button('Discard release'));
+    expect(ondiscard).toHaveBeenCalledTimes(1);
+    await fireEvent.click(button('Back'));
+    expect(
+      screen.getByRole('heading', { name: 'One thing to know before it uploads' }),
+    ).toBeInTheDocument();
   });
 
   it('disables every action while busy', async () => {

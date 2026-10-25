@@ -229,17 +229,7 @@
         >
       </div>
     {/if}
-    {#if destination}
-      <div class="actions">
-        <button class="btn" type="button" onclick={back}>Back</button>
-        <button class="btn danger small" type="button" disabled={busy} onclick={ondiscard}
-          >Discard release</button
-        >
-        <button class="btn primary" type="button" disabled={busy || !!firstError} onclick={approve}
-          >Approve &amp; upload</button
-        >
-      </div>
-    {:else}
+    {#if !destination}
       <div class="notice" data-tone="warn">
         <strong>Reconnect YouTube to upload.</strong>
         <span class="help"
@@ -248,6 +238,17 @@
         <a class="btn primary" href={resolve('/connections')}>Reconnect YouTube</a>
       </div>
     {/if}
+    <div class="actions">
+      <button class="btn" type="button" onclick={back}>Back</button>
+      <button class="btn danger small" type="button" disabled={busy} onclick={ondiscard}
+        >Discard release</button
+      >
+      {#if destination}
+        <button class="btn primary" type="button" disabled={busy || !!firstError} onclick={approve}
+          >Approve &amp; upload</button
+        >
+      {/if}
+    </div>
   {/if}
 </div>
 
