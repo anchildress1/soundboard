@@ -35,6 +35,7 @@
 - Q: What happens to a pick on an older job whose owner has no profile yet? → A: It waits with "Add your artist name first." and a link to Settings.
 - Q: Can a contact line contain `#`? → A: No. The app appends it verbatim, and a hashtag outside the job's list would block approval.
 - Q: Which job does a Short belong to for artist memory? → A: The parent's artist link. Only its tags use the owner's current name.
+- Q: What if KMS can't decrypt a stored YouTube grant under its key? → A: Treat it as access-lost, like a revoked grant: mark the connection revoked and wait on "Reconnect YouTube", with no failure strike, for identity reads, the pick, the brand guide, upload and verify. KMS transport or permission errors still fail as before.
 
 ## User Scenarios & Testing _(mandatory)_
 
