@@ -44,6 +44,8 @@
   let reviewStep = $state<ReviewStep>('title');
   /** The YouTube release, or one of the side trips offered once it's approved. */
   let room = $state<'release' | 'short' | 'bandcamp'>('release');
+  // The offers are server-rendered, and a click before hydration attaches their handlers is lost.
+  let hydrated = $state(false);
   // Finished calls only land in the view when their step returns, so the clock covers the gap.
   let stepStartedAt = $state(Date.now());
   let now = $state(Date.now());
@@ -245,6 +247,7 @@
   };
 
   onMount(() => {
+    hydrated = true;
     if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
     if (job.state === 'AWAITING_UPLOAD') void finishUpload();
     else void run();
@@ -425,7 +428,7 @@
       <section class="offers" aria-labelledby="offers-heading">
         <h2 id="offers-heading">Up next, if you want</h2>
         {#if shortView}
-          <button class="offer" type="button" onclick={() => enter('short')}>
+          <button class="offer" type="button" disabled={!hydrated} onclick={() => enter('short')}>
             <span>
               <strong
                 >{shortView.job.state === 'VERIFIED' ? 'Your Short' : 'Finish the Short'}</strong
@@ -442,7 +445,7 @@
           <button
             class="offer"
             type="button"
-            disabled={shortBusy || tooShortForShort}
+            disabled={!hydrated || shortBusy || tooShortForShort}
             onclick={makeShort}
           >
             <span>
@@ -457,7 +460,12 @@
           </button>
         {/if}
         {#if approved && fields && view.pick}
-          <button class="offer" type="button" onclick={() => enter('bandcamp')}>
+          <button
+            class="offer"
+            type="button"
+            disabled={!hydrated}
+            onclick={() => enter('bandcamp')}
+          >
             <span>
               <strong>Put it on Bandcamp</strong>
               <span class="help"

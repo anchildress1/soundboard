@@ -55,6 +55,19 @@ test.describe('up next', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText("It's on your channel");
   });
 
+  test('holds an offer until the page can act on it', async ({ page }, testInfo) => {
+    // Slow script delivery stands in for a loaded phone: the server-rendered offer shows first.
+    await page.route('**/_app/immutable/**', async (route) => {
+      await new Promise((done) => setTimeout(done, 2000));
+      await route.continue();
+    });
+    await page.goto(`/jobs/e2e-make-${testInfo.project.name}`, { waitUntil: 'commit' });
+    const bandcamp = offers(page).getByRole('button', { name: /Put it on Bandcamp/ });
+    await expect(bandcamp).toBeDisabled();
+    await bandcamp.click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Copy these into Bandcamp');
+  });
+
   test('shows no offers while the video is still being analyzed', async ({ page }) => {
     const step = page.waitForResponse((response) =>
       response.url().endsWith('/jobs/e2e-analyzing/step'),
