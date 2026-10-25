@@ -11,3 +11,14 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/provider-utils@5.0.68'
   - '@ai-sdk/provider@4.0.34'
   - ai@7.0.153
+# Patched versions of vulnerable transitive deps that no upstream release pulls in yet.
+# extract-zip has no fix; @puppeteer/browsers 3 (under Lighthouse's puppeteer-core 24) drops it
+# and peers on proxy-agent 8.
+overrides:
+  '@puppeteer/browsers@<3': 3.2.6
+  basic-ftp@<6.2.1: 6.2.3
+  esbuild@<0.25.0: 0.25.12
+  proxy-agent@<8: 8.0.2
+  tmp@<0.2.6: 0.2.7
+  uuid@<11.1.1: 11.1.1
+  zod@<4.6.6: 4.6.7
