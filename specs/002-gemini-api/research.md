@@ -141,7 +141,7 @@ Gate G1 ran on the real project on 2026-10-22 (R12).
 
 - **Decision:** one credential, `GEMINI_API_KEY`.
   - It's an AI Studio authorization key, an API key bound to a service account; requests act as that account.
-  - It lives in Secret Manager as `soundboard-gemini-api-key`, synced from `.env` by `deploy.sh` like the other app secrets.
+  - It lives in Secret Manager as `soundboard_gemini_api_key`, synced from `.env` by `deploy.sh` like the other app secrets.
   - It's restricted to the Generative Language API.
   - One key for dev and prod, the same pattern as the YouTube API key (owner's call, 2026-10-24). Local runs share prod's spend, per-day quota and abuse log. Rejected: a separate paid dev project and key.
 - **G1 finding:** don't mix credentials.

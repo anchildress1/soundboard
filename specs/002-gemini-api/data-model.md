@@ -45,7 +45,7 @@ type ModelRequest = { system: string; turns: Turn[] };
 
 | Name                   | Where                                                      | Default            |
 | ---------------------- | ---------------------------------------------------------- | ------------------ |
-| `GEMINI_API_KEY`       | Secret Manager `soundboard-gemini-api-key`; `.env` locally | required           |
+| `GEMINI_API_KEY`       | Secret Manager `soundboard_gemini_api_key`; `.env` locally | required           |
 | `GEMINI_ANALYST_MODEL` | `service.yaml` env                                         | `gemini-3.8-flash` |
 | `GEMINI_PICK_MODEL`    | `service.yaml` env                                         | `gemini-4-argon`   |
 | `MODEL_URL`            | removed                                                    | —                  |

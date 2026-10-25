@@ -76,7 +76,7 @@ Expected:
 
 ## Manual: deployed, at the combined release after approval
 
-1. Put `GEMINI_API_KEY` in `.env`, then `./deploy.sh`. Expected: `soundboard-gemini-api-key` is in Secret Manager, no Vertex step runs.
+1. Put `GEMINI_API_KEY` in `.env`, then `./deploy.sh`. Expected: `soundboard_gemini_api_key` is in Secret Manager, no Vertex step runs.
 2. Upload a 3-minute video and a 15-minute video. Both reach review with chunk N/M shown and every step under about 2 minutes, including seeking/cutting/measurement/inference on Cloud Run (SC-002, SC-003). Include first and last windows of a 2 GB, 15-minute source; inspect portrait/high-frame-rate/noisy inputs, verify complete clip duration/audio and size guards, and force timeout cleanup. Check pick and hook latency against G1 budgets.
 3. Check the pick: every hashtag and tag is from the candidates, and there are no loudness numbers in the text (SC-004).
 4. Make a Short and propose a brand guide. Both complete.

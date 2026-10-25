@@ -172,7 +172,7 @@ make dev
 - **Genre research retention:** database reads exclude research at least 30 days old. Deploy and enable the daily Neon cleanup separately using [the retention procedure](docs/operations/youtube-retention.md); an app deployment alone does not create that schedule.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
 - **Brand guide:** accounts linked to Nathan's artist profile get a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
-- **Gemini API key:** create it in a paid-tier project. `make deploy` copies `GEMINI_API_KEY` from `.env` into the `soundboard-gemini-api-key` secret when it changes; dev and prod share the key, its spend, and its daily quota.
+- **Gemini API key:** create it in a paid-tier project. `make deploy` copies `GEMINI_API_KEY` from `.env` into the `soundboard_gemini_api_key` secret when it changes; dev and prod share the key, its spend, and its daily quota.
 
 ---
 

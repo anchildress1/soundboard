@@ -145,7 +145,7 @@ grant_secret() {
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
-sync_secret soundboard-gemini-api-key GEMINI_API_KEY
+sync_secret soundboard_gemini_api_key GEMINI_API_KEY
 # The prod database URL lives only in Secret Manager: .env's points local dev at its own Neon branch.
 gcloud secrets describe DATABASE_URL --project "$GCP_PROJECT_ID" &> /dev/null || {
   echo "Error: secret 'DATABASE_URL' is missing; create it from Neon's main branch (README)." >&2

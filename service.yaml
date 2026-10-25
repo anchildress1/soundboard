@@ -57,7 +57,7 @@ spec:
                 secretKeyRef: { name: soundboard-youtube-api-key, key: latest }
             - name: GEMINI_API_KEY
               valueFrom:
-                secretKeyRef: { name: soundboard-gemini-api-key, key: latest }
+                secretKeyRef: { name: soundboard_gemini_api_key, key: latest }
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: DATABASE_URL, key: latest }
