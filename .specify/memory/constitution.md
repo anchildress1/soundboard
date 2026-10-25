@@ -36,10 +36,11 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
 
 - One Cloud Run service and one model provider. No added services, queues, functions or
   background workers, with two exceptions:
-  - Research and learning stages (spec 006) MAY run server-side, independent of the browser.
-    Their plan chooses the mechanism.
-  - One scheduled database retention job deletes expired YouTube data: statistics, and the
-    inputs listed on voice and brand proposals (Platform Terms).
+  - Research and learning stages (spec 006) run server-side through one Cloud Tasks queue. Each
+    delivery calls the app service and runs one claimed stage under the step budget. Nothing
+    else uses the queue.
+  - One scheduled database retention job deletes expired YouTube data: statistics, peer
+    research, the artist's analytics outcomes, peer rejections, and proposal inputs.
 - Every other pipeline step advances one step per page request, each under about 2 minutes,
   claimed in a database transaction.
 - A cold or busy dependency, or a missing or revoked user grant, MUST return a wait reason
@@ -86,7 +87,10 @@ addition local instead of spreading through every file.
 - Media is never buffered whole in app memory. Stream in chunks or use a temp file deleted in
   `finally`. ffmpeg and uploads read sources from GCS by signed URL.
 - Signed URLs are issued only after an ownership check.
-- Sentry never records audio, image bytes, tokens or ciphertext.
+- Sentry never records audio, image bytes, tokens or ciphertext. In the reply or reasoning of an
+  agent that can restate YouTube API data (peer match, smart pick), the API-derived values
+  (numbers, peer titles, channel names, peer text) are replaced with placeholders; the rest of the
+  reply text is kept.
 - Secrets live only in Secret Manager or a local `.env`. Never in the repo.
 
 ## Platform Terms
@@ -97,8 +101,14 @@ addition local instead of spreading through every file.
   unreadable by the app and MUST be deleted daily, even while the app is idle.
 - YouTube data read for a proposal MUST be kept at most 30 days, enforced by the database. Only
   artist-approved rules, holding no YouTube data, persist.
-- Until YouTube accepts the derived-metrics amendment, no number MAY be calculated from YouTube
-  statistics, and no channel MAY be scored, ranked or grouped by its statistics.
+- The owner states that YouTube accepted the derived-metrics amendment (III.L, recorded
+  2026-10-25). Numbers calculated from YouTube statistics MUST be computed in code from stored
+  data and labeled as calculated; reported numbers are shown exactly as YouTube returns them.
+  Model output MUST NOT contain statistics. No combined performance score.
+- YouTube Analytics data is read only through the artist's optional analytics grant. It is
+  refreshed or deleted within 30 days, and deleted when the grant is revoked.
+- Peer channels and videos are kept at most 30 days. Long-lived records point at them only
+  through expiring evidence, never by name or ID.
 - API data MUST NOT be aggregated across different content owners.
 
 Rationale: a policy violation can cost the API access that uploads and verification depend on.
@@ -121,4 +131,4 @@ Rationale: a policy violation can cost the API access that uploads and verificat
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 4.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-25
+**Version**: 5.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-25
