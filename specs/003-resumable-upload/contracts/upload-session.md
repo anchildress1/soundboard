@@ -2,7 +2,7 @@
 
 ## `POST /api/jobs` (changed)
 
-The request body adds `fingerprint` (64 hex characters). The response becomes `{ id, sessionUri }`.
+Called by `/new` (`createJob` in `src/lib/api.ts`). The request body adds `fingerprint` (64 lowercase hex characters). The response becomes `{ id, sessionUri }` (today: `{ id, uploadUrl }`).
 
 - The session is created with origin, content type, size and `ifGenerationMatch: 0` before the job is stored. A failure stores no job.
 - A bad fingerprint returns 400 alongside today's checks.
@@ -24,7 +24,8 @@ Owner-only through `authorizedJob`, so another user's job returns 404. Only the 
 ```
 
 - `renew: false` is a pick the user made. It always wins (research R6).
-- `renew: true` is the uploader recovering on its own after a 404, 410, 412 or 499. It swaps only if `prev` still matches.
+- `renew: true` is the uploader recovering on its own after a 404, 410, 412 or 499. It swaps only if `prev` still matches. `prev` is required (else 400). The new session uses the stored `videoUpload.size` and `contentType`; the body's file fields are ignored.
+- Every swap is `WHERE state = 'AWAITING_UPLOAD'`. If a pick's swap matches no row (the job was discarded or landed meanwhile), the session just made is cancelled and the reply is the 409 for the job's state now.
 
 Checks run in this order.
 
@@ -39,15 +40,15 @@ Checks run in this order.
 | 200      | `{ sessionUri, restarted: true }`                        | A renew whose `prev` matches: a new session is swapped in, then the old one is cancelled.               |
 | 409      | `{ message: "A different video replaced this upload." }` | A renew whose `prev` no longer matches. The session just made is cancelled.                             |
 
-- `sessionUri` appears only in these two responses. It never appears in `JobView`, logs or traces.
+- `sessionUri` appears only in this response and the create response. It never appears in `JobView`, page data, logs or traces.
 
 ## Server ↔ GCS
 
 | Call                                                  | When                                                 | Notes                                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Create session (`createResumableUpload`)              | create, pick of a new file, renew                    | `origin`, `contentType`, `contentLength`, `preconditionOpts: { ifGenerationMatch: 0 }` |
-| Status query (`PUT`, `Content-Range: bytes */<size>`) | job page server load for `AWAITING_UPLOAD`           | fills `JobView.uploadSaved`; no media; a failure leaves it null                        |
-| Cancel (`DELETE` session URI)                         | after any swap, and on discard                       | `404`, `410`, `499` count as done; other failures ignored                              |
+| Status query (`PUT`, `Content-Range: bytes */<size>`) | job page server load for `AWAITING_UPLOAD`           | fills page data `uploadSaved`; no media; 5 s timeout; a failure leaves it null         |
+| Cancel (`DELETE` session URI)                         | after any swap, and on discard                       | `404`, `410`, `499` count as done; 5 s timeout; other failures ignored                 |
 | Delete object                                         | discard of an unfinished upload, if it landed anyway | never for a job whose upload finished                                                  |
 
 ## Browser ↔ GCS (session URI)
@@ -73,7 +74,8 @@ This is the canonical list (spec FR-010).
 | State                                      | Text                                                                                     |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------- |
 | Sending                                    | `Uploading n%`                                                                           |
-| Network pause                              | `Upload paused: no connection`                                                           |
+| Network pause                              | `Upload paused: no connection` (status 0, stall, `408`)                                  |
+| Storage busy (`429`, `5xx`)                | `Uploading n%`, held at the confirmed offset while it backs off (no new copy)            |
 | Hidden tab back, nothing sent while hidden | "The upload paused while you were away." (until bytes flow)                              |
 | No file in this tab                        | `Upload paused at n%. Pick the video to continue.` + file input (`n` from `uploadSaved`) |
 | No file, saved amount unknown              | "Pick the video to continue." + file input                                               |
@@ -82,3 +84,10 @@ This is the canonical list (spec FR-010).
 | Session renewed                            | "The saved upload expired; starting again."                                              |
 | Replaced elsewhere                         | "A different video replaced this upload." + file input                                   |
 | Discarded elsewhere                        | "This job was discarded."                                                                |
+
+The working screen's copy for `AWAITING_UPLOAD` (`workCopy` in `src/lib/release.ts`) changes with FR-005:
+
+| Field | Text                                                                             |
+| ----- | -------------------------------------------------------------------------------- |
+| Title | "Uploading your video" (unchanged)                                               |
+| Body  | "Keep this tab open until the upload finishes. Other pages in the app are fine." |

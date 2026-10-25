@@ -12,19 +12,20 @@ videoUpload: {
 } | null;
 ```
 
-The content type is the existing `JobDoc.contentType`.
+The content type is the existing `JobDoc.contentType`. `newJobDoc` sets `videoUpload: null`, so Short jobs (built through it) carry null too. The field lives in `data`, not in `GUARDED`, so `jobSet` patches it like any other data field.
 
 | Rule     | Detail                                                                                                                                                |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Set      | At create, after the session exists (`ifGenerationMatch: 0`).                                                                                         |
+| Set      | At create, after the session exists (`ifGenerationMatch: 0`). A job row with no `videoUpload` reads as null: a pick starts a new upload.              |
 | Replaced | A user pick with a different file: unconditional swap (newest pick wins), then the old session is cancelled. `filename` and `contentType` change too. |
 | Renewed  | Automatic `renew: true` after a 404, 410, 412 or 499 reply: swapped only if `prev` still matches, then the old session is cancelled.                  |
 | Cleared  | When the job moves to `PREP`, and on discard (after the `DELETE`).                                                                                    |
-| Never    | In `toPublic`, `JobView`, logs, spans or breadcrumbs.                                                                                                 |
+| Never    | In `toPublic`, `JobView`, page data, logs, spans or breadcrumbs.                                                                                      |
 
-## `JobView` (`src/lib/types.ts`)
+## Job page data (`src/routes/jobs/[id]/+page.server.ts`)
 
-- Adds `uploadSaved: { saved: number; total: number } | null`. Only the job page's server load fills it, from a status query, for `AWAITING_UPLOAD` jobs. Step and action responses leave it null. `uploadProgress` stays YouTube's.
+- Adds `uploadSaved: { saved: number; total: number } | null` beside `view`, `expired` and `playbackUrl`. Only this load fills it, from a status query, for `AWAITING_UPLOAD` jobs with a `videoUpload`. A failed query or no session leaves it null.
+- `JobView` and `PublicJob` (`src/lib/types.ts`) are unchanged, so step and action responses never carry it. `uploadProgress` stays YouTube's.
 
 ## `CreateInput` (`src/lib/server/jobs/create.ts`)
 
@@ -33,7 +34,7 @@ The content type is the existing `JobDoc.contentType`.
 
 ## Browser state (`src/lib/upload.ts`)
 
-- A module-level store, one entry per job uploading in this tab: `{ file, objectUrl, sessionUri, saved, sending, state }`. The home page hands the picked file to it directly, so `src/lib/pending.ts` is removed.
+- A module-level store, one entry per job uploading in this tab: `{ file, sessionUri, size, saved, state }`, with `state` one of `sending`, `paused`, `away`, `other-tab`, `replaced`, `stopped`, `done`. Object URLs belong to the page showing the Monitor: each page makes its own from `file` and revokes it on destroy. The `/new` page hands the picked file to it directly, so `src/lib/pending.ts` is removed.
 - It survives in-app navigation and is empty after a page load. `stop(jobId)` aborts the request in flight and releases the lock.
 - Nothing about the upload is written to browser storage.
 

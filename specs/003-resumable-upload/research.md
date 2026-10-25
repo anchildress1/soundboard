@@ -8,6 +8,8 @@ Checked 2026-10-22 against:
 
 Gate G1 ran the same day on the real bucket (see `quickstart.md`).
 
+Re-checked 2026-10-25 against `main` at `fcee227` (spec 002 Gemini swap, UI v2 guided release): the pick moved from the home page to `/new`, the E2E model fake is now an in-process `fetch` preload, and the job page's load already returns load-only facts (`expired`, `playbackUrl`) beside the view. The decisions below are unchanged; only those locations moved.
+
 ## R1 · Transport
 
 - **Decision:** a GCS JSON API resumable session.
@@ -43,7 +45,7 @@ Gate G1 ran the same day on the real bucket (see `quickstart.md`).
   - `308` without `Range`: resume at 0.
 - **When:** before every attempt (start, resume, re-pick).
 - **Offset equals size** (all bytes saved, final reply lost): send an empty `PUT` with `Content-Range: bytes */<size>` to finish, with the same backoff as R4, capped at 5 tries before falling back to the pause state. Never build `bytes <size>-<size-1>/<size>`.
-- **Server-side lookup:** only the job page's server load (`jobs/[id]/+page.server.ts`) sends the same status query (no media) for an `AWAITING_UPLOAD` job and returns `uploadSaved: { saved, total }`. Step and action responses don't, so polling never queries GCS while a `PUT` is in flight. A failed lookup leaves `uploadSaved` null, and the prompt drops the percentage. `uploadProgress` stays YouTube's.
+- **Server-side lookup:** with a 5 s timeout (a slow GCS never holds the page; constitution III), only the job page's server load (`jobs/[id]/+page.server.ts`) sends the same status query (no media) for an `AWAITING_UPLOAD` job and returns `uploadSaved: { saved, total }` in its page data, beside `view` (not inside `JobView`). Step and action responses don't, so polling never queries GCS while a `PUT` is in flight. A failed lookup leaves `uploadSaved` null, and the prompt drops the percentage. `uploadProgress` stays YouTube's.
 - **Browser:** `XMLHttpRequest`, for `upload.onprogress`. G1 showed that Chromium, Firefox and WebKit all return the `308` to script (no `Location`, so it's not followed) and can read `Range` cross-origin under the bucket's existing CORS.
 - **Progress:** live `onprogress` while sending. After a pause, the bar resets to the confirmed offset.
 
@@ -62,9 +64,9 @@ Gate G1 ran the same day on the real bucket (see `quickstart.md`).
 
 ## R5 · Same file or new file
 
-- **Fingerprint:** SHA-256 over `size ‖ first 1 MiB ‖ last 1 MiB`, hex.
+- **Fingerprint:** SHA-256 over `size ‖ first 1 MiB ‖ last 1 MiB`, hex. The size is 8 bytes big-endian. For a file under 2 MiB the two slices overlap; that's still deterministic.
   - It uses `crypto.subtle.digest` on `File.slice`, so it reads 2 MiB.
-  - It's computed on the home page before create.
+  - It's computed on `/new` before create, and on the job page before a re-pick's `upload-session` call.
 - **On re-pick:**
   - The page recomputes the fingerprint and the server compares.
   - **Match:** the server returns the session.
@@ -80,7 +82,7 @@ Gate G1 ran the same day on the real bucket (see `quickstart.md`).
   - It's cleared when the job leaves `AWAITING_UPLOAD`, and on discard.
   - It's never in `toPublic`.
   - Named `videoUpload` so it can't be confused with a Short's `sourceObject` or the YouTube `upload` session.
-- **A pick the user makes always wins.** It swaps unconditionally (`WHERE state = 'AWAITING_UPLOAD'`), then cancels the session it replaced. Newest pick wins.
+- **A pick the user makes always wins.** It swaps unconditionally (`WHERE state = 'AWAITING_UPLOAD'`), then cancels the session it replaced. Newest pick wins. If the swap matches no row (discarded or landed meanwhile), it cancels the session it just made and answers with the 409 for the job's state now, so no stray session can land an object.
 - **Automatic renews swap conditionally.** A `renew: true` call sends the `sessionUri` it was using (`prev`) and swaps only `WHERE state = 'AWAITING_UPLOAD' AND data->'videoUpload'->>'sessionUri' = prev`. Then it cancels the old session.
   - If no row matches, a newer pick won. The server cancels the session it just made and returns 409 "A different video replaced this upload."
   - `prev` is never null in a condition: a tab without a session URI is always making a pick.
@@ -109,7 +111,7 @@ Gate G1 ran the same day on the real bucket (see `quickstart.md`).
 
 ## R9 · Keep running across the app
 
-- **Decision:** the uploader is a module-level store in `src/lib/upload.ts`, not owned by the job page. SvelteKit's client-side navigation keeps it alive, so moving between pages doesn't stop it. The home page hands the picked file and session to it directly, replacing `pending.ts`.
+- **Decision:** the uploader is a module-level store in `src/lib/upload.ts`, not owned by the job page. SvelteKit's client-side navigation keeps it alive, so moving between pages doesn't stop it. The `/new` page hands the picked file and session to it directly, replacing `pending.ts`.
 - **The job page:** subscribes to the store for progress and the away message.
 - **Away:** the store is alive, the page becomes visible (`visibilitychange` or `resume`), and no progress arrived while hidden. Then the page shows FR-006 and resumes.
 - **On a fresh page load:** the store is empty and there's no file. That's FR-008 and FR-009, not "away": a user reload and a killed tab look the same.
@@ -147,6 +149,7 @@ Gate G1 ran the same day on the real bucket (see `quickstart.md`).
   - A different file restarts.
   - Navigating within the app keeps sending.
   - A second tab waits, then takes over with the re-pick prompt.
+  - Discard mid-upload stops sending and leaves no object.
 - **Not tested:**
   - GCS's own behavior (proven once in G1).
   - Browser APIs we only call (Web Locks, `crypto.subtle`).

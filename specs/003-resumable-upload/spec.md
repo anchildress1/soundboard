@@ -152,4 +152,4 @@ Nathan discards a job while its upload is paused or running. The upload stops, a
 - The pipeline still advances only from the open job page.
 - The bucket's 7-day delete rule and the 7-day session life line up.
 - The 15-minute and 2 GB caps, the song-title form, and the monitor playing the local file while it uploads are unchanged.
-- This feature is independent of the 002 model swap and can ship before or after it.
+- The 002 model swap and the UI v2 guided release have merged. This feature builds on them: the pick happens on `/new`, and the upload is the release's first step.
