@@ -205,22 +205,18 @@
   };
 
   /**
-   * The browser upload landed: a few looks for the job to move on, then the steps take over. A step
-   * with no reply or a 5xx isn't a look: the link can drop right after the last byte, and nothing
-   * else would move the job on without a reload.
+   * The browser upload landed: ask until the job moves on, then the steps take over. The steps don't
+   * drive AWAITING_UPLOAD, and the link can drop right after the last byte, so nothing else would
+   * move the job on without a reload.
    */
   const landed = async () => {
-    let looks = 0;
     try {
       await pRetry(
         async () => {
           if (stopped) throw new AbortError(new Waiting('stopped'));
           view = await step(job.id, data.trace);
           message = view.job.error ?? '';
-          looks++;
-          if (view.job.state === 'AWAITING_UPLOAD' && looks < 5) {
-            throw new Waiting('upload not landed');
-          }
+          if (view.job.state === 'AWAITING_UPLOAD') throw new Waiting('upload not landed');
         },
         {
           ...POLL_BACKOFF,
@@ -233,6 +229,9 @@
       ).catch((error: unknown) => {
         if (!(error instanceof Waiting)) throw error;
       });
+      if (stopped) return;
+      // The uploader's local file goes with it; the load signs a playback URL once the video landed.
+      await invalidateAll();
       void run();
     } catch (error) {
       message = error instanceof Error ? error.message : 'Step failed';

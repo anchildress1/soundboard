@@ -737,19 +737,30 @@ describe('job page: browser upload', () => {
     }
   });
 
-  it('hands off to the steps after five looks find no upload', async () => {
-    serveUpload(...Array.from({ length: 5 }, awaitingView));
+  it('keeps looking while storage is slow to show the landed upload', async () => {
+    serveUpload(...Array.from({ length: 6 }, awaitingView), prep());
     await handedOver();
     setup(awaitingView(), { playbackUrl: null });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       (await query()).respond(200);
-      await vi.runAllTimersAsync();
-      expect(steps()).toHaveLength(5);
+      await vi.advanceTimersByTimeAsync(10 * POLL_BACKOFF.maxTimeout);
+      expect(chip()).toHaveTextContent('Measuring audio');
+      // Seven looks to land, then the driver's first step.
+      expect(steps()).toHaveLength(8);
       expect(screen.queryByText(/failed/i)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('reloads the page data for a playback URL once the upload moved on', async () => {
+    serveUpload(prep());
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    (await query()).respond(200);
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    expect(h.invalidateAll).toHaveBeenCalledTimes(1);
   });
 
   it('stops looking for the upload once the page is left', async () => {
