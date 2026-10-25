@@ -1127,6 +1127,76 @@ describe('job page: picking the video again', () => {
   });
 });
 
+describe('job page: discard during the upload', () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
+  const DISCARD_PATH = '/api/jobs/j1/discard';
+  const file = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
+  const awaitingView = () => view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 });
+
+  const serve = (discard: Response) =>
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path) === DISCARD_PATH) return discard;
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return hang();
+    });
+  const sending = async () => {
+    await acquire('j1');
+    start('j1', { file, sessionUri: SESSION, generation: 1, fingerprint: 'f'.repeat(64) });
+  };
+
+  it.each([
+    ['sending', sending],
+    ['waiting for a pick', async () => {}],
+    [
+      'waiting on another tab',
+      async () => {
+        void locks.request('upload:j1', {}, () => new Promise<void>(() => {}));
+      },
+    ],
+  ])('offers Discard while the upload is %s', async (_, arrange) => {
+    serve(json(view({ state: 'DISCARDED' })));
+    await arrange();
+    setup(awaitingView(), { playbackUrl: null });
+    expect(button('Discard')).toBeEnabled();
+  });
+
+  it('offers no Discard while a model step runs', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 }));
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('stops the upload before the discard request, then leaves', async () => {
+    let sendingAtDiscard: boolean | null = null;
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path) === DISCARD_PATH) {
+        sendingAtDiscard = get(uploads).j1 !== undefined;
+        return json(view({ state: 'DISCARDED' }));
+      }
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return hang();
+    });
+    await sending();
+    setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(FakeXhr.all).toHaveLength(1));
+    await fireEvent.click(button('Discard'));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
+    expect(sendingAtDiscard).toBe(false);
+    expect(FakeXhr.all[0]!.aborted).toBe(true);
+    expect(locks.holders.size).toBe(0);
+  });
+
+  it('shows a refused discard and keeps the job', async () => {
+    serve(json({ error: 'Storage is busy. Try discarding again.' }, 503));
+    await sending();
+    setup(awaitingView(), { playbackUrl: null });
+    await fireEvent.click(button('Discard'));
+    expect(await screen.findByText('Storage is busy. Try discarding again.')).toBeInTheDocument();
+    expect(h.goto).not.toHaveBeenCalled();
+    expect(heading('Uploading your video')).toBeInTheDocument();
+  });
+});
+
 const SPEC: Short = {
   sourceDurationSec: 140,
   reframe: 'blur',

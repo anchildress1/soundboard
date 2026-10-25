@@ -26,6 +26,7 @@
     publishPaused,
   } from '#lib/status.js';
   import { stepIndex, workCopy, type ReviewStep } from '#lib/release.js';
+  import { stop as stopUpload } from '#lib/upload.js';
   import { canCutShort, SHORT_MIN_SEC } from '#lib/short.js';
   import { DRIVEN_STATES, type JobView, type PickFields } from '#lib/types.js';
   import type { PageData } from './$types';
@@ -229,6 +230,12 @@
     if (DRIVEN_STATES.includes(view.job.state)) void run();
   };
 
+  /** Stops this tab's upload first, so its in-flight PUT aborts before the job goes. */
+  const discardUpload = () => {
+    stopUpload(job.id);
+    void act('discard');
+  };
+
   onMount(() => {
     hydrated = true;
     if (shortView && DRIVEN_STATES.includes(shortView.job.state)) void runShort();
@@ -407,7 +414,13 @@
         <p class="help">Uploading as <strong>{job.finalFields.title}</strong>, Private.</p>
       {/if}
       <UploadRecovery {view} {busy} onconfirm={(url) => act('confirm-upload', { url })} />
-      {#if paused}
+      {#if job.state === 'AWAITING_UPLOAD'}
+        <div class="actions">
+          <button class="btn danger" type="button" disabled={busy} onclick={discardUpload}
+            >Discard</button
+          >
+        </div>
+      {:else if paused}
         <div class="actions">
           <button class="btn danger" type="button" disabled={busy} onclick={() => act('discard')}
             >Discard</button

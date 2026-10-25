@@ -188,7 +188,7 @@ description: 'Task list for the resumable video upload'
 
 **Independent Test**: Discard mid-upload and confirm no object exists for that job.
 
-- [ ] T029 [US4] Discard during the browser upload in src/routes/jobs/[id]/+page.svelte, depends on T013, T027:
+- [x] T029 [US4] Discard during the browser upload in src/routes/jobs/[id]/+page.svelte, depends on T013, T027:
   - Show the Discard button on the working screen for `AWAITING_UPLOAD` while the upload runs, is paused, waits on another tab, or waits for a pick, beside today's `publishPaused` case.
   - Its action calls the store's `stop(job.id)` before the request, so the in-flight `PUT` aborts at once, then `act('discard')`. A 503 shows its message and leaves the job as it was.
   - Tests in tests/unit/routes/jobs/[id]/page.test.ts: the button renders in each of those states and not for running model steps; clicking it stops the store before the discard request; a 503 renders its message.
