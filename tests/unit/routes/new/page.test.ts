@@ -69,7 +69,8 @@ describe('new release: form', () => {
     const { container } = setup();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Pick the finished video');
     expect(screen.getByText('Step 1 of 8 · Upload')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Save & leave' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: /Back to releases/ })).toHaveAttribute('href', '/');
+    expect(screen.queryByRole('link', { name: 'Save & leave' })).toBeNull();
     expect(container.querySelector('.rail .current')).not.toBeNull();
     expect(container.querySelectorAll('.rail .done')).toHaveLength(0);
   });

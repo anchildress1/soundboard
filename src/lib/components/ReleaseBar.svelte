@@ -23,7 +23,10 @@
       <span><span class="visually-hidden">Back to releases from</span> {title}</span>
     </a>
     <span class="label">{label}</span>
-    <a class="btn small" href={resolve('/')}>Save &amp; leave</a>
+    <!-- Before Listening there is nothing saved yet, and leaving mid-upload loses the file. -->
+    {#if step > 0 && step < STEPS.length}
+      <a class="btn small" href={resolve('/')}>Save &amp; leave</a>
+    {/if}
   </div>
   <!-- The Signal Line: the only map. Done steps are lit, the current one carries the signal. -->
   <ol class="rail" aria-hidden="true">

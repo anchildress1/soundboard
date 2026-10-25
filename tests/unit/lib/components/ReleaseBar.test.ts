@@ -15,6 +15,18 @@ describe('ReleaseBar', () => {
     expect(screen.getByRole('link', { name: 'Save & leave' })).toHaveAttribute('href', '/');
   });
 
+  it.each([
+    ['before anything is saved', 0],
+    ['once done', 8],
+    ['for a stopped release', -1],
+  ])('offers no Save & leave %s', (_, step) => {
+    render(ReleaseBar, { title: 'PeekaBoo', step });
+    expect(screen.queryByRole('link', { name: 'Save & leave' })).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Back to releases from PeekaBoo' }),
+    ).toBeInTheDocument();
+  });
+
   it('lights the steps before the current one and marks the current one', () => {
     const { container } = render(ReleaseBar, { title: 'PeekaBoo', step: 2 });
     const steps = rail(container);
