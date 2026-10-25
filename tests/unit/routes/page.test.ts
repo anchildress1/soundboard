@@ -99,6 +99,17 @@ describe('home page: releases', () => {
     expect(screen.queryByRole('region', { name: 'Earlier' })).toBeNull();
   });
 
+  it('sends a browser upload back to its page instead of saying to wait', () => {
+    setup(USER, [job('j5', 'Night Bus', 'AWAITING_UPLOAD')]);
+    const running = screen.getByRole('region', { name: 'Night Bus' });
+    expect(running).toHaveTextContent('Uploading · open it to finish the upload');
+    expect(running).not.toHaveTextContent('nothing to do yet');
+    expect(within(running).getByRole('link', { name: 'Open Night Bus' })).toHaveAttribute(
+      'href',
+      '/jobs/j5',
+    );
+  });
+
   it('lists finished, failed, and discarded releases under Earlier with their state', () => {
     setup(USER, [
       job('j1', 'Half Light', 'VERIFIED'),

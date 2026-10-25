@@ -43,18 +43,23 @@
       {/if}
 
       {#each releases.running as job (job.id)}
+        <!-- The browser does the first upload, so it only runs while the release's page is open. -->
+        {@const uploading = job.state === 'AWAITING_UPLOAD'}
         <section class="running" aria-label={job.songTitle}>
           <div>
             <h2>{job.songTitle}</h2>
             <p class="help">
               <span class="dot" data-tone="running"></span>
-              {STATE_LABELS[job.state].text} · nothing to do yet
+              {STATE_LABELS[job.state].text} · {uploading
+                ? 'open it to finish the upload'
+                : 'nothing to do yet'}
             </p>
           </div>
           <a
             class="btn small"
             href={resolve('/jobs/[id]', { id: job.id })}
-            aria-label="Watch {job.songTitle}">Watch</a
+            aria-label="{uploading ? 'Open' : 'Watch'} {job.songTitle}"
+            >{uploading ? 'Open' : 'Watch'}</a
           >
         </section>
       {/each}
