@@ -88,6 +88,47 @@ No deploy. `pnpm dev` on `http://localhost:5173` (already in bucket CORS) with t
 8. In Sentry (dev DSN), the breadcrumbs show amounts only. No URL carries `upload_id`, and no event holds a session URI. In the dev database, `jobs.data->'videoUpload'->>'sessionCipher'` is ciphertext, not a URL.
 9. Clean up: delete every `uploads/<jobId>/` prefix the run created and discard its jobs.
 
+### Results: 2026-10-25
+
+Ran on `pnpm dev` against the dev bucket using headless Playwright 1.63, with Chrome (`channel: 'chrome'`), Firefox, and WebKit standing in for Safari. The branch was at `6b71dcf` unless a row says otherwise. The big file is the 1,132,486,295 B, 14-minute copy, the original is 211,318,537 B, and the small file is 31,815,277 B.
+
+How the run differed from the steps above:
+
+- **Drops.** Chromium's emulated offline doesn't stop an XHR that's already sending, so it can't cut a `PUT` mid-body. Drops ran through a local CONNECT proxy instead. Each drop closed every open tunnel and refused new ones, alongside `context.setOffline`.
+- **Re-sent bytes.** These were counted at the proxy as bytes sent upstream minus the file size, because Chromium's XHR `loaded` undercounts.
+- **Sentry.** Envelopes were captured in the page through `beforeEnvelope` and searched for `upload_id`, `uploadType` and session URIs. Nothing was routed through Playwright, because request routing crashes Chrome on a 1.13 GB body.
+- **No model calls.** A fetch wrapper in the page refused every step after the landing step. In the step 6 runs, the second browser let one PREP step (ffmpeg only) through. No ANALYZE step ran: `chunkIndex` stayed 0, with no wait or error.
+- **Database.** Mid-run, the dev database moved to spec 004's schema and RLS. After that, creating a job on this branch returns 500, so steps 5 to 7 reused jobs that earlier runs had left in AWAITING_UPLOAD.
+- **Step 2 baseline.** `main` wasn't run, because its signed-URL `PUT` needs bucket CORS for its own origin. The baseline is `gcloud storage cp` of the same file from the same machine.
+
+| Step                     | Browser                 | File     | Drops | Wall time                   | Result                                                                                                                                                            |
+| ------------------------ | ----------------------- | -------- | ----- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 (SC-001)               | Chrome                  | big      | 20    | 146.5 s                     | Pass on `096e54f`: "Upload paused: no connection" on every drop, about 1 s back to sending, 0.59% re-sent, one object                                             |
+| 1                        | Firefox                 | big      | 20    | 143.4 s                     | Pass on `096e54f`: 0.85% re-sent, one object                                                                                                                      |
+| 1                        | WebKit                  | big      | 20    | 143.5 s                     | Fail on `096e54f`: never left "Uploading 100%". Pass on `6b71dcf`: 0.72% re-sent, one object                                                                      |
+| 2 (SC-005)               | Chrome                  | original | 0     | 20.5 s                      | Pass against `gcloud storage cp` (10.5 s and 41.8 s), not against `main`                                                                                          |
+| 3 (SC-006)               | all three               | big      | 0     | 8 s away                    | Pass: the one `PUT` stayed open the whole time                                                                                                                    |
+| 4 (SC-003), same file    | Chrome, Firefox, WebKit | big      | 0     | 1.54, 1.57, 1.92 s to bytes | Pass: the page showed 15%, 16% and 15% before the pick                                                                                                            |
+| 4, different file        | all three               | small    | 0     | —                           | Pass: "New video: starting the upload over." and the `PUT` started at byte 0                                                                                      |
+| 4, close after last byte | Chrome                  | small    | 0     | —                           | Pass: reopening went straight to PREP with no pick                                                                                                                |
+| 4, close after last byte | Firefox, WebKit         | small    | 0     | —                           | Not reproduced: the last bytes hadn't reached storage when the tab closed, so reopening asked for a pick at 98% and 99%. The re-pick landed                       |
+| 4 (SC-004), objects      | all three               | —        | —     | —                           | Pass: one object under the prefix, the one `jobs.data->>'object'` names                                                                                           |
+| 5, two tabs              | all three               | big      | 0     | —                           | Pass: "Uploading in another tab" with no picker and no `PUT`. Closing the first tab brought up the prompt, and the re-pick resumed                                |
+| 6, same file             | Chrome, then Firefox    | big      | 0     | 29 s to notice              | Pass: Chrome stopped with "The upload moved to another device or window." and sent nothing more, while Firefox kept sending                                       |
+| 6, different file        | Chrome over Firefox     | small    | 0     | —                           | Not seen: the small file landed before Firefox's next check, so Firefox moved on to analysis without showing "A different video replaced this upload." One object |
+| 7, discard mid-upload    | all three               | big      | 0     | —                           | Pass: DISCARDED, no object, `sessionCipher` cleared                                                                                                               |
+| 7, discard after landing | Chrome                  | small    | 0     | —                           | Pass: the one object stayed                                                                                                                                       |
+| 8                        | all three               | —        | —     | —                           | Pass: the only GCS URL anywhere was `…/o?[redacted]`, breadcrumbs carried `reason`, `saved` and `total` only, and `sessionCipher` was ciphertext                  |
+| 9                        | —                       | —        | —     | —                           | Done: 17 jobs discarded and the bucket left empty                                                                                                                 |
+
+The run found three bugs, each fixed on this branch with a test:
+
+- `7e15e24`: if the step after the last byte got no reply, the page stopped asking and stayed at "Uploading 100%".
+- `096e54f`: the backoff from offline failures carried over after the link came back, so a resume could wait out a long delay.
+- `6b71dcf`: in Safari, Sentry's fetch wrapper gives fetch's TypeError a stack. p-retry then treated it as a bug and gave up on the first app request that got no reply, so the upload never landed.
+
+After landing, the page showed a lower saved percentage than storage later reported, for example 6% shown and 16% resumed. GCS records aborted bytes a little after the abort, and the resume always used storage's offset.
+
 ## Deployed only (after the next deploy, not in this run)
 
 - Start on the custom domain, re-pick on a run.app URL. It continues on the same session: session reuse across app origins. JSON API endpoints answer CORS for any origin, and the URI's secrecy is the authorization (research R1), so this is a smoke check, not a gate.
