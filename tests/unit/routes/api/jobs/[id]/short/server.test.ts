@@ -9,6 +9,7 @@ import { getJob } from '#lib/server/jobs/jobs.js';
 import { POST } from '#src/routes/api/jobs/[id]/short/+server.js';
 import type { JobView } from '#lib/types.js';
 import { afterJobUpdate, seed, truncate } from '../../../../../../helpers/db';
+import { gcs, resetGcs } from '../../../../../../helpers/gcs';
 import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 type Event = Parameters<typeof POST>[0];
@@ -36,11 +37,13 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
     .where(eq(jobs.id, id));
 }
 
-// Every object reads as stored, so the Short's source upload is still there.
-vi.mock('@google-cloud/storage', () => import('../../../../../../e2e/fakes/storage'));
+vi.mock('@google-cloud/storage', () => import('../../../../../../helpers/gcs'));
 
 beforeEach(async () => {
   resetClients();
+  resetGcs();
+  // Every object reads as stored, so the Short's source upload is still there.
+  gcs.exists.mockResolvedValue(true);
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'b');
   await truncate();

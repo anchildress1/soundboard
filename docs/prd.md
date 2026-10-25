@@ -56,8 +56,11 @@
 
 **R1 · Upload**
 
-- Video + song title (required) + notes. Browser PUTs straight to GCS via signed URL.
-- Signed URL carries `x-goog-content-length-range: 1,2147483648` (2 GB). Bucket has CORS for the app origin and a 7-day delete rule.
+- Video + song title (required) + notes. The browser uploads straight to GCS in a resumable session the server creates with the declared size (≤ 2 GB; GCS refuses any other size).
+- Each session writes its own object, and the job records the current one. The session address is encrypted at rest like refresh tokens.
+- After a drop, the browser asks GCS what was saved and sends the rest. Moving around the app keeps it sending.
+- After a reload or a closed tab, the user picks the same video to continue (matched by a sampled fingerprint); a different video starts over. The newest pick wins across tabs and devices.
+- Bucket CORS covers playback only. The bucket has a 7-day delete rule.
 - Job IDs are random and unguessable.
 - [ ] Uploads up to 15 minutes are accepted; longer gets a clear message.
 - [ ] A 12-minute video completes end to end.
@@ -244,7 +247,7 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmWvnwQgaf), adapted to what the app can actually back. Dark only.
 
 - **One release, one path:** a release is eight steps: Upload, Listening, Title, Description, Tags, Check, Approve, Upload & verify. Each screen asks one question and has one primary button. A bar on top shows "Step n of 8 · Name", an eight-segment rail, and Back to releases, plus Save & leave from Listening through Upload & verify, once there is something saved to come back to.
-- **Working screens:** while the app works, the screen says what it's doing in one headline and one plain line (window n of m, or the named wait), and that leaving is safe once the browser upload is done. The video monitor (R2), the state with its progress bar and model label, and "What the model heard" sit below.
+- **Working screens:** while the app works, the screen says what it's doing in one headline and one plain line (window n of m, or the named wait), that moving around the app is safe during the browser upload, and that closing the tab is safe once it is done. Discard shows during the browser upload. The video monitor (R2), the state with its progress bar and model label, and "What the model heard" sit below.
 - **Guided review (R5):** Title, then Description, then Tags, each with its live counter and the pick's "Why this". Check appears only when ffmpeg flagged something. Approve shows a summary (title, description length and hashtags, tags, destination channel, Private) with Back, Discard, and Approve & upload; the field screens carry Re-run model. A field the server rejects sends Nathan back to that field. Approve still sends every field at once.
 - **Edits survive leaving:** unsaved review edits and the current step stay in the browser per job and pick version, and clear on approval.
 - **Up next, after approval:** once the YouTube upload is approved, the release offers Make a Short from the hook (R13) and Put it on Bandcamp (R4's copy fields). Each opens as its own screen with a way back. A video under 15 s says why it can't make a Short.

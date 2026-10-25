@@ -8,6 +8,7 @@
     height = null,
     vertical = false,
     duration = $bindable(0),
+    onerror,
   }: {
     src?: string | null;
     filename?: string;
@@ -16,6 +17,8 @@
     /** 9:16 frame for a Short. */
     vertical?: boolean;
     duration?: number;
+    /** The video element couldn't load `src`, e.g. a picked file the browser can't read. */
+    onerror?: () => void;
   } = $props();
 
   let currentTime = $state(0);
@@ -40,6 +43,7 @@
       bind:duration
       bind:videoWidth
       bind:videoHeight
+      {onerror}
     ></video>
   {:else}
     <div class="scene" aria-hidden="true"></div>

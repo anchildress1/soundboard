@@ -17,11 +17,25 @@ import { POST as recut } from '#src/routes/api/jobs/[id]/recut/+server.js';
 import { POST as rerun } from '#src/routes/api/jobs/[id]/rerun/+server.js';
 import { POST as makeShort } from '#src/routes/api/jobs/[id]/short/+server.js';
 import { POST as step } from '#src/routes/api/jobs/[id]/step/+server.js';
+import { POST as uploadSession } from '#src/routes/api/jobs/[id]/upload-session/+server.js';
+import { KeyManagementServiceClient } from '../../e2e/fakes/kms';
 import { seed, truncate } from '../../helpers/db';
-import { A_JOB, CHANNEL_A, jobDoc, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
+import {
+  A_JOB,
+  CHANNEL_A,
+  jobDoc,
+  sealed,
+  seedJob,
+  USER_A,
+  USER_B,
+  USERS,
+} from '../../helpers/pipeline';
 
 // One process serving A, then B, then A: nothing one user saw may leak into the next request.
 
+const h = vi.hoisted(() => ({ createResumableUpload: vi.fn() }));
+
+vi.mock('@google-cloud/kms', () => import('../../e2e/fakes/kms'));
 vi.mock('@google-cloud/storage', () => ({
   Storage: class {
     bucket(name: string) {
@@ -30,6 +44,7 @@ vi.mock('@google-cloud/storage', () => ({
           getSignedUrl: async () => [`https://storage.googleapis.com/${name}/${object}?sig=read`],
           exists: async () => [true],
           getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
+          createResumableUpload: h.createResumableUpload,
         }),
       };
     }
@@ -209,5 +224,60 @@ describe('one process, A → B → A', () => {
       expect(await Promise.all([getJob(other), getJob(`${other}s`)])).toEqual(before);
     }
     expect(shorts.a).not.toBe(shorts.b);
+  });
+});
+
+describe("another user's browser upload", () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=b-session';
+  const FP = 'b'.repeat(64);
+
+  beforeEach(async () => {
+    h.createResumableUpload.mockReset();
+    await seedJob({
+      id: 'bu',
+      ownerUid: USER_B.uid,
+      artistId: null,
+      state: 'AWAITING_UPLOAD',
+      object: 'uploads/bu/o1',
+      videoUpload: {
+        sessionCipher: sealed(SESSION),
+        generation: 1,
+        size: 10,
+        fingerprint: FP,
+        ops: [],
+      },
+    });
+  });
+
+  it('404s every upload-session op and the page load before any session work', async () => {
+    const decrypt = vi.spyOn(KeyManagementServiceClient.prototype, 'decrypt');
+    const encrypt = vi.spyOn(KeyManagementServiceClient.prototype, 'encrypt');
+    const before = await getJob('bu');
+    const ops = [
+      {
+        op: 'pick',
+        opId: 'op-1',
+        generation: 1,
+        size: 10,
+        fingerprint: FP,
+        filename: 'b.mp4',
+        contentType: 'video/mp4',
+        durationSec: 60,
+      },
+      { op: 'renew', opId: 'op-2', generation: 1, fingerprint: FP },
+      { op: 'confirm', generation: 1, fingerprint: FP },
+    ];
+    for (const body of ops) {
+      const outcome = await Promise.resolve(uploadSession(event(USER_A, 'bu', body))).catch(
+        (e) => e,
+      );
+      expect([body.op, status(outcome)]).toEqual([body.op, 404]);
+    }
+    expect(status(await Promise.resolve(jobLoad(event(USER_A, 'bu'))).catch((e) => e))).toBe(404);
+    expect(decrypt).not.toHaveBeenCalled();
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(h.createResumableUpload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('upload_id'))).toBe(false);
+    expect(await getJob('bu')).toEqual(before);
   });
 });

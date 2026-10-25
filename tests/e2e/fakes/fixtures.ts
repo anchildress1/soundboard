@@ -1,7 +1,8 @@
 // Users and jobs the E2E server starts with: user A (linked to FLR, YouTube connected) owns every
 // job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
-// backs the Connections page. Each test owns its job IDs, so parallel tests and both Playwright
-// projects never share mutable state.
+// backs the Connections page, and an unlinked upload user creates its own jobs through `/new`.
+// Each test owns its job IDs, so parallel tests and both Playwright projects never share mutable
+// state.
 import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import type { Chunk, Pick, Short } from '#lib/types.js';
@@ -214,7 +215,11 @@ const broken = BROKEN_STATUSES.map((status) => ({
 
 /** Every row the E2E database starts with, in `seed()` order. */
 export const SEED: Seed = {
-  users: [...USERS.users, ...broken.map(({ uid, email }) => ({ uid, email }))],
+  users: [
+    ...USERS.users,
+    ...broken.map(({ uid, email }) => ({ uid, email })),
+    { uid: 'uid-upload', email: 'upload@example.com' },
+  ],
   connections: [
     ...USERS.connections,
     ...broken.map(({ uid, status }) => ({

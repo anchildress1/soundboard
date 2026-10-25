@@ -229,6 +229,7 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     filename: 'peekaboo.mp4',
     contentType: 'video/mp4',
     object: 'uploads/j1',
+    videoUpload: null,
     probe: null,
     measurements: null,
     chunkCount: 0,

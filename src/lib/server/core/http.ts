@@ -1,9 +1,13 @@
 import { ActionError } from './errors';
 
-/** Runs a route body, turning expected `ActionError`s into JSON error responses. */
+/**
+ * Runs a route body, turning expected `ActionError`s into JSON error responses. A body that builds
+ * its own `Response` gets it sent as is.
+ */
 export async function respond(fn: () => Promise<unknown>): Promise<Response> {
   try {
-    return Response.json(await fn());
+    const result = await fn();
+    return result instanceof Response ? result : Response.json(result);
   } catch (error) {
     if (error instanceof ActionError) {
       return Response.json(

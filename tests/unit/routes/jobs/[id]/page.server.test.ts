@@ -1,12 +1,15 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
-import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { load } from '#src/routes/jobs/[id]/+page.server.js';
 import type { JobView } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
-import { CHANNEL_A, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { gcs, land, resetGcs, seedSession, sessionFetch } from '../../../../helpers/gcs';
+import { CHANNEL_A, sealed, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
+import { getJob, type JobDoc, type VideoUpload } from '#lib/server/jobs/jobs.js';
+
+vi.mock('@google-cloud/kms', () => import('../../../../e2e/fakes/kms'));
 
 const signed = vi.hoisted(() => ({ objects: [] as string[], missing: new Set<string>() }));
 
@@ -22,6 +25,7 @@ vi.mock('@google-cloud/storage', () => ({
           exists: async () => [!signed.missing.has(object)],
           getMetadata: async () => [{ size: '10', contentType: 'video/mp4' }],
         }),
+        getFiles: async () => [[]],
       };
     }
   },
@@ -36,6 +40,8 @@ type Data = {
   shortExpired: boolean;
   playbackUrl: string | null;
   trace: { sentryTrace: string; baggage: string } | null;
+  uploadSaved: { saved: number; total: number; done: boolean } | null;
+  uploadGeneration: number;
 };
 
 const TRACE = { sentryTrace: 'abc-def-1', baggage: 'sentry-trace_id=abc' };
@@ -57,6 +63,9 @@ const put = (id: string, patch: Partial<JobDoc> = {}) =>
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
+  vi.stubEnv('KMS_KEY', 'projects/p/locations/l/keyRings/r/cryptoKeys/k');
+  vi.stubGlobal('fetch', sessionFetch);
+  resetGcs();
   resetClients();
   signed.objects.length = 0;
   signed.missing.clear();
@@ -212,5 +221,87 @@ describe('job page load: Short', () => {
     await put('s', { state: 'REVIEW', parentId: 'j', short: SHORT });
     const error = await fail('s', localsFor(USER_A));
     expect(isHttpError(error) && error.status).toBe(404);
+  });
+});
+
+describe('job page load: the browser upload', () => {
+  const SIZE = 4_000_000;
+  let uri: string;
+  const upload = (over: Partial<VideoUpload> = {}): VideoUpload => ({
+    sessionCipher: sealed(uri),
+    generation: 3,
+    size: SIZE,
+    fingerprint: 'a'.repeat(64),
+    ops: [],
+    ...over,
+  });
+  const uploading = (over: Partial<VideoUpload> = {}) =>
+    put('u', { state: 'AWAITING_UPLOAD', object: 'uploads/u/a', videoUpload: upload(over) });
+
+  beforeEach(() => {
+    uri = seedSession('uploads/u/a', SIZE, 1_000_000);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reads the saved amount and the generation', async () => {
+    await uploading();
+    const { data } = await run('u');
+    expect(data.uploadSaved).toEqual({ saved: 1_000_000, total: SIZE, done: false });
+    expect(data.uploadGeneration).toBe(3);
+  });
+
+  it('reads 0 saved when GCS returns no Range', async () => {
+    gcs.sessions.get(uri)!.saved = 0;
+    await uploading();
+    expect((await run('u')).data.uploadSaved).toEqual({ saved: 0, total: SIZE, done: false });
+  });
+
+  it('reads done once GCS has every byte', async () => {
+    land(uri);
+    await uploading();
+    expect((await run('u')).data.uploadSaved).toEqual({ saved: SIZE, total: SIZE, done: true });
+  });
+
+  it('leaves the amount unknown when the query fails or never answers', async () => {
+    await uploading();
+    gcs.session.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    expect((await run('u')).data.uploadSaved).toBeNull();
+    gcs.session.mockImplementationOnce(
+      (_uri, init) =>
+        new Promise((_resolve, reject) =>
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
+        ),
+    );
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(AbortSignal.timeout(10));
+    expect((await run('u')).data.uploadSaved).toBeNull();
+  });
+
+  it('leaves it unknown with no session, and generation 0', async () => {
+    await put('u', { state: 'AWAITING_UPLOAD' });
+    const { data } = await run('u');
+    expect(data.uploadSaved).toBeNull();
+    expect(data.uploadGeneration).toBe(0);
+    expect(sessionFetch).not.toHaveBeenCalled();
+  });
+
+  it('queries nothing for other states', async () => {
+    await put('u', { state: 'REVIEW', videoUpload: upload() });
+    expect((await run('u')).data.uploadSaved).toBeNull();
+    expect(sessionFetch).not.toHaveBeenCalled();
+  });
+
+  it('finishes a discarded job’s owed upload cleanup', async () => {
+    await put('u', { state: 'DISCARDED', object: 'uploads/u/a', videoUpload: upload() });
+    await run('u');
+    expect(gcs.sessions.get(uri)!.cancelled).toBe(true);
+    expect((await getJob('u'))!.videoUpload).toBeNull();
+  });
+
+  it('never puts the session URI in the page data', async () => {
+    await uploading();
+    expect(JSON.stringify((await run('u')).data)).not.toContain('upload_id');
   });
 });

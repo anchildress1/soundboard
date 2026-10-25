@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { Chunk, JobState, Pick, PublicJob } from '#lib/types.js';
 import { query, type Tx } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
@@ -13,12 +13,31 @@ export const CLAIM_TTL_MS = 3 * 60 * 1000;
 /** Longest video a job accepts. */
 export const MAX_MINUTES = 15;
 
+/** The browser's resumable upload to GCS, kept while the job awaits it. */
+export type VideoUpload = {
+  /** KMS ciphertext of the GCS session URI, a bearer credential: never logged, traced or shown. */
+  sessionCipher: string;
+  /** Sender ownership: 1 at create, +1 on every pick and renew. */
+  generation: number;
+  /** Declared to GCS, which refuses any other final size. */
+  size: number;
+  /** Hex SHA-256 of the sampled file (`#lib/fingerprint`). */
+  fingerprint: string;
+  /** The last applied picks and renews, newest last, so a retried request is answered as before. */
+  ops: { opId: string; generation: number; restarted: boolean }[];
+};
+
+/** How many applied picks and renews `VideoUpload.ops` remembers. */
+export const OPS_KEPT = 20;
+
 export type JobDoc = PublicJob & {
   ownerUid: string;
   /** The owner's artist link when the job was created. */
   artistId: string | null;
   object: string;
   contentType: string;
+  /** Null once the upload landed or was discarded, and on jobs that never had a browser upload. */
+  videoUpload: VideoUpload | null;
   consecutiveFailures: number;
   trace: { sentryTrace: string; baggage: string } | null;
   upload: { sessionUri: string; total: number } | null;
@@ -53,6 +72,7 @@ export type NewJob = {
   filename: string;
   contentType: string;
   object: string | null;
+  videoUpload?: VideoUpload;
   trace: JobDoc['trace'];
 };
 
@@ -64,7 +84,8 @@ export function newJobId(): string {
 export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
   return {
     id,
-    state: input.object ? 'PREP' : 'AWAITING_UPLOAD',
+    // An object with no browser session already sits in the bucket.
+    state: input.object && !input.videoUpload ? 'PREP' : 'AWAITING_UPLOAD',
     ownerUid: input.ownerUid,
     artistId: input.artistId,
     parentId: null,
@@ -74,6 +95,7 @@ export function newJobDoc(input: NewJob, id: string, now = Date.now()): JobDoc {
     filename: input.filename,
     contentType: input.contentType,
     object: input.object ?? `uploads/${id}`,
+    videoUpload: input.videoUpload ?? null,
     probe: null,
     measurements: null,
     chunkCount: 0,
@@ -209,7 +231,8 @@ const released = { claimToken: null, claimUntil: null };
  * (discard, re-run) moved the job off the state the step started from, only the video ID, upload
  * session, and upload progress land, so the record of what YouTube holds survives; a token whose
  * claim lapsed to someone else writes nothing and leaves the newer claim in place. `clearChunks`
- * empties the stored chunks under the same guard; a plain patch can't.
+ * empties the stored chunks under the same guard; a plain patch can't. `guard` narrows when the
+ * patch lands; when it doesn't match, the claim is still released.
  */
 export async function releaseJob(
   id: string,
@@ -221,6 +244,7 @@ export async function releaseJob(
     chunk?: Chunk;
     clearChunks?: boolean;
     alsoWrite?: (tx: Tx) => Promise<void>;
+    guard?: SQL;
   } = {},
 ): Promise<boolean> {
   const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
@@ -228,7 +252,7 @@ export async function releaseJob(
     const [kept] = await tx
       .update(jobs)
       .set({ ...jobSet(patch), ...released, ...(writes.clearChunks ? { chunks: [] } : {}) })
-      .where(and(held, eq(jobs.state, claimedState)))
+      .where(and(held, eq(jobs.state, claimedState), writes.guard))
       .returning({ id: jobs.id });
     if (!kept) {
       const { videoId, upload, uploadProgress } = patch;
@@ -272,6 +296,42 @@ export async function markFinalChunk(id: string): Promise<void> {
       .returning({ id: jobs.id }),
   );
   if (written.length === 0) throw new Error('Job is no longer writable.');
+}
+
+/** The generation a job's upload is at; a job with no upload reads as 0. */
+export const uploadGeneration = (job: { videoUpload: VideoUpload | null }): number =>
+  job.videoUpload?.generation ?? 0;
+
+/** SQL: the job's upload object is still `object`. */
+export const objectIs = (object: string) => sql`${jobs.data}->>'object' = ${object}`;
+
+/** The stored upload's generation, read in SQL the same way as `uploadGeneration`. */
+export const generationSql = sql`coalesce((${jobs.data}->'videoUpload'->>'generation')::int, 0)`;
+
+/**
+ * Writes a new upload state only while the job still awaits its upload at `readGeneration`, so no
+ * row lock is held across the GCS and KMS calls before it. Null when something newer committed.
+ */
+export async function commitUpload(
+  id: string,
+  readGeneration: number,
+  patch: { object?: string; filename?: string; contentType?: string; videoUpload: VideoUpload },
+): Promise<JobDoc | null> {
+  const videoUpload = { ...patch.videoUpload, ops: patch.videoUpload.ops.slice(-OPS_KEPT) };
+  const [row] = await query((tx) =>
+    tx
+      .update(jobs)
+      .set(jobSet({ ...patch, videoUpload }))
+      .where(
+        and(
+          eq(jobs.id, id),
+          eq(jobs.state, 'AWAITING_UPLOAD'),
+          sql`${generationSql} = ${readGeneration}`,
+        ),
+      )
+      .returning(),
+  );
+  return row ? fromRow(row) : null;
 }
 
 /** Moves the job to a new state only if it is still in one of `from`; false when it already moved. */

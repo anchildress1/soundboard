@@ -13,7 +13,7 @@ import { approvedBrand } from '#lib/server/artist/brand.js';
 import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
 import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
-import { objectInfo, signedReadUrl } from '#lib/server/media/gcs.js';
+import { objectInfo, signedReadUrl, sweepUploads } from '#lib/server/media/gcs.js';
 import { audienceEvidence, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
@@ -21,12 +21,12 @@ import {
   MAX_MINUTES,
   listChunks,
   listPicks,
+  objectIs,
   markFinalChunk,
   markUploadStarted,
   ok,
   outcomeUnknown,
   releaseJob,
-  transitionJob,
   type JobDoc,
 } from '#lib/server/jobs/jobs.js';
 import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
@@ -456,10 +456,7 @@ async function runHandler(job: JobDoc, handler: Handler, deadline: number): Prom
 
 /** Runs exactly one pipeline step for the job: claims it, runs, and releases it with its result. */
 export async function runStep(snapshot: JobDoc): Promise<StepResult> {
-  if (snapshot.state === 'AWAITING_UPLOAD') {
-    await startOnceUploaded(snapshot);
-    return {};
-  }
+  if (snapshot.state === 'AWAITING_UPLOAD') return await startOnceUploaded(snapshot);
   if (!handlerFor(snapshot.state)) return {};
 
   const claimed = await claimJob(snapshot.id);
@@ -485,11 +482,35 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   return stillVerifying ? { wait: 'waiting on YouTube' } : {};
 }
 
-/** The browser's upload has landed once its object exists; then the pipeline starts. */
-async function startOnceUploaded(job: JobDoc): Promise<void> {
-  if (await objectInfo(job.object)) {
-    await transitionJob(job.id, ['AWAITING_UPLOAD'], { state: 'PREP' });
+/**
+ * The browser's upload has landed once the job's current object exists; then the pipeline starts.
+ * It runs as a claimed step under the step deadline. An orphan from an older session never counts,
+ * a pick that swapped the object meanwhile keeps the job waiting, and a slow or failing storage read
+ * is only a wait: the open page asks again.
+ */
+async function startOnceUploaded(snapshot: JobDoc): Promise<StepResult> {
+  const claimed = await claimJob(snapshot.id);
+  if (!claimed) return { wait: 'step running in another tab' };
+  const deadline = stepDeadline();
+  const { token, job } = claimed;
+  let landed = false;
+  if (job.state === 'AWAITING_UPLOAD') {
+    try {
+      landed = (await objectInfo(job.object, deadline)) !== null;
+    } catch (error) {
+      captureException(error, { tags: { step: job.state } });
+    }
   }
+  const moved = await releaseJob(
+    job.id,
+    token,
+    job.state,
+    landed ? { state: 'PREP', videoUpload: null } : {},
+    { guard: objectIs(job.object) },
+  );
+  // Orphans are objects of displaced sessions; the bucket's 7-day rule takes any this misses.
+  if (landed && moved) await sweepUploads(job.id, job.object, deadline);
+  return {};
 }
 
 /** The step to run for a state the page drives, or null for any other state. */

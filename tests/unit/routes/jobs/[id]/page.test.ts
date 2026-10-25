@@ -1,10 +1,21 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draftKey } from '#lib/draft.js';
-import { setPending } from '#lib/pending.js';
-import { POLL_BACKOFF } from '#lib/retry.js';
-import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '#lib/types.js';
+import { POLL_BACKOFF, UPLOAD_BACKOFF } from '#lib/retry.js';
+import type { Chunk, JobState, JobView, Pick, PublicJob, Short, UploadSaved } from '#lib/types.js';
+import {
+  acquire,
+  ALREADY_DONE,
+  DISCARDED,
+  MOVED,
+  REPLACED,
+  start,
+  stop,
+  uploads,
+} from '#lib/upload.js';
 import Page from '#src/routes/jobs/[id]/+page.svelte';
+import { FakeXhr, installUploadFakes, type FakeLocks } from '../../../../helpers/uploads';
 
 const PLAYBACK_URL = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
 const BUSY = 'model busy';
@@ -20,8 +31,8 @@ const APPROVE_SCREEN = 'Ready to upload';
 const BACK_TO_RELEASE = 'Back to the release';
 const OFFERS = 'Up next, if you want';
 
-const h = vi.hoisted(() => ({ goto: vi.fn() }));
-vi.mock('$app/navigation', () => ({ goto: h.goto }));
+const h = vi.hoisted(() => ({ goto: vi.fn(), invalidateAll: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: h.goto, invalidateAll: h.invalidateAll }));
 
 const TRACE = { sentryTrace: 'trace-1', baggage: 'bag-1' };
 
@@ -119,6 +130,8 @@ function setup(
     expired?: boolean;
     shortExpired?: boolean;
     approveTo?: typeof CONNECTED | null;
+    uploadSaved?: UploadSaved | null;
+    uploadGeneration?: number;
   } = {},
 ) {
   return render(Page, {
@@ -133,6 +146,8 @@ function setup(
         trace: TRACE,
         channel: null,
         user: null,
+        uploadSaved: extra.uploadSaved ?? null,
+        uploadGeneration: extra.uploadGeneration ?? 1,
       },
     } as never,
   });
@@ -151,49 +166,21 @@ async function toApprove() {
   }
 }
 
-const xhr: { status: number; last: FakeXhr | null } = { status: 200, last: null };
-
-class FakeXhr {
-  status = 0;
-  headers: Record<string, string> = {};
-  upload: {
-    onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
-  } = {
-    onprogress: null,
-  };
-  onload: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  method = '';
-  url = '';
-  open(method: string, url: string) {
-    this.method = method;
-    this.url = url;
-    xhr.last = this;
-  }
-  setRequestHeader(name: string, value: string) {
-    this.headers[name] = value;
-  }
-  send() {
-    setTimeout(() => {
-      this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
-      this.status = xhr.status;
-      this.onload?.();
-    });
-  }
-}
+let locks: FakeLocks;
 
 beforeEach(() => {
   h.goto.mockReset();
+  h.invalidateAll.mockReset().mockResolvedValue(undefined);
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  xhr.status = 200;
-  xhr.last = null;
-  vi.stubGlobal('XMLHttpRequest', FakeXhr);
+  locks = installUploadFakes();
+  URL.createObjectURL = vi.fn(() => LOCAL_BLOB);
   URL.revokeObjectURL = vi.fn();
   localStorage.clear();
 });
 
 afterEach(() => {
+  stop('j1');
   vi.unstubAllGlobals();
 });
 
@@ -659,79 +646,90 @@ describe('job page: paused publish', () => {
   });
 });
 
-describe('job page: upload hand-off', () => {
+describe('job page: browser upload', () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
   const file = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
   const awaitingView = () => view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 });
+  const prep = () => view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 });
 
-  it('reports an interrupted upload after a reload', async () => {
-    fetchMock.mockResolvedValueOnce(json(awaitingView()));
-    setup(awaitingView(), { playbackUrl: null });
+  /** Upload-session confirms pass; each step answers the next of `steps`, then never again. */
+  const serveUpload = (...steps: JobView[]) => {
+    const queue = [...steps];
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      const next = queue.shift();
+      return next ? json(next) : hang();
+    });
+  };
+  const steps = () => paths().filter((path) => path === STEP_PATH);
+
+  /** The file /new handed over: the uploader is already running in this tab. */
+  const handedOver = async () => {
+    await acquire('j1');
+    start('j1', { file, sessionUri: SESSION, generation: 1, fingerprint: 'f'.repeat(64) });
+  };
+  const query = async () => {
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.headers['content-range']).toMatch(/^bytes \*/));
+    return FakeXhr.all.at(-1)!;
+  };
+
+  it('plays the handed-over file and shows what the upload sent', async () => {
+    serveUpload();
+    await handedOver();
+    const { container, unmount } = setup(awaitingView(), { playbackUrl: null });
     expect(heading('Uploading your video')).toBeInTheDocument();
     expect(screen.getByText('Step 1 of 8 · Upload')).toBeInTheDocument();
-    expect(
-      await screen.findByText('The upload was interrupted. Start a new run from the home page.'),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('resumes after a reload when the upload already landed', async () => {
-    fetchMock
-      .mockResolvedValueOnce(json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })))
-      .mockImplementation(hang);
-    setup(awaitingView(), { playbackUrl: null });
-    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
-    expect(heading('Measuring the audio')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  });
-
-  it('keeps the view when the reload probe fails', async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError('offline'));
-    setup(awaitingView(), { playbackUrl: null });
-    expect(await screen.findByText(/upload was interrupted/)).toBeInTheDocument();
-  });
-
-  it('PUTs the picked file to GCS, then starts the steps', async () => {
-    setPending('j1', {
-      file,
-      uploadUrl: 'https://storage.googleapis.com/put?sig=1',
-      objectUrl: LOCAL_BLOB,
-      contentType: 'video/mp4',
-    });
-    fetchMock
-      .mockResolvedValueOnce(json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })))
-      .mockImplementation(hang);
-    const { container, unmount } = setup(awaitingView(), { playbackUrl: null });
     expect(container.querySelector('video')).toHaveAttribute('src', LOCAL_BLOB);
-    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
-    expect(xhr.last).toMatchObject({
-      method: 'PUT',
-      url: 'https://storage.googleapis.com/put?sig=1',
-      headers: { 'content-type': 'video/mp4', 'x-goog-content-length-range': '1,2147483648' },
-    });
+    expect(URL.createObjectURL).toHaveBeenCalledWith(file);
+    (await query()).respond(308, { range: 'bytes=0-1' });
+    await waitFor(() => expect(chip()).toHaveTextContent('Uploading 20%'));
+    FakeXhr.all.at(-1)!.progress(3);
+    await waitFor(() => expect(chip()).toHaveTextContent('Uploading 50%'));
+    expect(steps()).toEqual([]);
     unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(LOCAL_BLOB);
   });
 
-  const pend = () =>
-    setPending('j1', {
-      file,
-      uploadUrl: 'https://storage.googleapis.com/put?sig=1',
-      objectUrl: LOCAL_BLOB,
-      contentType: 'video/mp4',
-    });
-  const awaiting = () => json(awaitingView());
+  it.each([
+    [503, 'Upload paused: storage busy, retrying'],
+    [429, 'Upload paused: storage busy, retrying'],
+    [408, 'Upload paused: no connection'],
+  ])('names a pause on %i, never as an error', async (status, text) => {
+    serveUpload();
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    (await query()).respond(status);
+    await waitFor(() => expect(chip()).toHaveTextContent(text));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('pauses as no connection on a drop', async () => {
+    serveUpload();
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    (await query()).drop();
+    await waitFor(() => expect(chip()).toHaveTextContent('Upload paused: no connection'));
+  });
+
+  it('looks for the landed upload, then drives the steps', async () => {
+    serveUpload(prep());
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    (await query()).respond(200);
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    expect(heading('Measuring the audio')).toBeInTheDocument();
+    expect(locks.holders.size).toBe(0);
+  });
 
   it('looks again with backoff until the upload lands', async () => {
+    serveUpload(awaitingView(), prep());
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      pend();
-      fetchMock
-        .mockResolvedValueOnce(awaiting())
-        .mockResolvedValueOnce(json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })))
-        .mockImplementation(hang);
-      setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(200);
       await vi.advanceTimersByTimeAsync(0);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(steps()).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
       expect(chip()).toHaveTextContent('Measuring audio');
     } finally {
@@ -739,56 +737,514 @@ describe('job page: upload hand-off', () => {
     }
   });
 
-  it('hands off to the steps after five looks find no upload', async () => {
+  it('keeps looking while storage is slow to show the landed upload', async () => {
+    serveUpload(...Array.from({ length: 6 }, awaitingView), prep());
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      pend();
-      fetchMock.mockImplementation(async () => awaiting());
-      setup(awaitingView(), { playbackUrl: null });
-      await vi.runAllTimersAsync();
-      const steps = fetchMock.mock.calls.filter(([url]) => String(url).endsWith(STEP_PATH));
-      expect(steps).toHaveLength(5);
+      (await query()).respond(200);
+      await vi.advanceTimersByTimeAsync(10 * POLL_BACKOFF.maxTimeout);
+      expect(chip()).toHaveTextContent('Measuring audio');
+      // Seven looks to land, then the driver's first step.
+      expect(steps()).toHaveLength(8);
       expect(screen.queryByText(/failed/i)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
+  it('reloads the page data for a playback URL once the upload moved on', async () => {
+    serveUpload(prep());
+    await handedOver();
+    setup(awaitingView(), { playbackUrl: null });
+    (await query()).respond(200);
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    expect(h.invalidateAll).toHaveBeenCalledTimes(1);
+  });
+
   it('stops looking for the upload once the page is left', async () => {
+    serveUpload(...Array.from({ length: 5 }, awaitingView));
+    await handedOver();
+    const { unmount } = setup(awaitingView(), { playbackUrl: null });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      pend();
-      fetchMock.mockImplementation(async () => awaiting());
-      const { unmount } = setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(200);
       await vi.advanceTimersByTimeAsync(0);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(steps()).toHaveLength(1);
       unmount();
       await vi.runAllTimersAsync();
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(steps()).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('shows a step error while looking for the upload', async () => {
-    pend();
-    fetchMock.mockResolvedValueOnce(json({ error: 'Internal' }, 500));
+  /** Step replies in order, then none; upload-session confirms pass. */
+  const serveSteps = (...replies: (() => Promise<Response>)[]) => {
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return (replies.shift() ?? hang)();
+    });
+  };
+
+  // Safari's 'Load failed' carries the stack Sentry's fetch wrapper backfills, as a Node error does.
+  it.each(['Failed to fetch', 'Load failed'])(
+    'asks again after a step with no reply (%s) or a 5xx, showing the error until it lands',
+    async (dropped) => {
+      serveSteps(
+        () => Promise.reject(new TypeError(dropped)),
+        async () => json({ error: 'Internal' }, 503),
+        async () => json(prep()),
+      );
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        (await query()).respond(200);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByText(dropped)).toBeInTheDocument();
+        await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
+        expect(screen.getByText('Internal')).toBeInTheDocument();
+        await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout * POLL_BACKOFF.factor);
+        // Three tries to land, then the driver's first step.
+        expect(steps()).toHaveLength(4);
+        expect(chip()).toHaveTextContent('Measuring audio');
+        expect(screen.queryByText('Internal')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('stops looking on a 4xx step reply and shows it', async () => {
+    serveSteps(async () => json({ error: 'Not found' }, 404));
+    await handedOver();
     setup(awaitingView(), { playbackUrl: null });
-    expect(await screen.findByText('Internal')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (await query()).respond(200);
+      await vi.runAllTimersAsync();
+      expect(steps()).toHaveLength(1);
+      expect(screen.getByText('Not found')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('shows a failed GCS upload', async () => {
-    xhr.status = 403;
-    setPending('j1', {
-      file,
-      uploadUrl: 'https://storage.googleapis.com/put',
-      objectUrl: 'blob:x',
-      contentType: 'video/mp4',
-    });
+  it('shows the message an upload stopped on', async () => {
+    serveUpload();
+    await handedOver();
     setup(awaitingView(), { playbackUrl: null });
-    expect(await screen.findByText('Upload failed (403)')).toBeInTheDocument();
+    (await query()).respond(403);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Upload failed (403)');
+    expect(steps()).toEqual([]);
+  });
+
+  it('moves a job on after a reload when the upload already landed', async () => {
+    serveUpload(prep());
+    setup(awaitingView(), {
+      playbackUrl: null,
+      uploadSaved: { saved: 10, total: 10, done: true },
+    });
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    expect(screen.queryByLabelText(/Pick the video/)).toBeNull();
+  });
+
+  it('asks for the file after a reload, with the saved amount when storage said it', () => {
+    serveUpload();
+    const { unmount } = setup(awaitingView(), {
+      playbackUrl: null,
+      uploadSaved: { saved: 299, total: 1000, done: false },
+    });
+    expect(chip()).toHaveTextContent('Upload paused at 29%. Pick the video to continue.');
+    unmount();
+    setup(awaitingView(), { playbackUrl: null });
+    expect(chip()).toHaveTextContent('Pick the video to continue.');
+    expect(steps()).toEqual([]);
+  });
+
+  describe('away', () => {
+    const AWAY = 'The upload paused while you were away.';
+    const visibility = (state: 'hidden' | 'visible') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+
+    afterEach(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    });
+
+    it('names a pause that happened while away, with the saved amount, and resumes', async () => {
+      serveUpload();
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(308, { range: 'bytes=0-2' });
+      await waitFor(() => expect(chip()).toHaveTextContent('Uploading 30%'));
+      FakeXhr.all.at(-1)!.drop();
+      await waitFor(() => expect(chip()).toHaveTextContent('Upload paused: no connection'));
+      const before = FakeXhr.all.length;
+      visibility('hidden');
+      visibility('visible');
+      await waitFor(() => expect(chip()).toHaveTextContent(AWAY));
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '30');
+      await waitFor(() => expect(FakeXhr.all.length).toBeGreaterThan(before));
+    });
+
+    it('shows nothing new when bytes went out while hidden', async () => {
+      serveUpload();
+      await handedOver();
+      setup(awaitingView(), { playbackUrl: null });
+      (await query()).respond(308);
+      await waitFor(() => expect(FakeXhr.all.at(-1)?.isQuery).toBe(false));
+      visibility('hidden');
+      FakeXhr.all.at(-1)!.progress(5);
+      visibility('visible');
+      await waitFor(() => expect(chip()).toHaveTextContent('Uploading 50%'));
+      expect(screen.queryByText(AWAY)).toBeNull();
+    });
+
+    it('drives the step at once when the upload finished while the page was away', async () => {
+      serveUpload(prep());
+      await handedOver();
+      (await query()).respond(200);
+      setup(awaitingView(), { playbackUrl: null });
+      await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+    });
+  });
+});
+
+describe('job page: picking the video again', () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s2';
+  const SESSION_PATH = '/api/jobs/j1/upload-session';
+  const PICK_PROMPT = 'Pick the video to continue.';
+  const UNREADABLE = "Couldn't read this video. Pick it again.";
+  const OTHER_TAB = 'Uploading in another tab';
+  const video = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
+  const awaitingView = () => view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 });
+  const picked = { sessionUri: SESSION, generation: 2, restarted: false };
+
+  type Answer = Response | (() => Promise<Response>);
+  /** Each upload-session call takes the next answer; the last one repeats. Steps hang. */
+  const serve = (...answers: Answer[]) => {
+    fetchMock.mockImplementation(async (path) => {
+      if (!String(path).endsWith('/upload-session')) return hang();
+      const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
+      return typeof answer === 'function' ? answer() : answer.clone();
+    });
+  };
+  const bodies = () =>
+    fetchMock.mock.calls
+      .filter(([path]) => String(path) === SESSION_PATH)
+      .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>);
+  const picks = () => bodies().filter((body) => body.op === 'pick');
+  const filePicker = () => screen.queryByLabelText('Pick the video') as HTMLInputElement | null;
+
+  /** Picks `file`; `duration` null leaves the video unplayable, so it errors. */
+  const pick = async (container: HTMLElement, file = video, duration: number | null = 140) => {
+    await fireEvent.change(filePicker()!, { target: { files: [file] } });
+    const el = container.querySelector('video')!;
+    if (duration === null) {
+      await fireEvent.error(el);
+      return;
+    }
+    Object.defineProperty(el, 'duration', { configurable: true, get: () => duration });
+    await fireEvent(el, new Event('durationchange'));
+  };
+
+  /** Another tab holds the job's lock until the returned release runs. */
+  const otherTab = () => {
+    let release!: () => void;
+    void locks.request('upload:j1', {}, () => new Promise<void>((done) => (release = done)));
+    return () => release();
+  };
+
+  it('reads the file, takes the lock, then resumes under the newest generation', async () => {
+    serve(json(picked), json({ current: true }));
+    const { container } = setup(awaitingView(), {
+      playbackUrl: null,
+      uploadSaved: { saved: 4, total: 10, done: false },
+      uploadGeneration: 2,
+    });
+    expect(chip()).toHaveTextContent('Upload paused at 40%. Pick the video to continue.');
+    await pick(container);
+    await waitFor(() => expect(picks()).toHaveLength(1));
+    expect(picks()[0]).toEqual({
+      op: 'pick',
+      opId: expect.any(String),
+      generation: 2,
+      size: 10,
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      filename: 'peekaboo.mp4',
+      contentType: 'video/mp4',
+      durationSec: 140,
+    });
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+    expect(filePicker()).toBeNull();
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('says the upload starts over when the server restarted it for a new video', async () => {
+    serve(json({ ...picked, restarted: true }), json({ current: true }));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container, new File(['x'], 'other.webm', { type: '' }));
+    expect(await screen.findByRole('note')).toHaveTextContent(
+      'New video: starting the upload over.',
+    );
+    expect(picks()[0]).toMatchObject({ contentType: 'video/mp4', filename: 'other.webm' });
+  });
+
+  it('asks again when the video cannot play, with no lock and no request', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container, video, null);
+    await waitFor(() => expect(chip()).toHaveTextContent(UNREADABLE));
+    expect(filePicker()).not.toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+    expect(locks.holders.size).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('asks again when the video gives no duration within 15 s', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await fireEvent.change(filePicker()!, { target: { files: [video] } });
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(chip()).toHaveTextContent(PICK_PROMPT);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(chip()).toHaveTextContent(UNREADABLE);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.querySelector('video')).toBeNull();
+  });
+
+  it('asks again when the file cannot be read for its fingerprint', async () => {
+    serve(json(picked));
+    vi.spyOn(Blob.prototype, 'arrayBuffer').mockRejectedValueOnce(
+      new DOMException('The file could not be read.', 'NotReadableError'),
+    );
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(UNREADABLE));
+    expect(locks.holders.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('resends the same pick after a timeout or a 503, backing off', async () => {
+    const timedOut = () => Promise.reject(new DOMException('signal timed out', 'TimeoutError'));
+    serve(timedOut, json({ error: 'busy' }, 503), json(picked), json({ current: true }));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pick(container);
+      await vi.waitFor(() => expect(picks()).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(UPLOAD_BACKOFF.minTimeout);
+      expect(picks()).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(UPLOAD_BACKOFF.minTimeout * UPLOAD_BACKOFF.factor);
+      expect(picks()).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(new Set(picks().map((body) => body.opId)).size).toBe(1);
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+  });
+
+  it('shows a refused pick, lets the lock go and keeps the picker', async () => {
+    serve(json({ error: "This video doesn't match the size of the saved upload." }, 400));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    expect(await screen.findByRole('alert')).toHaveTextContent("doesn't match the size");
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+    expect(filePicker()).not.toBeNull();
+    expect(get(uploads).j1).toBeUndefined();
+  });
+
+  it.each([
+    [REPLACED, 'A different video replaced this upload.'],
+    [MOVED, 'The upload moved to another device or window.'],
+  ])('names a 409 "%s" and picks next under its generation', async (error, text) => {
+    serve(json({ error, generation: 5 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(text));
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await pick(container);
+    await waitFor(() => expect(picks()).toHaveLength(2));
+    expect(picks()[1]!.generation).toBe(5);
+  });
+
+  it('moves the job on when the pick finds the upload already done', async () => {
+    fetchMock.mockImplementation(async (path) =>
+      String(path).endsWith('/upload-session')
+        ? json({ error: ALREADY_DONE, generation: 1 }, 409)
+        : json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })),
+    );
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+  });
+
+  it('reloads the job when the pick finds it discarded', async () => {
+    serve(json({ error: DISCARDED, generation: 1 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('reloads the job when a running upload hears it was discarded', async () => {
+    serve(json(picked), json({ error: DISCARDED, generation: 2 }, 409));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('waits on another tab, then takes over and asks for the file', async () => {
+    const release = otherTab();
+    serve(json(picked));
+    setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    expect(filePicker()).toBeNull();
+    release();
+    await waitFor(() => expect(h.invalidateAll).toHaveBeenCalledTimes(1));
+    expect(chip()).toHaveTextContent(PICK_PROMPT);
+    expect(filePicker()).not.toBeNull();
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+  });
+
+  it('moves the job on when the upload landed before the takeover', async () => {
+    const release = otherTab();
+    fetchMock.mockImplementation(async () =>
+      json(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 })),
+    );
+    const { rerender } = setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    h.invalidateAll.mockImplementation(async () => {
+      await rerender({
+        data: {
+          view: awaitingView(),
+          playbackUrl: null,
+          short: null,
+          shortExpired: false,
+          expired: false,
+          approveTo: CONNECTED,
+          trace: TRACE,
+          channel: null,
+          user: null,
+          uploadSaved: { saved: 10, total: 10, done: true },
+          uploadGeneration: 1,
+        },
+      } as never);
+    });
+    release();
+    await waitFor(() => expect(chip()).toHaveTextContent('Measuring audio'));
+  });
+
+  it('shows the other tab when a pick finds the lock taken', async () => {
+    serve(json(picked));
+    const { container } = setup(awaitingView(), { playbackUrl: null });
+    otherTab();
+    await pick(container);
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lets the lock go when the page closes with no upload running', async () => {
+    const release = otherTab();
+    serve(json(picked));
+    const { unmount } = setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(chip()).toHaveTextContent(OTHER_TAB));
+    release();
+    await waitFor(() => expect(locks.holders).toEqual(new Set(['upload:j1'])));
+    unmount();
+    await waitFor(() => expect(locks.holders.size).toBe(0));
+  });
+
+  it('keeps a running upload going when the page closes', async () => {
+    serve(json(picked), json({ current: true }));
+    const { container, unmount } = setup(awaitingView(), { playbackUrl: null });
+    await pick(container);
+    await waitFor(() => expect(FakeXhr.all.at(-1)?.url).toBe(SESSION));
+    unmount();
+    expect(locks.holders).toEqual(new Set(['upload:j1']));
+    expect(get(uploads).j1?.state).toBe('sending');
+  });
+});
+
+describe('job page: discard during the upload', () => {
+  const SESSION = 'https://storage.googleapis.com/upload/storage/v1/b/bkt/o?upload_id=s1';
+  const DISCARD_PATH = '/api/jobs/j1/discard';
+  const file = new File(['0123456789'], 'peekaboo.mp4', { type: 'video/mp4' });
+  const awaitingView = () => view({ state: 'AWAITING_UPLOAD', chunkCount: 0, chunkIndex: 0 });
+
+  const serve = (discard: Response) =>
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path) === DISCARD_PATH) return discard;
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return hang();
+    });
+  const sending = async () => {
+    await acquire('j1');
+    start('j1', { file, sessionUri: SESSION, generation: 1, fingerprint: 'f'.repeat(64) });
+  };
+
+  it.each([
+    ['sending', sending],
+    ['waiting for a pick', async () => {}],
+    [
+      'waiting on another tab',
+      async () => {
+        void locks.request('upload:j1', {}, () => new Promise<void>(() => {}));
+      },
+    ],
+  ])('offers Discard while the upload is %s', async (_, arrange) => {
+    serve(json(view({ state: 'DISCARDED' })));
+    await arrange();
+    setup(awaitingView(), { playbackUrl: null });
+    expect(button('Discard')).toBeEnabled();
+  });
+
+  it('offers no Discard while a model step runs', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'PREP', chunkCount: 0, chunkIndex: 0 }));
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('stops the upload before the discard request, then leaves', async () => {
+    let sendingAtDiscard: boolean | null = null;
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path) === DISCARD_PATH) {
+        sendingAtDiscard = get(uploads).j1 !== undefined;
+        return json(view({ state: 'DISCARDED' }));
+      }
+      if (String(path).endsWith('/upload-session')) return json({ current: true });
+      return hang();
+    });
+    await sending();
+    setup(awaitingView(), { playbackUrl: null });
+    await waitFor(() => expect(FakeXhr.all).toHaveLength(1));
+    await fireEvent.click(button('Discard'));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/'));
+    expect(sendingAtDiscard).toBe(false);
+    expect(FakeXhr.all[0]!.aborted).toBe(true);
+    expect(locks.holders.size).toBe(0);
+  });
+
+  it('shows a refused discard and keeps the job', async () => {
+    serve(json({ error: 'Storage is busy. Try discarding again.' }, 503));
+    await sending();
+    setup(awaitingView(), { playbackUrl: null });
+    await fireEvent.click(button('Discard'));
+    expect(await screen.findByText('Storage is busy. Try discarding again.')).toBeInTheDocument();
+    expect(h.goto).not.toHaveBeenCalled();
+    expect(heading('Uploading your video')).toBeInTheDocument();
   });
 });
 

@@ -78,3 +78,27 @@ describe('decrypt', () => {
     await expect(decrypt('AA==')).rejects.toThrow('INVALID_ARGUMENT');
   });
 });
+
+describe('timeouts', () => {
+  it('passes the timeout to KMS as the gax call option', async () => {
+    kms.encrypt.mockResolvedValueOnce([{ ciphertext: Buffer.from('x') }]);
+    kms.decrypt.mockResolvedValueOnce([{ plaintext: Buffer.from('y') }]);
+    await encrypt('a', { timeout: 5000 });
+    await decrypt('AA==', { timeout: 5000 });
+    expect(kms.encrypt).toHaveBeenCalledWith(expect.anything(), { timeout: 5000 });
+    expect(kms.decrypt).toHaveBeenCalledWith(expect.anything(), { timeout: 5000 });
+  });
+
+  it('rejects a call that outlives its timeout, without the plaintext', async () => {
+    vi.useFakeTimers();
+    kms.encrypt.mockReturnValueOnce(new Promise(() => {}));
+    kms.decrypt.mockReturnValueOnce(new Promise(() => {}));
+    const sealing = encrypt('https://upload/secret', { timeout: 5000 }).catch((e: Error) => e);
+    const opening = decrypt('AA==', { timeout: 5000 }).catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(5000);
+    const [sealed, opened] = await Promise.all([sealing, opening]);
+    vi.useRealTimers();
+    expect((sealed as Error).message).toBe('KMS encrypt took longer than 5000 ms');
+    expect((opened as Error).message).toBe('KMS decrypt took longer than 5000 ms');
+  });
+});

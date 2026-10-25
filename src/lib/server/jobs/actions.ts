@@ -1,18 +1,22 @@
 import { captureException } from '@sentry/sveltekit';
 import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '#lib/short.js';
 import { containsWords, parseHashtags, validateFields } from '#lib/metadata.js';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '#lib/types.js';
 import { query } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
 import {
   createShort,
+  generationSql,
+  getJob,
   latestPick,
   lockJob,
+  objectIs,
   outcomeUnknown,
   pickIn,
   skipAndRepick,
   transitionJob,
+  uploadGeneration,
   type JobDoc,
 } from './jobs';
 import { jobSet } from './rows';
@@ -27,7 +31,8 @@ import {
   type Access,
 } from '#lib/server/platforms/youtube/index.js';
 import { ActionError } from '#lib/server/core/errors.js';
-import { objectInfo } from '#lib/server/media/gcs.js';
+import { decrypt, UPLOAD_KMS_MS } from '#lib/server/core/kms.js';
+import { cancelUploadSession, objectInfo, sweepUploads } from '#lib/server/media/gcs.js';
 import { STALE_ANALYSIS, staleAnalysis } from '#lib/server/pipeline/short.js';
 
 function requireState(job: JobDoc, states: JobState[]): void {
@@ -210,15 +215,103 @@ const DISCARDABLE: JobState[] = [
   'CLAIMED_COMPLETE',
 ];
 
+const UNCHECKED = "Couldn't check the upload. Try again.";
+const MOVED_ON = 'The job moved on before it could be discarded.';
+/** Reads of the job before discard gives up on a job that keeps changing under it. */
+const DISCARD_TRIES = 3;
+
+/** Whether the job's current upload object landed; a failed read leaves the job as it was. */
+async function landedUpload(job: JobDoc): Promise<boolean> {
+  try {
+    return (await objectInfo(job.object)) !== null;
+  } catch (error) {
+    captureException(error, { tags: { action: 'discard', 'job.id': job.id } });
+    throw new ActionError(503, UNCHECKED);
+  }
+}
+
 /**
- * Ends the job, including one paused mid-publish. Nothing is learned from a discard, and it deletes
- * no video: a video ID YouTube already returned stays recorded, even from a step still running.
+ * Marks the job discarded, only while it is as `job` read it: for a job awaiting its upload, the
+ * same object and generation. A finished upload's state is cleared in the same statement, since
+ * that video is kept.
+ */
+async function markDiscarded(job: JobDoc, landed: boolean): Promise<boolean> {
+  const awaiting = job.state === 'AWAITING_UPLOAD';
+  const written = await query((tx) =>
+    tx
+      .update(jobs)
+      .set(jobSet(landed ? { state: 'DISCARDED', videoUpload: null } : { state: 'DISCARDED' }))
+      .where(
+        awaiting
+          ? and(
+              eq(jobs.id, job.id),
+              eq(jobs.state, 'AWAITING_UPLOAD'),
+              objectIs(job.object),
+              sql`${generationSql} = ${uploadGeneration(job)}`,
+            )
+          : and(eq(jobs.id, job.id), inArray(jobs.state, DISCARDABLE)),
+      )
+      .returning({ id: jobs.id }),
+  );
+  return written.length > 0;
+}
+
+/**
+ * Finishes a discarded job's unfinished upload: cancels its session, so it can't write, then deletes
+ * every object under the job's prefix. `videoUpload` is cleared only once both are confirmed; until
+ * then the job's next touch calls this again. Never throws.
+ */
+export async function finishDiscardCleanup(job: JobDoc): Promise<void> {
+  const upload = job.videoUpload;
+  if (job.state !== 'DISCARDED' || !upload) return;
+  try {
+    const cancelled = await cancelUploadSession(
+      await decrypt(upload.sessionCipher, { timeout: UPLOAD_KMS_MS }),
+    );
+    const swept = await sweepUploads(job.id, null);
+    if (!cancelled || !swept) return;
+    await query((tx) =>
+      tx
+        .update(jobs)
+        .set(jobSet({ videoUpload: null }))
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.state, 'DISCARDED'),
+            sql`${generationSql} = ${upload.generation}`,
+          ),
+        ),
+    );
+  } catch (error) {
+    captureException(error, { tags: { action: 'discard-cleanup', 'job.id': job.id } });
+  }
+}
+
+/**
+ * Ends the job, including one paused mid-publish or mid-upload. Nothing is learned from a discard.
+ * It deletes no video that reached storage for the job's current upload, and none YouTube returned:
+ * that ID stays recorded, even from a step still running. An unfinished browser upload is stopped
+ * and its objects deleted. The object read decides which; a pick or completion that lands between
+ * that read and the update makes it read again.
  */
 export async function discard(job: JobDoc): Promise<void> {
   requireState(job, DISCARDABLE);
-  if (!(await transitionJob(job.id, DISCARDABLE, { state: 'DISCARDED' }))) {
-    throw new ActionError(409, 'The job moved on before it could be discarded.');
+  await discardFrom(job, DISCARD_TRIES);
+}
+
+/** One read-then-update pass; a missed update reads the job again, `tries` times in all. */
+async function discardFrom(current: JobDoc, tries: number): Promise<void> {
+  if (tries === 0) throw new ActionError(503, UNCHECKED);
+  const landed = current.state === 'AWAITING_UPLOAD' && (await landedUpload(current));
+  if (await markDiscarded(current, landed)) {
+    if (current.state !== 'AWAITING_UPLOAD') return;
+    if (landed) await sweepUploads(current.id, current.object);
+    else await finishDiscardCleanup({ ...current, state: 'DISCARDED' });
+    return;
   }
+  const fresh = await getJob(current.id);
+  if (!fresh || !DISCARDABLE.includes(fresh.state)) throw new ActionError(409, MOVED_ON);
+  await discardFrom(fresh, tries - 1);
 }
 
 const NOT_PAUSED = "This job isn't waiting on a pasted video.";

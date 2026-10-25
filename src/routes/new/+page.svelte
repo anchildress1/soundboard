@@ -5,8 +5,9 @@
   import { ApiError, createJob } from '#lib/api.js';
   import Monitor from '#lib/components/Monitor.svelte';
   import ReleaseBar from '#lib/components/ReleaseBar.svelte';
-  import { setPending } from '#lib/pending.js';
+  import { fingerprint } from '#lib/fingerprint.js';
   import { TITLE_MAX } from '#lib/metadata.js';
+  import { acquire, start as startUpload } from '#lib/upload.js';
 
   const maxMinutes = 15;
 
@@ -35,22 +36,29 @@
 
   const start = async (event: SubmitEvent) => {
     event.preventDefault();
-    if (!file || !objectUrl || !canStart) return;
+    if (!file || !canStart) return;
     busy = true;
     message = '';
-    // Browsers report an empty type for some containers; the URL is signed with this exact value.
-    const contentType = file.type || 'video/mp4';
+    const print = await fingerprint(file).catch(() => null);
+    if (!print) {
+      message = "Couldn't read this video. Pick it again.";
+      busy = false;
+      return;
+    }
     try {
-      const { id, uploadUrl } = await createJob({
+      const { id, sessionUri, generation } = await createJob({
         songTitle: songTitle.trim(),
         notes: notes.trim(),
         filename: file.name,
         size: file.size,
         durationSec: duration,
-        contentType,
+        // Browsers report an empty type for some containers.
+        contentType: file.type || 'video/mp4',
+        fingerprint: print,
       });
-      setPending(id, { file, uploadUrl, objectUrl, contentType });
-      objectUrl = null;
+      // No other tab knows the job yet, so the lock is free.
+      await acquire(id);
+      startUpload(id, { file, sessionUri, generation, fingerprint: print });
       await goto(resolve('/jobs/[id]', { id }));
     } catch (error) {
       message = error instanceof ApiError ? error.message : 'Could not start the release.';

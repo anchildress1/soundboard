@@ -147,7 +147,9 @@ describe('workCopy', () => {
   });
 
   it('warns not to leave while the browser is still uploading', () => {
-    expect(workCopy(view('AWAITING_UPLOAD')).body).toMatch(/Keep this page open/);
+    expect(workCopy(view('AWAITING_UPLOAD')).body).toBe(
+      'Keep this tab open until the upload finishes. Other pages in the app are fine.',
+    );
   });
 
   it.each([
