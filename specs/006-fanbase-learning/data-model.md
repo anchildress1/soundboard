@@ -12,29 +12,29 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 
 ## `research_runs` (new): run state, no YouTube data
 
-| Column                 | Type               | Rules                                                                                                  |
-| ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| `job_id`               | `text` PK          | `REFERENCES jobs(id) ON DELETE CASCADE`. One run per job; a new run replaces the row.                  |
-| `id`                   | `text` NN unique   | Random per run (`randomBytes(12).toString('base64url')`); prefixes task names and keys `job_research`. |
-| `owner_uid`            | `text` NN          | `REFERENCES users(uid)`.                                                                               |
-| `artist_id`            | `text` NN          | `REFERENCES artists(id)`.                                                                              |
-| `stage`                | `text` NN          | `CHECK stage in ('learn','discover','match','releases','done','failed')`                               |
-| `seq`                  | `integer` NN       | default 0; +1 per commit (R2).                                                                         |
-| `cursor`               | `integer` NN       | default 0; next item in the current stage; reset to 0 when the stage advances.                         |
-| `claim_token`          | `text` null        | Set by the claim, cleared by the commit.                                                               |
-| `claim_until`          | `timestamptz` null | Claim + 3 minutes.                                                                                     |
-| `consecutive_failures` | `integer` NN       | default 0; 2 → `failed`.                                                                               |
-| `wait`                 | `text` null        | The last wait.                                                                                         |
-| `error`                | `text` null        | Scrubbed message, or `research-unavailable` or `discarded`. Never a token or URL query.                |
-| `limits`               | `text[]` NN        | default `{}`; codes from `RESEARCH_LIMITS`.                                                            |
-| `started_at`           | `timestamptz` NN   | default `now()`.                                                                                       |
-| `updated_at`           | `timestamptz` NN   | Every claim and commit.                                                                                |
-| `finished_at`          | `timestamptz` null | Set with `done` or `failed`.                                                                           |
+| Column                 | Type               | Rules                                                                                               |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
+| `job_id`               | `text` PK          | `REFERENCES jobs(id) ON DELETE CASCADE`. One run per job; a new run replaces the row.               |
+| `id`                   | `text` NN unique   | `DEFAULT gen_random_uuid()`, set by the database only; prefixes task names and keys `job_research`. |
+| `owner_uid`            | `text` NN          | `REFERENCES users(uid)`.                                                                            |
+| `artist_id`            | `text` NN          | `REFERENCES artists(id)`.                                                                           |
+| `stage`                | `text` NN          | `CHECK stage in ('learn','discover','match','releases','done','failed')`                            |
+| `seq`                  | `integer` NN       | default 0; +1 per commit (R2).                                                                      |
+| `cursor`               | `integer` NN       | default 0; next item in the current stage; reset to 0 when the stage advances.                      |
+| `claim_token`          | `text` null        | Set by the claim, cleared by the commit.                                                            |
+| `claim_until`          | `timestamptz` null | Claim + 3 minutes.                                                                                  |
+| `consecutive_failures` | `integer` NN       | default 0; 2 → `failed`.                                                                            |
+| `wait`                 | `text` null        | The last wait.                                                                                      |
+| `error`                | `text` null        | Scrubbed message, or `research-unavailable` or `discarded`. Never a token or URL query.             |
+| `limits`               | `text[]` NN        | default `{}`; codes from `RESEARCH_LIMITS`.                                                         |
+| `started_at`           | `timestamptz` NN   | default `now()`.                                                                                    |
+| `updated_at`           | `timestamptz` NN   | Every claim and commit.                                                                             |
+| `finished_at`          | `timestamptz` null | Set with `done` or `failed`.                                                                        |
 
 - **RLS** `runs_owner` `FOR ALL TO soundboard_app` (#6):
   - `USING`: `owner_uid = <principal> and <active>`
   - `WITH CHECK`: `owner_uid = <principal> and exists (select 1 from public.jobs j join public.users u on u.uid = <principal> where j.id = research_runs.job_id and j.owner_uid = <principal> and u.active and u.artist_id = research_runs.artist_id)`. A run for another user's job, or with an artist that isn't the caller's, is refused.
-- **Grants:** `soundboard_app`: `SELECT`, `INSERT`, `DELETE`, `UPDATE (id, stage, seq, cursor, claim_token, claim_until, consecutive_failures, wait, error, limits, started_at, updated_at, finished_at)`.
+- **Grants:** `soundboard_app`: `SELECT`, `DELETE`, `INSERT (job_id, owner_uid, artist_id, stage)`, `UPDATE (stage, seq, cursor, claim_token, claim_until, consecutive_failures, wait, error, limits, updated_at, finished_at)`. The app never picks or changes a run's `id`, so it can't point a run at another job's evidence; a new run is a delete and an insert.
 - **`RESEARCH_LIMITS`:** `research-unavailable`, `research-unfinished`, `analytics-not-shared`, `youtube-not-connected`, `private-releases`, `few-peers`, `no-peers`, `hearing-off`, `same-range-fallback`, `artist-range-unknown`, `peer-range-unknown`, `secondary-only`.
 
 ## `job_research` (new): peer evidence, Non-Authorized Data, 29 days
@@ -48,7 +48,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 
 - **Index** on `retrieved_at`; on `job_id`.
 - **RLS:** `research_read` `FOR SELECT TO soundboard_app USING` fresh and `exists (select 1 from public.jobs j where j.id = job_research.job_id and j.owner_uid = <principal>)` and _active_. `research_cleanup_read` and `research_cleanup_delete` `TO soundboard_cleanup USING` expired.
-- **Writes** only through `soundboard_save_research(p_run text, p_token text, p_at timestamptz, p_evidence jsonb)`: _claim held_; refuses `p_at` in the future or already expired; upserts by `run_id` with `job_id` from the run and `retrieved_at = coalesce(existing, p_at)`.
+- **Writes** only through `soundboard_save_research(p_run text, p_token text, p_at timestamptz, p_evidence jsonb)`: _claim held_; refuses `p_at` in the future or already expired; upserts by `run_id` with `job_id` from the run and `retrieved_at = coalesce(existing, p_at)`; an existing row for another job is never updated (`42501`).
 - **Grants:** `soundboard_app` `SELECT`, `EXECUTE`. `soundboard_cleanup` `SELECT (run_id, retrieved_at)`, `DELETE`.
 
 ## `artist_outcomes` (new): the artist's own results, Authorized Data, 29 days

@@ -49,34 +49,21 @@ export const expired = (run: ResearchRun, now = Date.now()) =>
   now - run.startedAt.getTime() >= RUN_EXPIRY_MS;
 
 /**
- * Starts the job's run at `learn`, replacing any earlier one with a new `id` and `seq` 0. The old
- * run's evidence stays under its own `id` until it expires, so earlier citations still resolve.
+ * Starts the job's run at `learn`, replacing any earlier one; the database gives it a new `id`. The
+ * old run's evidence stays under its own `id` until it expires, so earlier citations still resolve.
  */
 export async function startRun(
   job: { id: string; ownerUid: string },
   artistId: string,
 ): Promise<ResearchRun> {
-  const fresh = {
-    id: randomBytes(12).toString('base64url'),
-    stage: 'learn' as const,
-    seq: 0,
-    cursor: 0,
-    claimToken: null,
-    claimUntil: null,
-    consecutiveFailures: 0,
-    wait: null,
-    error: null,
-    limits: [],
-    startedAt: sql`now()`,
-    updatedAt: sql`now()`,
-    finishedAt: null,
-  };
   return await query(async (tx) => {
-    const [row] = await tx
-      .insert(researchRuns)
-      .values({ ...fresh, jobId: job.id, ownerUid: job.ownerUid, artistId })
-      .onConflictDoUpdate({ target: researchRuns.jobId, set: fresh })
-      .returning();
+    await tx.delete(researchRuns).where(eq(researchRuns.jobId, job.id));
+    // Raw, so the statement names only the columns the app role may insert.
+    await tx.execute(sql`
+      insert into ${researchRuns} (job_id, owner_uid, artist_id, stage)
+      values (${job.id}, ${job.ownerUid}, ${artistId}, 'learn')
+    `);
+    const [row] = await tx.select().from(researchRuns).where(eq(researchRuns.jobId, job.id));
     if (!row) throw new Error('The research run was not saved.');
     return row;
   });

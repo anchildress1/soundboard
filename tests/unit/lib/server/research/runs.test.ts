@@ -56,7 +56,7 @@ describe('startRun', () => {
   it('starts the job at learn with seq 0 and a random id', async () => {
     const run = await asA(() => startRun({ id: 'j1', ownerUid: USER_A.uid }, USER_A.artistId));
     expect(run).toMatchObject({ jobId: 'j1', stage: 'learn', seq: 0, cursor: 0, limits: [] });
-    expect(run.id).toMatch(/^[\w-]{16}$/);
+    expect(run.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('replaces an earlier run with a new id, seq 0 and nothing carried over', async () => {

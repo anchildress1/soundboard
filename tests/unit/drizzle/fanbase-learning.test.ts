@@ -278,23 +278,61 @@ describe('own rows only', () => {
     await db().execute(sql`delete from research_runs`);
     await fails(
       asUser(USER_A.uid, (tx) =>
-        tx.execute(sql`insert into research_runs (job_id, id, owner_uid, artist_id, stage)
-          values ('c', 'forged', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`),
+        tx.execute(sql`insert into research_runs (job_id, owner_uid, artist_id, stage)
+          values ('c', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`),
       ),
       '42501',
     );
     await fails(
       asUser(USER_A.uid, (tx) =>
-        tx.execute(sql`insert into research_runs (job_id, id, owner_uid, artist_id, stage)
-          values ('a', 'forged', ${USER_A.uid}, ${ARTIST_C.id}, 'learn')`),
+        tx.execute(sql`insert into research_runs (job_id, owner_uid, artist_id, stage)
+          values ('a', ${USER_A.uid}, ${ARTIST_C.id}, 'learn')`),
       ),
       '42501',
     );
     await asUser(USER_A.uid, (tx) =>
-      tx.execute(sql`insert into research_runs (job_id, id, owner_uid, artist_id, stage)
-        values ('a', 'mine', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`),
+      tx.execute(sql`insert into research_runs (job_id, owner_uid, artist_id, stage)
+        values ('a', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`),
     );
-    expect(await count('research_runs')).toBe(1);
+    const [mine] = await rows(db(), sql`select id from research_runs`);
+    expect(mine?.id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('never lets the app role pick or change a run id', async () => {
+    await db().execute(sql`delete from research_runs where job_id = 'a'`);
+    await fails(
+      asUser(USER_A.uid, (tx) =>
+        tx.execute(sql`insert into research_runs (job_id, id, owner_uid, artist_id, stage)
+          values ('a', 'run-c-old', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`),
+      ),
+      '42501',
+    );
+    await db().execute(sql`insert into research_runs (job_id, id, owner_uid, artist_id, stage)
+      values ('a', 'run-a', ${USER_A.uid}, ${ARTIST_A.id}, 'learn')`);
+    for (const column of [sql`id = 'run-c-old'`, sql`started_at = now()`]) {
+      await fails(
+        asUser(USER_A.uid, (tx) => tx.execute(sql`update research_runs set ${column}`)),
+        '42501',
+      );
+    }
+    expect(await rows(db(), sql`select id from research_runs where job_id = 'a'`)).toEqual([
+      { id: 'run-a' },
+    ]);
+  });
+
+  it("never overwrites another job's evidence through a run that shares its id", async () => {
+    // A's replaced run left evidence under `run-old`; C's run collides with that id.
+    await db().execute(sql`insert into job_research (run_id, job_id, retrieved_at, evidence)
+      values ('run-old', 'a', now(), '{"query":"a"}'::jsonb)`);
+    await db().execute(sql`update research_runs set id = 'run-old' where job_id = 'c'`);
+    await claimRun('run-old', 'tok-c');
+    await fails(
+      asUser(USER_C.uid, (tx) => saveResearch(tx, 'run-old', 'tok-c', new Date(), { query: 'c' })),
+      '42501',
+    );
+    expect(
+      await rows(db(), sql`select job_id, evidence from job_research where run_id = 'run-old'`),
+    ).toEqual([{ job_id: 'a', evidence: { query: 'a' } }]);
   });
 });
 

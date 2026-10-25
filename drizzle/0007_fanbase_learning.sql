@@ -32,7 +32,7 @@ CREATE TABLE "peer_rejections" (
 ALTER TABLE "peer_rejections" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE TABLE "research_runs" (
 	"job_id" text PRIMARY KEY NOT NULL,
-	"id" text NOT NULL,
+	"id" text DEFAULT gen_random_uuid()::text NOT NULL,
 	"owner_uid" text NOT NULL,
 	"artist_id" text NOT NULL,
 	"stage" text NOT NULL,
@@ -99,7 +99,8 @@ ALTER TABLE peer_rejections FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
 REVOKE ALL ON research_runs, job_research, artist_outcomes, peer_rejections FROM PUBLIC;
 --> statement-breakpoint
-GRANT SELECT, INSERT, DELETE, UPDATE (id, stage, seq, cursor, claim_token, claim_until, consecutive_failures, wait, error, limits, started_at, updated_at, finished_at) ON research_runs TO soundboard_app;
+-- No INSERT or UPDATE of `id`: a run's id keys its evidence, so only the database picks it.
+GRANT SELECT, DELETE, INSERT (job_id, owner_uid, artist_id, stage), UPDATE (stage, seq, cursor, claim_token, claim_until, consecutive_failures, wait, error, limits, updated_at, finished_at) ON research_runs TO soundboard_app;
 --> statement-breakpoint
 GRANT SELECT ON job_research, artist_outcomes, peer_rejections TO soundboard_app;
 --> statement-breakpoint
@@ -137,10 +138,15 @@ BEGIN
   IF p_at IS NULL OR p_at > now() + interval '1 minute' OR p_at <= now() - interval '29 days' THEN
     RAISE EXCEPTION 'Retrieval time out of range' USING ERRCODE = '22023';
   END IF;
-  -- The first read's time is kept, so a later batch can never extend the evidence's life.
+  -- The first read's time is kept, so a later batch can never extend the evidence's life. A row
+  -- under this run id for another job is never overwritten.
   INSERT INTO public.job_research (run_id, job_id, retrieved_at, evidence)
     VALUES (p_run, v_job, p_at, p_evidence)
-    ON CONFLICT (run_id) DO UPDATE SET evidence = excluded.evidence;
+    ON CONFLICT (run_id) DO UPDATE SET evidence = excluded.evidence
+    WHERE public.job_research.job_id = excluded.job_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Research evidence belongs to another job' USING ERRCODE = '42501';
+  END IF;
 END;
 $$;
 --> statement-breakpoint
