@@ -188,7 +188,6 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 | `GEMINI_ANALYST_MODEL`                                  | Model that watches and hears each window (default `gemini-3.8-flash`)                            |
 | `GEMINI_PICK_MODEL`                                     | Model for the draft, the Short hook, and the brand guide (default `gemini-4-argon`)              |
 | `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
-| `FLR_CHANNEL_ID`                                        | The Flies Like Robots channel ID                                                                 |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
 | `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |
 | `KMS_KEY`                                               | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service |

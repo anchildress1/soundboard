@@ -31,8 +31,6 @@ spec:
               value: ${GCP_PROJECT_ID}
             - name: GCS_BUCKET
               value: ${GCS_BUCKET}
-            - name: FLR_CHANNEL_ID
-              value: ${FLR_CHANNEL_ID}
             - name: GOOGLE_OAUTH_CLIENT_ID
               value: ${GOOGLE_OAUTH_CLIENT_ID}
             - name: SIGNUP_MODE
