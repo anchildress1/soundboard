@@ -18,6 +18,11 @@ describe('respond', () => {
     await expect(response.json()).resolves.toEqual({ ok: 1 });
   });
 
+  it('sends a Response the route built as is', async () => {
+    const built = Response.json({ error: 'gone', generation: 4 }, { status: 409 });
+    expect(await respond(async () => built)).toBe(built);
+  });
+
   it('turns an ActionError into its status with field errors', async () => {
     const response = await respond(async () => {
       throw new ActionError(422, 'Fix the highlighted fields.', { title: 'Title is required.' });
