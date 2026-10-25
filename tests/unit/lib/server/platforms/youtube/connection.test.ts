@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
+import { DeadlineExceeded } from '#lib/server/core/deadline.js';
 import {
   accessTokenFor,
   getConnection,
@@ -244,6 +245,20 @@ describe('accessTokenFor', () => {
       throw kmsRefusal(DECRYPTION_FAILED);
     });
     await expect(accessTokenFor(UID, CHANNEL, deadline)).rejects.toBeInstanceOf(DeadlineSpent);
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
+  it('reads a KMS timeout that fires a moment before the deadline as out of time', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValueOnce(new DeadlineExceeded('KMS decrypt', 26));
+    await expect(accessTokenFor(UID, CHANNEL, later())).rejects.toBeInstanceOf(DeadlineSpent);
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
+  it('reads gax giving up on its own timeout as out of time, keeping the grant', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValueOnce(Object.assign(new Error('4 DEADLINE_EXCEEDED'), { code: 4 }));
+    await expect(accessTokenFor(UID, CHANNEL, later())).rejects.toBeInstanceOf(DeadlineSpent);
     expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
   });
 

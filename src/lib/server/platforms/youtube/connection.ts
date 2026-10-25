@@ -2,6 +2,7 @@ import { captureException, captureMessage } from '@sentry/sveltekit';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
+import { DeadlineExceeded } from '#lib/server/core/deadline.js';
 import { required } from '#lib/server/core/env.js';
 import { invalidGrant, undecryptable } from '#lib/server/core/errors.js';
 import { decrypt, encrypt } from '#lib/server/core/kms.js';
@@ -133,6 +134,13 @@ export async function markRevoked(uid: string, tokenCiphertext: string): Promise
  */
 export type Access = { token: string; refused: (jobId?: string) => Promise<void> };
 
+// gRPC DEADLINE_EXCEEDED: gax's own timeout, the twin of `within`'s.
+const GRPC_DEADLINE_EXCEEDED = 4;
+
+const outOfBudget = (error: unknown) =>
+  error instanceof DeadlineExceeded ||
+  (error as { code?: unknown } | null)?.code === GRPC_DEADLINE_EXCEEDED;
+
 /**
  * A fresh access token for the user's grant on `channelId`, or null while the user isn't connected.
  * Google rejecting the refresh token, or KMS refusing its ciphertext, marks the connection revoked
@@ -156,8 +164,9 @@ export async function accessTokenFor(
   try {
     refreshToken = await decrypt(cipher, { timeout: Math.max(0, deadline - Date.now()) });
   } catch (cause) {
-    // KMS ran into the step's deadline, however it said so: a wait, never a broken grant.
-    if (Date.now() >= deadline) throw new DeadlineSpent();
+    // KMS ran into the step's deadline, however it said so: a wait, never a broken grant. Timers can
+    // fire a millisecond before the clock reads the deadline, so the timeout counts on its own.
+    if (outOfBudget(cause) || Date.now() >= deadline) throw new DeadlineSpent();
     if (!undecryptable(cause)) throw new Error("Couldn't unlock the YouTube grant.", { cause });
     captureMessage('YouTube grant does not decrypt', { level: 'warning' });
     await markRevoked(uid, cipher);
