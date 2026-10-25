@@ -16,6 +16,7 @@ import { seed } from '../../../../../helpers/db';
 
 const UID = 'sub-a';
 const CHANNEL = 'UC-a';
+const ACCESS = 'access-a';
 const SCOPES = ['openid', 'email', 'https://www.googleapis.com/auth/youtube.upload'];
 
 const kms = vi.hoisted(() => ({ decrypt: vi.fn() }));
@@ -171,8 +172,8 @@ describe('markRevoked', () => {
 describe('accessTokenFor', () => {
   it('decrypts the stored token and refreshes it', async () => {
     await putConnection(UID, connected());
-    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
-    expect(await accessTokenFor(UID, CHANNEL)).toMatchObject({ token: 'ya29.access' });
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
+    expect(await accessTokenFor(UID, CHANNEL)).toMatchObject({ token: ACCESS });
     expect(kms.decrypt).toHaveBeenCalledWith({
       name: 'projects/p/locations/l/keyRings/r/cryptoKeys/k',
       ciphertext: Buffer.from('c2VhbGVk', 'base64'),
@@ -183,7 +184,7 @@ describe('accessTokenFor', () => {
 
   it('revokes only its own grant once YouTube refuses the token, reporting no token', async () => {
     await putConnection(UID, connected());
-    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     const access = (await accessTokenFor(UID, CHANNEL))!;
     await access.refused('j1');
     expect(await getConnection(UID)).toMatchObject({ status: 'revoked', tokenCiphertext: null });
@@ -191,12 +192,12 @@ describe('accessTokenFor', () => {
       level: 'warning',
       tags: { 'job.id': 'j1' },
     });
-    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain('ya29');
+    expect(JSON.stringify(vi.mocked(captureMessage).mock.calls)).not.toContain(ACCESS);
   });
 
   it('leaves a newer grant alone when an older token is refused', async () => {
     await putConnection(UID, connected());
-    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     const access = (await accessTokenFor(UID, CHANNEL))!;
     await putConnection(UID, connected({ tokenCiphertext: 'bmV3' }));
     await access.refused('j1');
@@ -208,7 +209,7 @@ describe('accessTokenFor', () => {
 
   it('reports a refused grant it could not mark revoked, and still returns', async () => {
     await putConnection(UID, connected());
-    oauth.getAccessToken.mockResolvedValueOnce({ token: 'ya29.access' });
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
     const access = (await accessTokenFor(UID, CHANNEL))!;
     await db().execute(sql`
       create function refuse_write() returns trigger language plpgsql
@@ -229,7 +230,7 @@ describe('accessTokenFor', () => {
       { tags: { 'job.id': 'j1', component: 'youtube-revoke-mark' } },
     );
     expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
-    expect(JSON.stringify(vi.mocked(captureException).mock.calls)).not.toContain('ya29');
+    expect(JSON.stringify(vi.mocked(captureException).mock.calls)).not.toContain(ACCESS);
   });
 
   it('throws for a different channel without decrypting', async () => {
