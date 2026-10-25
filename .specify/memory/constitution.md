@@ -21,10 +21,14 @@ Rationale: the app is multi-user and becoming multi-artist; one leak breaks the 
 - A publish is `VERIFIED` only after the platform's own read-back returns it.
 - Audio numbers MUST come from ffmpeg. Model-emitted numerics MUST be stripped.
 - Hashtags and tags MUST come from the job's candidate lists. Anything else is rejected.
+  The pick's own artist name (`Pick.artistName`) is the one tag allowed outside the candidate
+  lists, exactly once.
 - UI text is plain labels. No persona or chatbot copy.
 - Description voice MUST be grounded in the artist's own writing, never invented. The only
   exception is peer influence the artist explicitly chooses through saved per-role settings.
   Copied peer sentences or distinctive phrases MUST NOT appear.
+  Temporary exception, removed by spec 005: until spec 005 ships, artists without a curated
+  profile get generic voice rules (`GENERIC_VOICE`).
 - Nathan's surname MUST NOT be written in code, fixtures, prompts, commits or docs, and MUST NOT
   be filtered from runtime data.
 
@@ -54,6 +58,8 @@ Rationale: one person watches each run; scale comes from raising instance limits
 - A shared platform interface is extracted when the second platform lands, not before.
 - Artist-specific values (name, voice, channel IDs) MUST NOT be constants in core code. They
   belong to the artist profile.
+  Temporary exception, removed by spec 005: until spec 005 ships, Nathan's `ARTIST_VOICE` and
+  credit wording stay in `smart-pick.ts`, selected by `artists.curated`.
 
 Rationale: the repo is growing to many artists and platforms. Placement rules keep each
 addition local instead of spreading through every file.
@@ -114,4 +120,4 @@ Rationale: a policy violation can cost the API access that uploads and verificat
   MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording.
 - Every plan and PR review checks compliance. A known violation is recorded with its fix target.
 
-**Version**: 2.0.1 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-23
+**Version**: 3.0.0 | **Ratified**: 2026-10-16 | **Last Amended**: 2026-10-25

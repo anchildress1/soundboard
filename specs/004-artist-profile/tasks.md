@@ -34,7 +34,7 @@ description: 'Task list for artist profile inputs and display'
   - II (grounded voice) and IV (no artist constants) get explicit, temporary exceptions, removed by spec 005.
   - II (tags from candidates) gets the permanent required-artist-tag exception PRD R4 already states.
   - Classification: **MAJOR, 2.0.1 → 3.0.0** (an exception redefines a MUST; precedent `cef38f2`).
-- [ ] T001 👤 Amend `.specify/memory/constitution.md` through `/speckit-constitution` (blocks T006 onward):
+- [x] T001 👤 Amend `.specify/memory/constitution.md` through `/speckit-constitution` (blocks T006 onward):
   - II: "Until spec 005 ships, artists without a curated profile get generic voice rules (`GENERIC_VOICE`)."
   - IV: "Until spec 005 ships, Nathan's `ARTIST_VOICE` and credit wording stay in `smart-pick.ts`, selected by `artists.curated`."
   - Each voice exception names spec 005 as its removal point.
