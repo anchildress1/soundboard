@@ -201,15 +201,15 @@ s = json.load(sys.stdin)
 urls = json.loads(s["metadata"]["annotations"].get("run.googleapis.com/urls", "[]"))
 print(", ".join(json.dumps(u) for u in urls or [s["status"]["url"]]))')"
 
-# Browsers PUT uploads and stream playback straight from GCS, so the bucket must allow the app's
-# origins: the custom domain, every run.app URL, and the local dev server.
+# Browsers stream playback straight from GCS through the XML API, so the bucket must allow the
+# app's origins: the custom domain, every run.app URL, and the local dev server. Uploads use JSON
+# API resumable sessions, which answer CORS for any origin; bucket CORS doesn't govern them.
 cors="$(mktemp)"
 trap 'rm -f "$rendered" "$cors"' EXIT
 cat > "$cors" << CORS
 [{"origin": ["${APP_DOMAIN}", ${RUN_ORIGINS}, "http://localhost:5173"],
-  "method": ["GET", "PUT"],
-  "responseHeader": ["Content-Type", "Content-Range", "Accept-Ranges", "Range",
-    "x-goog-content-length-range"],
+  "method": ["GET"],
+  "responseHeader": ["Content-Type", "Content-Range", "Accept-Ranges", "Range"],
   "maxAgeSeconds": 3600}]
 CORS
 gcloud storage buckets update "gs://${GCS_BUCKET}" --cors-file "$cors" \
