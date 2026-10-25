@@ -10,6 +10,7 @@ import {
   type OAuthState,
 } from '$lib/server/auth/auth';
 import { admit } from '$lib/server/auth/users';
+import { withIdentity } from '$lib/server/core/identity';
 import { connectGrant, type ConnectOutcome } from '$lib/server/platforms/youtube';
 import type { RequestHandler } from './$types';
 
@@ -38,7 +39,7 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
   // The session is already set: a YouTube or KMS failure leaves the user signed in, unconnected.
   let outcome: ConnectOutcome | null = null;
   try {
-    outcome = await connectGrant(user.uid, grant, 'sign-in');
+    outcome = await withIdentity(user.uid, () => connectGrant(user.uid, grant, 'sign-in'));
   } catch (error) {
     captureException(error, { tags: { component: 'sign-in-connect' } });
   }

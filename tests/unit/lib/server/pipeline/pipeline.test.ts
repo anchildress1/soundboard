@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
-import { seed, truncate } from '../../../../helpers/db';
+import { seed, truncate, vanishOnUpdate } from '../../../../helpers/db';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import {
   A_JOB,
@@ -31,6 +31,7 @@ import {
 import { captureException, captureMessage } from '../../../../mocks/sentry';
 import { resetClients } from '$lib/server/core/clients';
 import { db } from '$lib/server/core/db';
+import { withIdentity } from '$lib/server/core/identity';
 import { artistMemory, connections, jobs, users } from '$lib/server/core/schema';
 import { discard, retry } from '$lib/server/jobs/actions';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '$lib/server/jobs/jobs';
@@ -850,6 +851,16 @@ describe('runStep: PUBLISHING', () => {
     expect(await saved()).toMatchObject({ upload, uploadProgress: progress, uploadStartedAt: 7 });
   });
 
+  it('sends no initiation request when the job disappears before its durable marker', async () => {
+    const job = await publishing();
+    await vanishOnUpdate();
+
+    await withIdentity(USER_A.uid, () => runStep(job));
+
+    expect(called(/upload\/youtube\/v3\/videos/)).toHaveLength(0);
+    expect(await db().select().from(jobs)).toEqual([]);
+  });
+
   it('marks the upload started before the initiation request goes out', async () => {
     let markedAtRequest: number | null = null;
     on(/upload\/youtube\/v3\/videos/, async () => {
@@ -1103,6 +1114,34 @@ describe('runStep: PUBLISHING recovery', () => {
       .set({ status: 'connected', tokenCiphertext: USERS.connections[0]!.tokenCiphertext })
       .where(eq(connections.uid, USER_A.uid));
   const initiations = () => called(/upload\/youtube\/v3\/videos/);
+
+  it('cancels the source and sends no final bytes when the owner is revoked mid-step', async () => {
+    let cancelled = false;
+    on(/storage\.googleapis\.com/, async () => {
+      await db().update(users).set({ active: false }).where(eq(users.uid, USER_A.uid));
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 206 },
+      );
+    });
+    const job = await publishing({ upload: UPLOAD });
+
+    await withIdentity(USER_A.uid, () => runStep(job));
+
+    expect(cancelled).toBe(true);
+    const uploadCalls = called(/upload\.example\/s1/);
+    expect(uploadCalls).toHaveLength(1);
+    expect(headers(uploadCalls[0]!.init)['content-range']).toBe('bytes */1000');
+    expect(await saved()).toMatchObject({
+      state: 'PUBLISHING',
+      finalChunkAt: null,
+      upload: UPLOAD,
+    });
+  });
 
   it('marks the final chunk before sending it', async () => {
     let markedAtPut: number | null = null;

@@ -144,8 +144,31 @@ make dev
 
 ### Operating it
 
-- **Production database:** its pooled URL lives only in Secret Manager, never in `.env`; deploys derive the direct URL from it for migrations. Create it once from Neon's `main` branch (paste the URL, then press Ctrl-D): `gcloud secrets create DATABASE_URL --replication-policy automatic --data-file=-`. `deploy.sh` fails until it exists.
-- **Invites:** while `SIGNUP_MODE=invite`, only invited emails can sign in. Manage them with `node --env-file=.env scripts/invite.ts add <email> [--artist flr]`, `revoke <email>`, `reactivate <email>`, or `list`. That edits the dev database in `.env`; for production, prefix the command with `DATABASE_URL="$(gcloud secrets versions access latest --secret DATABASE_URL)"`. `--artist flr` links the account to Nathan's artist profile. Revoking signs the user out on their next request.
+- **Production database:** provision two secrets from Neon's `main` branch:
+  - `DATABASE_URL`: pooled URL for the restricted `soundboard_app` login.
+  - `DATABASE_URL_UNPOOLED`: owner's direct URL for migrations and operator commands.
+
+  Replace `YOUR_GCP_PROJECT_ID`; for each command, paste the corresponding URL on standard input and press Ctrl-D:
+
+  ```bash
+  gcloud secrets create DATABASE_URL --project=YOUR_GCP_PROJECT_ID --replication-policy=automatic --data-file=-
+  gcloud secrets create DATABASE_URL_UNPOOLED --project=YOUR_GCP_PROJECT_ID --replication-policy=automatic --data-file=-
+  ```
+
+  `deploy.sh` requires both secrets and grants the owner secret only to the deployer.
+
+  Never derive the owner credential from the app URL or grant the runtime access to the owner secret.
+
+  See [database roles and the deployment freeze](docs/operations/youtube-retention.md#database-roles).
+
+- **Invites:** while `SIGNUP_MODE=invite`, only invited emails can sign in. Manage them with `node --env-file=.env scripts/invite.ts add <email> [--artist flr]`, `revoke <email>`, `reactivate <email>`, or `list`. Locally, the script uses the dev owner's `DATABASE_URL_UNPOOLED` from `.env`; production commands use the owner secret explicitly:
+
+  ```bash
+  DATABASE_URL_UNPOOLED="$(gcloud secrets versions access latest --secret=DATABASE_URL_UNPOOLED --project=YOUR_GCP_PROJECT_ID)" node scripts/invite.ts list
+  ```
+
+  Replace `YOUR_GCP_PROJECT_ID` and use the same prefix for `add`, `revoke`, or `reactivate`. `--artist flr` links the account to Nathan's artist profile. Revoking signs the user out on their next request.
+
 - **Connections:** signing in also connects the user's own YouTube channel. The _Connections_ page shows its status and offers Reconnect and Disconnect; a missing or revoked grant blocks approval until it's reconnected. Refresh tokens are stored encrypted with the Cloud KMS key.
 - **Genre research retention:** database reads exclude research at least 30 days old. Deploy and enable the daily Neon cleanup separately using [the retention procedure](docs/operations/youtube-retention.md); an app deployment alone does not create that schedule.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
@@ -168,8 +191,8 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
 | `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |
 | `KMS_KEY`                                               | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service |
-| `DATABASE_URL`                                          | Neon pooled connection string, for the app; locally, a dev branch (never `main`)                 |
-| `DATABASE_URL_UNPOOLED`                                 | Neon direct connection string, for `drizzle-kit migrate`                                         |
+| `DATABASE_URL`                                          | Neon pooled URL for the restricted `soundboard_app` login; locally, a dev branch (never `main`)  |
+| `DATABASE_URL_UNPOOLED`                                 | Neon owner's direct URL for migrations and operator invites; never supplied to the app runtime   |
 | `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                                 |
 | `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                                    |
 | `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only         |

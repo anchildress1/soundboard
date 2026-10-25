@@ -168,27 +168,60 @@ describe('scripts/invite.ts as a standalone script', () => {
   it('prints the usage line and exits 1 without arguments, before touching the database', () => {
     const env = { ...process.env };
     delete env.DATABASE_URL;
+    delete env.DATABASE_URL_UNPOOLED;
     const result = spawnSync(process.execPath, [SCRIPT], { env, encoding: 'utf8' });
     expect(result.status).toBe(1);
     expect(result.stderr.trim()).toBe(USAGE);
     expect(result.stdout).toBe('');
   });
 
-  it('asks for DATABASE_URL on a valid command line without it, never ending a client', () => {
-    const env = { ...process.env };
-    delete env.DATABASE_URL;
-    // Preloaded on the pg the script resolves, so a call to end() shows up on stderr.
+  it.each([undefined, 'postgres://app@runtime.test/runtime'])(
+    'requires DATABASE_URL_UNPOOLED without falling back to DATABASE_URL %s',
+    (runtimeUrl) => {
+      const env = { ...process.env };
+      delete env.DATABASE_URL_UNPOOLED;
+      if (runtimeUrl) env.DATABASE_URL = runtimeUrl;
+      else delete env.DATABASE_URL;
+      // Preloaded on the pg the script resolves, so either lifecycle call fails the assertion.
+      const spy =
+        `import { createRequire } from 'node:module';` +
+        `const { Client } = createRequire(${JSON.stringify(SCRIPT)})('pg');` +
+        `Client.prototype.connect = async () => { throw new Error('connect called'); };` +
+        `Client.prototype.end = ` +
+        `async () => { console.error('end called'); };`;
+      const result = spawnSync(
+        process.execPath,
+        ['--import', `data:text/javascript,${encodeURIComponent(spy)}`, SCRIPT, 'list'],
+        { env, encoding: 'utf8' },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr.trim()).toBe('Set DATABASE_URL_UNPOOLED');
+      expect(result.stdout).toBe('');
+    },
+  );
+
+  it('uses the operator URL when both database credentials are present', () => {
     const spy =
       `import { createRequire } from 'node:module';` +
-      `createRequire(${JSON.stringify(SCRIPT)})('pg').Client.prototype.end = ` +
-      `async () => { console.error('end called'); };`;
+      `const { Client } = createRequire(${JSON.stringify(SCRIPT)})('pg');` +
+      `Client.prototype.connect = async function () {` +
+      `if (this.connectionParameters.host !== 'owner.test') throw new Error('Wrong database credential'); };` +
+      `Client.prototype.query = async () => ({ rows: [] });` +
+      `Client.prototype.end = async () => {};`;
     const result = spawnSync(
       process.execPath,
       ['--import', `data:text/javascript,${encodeURIComponent(spy)}`, SCRIPT, 'list'],
-      { env, encoding: 'utf8' },
+      {
+        env: {
+          ...process.env,
+          DATABASE_URL: 'postgres://app@runtime.test/runtime',
+          DATABASE_URL_UNPOOLED: 'postgres://operator@owner.test/operator',
+        },
+        encoding: 'utf8',
+      },
     );
-    expect(result.status).toBe(1);
-    expect(result.stderr.trim()).toBe('Set DATABASE_URL');
-    expect(result.stdout).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe('\n');
   });
 });

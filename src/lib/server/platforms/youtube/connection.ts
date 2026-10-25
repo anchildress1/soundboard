@@ -1,7 +1,7 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
-import { db, type Database, type Tx } from '$lib/server/core/db';
+import { query, type Database, type Tx } from '$lib/server/core/db';
 import { required } from '$lib/server/core/env';
 import { invalidGrant } from '$lib/server/core/errors';
 import { decrypt, encrypt } from '$lib/server/core/kms';
@@ -35,10 +35,8 @@ export type ConnectionStatus = Connection['status'];
 const mine = (uid: string) => eq(connections.uid, uid);
 
 /** The user's YouTube connection; pass `q` to read it inside the caller's transaction. */
-export async function getConnection(
-  uid: string,
-  q: Database | Tx = db(),
-): Promise<Connection | null> {
+export async function getConnection(uid: string, q?: Database | Tx): Promise<Connection | null> {
+  if (!q) return await query((tx) => getConnection(uid, tx));
   const [row] = await q.select().from(connections).where(mine(uid));
   // The table's check constraints hold the union's shape.
   return (row as Connection | undefined) ?? null;
@@ -50,14 +48,16 @@ export async function getConnection(
  */
 export async function putConnection(uid: string, row: ConnectionRow): Promise<void> {
   const values = { ...row, updatedAt: new Date() };
-  await db()
-    .insert(connections)
-    .values({ uid, ...values })
-    .onConflictDoUpdate({
-      target: connections.uid,
-      set: values,
-      setWhere: row.status === 'connected' ? undefined : ne(connections.status, 'connected'),
-    });
+  await query((tx) =>
+    tx
+      .insert(connections)
+      .values({ uid, ...values })
+      .onConflictDoUpdate({
+        target: connections.uid,
+        set: values,
+        setWhere: row.status === 'connected' ? undefined : ne(connections.status, 'connected'),
+      }),
+  );
 }
 
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
@@ -99,9 +99,7 @@ export async function revokeGrant(uid: string): Promise<boolean> {
   const observed = tokenCiphertext
     ? or(eq(connections.tokenCiphertext, tokenCiphertext), tokenless)
     : tokenless;
-  await db()
-    .delete(connections)
-    .where(and(mine(uid), observed));
+  await query((tx) => tx.delete(connections).where(and(mine(uid), observed)));
   return revoked;
 }
 
@@ -110,10 +108,12 @@ export async function revokeGrant(uid: string): Promise<boolean> {
  * dead token is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
  */
 export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {
-  await db()
-    .update(connections)
-    .set({ status: 'revoked', tokenCiphertext: null, updatedAt: new Date() })
-    .where(and(mine(uid), eq(connections.tokenCiphertext, tokenCiphertext)));
+  await query((tx) =>
+    tx
+      .update(connections)
+      .set({ status: 'revoked', tokenCiphertext: null, updatedAt: new Date() })
+      .where(and(mine(uid), eq(connections.tokenCiphertext, tokenCiphertext))),
+  );
 }
 
 /**

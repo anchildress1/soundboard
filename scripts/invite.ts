@@ -1,4 +1,4 @@
-// Manages the users allowlist against DATABASE_URL (the unpooled URL works too):
+// Manages the users allowlist using the operator credential in DATABASE_URL_UNPOOLED:
 //   node --env-file=.env scripts/invite.ts add <email> [--artist flr]
 //   node --env-file=.env scripts/invite.ts revoke <email>
 //   node --env-file=.env scripts/invite.ts reactivate <email>
@@ -96,12 +96,12 @@ export async function run(args: string[], db: Queryable): Promise<string> {
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
   let connected = false;
   try {
-    // Parse first: a bad command line prints usage even without DATABASE_URL.
+    // Parse first: a bad command line prints usage even without DATABASE_URL_UNPOOLED.
     parse(args);
-    if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL');
+    if (!process.env.DATABASE_URL_UNPOOLED) throw new Error('Set DATABASE_URL_UNPOOLED');
     await client.connect();
     connected = true;
     console.log(await run(args, client));

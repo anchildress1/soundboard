@@ -3,7 +3,7 @@ import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
 import { containsWords, parseHashtags, validateFields } from '$lib/metadata';
 import { and, eq, isNull } from 'drizzle-orm';
 import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '$lib/types';
-import { db } from '$lib/server/core/db';
+import { query } from '$lib/server/core/db';
 import { jobs } from '$lib/server/core/schema';
 import {
   createShort,
@@ -109,7 +109,7 @@ export async function approve(job: JobDoc, input: ApprovalInput): Promise<void> 
   }
   if (!input.channelId) throw new ActionError(400, 'Name the channel being approved to.');
 
-  const outcome = await db().transaction(async (tx) => {
+  const outcome = await query(async (tx) => {
     const current = await lockJob(tx, job.id);
     if (current?.state !== 'REVIEW') return 'handled';
     if (current.pickVersion !== input.pickVersion) return 'stale';
@@ -288,7 +288,7 @@ export async function confirmUpload(job: JobDoc, url: string): Promise<void> {
   if (job.uploadStartedAt !== null && video.publishedAt < startSecond(job.uploadStartedAt)) {
     throw new ActionError(422, 'That video was published before this upload started.');
   }
-  const saved = await db().transaction(async (tx) => {
+  const saved = await query(async (tx) => {
     const current = await lockJob(tx, job.id);
     if (!current || !outcomeUnknown(current) || current.destination?.channelId !== channelId) {
       return false;

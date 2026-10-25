@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PickFields } from '$lib/types';
-import { db, type Database, type Tx } from '$lib/server/core/db';
+import { query, type Database, type Tx } from '$lib/server/core/db';
 import { artistMemory, jobs, users } from '$lib/server/core/schema';
 
 export const ARTIST_ID = 'flr';
@@ -39,9 +39,10 @@ export const SEED_FACTS: Fact[] = [
  */
 export async function artistJob(
   job: { ownerUid: string; artistId: string | null },
-  q: Database | Tx = db(),
+  q?: Database | Tx,
 ): Promise<boolean> {
   if (job.artistId !== ARTIST_ID) return false;
+  if (!q) return await query((tx) => artistJob(job, tx));
   const [owner] = await q
     .select({ artistId: users.artistId })
     .from(users)
@@ -51,22 +52,23 @@ export async function artistJob(
 
 /** Reads Nathan's facts, seeding an empty table on first use. Call only on artist jobs. */
 export async function listFacts(): Promise<Fact[]> {
-  const rows = await db()
-    .select({ data: artistMemory.data })
-    .from(artistMemory)
-    .where(memoryOf('fact'));
+  const rows = await query((tx) =>
+    tx.select({ data: artistMemory.data }).from(artistMemory).where(memoryOf('fact')),
+  );
   if (rows.length > 0) return rows.map((r) => r.data as Fact);
-  await db()
-    .insert(artistMemory)
-    .values(
-      SEED_FACTS.map((fact) => ({
-        artistId: ARTIST_ID,
-        kind: 'fact' as const,
-        key: fact.key,
-        data: fact,
-      })),
-    )
-    .onConflictDoNothing();
+  await query((tx) =>
+    tx
+      .insert(artistMemory)
+      .values(
+        SEED_FACTS.map((fact) => ({
+          artistId: ARTIST_ID,
+          kind: 'fact' as const,
+          key: fact.key,
+          data: fact,
+        })),
+      )
+      .onConflictDoNothing(),
+  );
   return SEED_FACTS;
 }
 
@@ -96,12 +98,14 @@ export async function writeFeedback(
 
 /** Nathan's latest feedback, newest first. */
 export async function recentFeedback(limit = 20): Promise<Feedback[]> {
-  const rows = await db()
-    .select({ data: artistMemory.data })
-    .from(artistMemory)
-    .where(memoryOf('feedback'))
-    .orderBy(desc(artistMemory.id))
-    .limit(limit);
+  const rows = await query((tx) =>
+    tx
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
+      .where(memoryOf('feedback'))
+      .orderBy(desc(artistMemory.id))
+      .limit(limit),
+  );
   return rows.map((r) => r.data as Feedback);
 }
 

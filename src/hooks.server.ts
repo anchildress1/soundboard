@@ -3,6 +3,7 @@ import { json, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { readSession, SESSION_COOKIE } from '$lib/server/auth/auth';
 import { getUser } from '$lib/server/auth/users';
+import { withIdentity } from '$lib/server/core/identity';
 
 const SENTRY_TRACE = /^[0-9a-f]{32}-[0-9a-f]{16}(?:-[01])?$/;
 // Stricter than W3C baggage, which allows raw `&`, `<`, and `>`: Sentry percent-encodes values with
@@ -48,12 +49,14 @@ const jobTraceMeta: Handle = ({ event, resolve }) =>
 /** A session counts only while its user is active, so deactivating signs them out everywhere. */
 const session: Handle = async ({ event, resolve }) => {
   const signed = readSession(event.cookies.get(SESSION_COOKIE));
-  const user = signed ? await getUser(signed.uid) : null;
-  event.locals.user =
-    user && signed
-      ? { uid: user.uid, sid: signed.sid, email: user.email, artistId: user.artistId }
-      : null;
-  return resolve(event);
+  return await withIdentity(signed?.uid, async () => {
+    const user = signed ? await getUser(signed.uid) : null;
+    event.locals.user =
+      user && signed
+        ? { uid: user.uid, sid: signed.sid, email: user.email, artistId: user.artistId }
+        : null;
+    return resolve(event);
+  });
 };
 
 /**
@@ -71,7 +74,7 @@ const OPEN = new Set([
   '/health',
 ]);
 
-const gate: Handle = async ({ event, resolve }) => {
+const gate: Handle = ({ event, resolve }) => {
   const { pathname } = event.url;
   if (event.locals.user) return resolve(event);
   // A client-side navigation, even to `/`, keeps its cached signed-in layout, so every data request
