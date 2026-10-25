@@ -95,7 +95,7 @@ test.describe('the Short', () => {
     await main.getByRole('button', { name: 'Discard', exact: true }).click();
     expect((await discarded).status()).toBe(200);
     await expect(offers(page).getByRole('button', { name: /Make a Short/ })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/jobs/${id}$`));
+    await expect(page).toHaveURL(`/jobs/${id}`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText("It's on your channel");
   });
 
