@@ -38,7 +38,7 @@ description: 'Task list for the resumable video upload'
 
 **Purpose**: The docs agents work from, the config change, test seams, and gate G2.
 
-- [ ] T001 Update docs/prd.md (FR-017) before any behavior code:
+- [x] T001 Update docs/prd.md (FR-017) before any behavior code:
   - **R1 · Upload:** replace "Browser PUTs straight to GCS via signed URL" and the `x-goog-content-length-range` line with: the browser uploads straight to GCS in a resumable session, created by the server with the declared size (≤ 2 GB, GCS refuses any other size); each session writes its own object and the job records the current one; the session address is encrypted at rest like refresh tokens; after a drop it asks GCS what was saved and sends the rest; moving around the app keeps it sending; after a reload or a closed tab the user picks the same video to continue (matched by a sampled fingerprint), and a different video starts over; the newest pick wins across tabs and devices. Keep the 7-day delete rule, the unguessable job IDs and both checkboxes. Bucket CORS now covers playback only.
   - **UX, Working screens:** "leaving is safe once the browser upload is done" becomes "moving around the app is safe during the browser upload, and closing the tab is safe once it is done". Add that Discard shows during the browser upload.
   - No other PRD line changes.
