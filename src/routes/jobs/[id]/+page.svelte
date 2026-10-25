@@ -413,7 +413,8 @@
       {/if}
     {/if}
 
-    {#if approved && fields && view.pick}
+    <!-- A Short outlives its video's upload: one already made stays reachable if that stops. -->
+    {#if (approved && fields && view.pick) || shortView}
       <section class="offers" aria-labelledby="offers-heading">
         <h2 id="offers-heading">Up next, if you want</h2>
         {#if shortView}
@@ -430,7 +431,7 @@
             </span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
           </button>
-        {:else}
+        {:else if approved}
           <button
             class="offer"
             type="button"
@@ -448,17 +449,19 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
           </button>
         {/if}
-        <button class="offer" type="button" onclick={() => enter('bandcamp')}>
-          <span>
-            <strong>Put it on Bandcamp</strong>
-            <span class="help"
-              >{bandcampDone
-                ? 'Every field copied.'
-                : 'Copy the drafted fields into Bandcamp.'}</span
-            >
-          </span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-        </button>
+        {#if approved && fields && view.pick}
+          <button class="offer" type="button" onclick={() => enter('bandcamp')}>
+            <span>
+              <strong>Put it on Bandcamp</strong>
+              <span class="help"
+                >{bandcampDone
+                  ? 'Every field copied.'
+                  : 'Copy the drafted fields into Bandcamp.'}</span
+              >
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+        {/if}
         {#if job.state === 'VERIFIED'}
           <a class="btn" href={resolve('/')}>I'm done for now</a>
         {/if}

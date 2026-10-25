@@ -927,6 +927,29 @@ describe('job page: offers', () => {
     expect(screen.getByRole('heading', { name: 'YouTube Short' })).toBeInTheDocument();
   });
 
+  it.each([
+    ['FAILED', { failedState: 'PUBLISHING' }],
+    ['DISCARDED', {}],
+  ] as [JobState, Partial<PublicJob>][])(
+    'keeps an existing Short reachable once its video stops (%s)',
+    async (state, patch) => {
+      fetchMock.mockImplementation(hang);
+      setup(view({ state, finalFields: FINAL, shortId: 's1', ...patch }, { pick: PICK }), {
+        short: shortView('REVIEW', {}, { playbackUrl: URL_A }),
+      });
+      expect(screen.queryByRole('button', { name: MAKE_SHORT })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Put it on Bandcamp/ })).toBeNull();
+      await fireEvent.click(shortOffer());
+      expect(heading('Is this the hook?')).toBeInTheDocument();
+    },
+  );
+
+  it('offers nothing after a stopped video without a Short', () => {
+    fetchMock.mockImplementation(hang);
+    setup(view({ state: 'DISCARDED', finalFields: FINAL }, { pick: PICK }));
+    expect(screen.queryByRole('heading', { name: OFFERS })).toBeNull();
+  });
+
   it('shows a verified Short with its link', async () => {
     setup(verified({ shortId: 's1' }), {
       short: shortView('VERIFIED', {}, { playbackUrl: URL_A }, { videoId: 'short1' }),
