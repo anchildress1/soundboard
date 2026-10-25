@@ -42,7 +42,7 @@
 - Downloading videos from YouTube.
 - Browser automation.
 - Collaboration: a job belongs to one user.
-- Per-artist voice and brand guide in this version; they come with spec 005.
+- Visual identity (thumbnail style, colors). Per-artist voice and brand guide are in scope as of spec 005.
 
 ## Users
 
@@ -98,15 +98,15 @@
   - Each list contains that video's unique description `#hashtags` (at most 30) and unique tags plus description hashtag terms (at most 40), in first-seen order within the video.
   - The model may select terms from several lists. Approval checks membership in the union of the job's lists only.
   - Top videos: the first 5 eligible results in YouTube's search order. The title format and the description's structure and length are modeled on them; raw view counts never enter model prompts.
-  - Research is stored separately in `job_audience` with its original retrieval time. All evidence reads use `job_audience_fresh`, whose database predicate excludes rows at least 30 days old; a daily Neon Function deletes expired rows even without app activity. Retries and Shorts never extend the retrieval time. Re-picking after expiry fetches fresh research.
+  - Research is stored separately in `job_audience` with its original retrieval time. All evidence reads use `job_audience_fresh`, whose database predicate excludes rows at least 30 days old; a daily Neon Function deletes expired rows even without app activity, and also deletes voice and brand proposals 29 days after their claim. Retries and Shorts never extend the retrieval time. Re-picking after expiry fetches fresh research.
   - After expiry, existing drafts retain only their selected tags and hashtags for approval validation; the full research pool is unavailable.
 - Identity reads are the owner's 3 most recent uploads, read through the owner's own YouTube grant on every pick. They supply identity only: credit lines (full names included) and how the artist is named. Their structure, tags, and hashtags are not copied, and they're never stored. A missing or revoked grant makes the pick wait on "reconnect YouTube"; it never runs without identity.
-- Nathan's curated profile reads in his voice until spec 005 makes voice per artist. Every other profile gets generic voice rules (short, literal, no marketing copy) and no credit line. Nathan's voice: the description's wording follows Nathan's own writing voice, distilled from his YouTube descriptions and comments (2024 on) and written into the pick prompt: short and literal, his "hacked and slashed" credit line, dry self-mocking asides, no marketing copy, with spelling, capitalization, and grammar corrected (his slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
+- The description follows the owner's approved voice: rules the artist approved from a proposal built on their own YouTube descriptions, their approved Soundboard drafts at lower weight, and their Soundboard edits. Without one, generic plain-copy rules (short, literal, no marketing copy) and no credit line; never another artist's voice. Hook picks write their reason in the current voice; Shorts inherit the parent's approved fields. Content rules outrank the voice: candidate-only tags and hashtags, ffmpeg-only audio figures, YouTube limits, and never-invented facts. Spelling, capitalization, and grammar are corrected (slang, the styled song title, and the credited name stay as written). Structure and length still follow the audience evidence.
 - The model picks 3–5 hashtags from the candidates; they close the description. Hashtags matching the chosen tags come first, so the description and the tags field agree.
 - The description never opens with or repeats the title; YouTube shows the title right above it.
 - `tags[]` (the YouTube tags field) come only from the tag candidates, plus the owner's artist name exactly once, recorded on the pick (`artistName`) and fixed in the Review editor. The model picks 5–10, each naming something the analysis heard (genre, subgenre, style, instrument); no mood, scene, or decade filler unless the analysis named it. The server keeps at most 10, always includes the artist name, and never fills from the pool: search membership alone doesn't show a tag was heard. Never the song title.
 - `why` names the evidence behind each field.
-- The same pick drafts Bandcamp copy: an About text and, for Nathan's curated profile, his credit line, cleaned like the description.
+- The same pick drafts Bandcamp copy: an About text in the artist's voice (approved or generic) and, when the approved voice writes one, the credit line, cleaned like the description.
 - The app, never the model, places the profile's contact line at the end of the description body and of the Bandcamp credits. No contact line set means none.
 - After approval, the Bandcamp screen shows the copy with the song title and the pick's tags, each with a Copy button, and opens the owner's `https://<name>.bandcamp.com` plus `/edit_track` in a new tab. Without a Bandcamp URL it shows a note to add one in Settings.
 - Thumbnails go to the model as inline images.
@@ -177,11 +177,11 @@
 
 - Every job belongs to the user who made it; anyone else gets not-found.
 - User-specific caches and credentials are isolated by user and, where needed, channel. Check ownership before issuing a signed media URL; already-issued URLs retain their bounded expiry after sign-out.
-- Every user has at most one artist profile, never shared. Only its owner reads or writes it and its memory, and only the curated profile (Nathan's) opens the brand guide. Jobs not linked to the owner's profile keep their feedback on the job.
+- Every user has at most one artist profile, never shared. Only its owner reads or writes it, its memory, and its voice and brand guide; every user with a profile opens the brand page. Jobs not linked to the owner's profile keep their feedback on the job.
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
 - The database has no client access: only the app (restricted pooled URL from Secret Manager), migrations, and the invite script (owner's direct URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
-- All six application tables enforce row-level security. The app connects as the non-owner `soundboard_app` role, which cannot bypass RLS; each short database transaction uses the verified Google `sub`, and missing identity denies access.
+- All eight application tables enforce row-level security. The app connects as the non-owner `soundboard_app` role, which cannot bypass RLS; each short database transaction uses the verified Google `sub`, and missing identity denies access.
 - Migrations and operator invites use separate privileged credentials. Account activation, artist assignment, and existing identity bindings cannot be changed by ordinary app queries; sign-in binds an account through a restricted database function. The app claims a new artist profile only through `soundboard_create_artist`; otherwise the artist link is operator-only.
 - [x] A user's token and jobs are reachable only from that user's session.
 
@@ -189,16 +189,16 @@
 
 - SDK: `@sentry/sveltekit` 11.4.0.
 - One job = one trace. Job creation saves `sentry-trace` and `baggage` on the job doc. The status page renders them as `<meta>` tags, so the browser continues the job's trace and every step request carries it. Reloads land in the same trace.
-- Each model call is an `invoke_agent` span (`chunk-analyst`, `smart-pick`, `hook-pick` or `brand-guide`) wrapping a `chat <model>` span with provider `gcp.gemini`, the call's actual model, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
+- Each model call is an `invoke_agent` span (`chunk-analyst`, `smart-pick`, `hook-pick`, `voice-guide` or `brand-guide`) wrapping a `chat <model>` span with provider `gcp.gemini`, the call's actual model, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
 - The hashtag search is an `execute_tool hashtag_search` span inside `smart-pick`, with the query and candidate count.
-- Video and images are recorded as placeholders (type, MIME, bytes, and the clip's time range), keeping Nathan's media out of Sentry. Prompt, reply and reasoning text are kept for every agent, except YouTube-sourced prompt text (the owner's uploads and the genre search's videos), which spans replace with `[YouTube uploads: <n>]`; credentials and signed-URL queries are scrubbed.
+- Video and images are recorded as placeholders (type, MIME, bytes, and the clip's time range), keeping Nathan's media out of Sentry. Prompt, reply and reasoning text are kept for every agent, except YouTube-sourced prompt text (the owner's uploads and the genre search's videos), which spans replace with `[YouTube uploads: <n>]`. The `voice-guide` and `brand-guide` reply and reasoning are recorded as `[guide proposal: <n> chars]`, since they restate YouTube data; credentials and signed-URL queries are scrubbed.
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
 - Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
 
 ### P1
 
-**R12 · Brand guide** — curated profile only. Reads up to 30 of the owner's own uploads through their grant + 10 thumbnails, stores a count of the uploads read (no video IDs), proposes one brand statement with keep / fix / drop rules. Nathan approves it; smart pick uses it.
+**R12 · Voice and brand guide** — every artist proposes a voice (the descriptions of their own 30 newest uploads, read through their grant, with approved Soundboard drafts marked and weighted lower, plus their Soundboard edits) and a brand guide (the same 30 uploads + 10 thumbnails through their grant: one brand statement with keep / fix / drop rules). Each proposal lists its sources, is hidden 29 days after its claim and deleted daily, and is deleted on disconnect. The artist edits and approves; only approved rules are kept, with source counts and no video IDs or titles. Nathan's earlier voice (with his credit wording as a rule) and brand guide carried over as approved.
 
 **R13 · Short**
 
@@ -217,10 +217,10 @@
 
 One Cloud Run service for the app in Ashley's project, and one model provider, the Gemini API.
 
-| Piece                      | Runs                                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `app` (Cloud Run, ingress) | SvelteKit 3.1 + Svelte 5.57, ffmpeg                                                                    |
-| Gemini API (paid tier)     | `gemini-3.8-flash` (analyst), `gemini-4-argon` (smart pick, hook pick, brand guide); set by app config |
+| Piece                      | Runs                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `app` (Cloud Run, ingress) | SvelteKit 3.1 + Svelte 5.57, ffmpeg                                                                                 |
+| Gemini API (paid tier)     | `gemini-3.8-flash` (analyst), `gemini-4-argon` (smart pick, hook pick, voice guide, brand guide); set by app config |
 
 - **App service:** 2 vCPU / 8 GiB, max 1, min 0, 60-min request timeout. No GPU.
 - **Model client:** the AI SDK (`ai` + `@ai-sdk/google`) through the Interactions API, in `src/lib/server/ai/model.ts` only. One authorization key from Secret Manager; model names are configuration, so a model or provider change touches only that file and config.
@@ -239,13 +239,15 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 
 ### Postgres
 
-| Table           | Holds                                                                                                                                                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`         | the allowlist and the accounts: invited email, Google account ID bound at first sign-in, artist profile link (unique), active flag                                                                                                                                                                                                          |
-| `artists`       | one artist profile per user: name, optional Bandcamp URL and contact line, and the migration-only `curated` flag (Nathan's; spec 005 removes it)                                                                                                                                                                                            |
-| `connections`   | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                                                                            |
-| `jobs`          | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile                                                   |
-| `artist_memory` | per artist, by kind: facts (FACT · INFERENCE · APPROVED; the name is derived from the profile; Nathan's: Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), publishes (video ID, URL, final metadata, status), and the brand guide's proposal and approved version |
+| Table           | Holds                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`         | the allowlist and the accounts: invited email, Google account ID bound at first sign-in, artist profile link (unique), active flag                                                                                                                                                         |
+| `artists`       | one artist profile per user: name, optional Bandcamp URL and contact line                                                                                                                                                                                                                  |
+| `connections`   | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                           |
+| `jobs`          | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile  |
+| `artist_memory` | per artist, by kind: facts (FACT · INFERENCE · APPROVED; the name is derived from the profile; Nathan's: Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), and publishes (video ID, URL, final metadata, status) |
+| `artist_guides` | per artist, a voice and a brand guide: at most one proposal (with its source list, expiring at 29 days) and one approved version (source counts only) each                                                                                                                                 |
+| `guide_claims`  | per artist and kind, the running proposal's claim and the model quota hold                                                                                                                                                                                                                 |
 
 ## UX
 
@@ -259,7 +261,7 @@ Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmW
 - **New release:** without an artist profile, the artist form (name, Bandcamp URL, contact line) comes first. Then its own page: pick the finished video, the song title, and optional notes, then Start the release.
 - **Home, signed out:** "Sign in to Soundboard" and one Continue with Google button. A "not invited" or "sign-in expired" notice shows above it.
 - **Home, signed in:** the newest release that needs review sits on top as Up next with one Continue button. Running releases follow with "nothing to do yet" and a Watch link. Everything else is under Earlier with its state. New release is the primary action only when nothing is up next. No releases yet: a short explanation of the loop and Start.
-- **Header:** the wordmark, the artist name and the connected channel's handle with its exact video and subscriber counts (on its own row on phones), and a Menu: Connections, Brand guide (curated profile only), Settings, and Sign out.
+- **Header:** the wordmark, the artist name and the connected channel's handle with its exact video and subscriber counts (on its own row on phones), and a Menu: Connections, Brand (every user with an artist profile), Settings, and Sign out.
 - **Connections:** YouTube with Connected as … / Not connected and Connect, Reconnect, Disconnect. Bandcamp is listed as copy and paste with nothing to connect; Instagram and TikTok as coming later, with no controls.
 - **Settings:** an Artist section edits the name, Bandcamp URL and contact line. Peer influence lists the five roles and the source each uses by default. No sliders until fanbase learning ships (spec 006).
 - **Not found / errors:** the status, a plain explanation, and a link home.
