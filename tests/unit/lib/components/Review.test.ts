@@ -152,7 +152,7 @@ describe('Review: approval', () => {
     expect(fact('Channel')).toHaveTextContent('your channel');
   });
 
-  it('approves the edited fields with tags split, and clears the draft', async () => {
+  it('approves the edited fields with tags split, leaving the draft to the parent', async () => {
     const { onapprove } = setup();
     await fireEvent.input(field(/^Title/), { target: { value: 'Edited' } });
     await walk('Keep it, next', 'Looks right, next');
@@ -165,7 +165,7 @@ describe('Review: approval', () => {
       description: PICK.description,
       tags: ['synthwave', 'night drive'],
     });
-    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(localStorage.getItem(KEY)).toContain('Edited');
   });
 
   it('discards from the approval screen', async () => {

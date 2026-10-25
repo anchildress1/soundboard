@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
-  import { clearDraft, loadDraft, saveDraft } from '$lib/draft';
+  import { loadDraft, saveDraft } from '$lib/draft';
   import {
     DESCRIPTION_MAX,
     parseHashtags,
@@ -36,7 +36,7 @@
     candidates: string[];
     /** The owner's connected channel; null blocks approval until YouTube is reconnected. */
     destination: Destination | null;
-    /** Storage key for this pick's edits. */
+    /** Storage key for this pick's edits; the parent clears it once approval lands. */
     draft: string;
     busy?: boolean;
     serverErrors?: FieldErrors;
@@ -76,10 +76,7 @@
 
   const next = () => (step = nextReviewStep(step, hasFlags));
   const back = () => (step = previousReviewStep(step, hasFlags));
-  const approve = () => {
-    clearDraft(draft);
-    onapprove({ title, description, tags });
-  };
+  const approve = () => onapprove({ title, description, tags });
 </script>
 
 {#snippet why(text: string)}

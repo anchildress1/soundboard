@@ -431,6 +431,17 @@ describe('job page: review', () => {
     expect(paths()).toEqual(['/api/jobs/j1/discard']);
   });
 
+  it('keeps the edits when an approval fails', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    setup(view({ state: 'REVIEW' }, { pick: PICK }));
+    await fireEvent.input(titleInput(), { target: { value: 'Edited' } });
+    await toApprove();
+    await fireEvent.click(button(APPROVE));
+    expect(await screen.findByText('Failed to fetch')).toBeInTheDocument();
+    expect(heading(APPROVE_SCREEN)).toBeInTheDocument();
+    expect(localStorage.getItem(draftKey('j1', 1))).toContain('Edited');
+  });
+
   it('stays on the release when a discard is rejected', async () => {
     fetchMock.mockResolvedValueOnce(json({ error: 'The job moved on.' }, 409));
     setup(view({ state: 'REVIEW' }, { pick: PICK }));

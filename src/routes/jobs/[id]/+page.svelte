@@ -12,7 +12,7 @@
   import UploadRecovery from '$lib/components/UploadRecovery.svelte';
   import Track from '$lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
-  import { draftKey } from '$lib/draft';
+  import { clearDraft, draftKey } from '$lib/draft';
   import { drive } from '$lib/driver';
   import type { FieldErrors } from '$lib/metadata';
   import { takePending } from '$lib/pending';
@@ -336,12 +336,16 @@
           {busy}
           {serverErrors}
           bind:step={reviewStep}
-          onapprove={(f) =>
-            act('approve', {
+          onapprove={async (f) => {
+            const key = draftKey(job.id, pick.version);
+            await act('approve', {
               ...f,
               pickVersion: pick.version,
               channelId: data.approveTo?.channelId,
-            })}
+            });
+            // A failed approval keeps the job in review, and the edits with it.
+            if (view.job.state !== 'REVIEW') clearDraft(key);
+          }}
           onrerun={() => {
             // The new pick opens on its title, not the screen the re-run came from.
             reviewStep = 'title';
