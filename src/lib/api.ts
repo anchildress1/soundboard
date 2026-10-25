@@ -12,22 +12,37 @@ export class ApiError extends Error {
   }
 }
 
+/** A 409 from `upload-session`; `generation` is the current one when the server named it. */
+export class UploadConflict extends ApiError {
+  constructor(
+    message: string,
+    readonly generation: number | null,
+  ) {
+    super(409, message);
+  }
+}
+
+/** `upload-session` didn't answer in time; the uploader resends the same body. */
+export class SessionTimeout extends Error {
+  constructor() {
+    super('The upload service did not answer in time.');
+  }
+}
+
+type ErrorBody = { error?: string; message?: string; fields?: FieldErrors; generation?: number };
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { 'content-type': 'application/json', ...init.headers },
   });
-  const body = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    message?: string;
-    fields?: FieldErrors;
-  };
+  const body = (await response.json().catch(() => ({}))) as ErrorBody;
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      body.error ?? body.message ?? `Request failed (${response.status})`,
-      body.fields ?? null,
-    );
+    const message = body.error ?? body.message ?? `Request failed (${response.status})`;
+    if (response.status === 409 && path.endsWith('/upload-session')) {
+      throw new UploadConflict(message, body.generation ?? null);
+    }
+    throw new ApiError(response.status, message, body.fields ?? null);
   }
   return body as T;
 }
@@ -48,6 +63,44 @@ export function createJob(body: CreateBody) {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export type SessionOp =
+  | {
+      op: 'pick';
+      opId: string;
+      generation: number;
+      size: number;
+      fingerprint: string;
+      filename: string;
+      contentType: string;
+      durationSec: number;
+    }
+  | { op: 'renew'; opId: string; generation: number; fingerprint: string }
+  | { op: 'confirm'; generation: number; fingerprint: string };
+
+/** A pick or renew carries the session URI; a confirm only says the sender is still current. */
+export type SessionReply<O extends SessionOp> = O extends { op: 'confirm' }
+  ? { current: true }
+  : { sessionUri: string; generation: number; restarted: boolean };
+
+const SESSION_MS = 10_000;
+
+/** `POST /api/jobs/{id}/upload-session`, bounded at 10 s. */
+export async function uploadSession<O extends SessionOp>(
+  id: string,
+  body: O,
+): Promise<SessionReply<O>> {
+  try {
+    return await call<SessionReply<O>>(`/api/jobs/${id}/upload-session`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(SESSION_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') throw new SessionTimeout();
+    throw error;
+  }
 }
 
 /** Explicit trace headers keep every step in the job's trace; Sentry never overrides them. */

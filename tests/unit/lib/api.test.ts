@@ -6,7 +6,10 @@ import {
   createJob,
   discardBrandProposal,
   proposeBrand,
+  SessionTimeout,
   step,
+  UploadConflict,
+  uploadSession,
   uploadToGcs,
 } from '#lib/api.js';
 
@@ -117,6 +120,13 @@ describe('action', () => {
     expect(JSON.parse(lastInit().body as string)).toEqual({ title: 'T' });
   });
 
+  it('keeps a 409 from another route a plain ApiError', async () => {
+    fetchMock.mockResolvedValue(json(409, { message: 'Busy' }));
+    const err = await action('j1', 'approve', null).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(UploadConflict);
+    expect(err).toMatchObject({ status: 409, message: 'Busy' });
+  });
+
   it('defaults to an empty body and carries trace headers', async () => {
     fetchMock.mockResolvedValue(json(200, {}));
     await action('j1', 'discard', { sentryTrace: 't', baggage: '' });
@@ -141,6 +151,89 @@ describe('brand guide', () => {
       ...guide,
       proposedAt: 42,
     });
+  });
+});
+
+describe('uploadSession', () => {
+  const FP = 'a'.repeat(64);
+  const PICK = {
+    op: 'pick',
+    opId: 'op-1',
+    generation: 0,
+    size: 10,
+    fingerprint: FP,
+    filename: 'a.mp4',
+    contentType: 'video/mp4',
+    durationSec: 60,
+  } as const;
+  const RENEW = { op: 'renew', opId: 'op-2', generation: 3, fingerprint: FP } as const;
+  const CONFIRM = { op: 'confirm', generation: 3, fingerprint: FP } as const;
+  const session = { sessionUri: 'https://storage/s', generation: 4, restarted: true };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['pick', PICK, session],
+    ['renew', RENEW, session],
+    ['confirm', CONFIRM, { current: true }],
+  ])('POSTs a %s as JSON and returns the reply', async (_op, body, reply) => {
+    fetchMock.mockResolvedValue(json(200, reply));
+    expect(await uploadSession('j1', body)).toEqual(reply);
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs/j1/upload-session');
+    expect(lastInit().method).toBe('POST');
+    expect(JSON.parse(lastInit().body as string)).toEqual(body);
+    expect(lastInit().signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('throws UploadConflict with the message and the current generation on a 409', async () => {
+    fetchMock.mockResolvedValue(
+      json(409, { error: 'The upload moved to another device or window.', generation: 7 }),
+    );
+    const err = await uploadSession('j1', PICK).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UploadConflict);
+    expect(err).toMatchObject({
+      status: 409,
+      message: 'The upload moved to another device or window.',
+      generation: 7,
+    });
+  });
+
+  it('leaves the generation null on a 409 that names none', async () => {
+    fetchMock.mockResolvedValue(json(409, { message: 'This job was discarded.' }));
+    await expect(uploadSession('j1', CONFIRM)).rejects.toMatchObject({
+      message: 'This job was discarded.',
+      generation: null,
+    });
+  });
+
+  it('throws a plain ApiError on a 404', async () => {
+    fetchMock.mockResolvedValue(json(404, { message: 'Not Found' }));
+    const err = await uploadSession('j1', RENEW).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).not.toBeInstanceOf(UploadConflict);
+    expect(err).toMatchObject({ status: 404 });
+  });
+
+  it('rejects with SessionTimeout when the server never answers within 10 s', async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    fetchMock.mockImplementation(
+      (_path: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+        }),
+    );
+    const pending = uploadSession('j1', CONFIRM);
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    controller.abort(new DOMException('signal timed out', 'TimeoutError'));
+    await expect(pending).rejects.toBeInstanceOf(SessionTimeout);
+  });
+
+  it('passes other network failures through', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(uploadSession('j1', CONFIRM)).rejects.toThrow('Failed to fetch');
   });
 });
 

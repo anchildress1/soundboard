@@ -7,6 +7,13 @@ export const POLL_BACKOFF = {
   maxTimeout: 30_000,
 } as const satisfies Options;
 
+/** Upload retries start sooner and wait longer: a dropped link often comes back within a second. */
+export const UPLOAD_BACKOFF = {
+  minTimeout: 1000,
+  factor: 2,
+  maxTimeout: 60_000,
+} as const satisfies Options;
+
 /** A bad model reply is asked again at once, one time: waiting doesn't change what it writes. */
 export const REASK_ONCE = { retries: 1, minTimeout: 0 } as const satisfies Options;
 
