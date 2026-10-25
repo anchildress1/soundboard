@@ -243,6 +243,9 @@ describe('recordPublish', () => {
     status: 'VERIFIED' as const,
     at: 5,
     fields,
+    recommendation: null,
+    influence: null,
+    editedBeforeApproval: false,
   };
 
   const publish = (r: typeof record, artistId = 'flr') =>

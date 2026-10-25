@@ -14,7 +14,7 @@ import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
 import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
 import { objectInfo, signedReadUrl, sweepUploads } from '#lib/server/media/gcs.js';
-import { audienceEvidence, type AudienceEvidence } from './hashtags';
+import { audienceEvidence, releaseList, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
   fail,
@@ -22,6 +22,7 @@ import {
   listChunks,
   listPicks,
   objectIs,
+  pickIn,
   markFinalChunk,
   markUploadStarted,
   ok,
@@ -29,6 +30,7 @@ import {
   releaseJob,
   type JobDoc,
 } from '#lib/server/jobs/jobs.js';
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
 import { artistProfile, type ArtistProfile } from '#lib/server/artist/profile.js';
 import type { Tx } from '#lib/server/core/db.js';
@@ -45,6 +47,13 @@ import { runPick } from '#lib/server/ai/smart-pick.js';
 import type { JobPatch } from '#lib/server/jobs/rows.js';
 import { invokeAgent } from '#lib/server/core/tracing.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
+import {
+  evidenceExpiry,
+  readEvidence,
+  rejectedChannels,
+  withoutRejected,
+} from '#lib/server/research/evidence.js';
+import { pickOutcomes } from '#lib/server/research/outcomes.js';
 import { enqueue } from '#lib/server/research/queue.js';
 import {
   expired,
@@ -193,18 +202,20 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   );
   return invokeAgent('smart-pick', modelFor('smart-pick'), async (span) => {
     let audience = job.audience;
+    const limits: string[] = [...research.limits];
     try {
       audience ??= await audienceEvidence(chunks, job.probe?.durationSec ?? null, by);
     } catch (error) {
       if (outOfTime(error)) return { wait: YOUTUBE_BUSY };
-      // Not a failure (T056): the draft goes ahead on no genre evidence, and stores none.
+      // Not a failure: the draft goes ahead on no genre evidence, stores none, and says so.
       if (!quotaSpent(error)) throw error;
+      limits.push('genre-search-unavailable');
     }
     // The genre search is one per job: every outcome from here keeps it.
     const keep: Patch = audience ? { audience } : {};
     if (!hasModelTime('smart-pick', by)) return { ...keep, wait: 'model busy' };
     try {
-      return await pickWith(artist, audience ?? noAudience(), keep, span);
+      return await pickWith(artist, audience ?? noAudience(), limits, keep, span);
     } catch (error) {
       throw new StepFailure(error, keep);
     }
@@ -213,10 +224,14 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   async function pickWith(
     artist: ArtistProfile,
     audience: AudienceEvidence,
+    limits: string[],
     keep: Patch,
     span: Span,
   ): Promise<StepOutput> {
-    const [facts, feedback, { voice, brand }] = await memoryFor(artist, memory);
+    const [[facts, feedback, { voice, brand, influence }, outcomes], found] = await Promise.all([
+      memoryFor(artist, memory),
+      evidenceFor(research.runId),
+    ]);
     const result = await runPick(
       {
         artist,
@@ -225,7 +240,10 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         measurements: job.measurements,
         probe: job.probe,
         recent: withThumbs,
-        candidateLists: audience.candidateLists,
+        candidateLists: [
+          ...audience.candidateLists,
+          ...(found?.evidence.releases.map(releaseList) ?? []),
+        ],
         audience: audience.top,
         skipped: picks
           .filter((p) => p.skipped)
@@ -235,6 +253,10 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         feedback,
         voice,
         brand,
+        influence,
+        evidence: found?.evidence ?? null,
+        outcomes,
+        limits,
       },
       by,
       span,
@@ -250,6 +272,7 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         version,
         modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0),
         researchRunId: research.runId,
+        evidenceExpiresAt: found?.expiresAt ?? null,
       },
     });
   }
@@ -299,13 +322,25 @@ async function researchFor(
   return { runId: run.id, limits: unfinished ? [...limits, 'research-unfinished'] : limits };
 }
 
-/** Facts, feedback and the approved guides; feedback and guides only on jobs that use the memory. */
+/**
+ * Facts, feedback, the approved guides with their slider settings, and the artist's own results;
+ * all but the facts only on jobs that use the memory.
+ */
 const memoryFor = (artist: ArtistProfile, memory: boolean) =>
   Promise.all([
     listFacts(artist, memory),
     memory ? recentFeedback(artist.id) : [],
-    memory ? approvedGuides(artist.id) : { voice: null, brand: null },
+    memory ? approvedGuides(artist.id) : { voice: null, brand: null, influence: DEFAULT_INFLUENCE },
+    memory ? pickOutcomes(artist.id) : [],
   ]);
+
+/** The run's peer evidence while fresh, without the artist's rejected channels, and when it lapses. */
+async function evidenceFor(runId: string) {
+  const stored = await readEvidence(runId);
+  if (!stored) return null;
+  const evidence = withoutRejected(stored.evidence, await rejectedChannels());
+  return { evidence, expiresAt: evidenceExpiry(stored.retrievedAt) };
+}
 
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
@@ -463,13 +498,30 @@ async function sendChunk(
 /** Verified uploads on artist jobs join the artist's memory; no one else's do. */
 async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<void> {
   if (!job.finalFields || !job.artistId || !(await artistJob(job, tx))) return;
+  const proposed = job.pickVersion === null ? null : await pickIn(tx, job.id, job.pickVersion);
+  const { finalFields: fields } = job;
+  // A Short's pick is its parent's approved text, not a recommendation of its own.
+  const own = proposed && job.parentId === null ? proposed : null;
   await recordPublish(tx, job.artistId, {
     videoId,
     url: `https://youtu.be/${videoId}`,
     jobId: job.id,
-    fields: job.finalFields,
+    fields,
     status: 'VERIFIED',
     at: Date.now(),
+    recommendation: own?.recommendation
+      ? {
+          approach: own.recommendation.approach,
+          intendedOutcome: own.recommendation.intendedOutcome,
+          evidence: own.recommendation.evidence,
+        }
+      : null,
+    influence: own?.influence ?? null,
+    editedBeforeApproval:
+      proposed !== null &&
+      (proposed.title !== fields.title ||
+        proposed.description !== fields.description ||
+        proposed.tags.join('\n') !== fields.tags.join('\n')),
   });
 }
 

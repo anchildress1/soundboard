@@ -123,6 +123,8 @@ export type Pick = PickFields & {
   evidenceExpiresAt?: string | null;
   /** `A<n>` → the artist's own video ID. */
   outcomeRefs?: Record<string, string>;
+  /** What the draft couldn't use, built by the server; the reason when `recommendation` is null. */
+  limits?: string[];
 };
 
 /** How a landscape frame fits 9:16: a blurred copy of the frame behind it, or a center crop. */

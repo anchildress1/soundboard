@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '#lib/metadata.js';
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
@@ -50,6 +51,14 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   brandCheck: 'Matches the recent uploads.',
   why: { title: 't', description: 'd', tags: 'g' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  citations: { sound: [], feel: [], wording: [], discovery: [], structure: [] },
+  recommendation: {
+    approach: 'Lead with the synth hook.',
+    intendedOutcome: 'More people reach the end of the track.',
+    follows: 'artist',
+    followsWhy: 'Only the artist’s own sources were available.',
+    evidence: [],
+  },
   ...over,
 });
 
@@ -58,6 +67,8 @@ const tagNames = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'out
 const cands = (...tags: string[]) => tags.map((tag) => ({ tag }));
 const tagCandidates = cands(...tagNames);
 const source = (over: Partial<CandidateList> = {}): CandidateList => ({
+  source: 'genre',
+  ref: 'G1',
   videoId: 'reference-one',
   title: 'Reference one',
   hashtags: candidates,
@@ -65,6 +76,13 @@ const source = (over: Partial<CandidateList> = {}): CandidateList => ({
   ...over,
 });
 const candidateLists = [source()];
+/** A candidate list as the prompt shows it: keyed by its ref, so the ref and source are dropped. */
+const listed = ({ videoId, title, hashtags, tags }: CandidateList) => ({
+  videoId,
+  title,
+  hashtags,
+  tags,
+});
 
 const facts: Fact[] = [
   { key: 'artist-name', value: ARTIST, kind: 'FACT', public: true },
@@ -86,6 +104,10 @@ const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   facts,
   measurements: null,
   probe: null,
+  influence: DEFAULT_INFLUENCE,
+  evidence: null,
+  outcomes: [],
+  limits: [],
   ...over,
 });
 
@@ -143,6 +165,10 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   skipped: [],
   voice: NATHAN_VOICE,
   brand: null,
+  influence: DEFAULT_INFLUENCE,
+  evidence: null,
+  outcomes: [],
+  limits: [],
   ...over,
 });
 
@@ -291,6 +317,7 @@ describe('buildPickRequest', () => {
     const lists = [
       source({ tags: [{ tag: 'synthwave', usedBy: 99 } as { tag: string }] }),
       source({
+        ref: 'G2',
         videoId: 'reference-two',
         title: 'Reference two',
         tags: cands('synthwave', 'outrun'),
@@ -298,7 +325,10 @@ describe('buildPickRequest', () => {
     ];
     const body = context(buildPickRequest(ctx({ candidateLists: lists })));
 
-    expect(body.candidateLists).toEqual([source({ tags: cands('synthwave') }), lists[1]]);
+    expect(body.candidateLists).toEqual({
+      G1: listed(source({ tags: cands('synthwave') })),
+      G2: listed(lists[1]!),
+    });
     expect(body).not.toHaveProperty('candidateHashtags');
     expect(body).not.toHaveProperty('candidateTags');
     expect(JSON.stringify(body)).not.toMatch(/usedBy|views|score|weight/);
@@ -310,7 +340,7 @@ describe('buildPickRequest', () => {
     const body = context(messages);
     expect(body.artist).toBe(ARTIST);
     expect(body.artistNotes).toBe('live take');
-    expect(body.candidateLists).toEqual(candidateLists);
+    expect(body.candidateLists).toEqual({ G1: listed(candidateLists[0]!) });
     expect(body).not.toHaveProperty('candidateHashtags');
     expect(body).not.toHaveProperty('candidateTags');
     expect(body.ffmpeg).toEqual(measurements());
@@ -909,7 +939,7 @@ describe('finalizePick: links, tags, and limits', () => {
     );
     const parts = messages.turns[0]!.parts as { text: string; source?: string }[];
     const lists = parts.find((part) => part.source && part.text.includes('candidateLists'))!;
-    expect(JSON.parse(lists.text).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
+    expect(JSON.parse(lists.text).candidateLists.G1.tags).toEqual([{ tag: 'synthwave' }]);
     expect(finalizePick(raw(), fix()).tags.filter((tag) => tag === ARTIST)).toHaveLength(1);
   });
 

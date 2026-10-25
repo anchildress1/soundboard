@@ -6,11 +6,20 @@ import {
   TITLE_MAX,
   withArtistTag,
 } from '#lib/metadata.js';
-import type { Chunk, Measurements, Pick, Probe } from '#lib/types.js';
+import { ROLES, type Influence, type Role } from '#lib/influence.js';
+import type { Chunk, Measurements, Pick, Probe, Recommendation } from '#lib/types.js';
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
+import type { PeerEvidence } from '#lib/server/research/evidence.js';
+import type { PickOutcome } from '#lib/server/research/outcomes.js';
+import { engagementRate } from '#lib/server/research/calculated.js';
+import { soleSecondary } from '#lib/server/research/brackets.js';
+import { checkCopy, type CopyViolation } from './copy-check';
+import { checkInfluence, type Mismatch } from './influence-check';
 import { chatJson, hasModelTime, type Asks } from './model';
 import { stripDeep } from './numerics';
-import { isString, isStrings, shape } from './shape';
+import { cleanCitations, cleanEvidence, influenceRules, type Refs } from './pick-sources';
+import { isString, isStrings, shape, type Check } from './shape';
+import { stripStats } from './stat-guard';
 import type { AudienceVideo, CandidateList, TagCandidate } from '#lib/server/pipeline/hashtags.js';
 import {
   agentInput,
@@ -24,11 +33,22 @@ import {
 import type { CatalogVideo, Thumbnail } from '#lib/server/platforms/youtube/index.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
+const FOLLOWS = ['artist', 'peers', 'both', 'none'];
 
 export const PICK_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'description', 'hashtags', 'tags', 'brandCheck', 'why', 'bandcamp'],
+  required: [
+    'title',
+    'description',
+    'hashtags',
+    'tags',
+    'brandCheck',
+    'why',
+    'bandcamp',
+    'citations',
+    'recommendation',
+  ],
   properties: {
     title: { type: 'string' },
     description: { type: 'string' },
@@ -54,12 +74,44 @@ export const PICK_SCHEMA = {
         credits: { type: 'string' },
       },
     },
+    citations: {
+      type: 'object',
+      additionalProperties: false,
+      required: [...ROLES],
+      properties: Object.fromEntries(ROLES.map((role) => [role, stringArray])),
+    },
+    recommendation: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['approach', 'intendedOutcome', 'follows', 'followsWhy', 'evidence'],
+      properties: {
+        approach: { type: 'string' },
+        intendedOutcome: { type: 'string' },
+        follows: { type: 'string', enum: FOLLOWS },
+        followsWhy: { type: 'string' },
+        evidence: stringArray,
+      },
+    },
   },
 } as const;
 
 /** The model's reply. Flags are never the model's: `finalizePick` builds them from measured evidence. */
-export type RawPick = Omit<Pick, 'version' | 'modelMs' | 'flags' | 'artistName'>;
+export type RawPick = Omit<Pick, 'version' | 'modelMs' | 'flags' | 'artistName' | ServerFields> & {
+  citations: Record<Role, string[]>;
+  recommendation: Omit<Recommendation, 'limits'>;
+};
 export type FinalPick = Omit<Pick, 'version' | 'modelMs'>;
+
+/** The fields only the server fills in. */
+type ServerFields =
+  | 'influence'
+  | 'influenceWarning'
+  | 'researchRunId'
+  | 'evidenceExpiresAt'
+  | 'outcomeRefs'
+  | 'limits'
+  | 'citations'
+  | 'recommendation';
 
 const RAW_PICK = shape({
   title: isString,
@@ -69,6 +121,14 @@ const RAW_PICK = shape({
   brandCheck: isString,
   why: shape({ title: isString, description: isString, tags: isString }),
   bandcamp: shape({ about: isString, credits: isString }),
+  citations: shape(Object.fromEntries(ROLES.map((role) => [role, isStrings]))),
+  recommendation: shape({
+    approach: isString,
+    intendedOutcome: isString,
+    follows: ((value) => FOLLOWS.includes(value as string)) satisfies Check,
+    followsWhy: isString,
+    evidence: isStrings,
+  }),
 });
 
 export function isRawPick(value: unknown): value is RawPick {
@@ -97,6 +157,30 @@ export type PickContext = {
   voice: VoiceRules | null;
   /** The owner's approved brand guide; null before one is approved, or when the job can't use it. */
   brand: BrandGuide | null;
+  /** How strongly similar artists shape each part of this draft. */
+  influence: Influence;
+  /** The run's peers and releases without rejected channels; null when there are none to use. */
+  evidence: PeerEvidence | null;
+  /** The artist's own fresh results, `A<n>` in this order. */
+  outcomes: PickOutcome[];
+  /** Server-built notes on what the draft couldn't use; they close the recommendation. */
+  limits: string[];
+};
+
+/** Every ref the job's sources carry, so the reply's refs can be checked against them. */
+export function refsOf(ctx: SourceHolder): Refs {
+  const lists = ctx.candidateLists;
+  return {
+    genre: lists.filter((list) => list.source === 'genre').map((list) => list.ref),
+    peers: ctx.evidence?.peers.map((peer) => peer.ref) ?? [],
+    releases: ctx.evidence?.releases.map((release) => release.ref) ?? [],
+    outcomes: ctx.outcomes.map((outcome) => outcome.ref),
+  };
+}
+type SourceHolder = {
+  candidateLists: CandidateList[];
+  evidence: PeerEvidence | null;
+  outcomes: PickOutcome[];
 };
 
 const RECENT_DESCRIPTION_CHARS = 700;
@@ -170,17 +254,117 @@ export function tagPool(fix: {
   return [...found.values(), ...(fix.artistName ? [{ tag: fix.artistName }] : [])];
 }
 
+/** Keyed by ref, so a ref is never a value Sentry has to redact from the reply. */
+const byRef = <T>(items: T[], ref: (item: T) => string, value: (item: T) => unknown) =>
+  Object.fromEntries(items.map((item) => [ref(item), value(item)]));
+
+/** Reported counts and calculated values, each labeled as what it is. */
+function peerSources(evidence: PeerEvidence | null) {
+  const peers = evidence?.peers ?? [];
+  const releases = evidence?.releases ?? [];
+  return {
+    // Our own labels: no YouTube text or number in them.
+    labels: {
+      similarArtists: byRef(
+        peers,
+        (peer) => peer.ref,
+        (peer) => ({ relation: peer.relation, basis: peer.basis, secondary: peer.secondary }),
+      ),
+      peerReleases: byRef(
+        releases,
+        (release) => release.ref,
+        (release) => ({ selectedAs: release.selectedAs }),
+      ),
+    },
+    similarArtists: byRef(
+      peers,
+      (peer) => peer.ref,
+      (peer) => ({
+        explanation: peer.explanation,
+        publicReachReportedByYouTube: {
+          subscribers: peer.stats.hidden ? 'hidden' : peer.stats.subscribers,
+          videos: peer.stats.videos,
+          views: peer.stats.views,
+        },
+      }),
+    ),
+    peerReleases: byRef(
+      releases,
+      (release) => release.ref,
+      (release) => ({
+        title: release.title,
+        description: release.description,
+        durationSec: release.durationSec,
+        publishedAt: release.publishedAt,
+        publicReachReportedByYouTube: release.stats,
+        engagementRate: engagementRate(release.stats),
+      }),
+    ),
+  };
+}
+
+function resultSources(outcomes: PickOutcome[]) {
+  return byRef(
+    outcomes,
+    (outcome) => outcome.ref,
+    (outcome) => ({
+      suggested: outcome.suggested,
+      published: outcome.published,
+      editedBeforeApproval: outcome.editedBeforeApproval,
+      changedOnYouTubeSinceApproval: outcome.differsFromApproved,
+      liveOnYouTubeNow: outcome.live,
+      coverage: outcome.coverage,
+      window: outcome.window,
+      reportedByYouTube: {
+        views: outcome.metrics.views,
+        subscribersGained: {
+          value: outcome.metrics.subscribersGained,
+          note: "counted on this video's page; a lower bound",
+        },
+        subscribersLost: outcome.metrics.subscribersLost,
+      },
+      netSubscribers: outcome.net,
+    }),
+  );
+}
+
+const SOURCES_RULE =
+  "Sources, by ref: analysis = windows; voice = the voice rules below; edits = feedback, the artist's own preference and never evidence of reach; identity = recentUploads; G<n> = a candidateLists entry from the genre search";
+
+/** The prompt rules that tell the model what evidence it has and how to use each source. */
+function evidenceRules(ctx: PickContext, refs: Refs): string[] {
+  const peered = refs.releases.length > 0;
+  const results = refs.outcomes.length > 0;
+  return [
+    peered
+      ? "peerReleases are other artists' releases comparable to this one, each chosen within its own artist as newest, most viewed or most engaged (see peerLabels). Model the title format and the description's structure and length on them. Do not claim these choices caused reach or success."
+      : "audienceTopVideos are genre search examples: model the title format and the description's structure and length on them. Do not claim these choices caused audience reach or success.",
+    `${SOURCES_RULE}${refs.peers.length > 0 ? '; P<n> = a similarArtists entry; P<n>-R<m> = a peerReleases entry, whose hashtags and tags are the candidateLists entry with the same ref' : ''}${results ? '; A<n> = an artistResults entry' : ''}.`,
+    refs.peers.length > 0
+      ? `Similar artists shape each part of the draft as far as its level says. Follow the level, and cite what you followed:\n${influenceRules(ctx.influence)}`
+      : "No similar-artist evidence is available. Cite only the artist's own sources.",
+    results
+      ? 'artistResults are the artist’s own uploads. suggested is what a past recommendation proposed; published is what the artist actually posted, which may differ (editedBeforeApproval); liveOnYouTubeNow is how the video reads now. Their results measure fans and reach; similar-artist evidence measures reach only. Repeated comparable results from the artist outrank loose observations about other artists.'
+      : '',
+    'citations: for sound, feel, wording, discovery and structure, the refs that part of your draft followed, only from the sources that part may cite.',
+    "recommendation: one thing to try for this release, said tentatively. approach: what to try. intendedOutcome: the reach or fan outcome hoped for. follows: 'artist' when it rests on the artist's own sources or results, 'peers' on similar artists, 'both', or 'none' when the evidence is too sparse (then say so). followsWhy: why it follows what it does, and which side you follow when artist and peer evidence disagree. evidence: the refs it rests on. Heard artists outrank metadata-only ones and next-range artists outrank secondary ones; a recommendation never rests only on secondary artists. Never state a cause.",
+    'Never write a number about views, subscribers, likes, comments or engagement; point to the source by ref instead. Refer to similar artists only by ref, never by name.',
+  ].filter(Boolean);
+}
+
 export function buildPickRequest(ctx: PickContext): ModelRequest {
   const { name } = ctx.artist;
   const voiced = ctx.voice !== null;
+  const refs = refsOf(ctx);
+  const peered = refs.releases.length > 0;
   const artistTag = ` Include "${name}". This required artist tag may be absent from the reference lists.`;
   const rules = [
     'Write one YouTube upload recommendation for a new music video: title, description, hashtags, tags.',
-    "audienceTopVideos are genre search examples: model the title format and the description's structure and length on them. Do not claim these choices caused audience reach or success.",
+    ...evidenceRules(ctx, refs),
     'candidateLists keep hashtags and tags labeled by their source video. Select across lists when relevant; do not pool, count, rank, or infer popularity from repeated terms.',
     "recentUploads are the artist's own uploads. Use them only for identity: credit lines and how the artist is named. Do not copy their structure, tags, or hashtags.",
     `title: at most ${TITLE_MAX} characters.`,
-    `description: plain text whose structure and length follow the audienceTopVideos descriptions; its wording follows the artist voice below. Never open with or repeat the title: YouTube shows it right above. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
+    `description: plain text whose structure and length follow the ${peered ? 'peerReleases' : 'audienceTopVideos'} descriptions; its wording follows the artist voice below. Never open with or repeat the title: YouTube shows it right above. No hashtags inside it, they are appended separately. Only include links listed in facts.`,
     voiceBlock(ctx.voice),
     CONTENT_RULES,
     voiced
@@ -194,7 +378,7 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
       ? "brandGuide is the artist's approved brand guide: follow keep, apply fix, avoid drop. It outranks patterns in the recent uploads."
       : '',
     `brandCheck: one sentence on how the proposal matches or departs from ${ctx.brand ? 'the brand guide' : 'the recent uploads'}.`,
-    'why: one short reason per field naming its evidence: which audienceTopVideos or candidates it follows.',
+    `why: one short reason per field naming its evidence: which refs it follows.`,
     "bandcamp.about: the same song for Bandcamp's About field, in the artist voice, a few sentences at most. No hashtags, credits, or contact line.",
     voiced
       ? 'bandcamp.credits: the credit line from the description, exactly as written there.'
@@ -203,6 +387,7 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
       ? 'skippedVersions were rejected. Write a different title and a different description: new wording and a new angle, not a rearrangement of the skipped ones. The voice rules still apply.'
       : '',
   ].filter(Boolean);
+  const sources = peerSources(ctx.evidence);
   const context = {
     artist: name,
     songTitle: ctx.songTitle,
@@ -221,6 +406,7 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
     brandGuide: ctx.brand ?? undefined,
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,
+    peerLabels: refs.peers.length > 0 ? sources.labels : undefined,
   };
   // YouTube data goes in its own tagged parts, so spans record a placeholder instead (research R13).
   const recentUploads = ctx.recent.map((v) => ({
@@ -228,19 +414,23 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
     description: v.description.slice(0, RECENT_DESCRIPTION_CHARS),
     publishedAt: v.publishedAt,
   }));
-  const audienceTopVideos = ctx.audience.map(({ title, description, tags }) => ({
-    title,
-    description,
-    tags,
-  }));
-  const candidateLists = ctx.candidateLists.map(({ videoId, title, hashtags, tags }) => ({
-    videoId,
-    title,
-    hashtags,
-    tags: tags
-      .filter(({ tag }) => tag.toLowerCase() !== name.toLowerCase())
-      .map(({ tag }) => ({ tag })),
-  }));
+  const audienceTopVideos = peered
+    ? []
+    : ctx.audience.map(({ title, description, tags }) => ({ title, description, tags }));
+  const candidateLists = byRef(
+    ctx.candidateLists,
+    (list) => list.ref,
+    ({ videoId, title, hashtags, tags }) => ({
+      videoId,
+      title,
+      hashtags,
+      tags: tags
+        .filter(({ tag }) => tag.toLowerCase() !== name.toLowerCase())
+        .map(({ tag }) => ({ tag })),
+    }),
+  );
+  const { similarArtists, peerReleases } = sources;
+  const artistResults = resultSources(ctx.outcomes);
   return {
     system: rules.join('\n'),
     turns: [
@@ -249,8 +439,17 @@ export function buildPickRequest(ctx: PickContext): ModelRequest {
         parts: [
           { type: 'text', text: JSON.stringify(context) },
           youtubePart({ recentUploads }, recentUploads.length),
-          youtubePart({ audienceTopVideos }, audienceTopVideos.length),
-          youtubePart({ candidateLists }, candidateLists.length),
+          ...(peered ? [] : [youtubePart({ audienceTopVideos }, audienceTopVideos.length)]),
+          ...(refs.peers.length > 0
+            ? [
+                youtubePart({ similarArtists }, refs.peers.length, 'YouTube peers'),
+                youtubePart({ peerReleases }, refs.releases.length, 'YouTube releases'),
+              ]
+            : []),
+          ...(ctx.outcomes.length > 0
+            ? [youtubePart({ artistResults }, ctx.outcomes.length, 'YouTube outcomes')]
+            : []),
+          youtubePart({ candidateLists }, ctx.candidateLists.length),
           ...imageParts(
             'Thumbnails of the recent uploads, newest first:',
             ctx.recent.map((v) => v.thumbnail),
@@ -300,6 +499,10 @@ export type PickFixups = {
   facts: Fact[];
   measurements: Measurements | null;
   probe: Probe | null;
+  influence: Influence;
+  evidence: PeerEvidence | null;
+  outcomes: PickOutcome[];
+  limits: string[];
 };
 
 const SHORT_MAX_SEC = 180;
@@ -419,11 +622,28 @@ function pickTags(raw: string[], pool: string[], fix: PickFixups): string[] {
   return withArtistTag(fix.artist.name, picked, MAX_TAGS);
 }
 
+/** The model never writes a statistic: sentences that state one are removed (research R7). */
+const unstated = (text: string) => stripStats(text).text;
+
+const escapeRegExp = (text: string) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** `text` with each peer's channel title replaced by the peer's ref. */
+function byRefOnly(text: string, peers: { ref: string; title: string }[]): string {
+  return peers.reduce(
+    (acc, peer) =>
+      peer.title.trim()
+        ? acc.replaceAll(new RegExp(escapeRegExp(peer.title.trim()), 'giu'), peer.ref)
+        : acc,
+    text,
+  );
+}
+
 /**
  * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
  * links only from facts, plain-term tags with the artist's first, the profile's contact line placed
- * in code, YouTube limits, and no model-emitted audio numbers. Flags
- * come only from ffmpeg, the probe, and the windows' quality flags.
+ * in code, YouTube limits, and no model-emitted audio numbers or statistics. Citations and
+ * evidence keep only refs the job has and the role may cite. Flags come only from ffmpeg, the
+ * probe, and the windows' quality flags.
  */
 export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
   const draft = stripDeep(raw);
@@ -438,33 +658,53 @@ export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
 
   const closing = hashtags.join(' ');
   const body = endWith(
-    cleanText(dropContactLines(draft.description), fix.facts),
+    cleanText(dropContactLines(unstated(draft.description)), fix.facts),
     contactLine,
     DESCRIPTION_MAX - closing.length - 2,
   );
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
+  const refs = refsOf(fix);
+  const peers = fix.evidence?.peers ?? [];
+  const { recommendation: advice } = draft;
 
   return {
     description,
     hashtags,
     tags,
-    title: clip(tidy(draft.title), TITLE_MAX),
+    title: clip(tidy(unstated(draft.title)), TITLE_MAX),
     flags: [
       ...measuredFlags(fix.measurements),
       ...shortFlag(fix.probe),
       ...windowFlags(fix.chunks),
     ],
-    brandCheck: draft.brandCheck,
-    why: draft.why,
+    brandCheck: unstated(draft.brandCheck),
+    why: {
+      title: unstated(draft.why.title),
+      description: unstated(draft.why.description),
+      tags: unstated(draft.why.tags),
+    },
     bandcamp: {
-      about: clip(cleanText(draft.bandcamp.about, fix.facts), DESCRIPTION_MAX),
+      about: clip(cleanText(unstated(draft.bandcamp.about), fix.facts), DESCRIPTION_MAX),
       credits: endWith(
-        cleanText(dropContactLines(draft.bandcamp.credits), fix.facts),
+        cleanText(dropContactLines(unstated(draft.bandcamp.credits)), fix.facts),
         contactLine,
         DESCRIPTION_MAX,
       ),
     },
     artistName: name,
+    influence: fix.influence,
+    citations: cleanCitations(draft.citations, refs),
+    recommendation: {
+      approach: unstated(byRefOnly(advice.approach, peers)),
+      intendedOutcome: unstated(byRefOnly(advice.intendedOutcome, peers)),
+      follows: advice.follows,
+      followsWhy: unstated(byRefOnly(advice.followsWhy, peers)),
+      evidence: cleanEvidence(advice.evidence, refs),
+      limits: fix.limits,
+    },
+    influenceWarning: null,
+    outcomeRefs: Object.fromEntries(fix.outcomes.map((o) => [o.ref, o.videoId])),
+    limits: fix.limits,
   };
 }
 
@@ -488,10 +728,121 @@ function repeatAsk(fields: string[]): string {
   return `That ${named} ${fields.length > 1 ? 'repeat' : 'repeats'} a skipped version. Write a different ${named}.`;
 }
 
+/** A draft that still copies a similar artist after its one re-ask: the step fails and a retry re-picks. */
+export class CopiedWording extends Error {
+  constructor() {
+    super("The draft copied a similar artist's wording. Try again.");
+  }
+}
+
+export const INFLUENCE_WARNING = 'Influence settings not met';
+
+/** What each check found in one reply. */
+type Findings = {
+  repeated: string[];
+  mismatches: Mismatch[];
+  copied: CopyViolation[];
+  secondaryOnly: boolean;
+  limits: string[];
+};
+
+const terms = (lists: CandidateList[]) =>
+  lists.flatMap((list) => [...list.hashtags, ...list.tags.map(({ tag }) => tag)]);
+
+/** Peer text a draft must not copy, and the artist's own words it may share (research R12). */
+function copyContext(ctx: PickContext) {
+  const { evidence } = ctx;
+  const peers = (evidence?.peers ?? []).map((peer) => ({
+    channelTitle: peer.title,
+    texts: [
+      evidence!.candidates.find((c) => c.channelId === peer.channelId)?.description ?? '',
+      ...evidence!.releases
+        .filter((release) => release.peer === peer.ref)
+        .flatMap((release) => [release.title, release.description]),
+    ].filter(Boolean),
+  }));
+  return {
+    peers,
+    own: [
+      ...(ctx.voice?.rules ?? []),
+      ...ctx.feedback.flatMap((f) => [f.before ?? '', f.after ?? '']),
+      ...ctx.recent.flatMap((v) => [v.title, v.description]),
+      ctx.notes,
+      ...ctx.facts.map((fact) => fact.value),
+    ],
+    analysis: digestChunks(ctx.chunks).flatMap((w) =>
+      [
+        w.visual,
+        ...(w.genre ?? []),
+        w.tempoFeel,
+        ...(w.instrumentation ?? []),
+        w.vocals,
+        ...(w.mood ?? []),
+      ].filter((text): text is string => typeof text === 'string'),
+    ),
+    terms: terms(ctx.candidateLists),
+    names: [ctx.songTitle, ctx.artist.name],
+  };
+}
+
+function findings(pick: FinalPick, ctx: PickContext): Findings {
+  const refs = refsOf(ctx);
+  const influence = checkInfluence(pick.citations!, ctx.influence, {
+    peers: refs.peers,
+    releases: refs.releases,
+  });
+  return {
+    repeated: repeatedFields(pick, ctx.skipped),
+    mismatches: influence.failing,
+    copied: checkCopy(
+      {
+        title: pick.title,
+        description: pick.description,
+        'Bandcamp about': pick.bandcamp.about,
+        'Bandcamp credits': pick.bandcamp.credits,
+      },
+      copyContext(ctx),
+    ),
+    secondaryOnly: soleSecondary(pick.recommendation?.evidence ?? [], ctx.evidence?.peers ?? []),
+    // With no peers at all, the run's own limit already says so; one line per role would only repeat it.
+    limits: refs.peers.length > 0 ? influence.limits : [],
+  };
+}
+
+const SECONDARY_ASK =
+  'The recommendation rests only on secondary (two range up) artists. Base it on the artist’s own sources or results, or on next-range or same-range artists, as well.';
+
+/** One message naming every failure, so a single re-ask fixes them all. */
+const askFor = (found: Findings): string | null => {
+  const asks = [
+    ...(found.repeated.length > 0 ? [repeatAsk(found.repeated)] : []),
+    ...found.mismatches.map((m) => m.problem),
+    ...found.copied.map((c) => c.message),
+    ...(found.secondaryOnly ? [SECONDARY_ASK] : []),
+  ];
+  return asks.length > 0 ? asks.join(' ') : null;
+};
+
+/** The pick as it is kept: what the checks found is a limit or a warning, never hidden. */
+function settled(pick: FinalPick, found: Findings): FinalPick {
+  const limits = [...new Set([...(pick.limits ?? []), ...found.limits])];
+  const kept = found.secondaryOnly ? [...limits, 'secondary-only'] : limits;
+  return {
+    ...pick,
+    limits: kept,
+    recommendation: found.secondaryOnly
+      ? null
+      : pick.recommendation && { ...pick.recommendation, limits },
+    influenceWarning: found.mismatches.length > 0 ? INFLUENCE_WARNING : null,
+  };
+}
+
 /**
- * Runs the pick under one re-ask allowance shared by every check: a reply that doesn't parse, and
- * a title or description that repeats a skipped version. Returns null when the reply never parses
- * or still repeats once the allowance is spent. The step's `deadline` covers every call.
+ * Runs the pick under one re-ask allowance shared by every check: a reply that doesn't parse, a
+ * title or description that repeats a skipped version, citations that miss a slider level, copied
+ * wording, and a recommendation resting only on secondary artists. Once it is spent: a repeat or a
+ * reply that never parses returns null, copied wording throws, a missed level becomes a warning,
+ * and secondary-only evidence drops the recommendation. The step's `deadline` covers every call.
  */
 export async function runPick(
   ctx: PickContext,
@@ -507,14 +858,18 @@ export async function runPick(
     ms += reply.ms;
     if (!reply.value) return null;
     const pick = finalizePick(reply.value, ctx);
-    const repeated = repeatedFields(pick, ctx.skipped);
-    if (repeated.length === 0) {
-      if (span) agentOutput(span, JSON.stringify(pick), 'smart-pick');
-      return { pick, ms };
+    const found = findings(pick, ctx);
+    const ask = askFor(found);
+    if (ask && asks.left > 0 && hasModelTime('smart-pick', deadline)) {
+      asks.left -= 1;
+      request = { ...request, turns: [...reply.turns, textTurn('user', ask)] };
+      continue;
     }
     // A re-run must produce a new title and description; a repeat that survives fails the step.
-    if (asks.left < 1 || !hasModelTime('smart-pick', deadline)) return null;
-    asks.left -= 1;
-    request = { ...request, turns: [...reply.turns, textTurn('user', repeatAsk(repeated))] };
+    if (found.repeated.length > 0) return null;
+    if (found.copied.length > 0) throw new CopiedWording();
+    const kept = settled(pick, found);
+    if (span) agentOutput(span, JSON.stringify(kept), 'smart-pick');
+    return { pick: kept, ms };
   }
 }

@@ -47,6 +47,7 @@ import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
 import {
+  artistGuides,
   artistMemory,
   artists,
   connections,
@@ -61,10 +62,12 @@ import { RESEARCH_MAX_MS } from '#lib/server/research/runs.js';
 import { getJob, MAX_MINUTES, outcomeUnknown, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '#lib/server/pipeline/pipeline.js';
 import { HOOK_SCHEMA } from '#lib/server/pipeline/short.js';
 import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
+import { COPIED, evidence, PEER_TITLE } from '../../../../helpers/evidence';
 
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';
@@ -720,6 +723,8 @@ const context = () => {
       tags: { tag: string }[];
     }[];
     audienceTopVideos: unknown[];
+    similarArtists?: Record<string, unknown>;
+    artistResults?: Record<string, unknown>;
     recentUploads?: unknown[];
     brandGuide?: unknown;
   };
@@ -1032,11 +1037,13 @@ describe('runStep: PICK research', () => {
       const { task } = JSON.parse(String(init.body)) as { task: { httpRequest: { body: string } } };
       return JSON.parse(Buffer.from(task.httpRequest.body, 'base64').toString()) as unknown;
     });
-  const AUDIENCE = {
+  const AUDIENCE: AudienceEvidence = {
     retrievedAt: NOON_PACIFIC,
     query: 'synthwave music video',
     candidateLists: [
       {
+        source: 'genre',
+        ref: 'G1',
         videoId: 'peer',
         title: 'Peer release',
         hashtags: [SYNTHWAVE],
@@ -1179,6 +1186,9 @@ describe('runStep: PICK research', () => {
     const pick = (await pickAt(1))!;
     expect(pick.tags).toEqual([ARTIST_C.name]);
     expect(pick.hashtags).toEqual([]);
+    // Research ended on its own limits; the genre search adds the one it lost.
+    const limits = ['analytics-not-shared', 'no-peers', 'genre-search-unavailable'];
+    expect(pick).toMatchObject({ limits, recommendation: { limits } });
   });
 
   it('starts no run for a job whose owner has no profile', async () => {
@@ -1260,6 +1270,8 @@ describe("runStep: PICK with Nathan's memory", () => {
         query: 'synthwave music video',
         candidateLists: [
           {
+            source: 'genre',
+            ref: 'G1',
             videoId: 'peer',
             title: 'Peer release',
             hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
@@ -1293,14 +1305,14 @@ describe("runStep: PICK with Nathan's memory", () => {
     expect(called(/youtube\/v3\/search\?/)).toHaveLength(0);
     const ctx = context();
     expect(ctx.artist).toBe(ARTIST);
-    expect(ctx.candidateLists).toEqual([
-      {
+    expect(ctx.candidateLists).toEqual({
+      G1: {
         videoId: 'peer',
         title: 'Peer release',
         hashtags: [SYNTHWAVE, RETROWAVE, '#newmusic'],
         tags: [{ tag: 'synthwave' }, { tag: 'outrun' }],
       },
-    ]);
+    });
     expect(ctx.audienceTopVideos).toEqual([{ title: 'Top', description: 'd', tags: ['outrun'] }]);
     // The private INFERENCE is read but never reaches the prompt.
     expect(ctx.facts.map((f) => f.key)).toEqual([ARTIST_NAME_KEY, 'home']);
@@ -2263,6 +2275,85 @@ describe('runStep: CLAIMED_COMPLETE', () => {
     expect(headers(called(/com\/youtube\/v3\/videos\?/)[0]!.init).authorization).toBe(A_TOKEN);
   });
 
+  describe('adoption', () => {
+    const PICK = {
+      ...RAW_PICK,
+      version: 1,
+      skipped: false,
+      title: 'Proposed',
+      description: 'Proposed description.',
+      tags: ['synthwave'],
+      hashtags: [],
+      artistName: ARTIST,
+      modelMs: 1,
+      flags: [],
+      influence: { sound: 1, feel: 0, wording: 0, discovery: 4, structure: 4 },
+      recommendation: {
+        approach: 'Open on the hook.',
+        intendedOutcome: 'More listeners stay.',
+        follows: 'peers',
+        followsWhy: 'P1 does.',
+        evidence: ['P1'],
+        limits: ['no-peers'],
+      },
+    };
+    const withPick = async (final: typeof FIELDS, patch: Partial<JobDoc> = {}) => {
+      await claimed({ pickVersion: 1, finalFields: final, ...patch });
+      await db()
+        .update(jobs)
+        .set({ picks: [PICK] })
+        .where(eq(jobs.id, 'j1'));
+      await runStep(await saved());
+      return (await publishes())[0]!.data;
+    };
+    const same = {
+      ...FIELDS,
+      title: 'Proposed',
+      description: 'Proposed description.',
+      tags: ['synthwave'],
+    };
+
+    it('records what was suggested as refs only, the settings used, and that it was kept as is', async () => {
+      expect(await withPick(same)).toMatchObject({
+        recommendation: {
+          approach: 'Open on the hook.',
+          intendedOutcome: 'More listeners stay.',
+          evidence: ['P1'],
+        },
+        influence: PICK.influence,
+        editedBeforeApproval: false,
+      });
+      expect(JSON.stringify((await publishes())[0]!.data)).not.toContain('no-peers');
+    });
+
+    it.each([
+      ['title', { title: 'Mine' }],
+      ['description', { description: 'Mine.' }],
+      ['tags', { tags: ['synthwave', 'outrun'] }],
+    ])('flags an approval that changed the %s', async (_field, change) => {
+      expect(await withPick({ ...same, ...change })).toMatchObject({ editedBeforeApproval: true });
+    });
+
+    it('records no suggestion for a Short, whose pick is its parent’s approved text', async () => {
+      await put({ id: 'p1', ...A_JOB, state: 'VERIFIED' });
+      expect(await withPick(same, { parentId: 'p1' })).toMatchObject({
+        recommendation: null,
+        influence: null,
+        editedBeforeApproval: false,
+      });
+    });
+
+    it('records no suggestion when the pick had none', async () => {
+      await claimed({ pickVersion: 1, finalFields: same });
+      await db()
+        .update(jobs)
+        .set({ picks: [{ ...PICK, recommendation: null }] })
+        .where(eq(jobs.id, 'j1'));
+      await runStep(await saved());
+      expect((await publishes())[0]!.data).toMatchObject({ recommendation: null });
+    });
+  });
+
   it("verifies a job outside Nathan's artist without touching the artist tables", async () => {
     await runStep(await claimed({ artistId: null }));
     expect((await saved()).state).toBe('VERIFIED');
@@ -2653,6 +2744,311 @@ describe('runStep: Short', () => {
       state: 'FAILED',
       failedState: 'RENDER',
       error: '403 Forbidden',
+    });
+  });
+});
+
+describe('runStep: PICK with peers and the artist’s results', () => {
+  const ANALYTICS = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+  const RETRIEVED = new Date(Date.now() - 24 * 60 * 60_000);
+  const CITED = {
+    sound: ['analysis', 'P1'],
+    feel: ['voice'],
+    wording: ['voice'],
+    discovery: ['P1-R1', 'G1'],
+    structure: ['P1-R1', 'identity'],
+  };
+  // Under the owner's identity, so the database applies its row-level rules to what the pick reads.
+  const step = (job: JobDoc) => withIdentity(USER_C.uid, () => runStep(job));
+  const reply = (over: Record<string, unknown> = {}) =>
+    on(GEMINI, () =>
+      interaction(
+        JSON.stringify({
+          ...RAW_PICK,
+          citations: CITED,
+          recommendation: {
+            ...RAW_PICK.recommendation,
+            follows: 'peers',
+            evidence: ['P1', 'P1-R1'],
+          },
+          ...over,
+        }),
+      ),
+    );
+  const stored = (run = 'run-1') => ({
+    runId: run,
+    jobId: 'j1',
+    retrievedAt: RETRIEVED,
+    evidence: evidence(),
+  });
+  /** A PICK job for C with a finished run and its stored evidence. */
+  const withPeers = async (limits: string[] = ['analytics-not-shared']) => {
+    const job = await put({ state: 'PICK', ...C_JOB });
+    await setChunks('j1', [0, 1].map(chunkDoc));
+    await researched(job, { limits });
+    await seed({ jobResearch: [stored()] });
+    return job;
+  };
+  const shareAnalytics = () =>
+    db()
+      .update(connections)
+      .set({ scopes: ['openid', 'email', ANALYTICS] })
+      .where(eq(connections.uid, USER_C.uid));
+  const outcomeRow = (videoId: string, over = {}) => ({
+    artistId: ARTIST_C.id,
+    videoId,
+    retrievedAt: new Date(),
+    publishedAt: new Date('2026-09-01T00:00:00Z'),
+    requestedStart: '2026-09-01',
+    requestedEnd: '2026-09-28',
+    coverage: 'complete' as const,
+    metrics: { views: 900, subscribersGained: 12, subscribersLost: 2 },
+    live: { title: 'Last Light', description: 'Live copy.', tags: ['synthwave'] },
+    differsFromApproved: false,
+    ...over,
+  });
+
+  it('puts the run’s peers and releases in the prompt and stores what the pick cited', async () => {
+    reply();
+    await step(await withPeers());
+    const pick = (await pickAt(1))!;
+    expect(pick).toMatchObject({
+      researchRunId: 'run-1',
+      evidenceExpiresAt: new Date(RETRIEVED.getTime() + 29 * 24 * 60 * 60_000).toISOString(),
+      influence: { sound: 1, feel: 0, wording: 0, discovery: 4, structure: 4 },
+      citations: CITED,
+      influenceWarning: null,
+      recommendation: { evidence: ['P1', 'P1-R1'], limits: ['analytics-not-shared'] },
+      limits: ['analytics-not-shared'],
+    });
+    const ctx = context();
+    expect(Object.keys(ctx.similarArtists!)).toEqual(['P1', 'P2', 'P3']);
+    expect(Object.keys(ctx.candidateLists)).toEqual(['G1', 'P1-R1', 'P2-R1', 'P3-R1']);
+    expect(ctx.audienceTopVideos).toBeUndefined();
+  });
+
+  it('keeps every peer name and channel ID out of the stored pick and the artist memory', async () => {
+    reply({
+      recommendation: {
+        ...RAW_PICK.recommendation,
+        approach: `Open the way ${PEER_TITLE} does.`,
+        evidence: ['P1'],
+      },
+    });
+    await step(await withPeers());
+    const stored = JSON.stringify([await arrays(), await db().select().from(artistMemory)]);
+    expect(stored).not.toContain(PEER_TITLE);
+    expect(stored).not.toContain('UC-peer');
+    expect((await pickAt(1))!.recommendation).toMatchObject({ approach: 'Open the way P1 does.' });
+  });
+
+  it('drops a rejected channel’s peer, its releases and its candidate lists from the prompt', async () => {
+    reply();
+    await withPeers();
+    await seed({
+      peerRejections: [{ artistId: ARTIST_C.id, channelId: 'UC-peer-2', retrievedAt: new Date() }],
+    });
+    await step(await saved());
+    const ctx = context();
+    expect(Object.keys(ctx.similarArtists!)).toEqual(['P1', 'P3']);
+    expect(Object.keys(ctx.candidateLists)).toEqual(['G1', 'P1-R1', 'P3-R1']);
+  });
+
+  it('drafts without peers once the evidence is gone, saying only what the run said', async () => {
+    reply();
+    const job = await put({ state: 'PICK', ...C_JOB });
+    await setChunks('j1', [0, 1].map(chunkDoc));
+    await researched(job, { limits: ['no-peers'] });
+    await step(await saved());
+    const pick = (await pickAt(1))!;
+    expect(pick).toMatchObject({ researchRunId: 'run-1', evidenceExpiresAt: null });
+    expect(context().similarArtists).toBeUndefined();
+    expect(pick.limits).toEqual(['no-peers']);
+  });
+
+  it('uses the settings saved on the approved brand guide, and records them on the pick', async () => {
+    const influence = { sound: 0, feel: 4, wording: 4, discovery: 2, structure: 0 };
+    reply({
+      citations: {
+        sound: ['analysis'],
+        feel: ['P1', 'P2'],
+        wording: ['P1', 'P2'],
+        discovery: ['P1-R1', 'G1'],
+        structure: ['identity'],
+      },
+    });
+    await seed({
+      artistGuides: [
+        approvedGuide(ARTIST_C.id, 'brand', { statement: 'Plain.', keep: [], fix: [], drop: [] }),
+      ],
+    });
+    await db().update(artistGuides).set({ influence }).where(eq(artistGuides.kind, 'brand'));
+    await step(await withPeers());
+    expect((await pickAt(1))!.influence).toEqual(influence);
+    expect(
+      chatBodies().at(-1)!.system_instruction ?? JSON.stringify(chatBodies().at(-1)),
+    ).toContain('- feel (level 4 of 4)');
+  });
+
+  it('leaves an earlier pick alone when the defaults or settings change later', async () => {
+    reply();
+    await seed({
+      artistGuides: [
+        approvedGuide(ARTIST_C.id, 'brand', { statement: 'Plain.', keep: [], fix: [], drop: [] }),
+      ],
+    });
+    await step(await withPeers());
+    const before = await pickAt(1);
+    await db()
+      .update(artistGuides)
+      .set({ influence: { sound: 4, feel: 4, wording: 4, discovery: 4, structure: 4 } })
+      .where(eq(artistGuides.kind, 'brand'));
+    expect(await pickAt(1)).toEqual(before);
+  });
+
+  it('re-asks once for a missed level and keeps the draft with a warning', async () => {
+    reply({ citations: { ...CITED, sound: ['analysis'] } });
+    await step(await withPeers());
+    expect(called(GEMINI)).toHaveLength(2);
+    expect(await saved()).toMatchObject({ state: 'REVIEW' });
+    expect((await pickAt(1))!.influenceWarning).toBe('Influence settings not met');
+  });
+
+  it('spends one re-ask on a copy and a missed level together: two provider calls', async () => {
+    reply({
+      description: `Made in ${COPIED}.`,
+      citations: { ...CITED, sound: ['analysis'] },
+    });
+    await step(await withPeers());
+    expect(called(GEMINI)).toHaveLength(2);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+  });
+
+  it('fails the step, keeping the genre search, when a copy survives the re-ask', async () => {
+    reply({ description: `Made in ${COPIED}.` });
+    await step(await withPeers());
+    expect(called(GEMINI)).toHaveLength(2);
+    const job = await saved();
+    expect(job).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+    expect(job.error).toBe("The draft copied a similar artist's wording. Try again.");
+    expect(job.audience).not.toBeNull();
+    expect(await pickAt(1)).toBeUndefined();
+  });
+
+  it('counts a parse failure and then a copy as two calls and a step failure', async () => {
+    let n = 0;
+    on(GEMINI, () =>
+      interaction(
+        n++ === 0
+          ? BAD_PICK_JSON
+          : JSON.stringify({ ...RAW_PICK, citations: CITED, description: `Made in ${COPIED}.` }),
+      ),
+    );
+    await step(await withPeers());
+    expect(called(GEMINI)).toHaveLength(2);
+    expect(await saved()).toMatchObject({ state: 'PICK', consecutiveFailures: 1 });
+  });
+
+  it('drops a recommendation that only secondary artists support, with the limit', async () => {
+    reply({ recommendation: { ...RAW_PICK.recommendation, evidence: ['P3'] } });
+    await step(await withPeers());
+    expect(called(GEMINI)).toHaveLength(2);
+    expect(await pickAt(1)).toMatchObject({
+      recommendation: null,
+      limits: ['analytics-not-shared', 'secondary-only'],
+    });
+  });
+
+  it('removes a sentinel statistic from every stored field, feedback and publish record included', async () => {
+    const stat = 'It earned 987654 views.';
+    reply({
+      title: `Title ${stat}`,
+      description: `Desc. ${stat}`,
+      brandCheck: `Brand. ${stat}`,
+      why: { title: `a. ${stat}`, description: `b. ${stat}`, tags: `c. ${stat}` },
+      bandcamp: { about: `About. ${stat}`, credits: `Credits. ${stat}` },
+      recommendation: {
+        ...RAW_PICK.recommendation,
+        evidence: ['P1'],
+        followsWhy: `Because. ${stat}`,
+      },
+    });
+    await step(await withPeers());
+    expect(JSON.stringify(await arrays())).not.toContain('987654');
+    expect(JSON.stringify(await db().select().from(artistMemory))).not.toContain('987654');
+  });
+
+  describe('the artist’s own results', () => {
+    it('adds each fresh result as A<n> with its suggestion and what was published', async () => {
+      reply({ recommendation: { ...RAW_PICK.recommendation, evidence: ['A1', 'P1'] } });
+      await shareAnalytics();
+      await seed({
+        artistOutcomes: [outcomeRow('own-1', { differsFromApproved: true })],
+        artistMemory: [
+          {
+            artistId: ARTIST_C.id,
+            kind: 'publish',
+            key: 'own-1',
+            data: {
+              videoId: 'own-1',
+              url: 'https://youtu.be/own-1',
+              jobId: 'old',
+              fields: {
+                title: 'Approved',
+                description: 'Approved copy.',
+                hashtags: [],
+                tags: ['x'],
+              },
+              status: 'VERIFIED',
+              at: 1,
+              recommendation: {
+                approach: 'Try short titles.',
+                intendedOutcome: 'More clicks.',
+                evidence: ['P1'],
+              },
+              influence: null,
+              editedBeforeApproval: true,
+            },
+          },
+        ],
+      });
+      await step(await withPeers());
+      const result = context().artistResults!.A1 as Record<string, unknown>;
+      expect(result).toMatchObject({
+        suggested: { approach: 'Try short titles.', intendedOutcome: 'More clicks.' },
+        published: { title: 'Approved' },
+        editedBeforeApproval: true,
+        changedOnYouTubeSinceApproval: true,
+        coverage: 'complete',
+        netSubscribers: { value: 10, calculated: true },
+      });
+      expect(await pickAt(1)).toMatchObject({ outcomeRefs: { A1: 'own-1' } });
+    });
+
+    it('shows a result nobody suggested as unsuggested, and missing metrics as null', async () => {
+      reply();
+      await shareAnalytics();
+      await seed({
+        artistOutcomes: [
+          outcomeRow('own-2', {
+            coverage: 'unknown',
+            metrics: { views: null, subscribersGained: null, subscribersLost: null },
+          }),
+        ],
+      });
+      await step(await withPeers());
+      const result = context().artistResults!.A1 as Record<string, unknown>;
+      expect(result).toMatchObject({ suggested: null, published: null, coverage: 'unknown' });
+      expect((result.reportedByYouTube as { views: unknown }).views).toBeNull();
+      expect(result.netSubscribers).toEqual({ value: null, calculated: true });
+    });
+
+    it('shows no results once analytics is not shared', async () => {
+      reply();
+      await seed({ artistOutcomes: [outcomeRow('own-3')] }).catch(() => undefined);
+      await step(await withPeers());
+      expect(context().artistResults).toBeUndefined();
+      expect(await pickAt(1)).toMatchObject({ outcomeRefs: {} });
     });
   });
 });
