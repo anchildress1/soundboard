@@ -5,6 +5,7 @@ import { db } from '#lib/server/core/db.js';
 import { jobs } from '#lib/server/core/schema.js';
 import {
   claimJob,
+  commitUpload,
   createJob,
   createShort,
   getJob,
@@ -14,13 +15,17 @@ import {
   listPicks,
   newJobDoc,
   newJobId,
+  objectIs,
+  OPS_KEPT,
   outcomeUnknown,
   releaseJob,
   skipAndRepick,
   toPublic,
   transitionJob,
+  uploadGeneration,
   type JobDoc,
   type NewJob,
+  type VideoUpload,
 } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
@@ -791,5 +796,120 @@ describe('outcomeUnknown', () => {
     ['a video ID', { videoId: 'v' }],
   ])('rejects a job with %s', (_label, patch) => {
     expect(outcomeUnknown({ ...paused, ...patch })).toBe(false);
+  });
+});
+
+describe('videoUpload', () => {
+  const upload = (generation: number, ops: VideoUpload['ops'] = []): VideoUpload => ({
+    sessionCipher: 'Y2lwaGVy',
+    generation,
+    size: 1000,
+    fingerprint: 'f'.repeat(64),
+    ops,
+  });
+
+  it('starts null on new and Short docs', async () => {
+    expect(newJobDoc(input, 'n1').videoUpload).toBeNull();
+    await seedJob({ id: 'v1', state: 'REVIEW', pickVersion: 1 });
+    await db()
+      .update(jobs)
+      .set({ picks: [{ version: 1, title: 't', skipped: false }] })
+      .where(eq(jobs.id, 'v1'));
+    const started = await createShort((await getJob('v1'))!, ['REVIEW'], 's1');
+    expect(started).toEqual({ id: 's1' });
+    expect((await getJob('s1'))!.videoUpload).toBeNull();
+  });
+
+  it('is stored when given at create', async () => {
+    await createJob({ ...input, videoUpload: upload(1) }, 'n2');
+    expect((await getJob('n2'))!.videoUpload).toEqual(upload(1));
+  });
+
+  it('never reaches the public job', () => {
+    expect(toPublic(jobDoc({ videoUpload: upload(3) }))).not.toHaveProperty('videoUpload');
+  });
+
+  it('reads as null from a row written without the key', async () => {
+    await seedJob({ id: 'old', state: 'AWAITING_UPLOAD' });
+    await db()
+      .update(jobs)
+      .set({ data: sql`${jobs.data} - 'videoUpload'` })
+      .where(eq(jobs.id, 'old'));
+    const job = (await getJob('old'))!;
+    expect(job.videoUpload).toBeNull();
+    expect(uploadGeneration(job)).toBe(0);
+  });
+
+  describe('commitUpload', () => {
+    beforeEach(async () => {
+      await seedJob({ id: 'u1', state: 'AWAITING_UPLOAD', videoUpload: upload(2) });
+    });
+
+    it('writes at the generation it read', async () => {
+      const next = { ...upload(3), sessionCipher: 'bmV3' };
+      const written = await commitUpload('u1', 2, { videoUpload: next, object: 'uploads/u1/b' });
+      expect(written).toMatchObject({ videoUpload: next, object: 'uploads/u1/b' });
+      expect((await getJob('u1'))!).toMatchObject({ videoUpload: next, object: 'uploads/u1/b' });
+    });
+
+    it('writes nothing at a stale generation', async () => {
+      expect(await commitUpload('u1', 1, { videoUpload: upload(9) })).toBeNull();
+      expect((await getJob('u1'))!.videoUpload).toEqual(upload(2));
+    });
+
+    it('writes nothing once the job left AWAITING_UPLOAD', async () => {
+      await transitionJob('u1', ['AWAITING_UPLOAD'], { state: 'PREP' });
+      expect(await commitUpload('u1', 2, { videoUpload: upload(3) })).toBeNull();
+      expect((await getJob('u1'))!.videoUpload).toEqual(upload(2));
+    });
+
+    it('commits a first upload on a job that had none, at generation 0', async () => {
+      await seedJob({ id: 'u0', state: 'AWAITING_UPLOAD' });
+      expect(await commitUpload('u0', 0, { videoUpload: upload(1) })).not.toBeNull();
+      expect(uploadGeneration((await getJob('u0'))!)).toBe(1);
+    });
+
+    it(`keeps the last ${OPS_KEPT} ops with their restarted flags`, async () => {
+      const ops = Array.from({ length: OPS_KEPT + 5 }, (_, i) => ({
+        opId: `op-${i}`,
+        generation: i + 1,
+        restarted: i % 2 === 0,
+      }));
+      await commitUpload('u1', 2, { videoUpload: upload(3, ops) });
+      const kept = (await getJob('u1'))!.videoUpload!.ops;
+      expect(kept).toHaveLength(OPS_KEPT);
+      expect(kept[0]).toEqual(ops[5]);
+      expect(kept.at(-1)).toEqual(ops.at(-1));
+    });
+  });
+
+  it('releaseJob applies a guarded patch only while the guard holds, and still releases', async () => {
+    await seedJob({ id: 'g1', state: 'AWAITING_UPLOAD', object: 'uploads/g1/a' });
+    const first = (await claimJob('g1'))!;
+    const missed = await releaseJob(
+      'g1',
+      first.token,
+      'AWAITING_UPLOAD',
+      { state: 'PREP' },
+      {
+        guard: objectIs('uploads/g1/b'),
+      },
+    );
+    expect(missed).toBe(false);
+    expect((await getJob('g1'))!.state).toBe('AWAITING_UPLOAD');
+    const second = (await claimJob('g1'))!;
+    expect(second).not.toBeNull();
+    expect(
+      await releaseJob(
+        'g1',
+        second.token,
+        'AWAITING_UPLOAD',
+        { state: 'PREP' },
+        {
+          guard: objectIs('uploads/g1/a'),
+        },
+      ),
+    ).toBe(true);
+    expect((await getJob('g1'))!.state).toBe('PREP');
   });
 });

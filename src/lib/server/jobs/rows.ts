@@ -11,8 +11,11 @@ const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 const toMs = (date: Date | null) => (date === null ? null : date.getTime());
 
 export function fromRow(row: Row): JobDoc {
+  const data = row.data as JobData;
   return {
-    ...(row.data as JobData),
+    ...data,
+    // Rows written before uploads were resumable have no key.
+    videoUpload: data.videoUpload ?? null,
     id: row.id,
     ownerUid: row.ownerUid,
     artistId: row.artistId,
