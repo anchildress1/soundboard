@@ -1,7 +1,7 @@
 // A fake of the GCS JSON API's resumable sessions for E2E, run as its own process on port 4174
 // (playwright.config.ts). The browser's PUTs and the app server's status queries, cancels and
 // storage calls (tests/e2e/fakes/storage.ts) all reach this one state. Control routes let a test
-// drop, throttle or fail a session. Plain Node, so it runs with type stripping and no build.
+// drop, throttle, fail or hold a session. Plain Node, so it runs with type stripping and no build.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 const PORT = 4174;
@@ -15,10 +15,14 @@ type Session = {
   size: number;
   saved: number;
   received: number;
+  // Bytes each PUT of the rest delivered, in order: what one sender sent, apart from the others.
+  puts: number[];
   cancelled: boolean;
   bytesPerSec: number;
   drops: number[];
   fail: { status: number; times: number } | null;
+  // Lands the last byte but never answers, as when a tab closes between the two.
+  holdReply: boolean;
 };
 type StoredObject = { size: number; contentType: string; landed: boolean; deleted: boolean };
 
@@ -84,9 +88,11 @@ function put(req: IncomingMessage, res: ServerResponse, session: Session) {
     return;
   }
   const started = Date.now();
+  const index = session.puts.push(0) - 1;
   let read = 0;
   req.on('data', (chunk: Buffer) => {
     session.received += chunk.length;
+    session.puts[index]! += chunk.length;
     read += chunk.length;
     const end = position + chunk.length;
     const drop = session.drops.find((at) => at > session.saved && at <= end);
@@ -107,6 +113,7 @@ function put(req: IncomingMessage, res: ServerResponse, session: Session) {
   req.on('end', () => {
     if (session.saved >= session.size) {
       land(session);
+      if (session.holdReply) return;
       send(res, 200, { name: session.object, size: String(session.size) });
     } else {
       send(res, 308, undefined, savedRange(session));
@@ -160,10 +167,12 @@ async function control(req: IncomingMessage, res: ServerResponse, url: URL) {
         size: Number(body.size),
         saved: 0,
         received: 0,
+        puts: [],
         cancelled: false,
         bytesPerSec: DEFAULT_BYTES_PER_SEC,
         drops: [],
         fail: null,
+        holdReply: false,
       });
       objects.set(object, {
         size: 0,
@@ -201,12 +210,13 @@ async function control(req: IncomingMessage, res: ServerResponse, url: URL) {
         200,
         [...sessions.values()]
           .filter((item) => item.object.startsWith(prefix))
-          .map(({ id, object, size, saved, received, cancelled }) => ({
+          .map(({ id, object, size, saved, received, puts, cancelled }) => ({
             id,
             object,
             size,
             saved,
             received,
+            puts,
             cancelled,
           })),
       );
@@ -219,11 +229,16 @@ async function control(req: IncomingMessage, res: ServerResponse, url: URL) {
   }
   switch (`${req.method} ${route}`) {
     case 'POST drop':
-      session.drops.push(Number(url.searchParams.get('after')));
+      // Relative to what's saved now: an absolute offset can pass before the drop is armed.
+      session.drops.push(session.saved + Number(url.searchParams.get('ahead')));
       send(res, 204);
       return;
     case 'POST throttle':
       session.bytesPerSec = Number(url.searchParams.get('bytesPerSec'));
+      send(res, 204);
+      return;
+    case 'POST hold':
+      session.holdReply = true;
       send(res, 204);
       return;
     case 'POST fail':
