@@ -271,9 +271,9 @@ description: 'Task list for the Gemini API swap'
   - Drop the "planned spec 002" section.
   - Validate every Mermaid diagram with mcp-mermaid.
 - [x] T041 Confirm .specify/memory/constitution.md already carries the 2.0.0 III/IV/V amendments the plan lists; change nothing if it does.
-- [ ] T042 Run `make ai-checks`: format, lint, typecheck, unit coverage floors at 85/85/85/80, build. Zero warnings.
-- [ ] T043 Run `make e2e` on desktop Chrome and Pixel 7, then the Semgrep and Sonar scans.
-- [ ] T044 Walk every Automated bullet in specs/002-gemini-api/quickstart.md and confirm a test covers it.
+- [x] T042 Run `make ai-checks`: format, lint, typecheck, unit coverage floors at 85/85/85/80, build. Zero warnings.
+- [x] T043 Run `make e2e` on desktop Chrome and Pixel 7, then the Semgrep and Sonar scans.
+- [x] T044 Walk every Automated bullet in specs/002-gemini-api/quickstart.md and confirm a test covers it.
 - [ ] T045 👤 FR-023 gate:
   - Record YouTube's approval reference, date and scope.
   - Record the actual Sentry plan, billing model and retention for errors, full spans and sampled spans.
@@ -355,3 +355,11 @@ Task: "releaseJob chunk reset + tests (T015)"
 - Commit after each task or logical group, on `002-gemini-api`. Commits made while the tree is red pass the hooks (format, lint, secret scan) but not `make ai-checks`.
 - G2 can change analyst defaults; T001 updates the docs before T002 writes them into the PRD.
 - Never write Nathan's surname in fixtures, prompts, tests or docs.
+
+---
+
+## Phase 8: Convergence
+
+- [x] T048 CRITICAL: import `quotaResetAt` in src/lib/server/ai/model.ts from `#lib/server/platforms/youtube/index.js`, not `youtube.js`; core domains reach a platform only through its `index.ts` per Constitution IV (contradicts)
+- [x] T049 Show the brand page's quota-spent stop as `WAIT_TEXT['model quota spent']` ("Model quota spent"), not the raw wait key, in src/routes/brand/+page.svelte, with tests/unit/routes/brand/page.test.ts updated, per FR-009 (partial)
+- [x] T050 Add a test in tests/unit/lib/server/jobs/actions.test.ts that a Short with an existing cut re-cuts when its parent's chunk count is stale, per US3 edge case "existing absolute cut may finish RENDER … and may be re-cut" (partial)
