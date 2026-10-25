@@ -8,7 +8,7 @@ This describes the repository implementation, not confirmation that every compon
 %%{init: {"theme": "default"}}%%
 flowchart LR
   accTitle: Soundboard current architecture
-  accDescr: The artist uses a browser to sign in through Google and drive the Cloud Run app. Media goes directly to Cloud Storage. The app sends window clips and text to the paid Gemini API for analysis and drafting. It uses Neon for state and YouTube for research and approved private uploads. Cloud KMS and Secret Manager protect credentials. Sentry keeps text traces for 30 days. Neon deletes expired research daily.
+  accDescr: The artist uses a browser to sign in through Google and drive the Cloud Run app. Media goes directly to Cloud Storage. The app sends window clips and text to the paid Gemini API for analysis and drafting. It uses Neon for state, YouTube for research and approved private uploads, and the YouTube Analytics API only under the artist's optional grant. Cloud KMS and Secret Manager protect credentials. Sentry keeps text traces for 30 days. Cloud Tasks delivers research batches back to the app. Neon deletes expired YouTube data daily.
 
   ARTIST["Artist's browser"] <-->|"Sign in and consent"| AUTH["Google OAuth"]
   ARTIST <-->|"Review and approve"| APP["Soundboard<br/>Cloud Run · SvelteKit · ffmpeg"]
@@ -18,6 +18,9 @@ flowchart LR
   APP <-->|"Window clips and text · API key"| MODEL["Gemini API · paid tier<br/>Implicit cache · 55-day abuse log"]
   APP <-->|"Save progress and evidence"| DB[("Neon Postgres<br/>30-day research expiry<br/>Daily deletion")]
   APP <-->|"Research / approved private uploads"| YT["YouTube Data API<br/>and thumbnail host"]
+  APP <-->|"Optional, artist's own grant"| YTA["YouTube Analytics API"]
+  TASKS["Cloud Tasks<br/>research queue"] -->|"One batch per request · OIDC"| APP
+  APP -->|"Next batch"| TASKS
   APP --- SECURITY["Cloud KMS + Secret Manager<br/>Protected credentials"]
   APP -->|"Text traces"| SENTRY["Sentry<br/>30-day retention"]
 ```
@@ -37,7 +40,14 @@ flowchart LR
 - Header channel stats are cached in memory only and never written to the database.
 - The daily cleanup function runs at 03:00 UTC on the production database branch, deployed on 2026-10-24. It rejects any call that doesn't come from Neon's scheduler and can only delete research that is already past 30 days.
 
-## Planned fanbase learning — spec 006
+## Fanbase learning (spec 006)
 
-- Not implemented: pipeline-run research and learning from individual comparable releases and optional artist-authorized YouTube Analytics, guided by saved influence sliders.
-- Calculated metrics and subscriber-range targeting stay disabled until YouTube accepts the amendment; retain 30-day statistics expiry and no cross-owner totals.
+- Research and learning run server-side through one Cloud Tasks queue. Each delivery is a request to the app that runs one claimed batch of a stage (learn, discover, match, releases) and enqueues the next. The queue carries run identifiers only, never YouTube data. Nothing runs without work.
+- Peer research uses the API key: a genre search by relevance, then public channel and upload reads. Each peer is an individual, labeled example. Peers are placed in subscriber-count ranges that use the same boundaries as the artist's own; channels more than two ranges up, and channels that hide their count, are not used.
+- Each peer release keeps its own candidate list. Nothing is summed, averaged, counted or weighted across videos or channels, and there is no combined score.
+- Peer data (channels, releases, statistics as reported) is Non-Authorized API data. It carries its retrieval time, is hidden by the database at 29 days and deleted by the daily cleanup. A draft keeps only an internal reference to a peer; once the evidence expires the review says so and shows the date.
+- Analytics is an optional second grant (`yt-analytics.readonly`), requested only when the artist chooses Share analytics. It reads the first 28 days of totals for the artist's own public uploads. Results are Authorized Data: refreshed on each run, hidden at 29 days, deleted daily, and deleted at once when the artist disconnects, revokes, or reconnects without the scope. A report that was in flight when sharing ended cannot be saved.
+- Numbers on screen are either exactly as YouTube returned them or calculated in code from stored data and labeled "calculated". The model is told never to write a number about views, subscribers or engagement, and a server check removes any sentence that does.
+- Gemini may hear a 60-second clip of a peer's public upload through its YouTube URL; the app does not download it. The artist's own media is never sent as a link.
+- Sentry keeps prompt and reply text for the peer-matching and smart-pick agents. Values drawn from YouTube data (numbers, peer titles, channel names, peer text) are replaced with a placeholder in prompts and replies.
+- Retention changes: the daily cleanup also deletes expired peer research, analytics results and peer rejections.

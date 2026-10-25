@@ -16,8 +16,9 @@
     <li>Your Google account ID and email address identify your account and control access.</li>
     <li>
       Soundboard uses YouTube API Services to read channel details and video metadata, find genre
-      examples, and upload and verify videos you approve. It stores your channel connection and an
-      encrypted refresh token so you can continue without signing in for every request.
+      examples and similar artists, and upload and verify videos you approve. It stores your channel
+      connection and an encrypted refresh token so you can continue without signing in for every
+      request.
     </li>
     <li>
       Uploaded media, song titles, notes, analysis, generated drafts, edits, approvals, and upload
@@ -26,6 +27,19 @@
       feedback. Your profile also stores the voice and brand guide you approve, and any pending
       proposal with the uploads it read, which is deleted within 30 days or when you disconnect
       YouTube. Recent uploads read to identify your artist aren't stored.
+    </li>
+    <li>
+      Before each draft, Soundboard researches public YouTube channels and videos of similar artists
+      in your genre and size range, including their titles, descriptions, tags, and public view,
+      like, comment, and subscriber counts as YouTube reports them. It keeps this research with the
+      draft for up to 29 days and uses each artist as an individual example. Nothing is added up
+      across channels, and any calculated number is labeled as calculated.
+    </li>
+    <li>
+      If you choose <em>Share analytics</em> on the Connections page, Soundboard also reads YouTube Analytics
+      results for your own public uploads: views and subscribers gained and lost in the first 28 days,
+      and the title, description, and tags now on YouTube. It uses them to shape later drafts and keeps
+      them for up to 29 days, refreshing them while you share. You can use Soundboard without sharing.
     </li>
   </ul>
 
@@ -59,7 +73,8 @@
   <p>
     Sentry receives error reports and performance traces, including text prompts, generated
     responses, and model reasoning that may contain song titles, notes, or release details. Audio,
-    image, and video payloads are replaced with placeholders in traces, and URL query strings are
+    image, and video payloads are replaced with placeholders in traces, as are the values that came
+    from the YouTube API, such as other artists' names and statistics. URL query strings are
     scrubbed to remove credentials. Sentry keeps error reports and traces for 30 days. Soundboard
     does not sell your information or use it for advertising.
   </p>
@@ -75,9 +90,11 @@
   <p>
     Uploaded media is scheduled for deletion by the storage bucket's seven-day lifecycle rule. Saved
     account records, analysis, drafts, and artist guidance are retained as needed to operate your
-    account and prepare releases; media expiry does not delete those records. Genre-search evidence
-    is excluded from app reads after 30 days, and daily database cleanup deletes expired evidence.
-    Existing drafts keep their selected tags and hashtags, rather than the expired research pool.
+    account and prepare releases; media expiry does not delete those records. Genre-search evidence,
+    similar-artist research, your analytics results, and the similar artists you mark "Not a peer"
+    are hidden from the app after 29 days, and daily database cleanup deletes them. Existing drafts
+    keep their selected tags and hashtags, rather than the expired research pool, and show that a
+    cited artist's evidence has expired.
   </p>
   <p>
     To request deletion of your stored data, email
@@ -91,9 +108,10 @@
   <h2>YouTube access and your choices</h2>
   <p>
     Disconnect on the Connections page removes the stored connection token and asks Google to revoke
-    Soundboard's grant. It deletes voice and brand proposals you haven't approved; it does not
-    delete saved jobs or your approved voice and brand guide. If Google does not confirm revocation,
-    the page asks you to finish revoking access in Google account permissions. You can also revoke
+    Soundboard's grant. It deletes voice and brand proposals you haven't approved and the analytics
+    results you shared; it does not delete saved jobs or your approved voice and brand guide.
+    Disconnecting is also how you stop sharing analytics. If Google does not confirm revocation, the
+    page asks you to finish revoking access in Google account permissions. You can also revoke
     access directly in
     <a href="https://security.google.com/settings/security/permissions"
       >Google account permissions</a

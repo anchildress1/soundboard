@@ -28,6 +28,20 @@ describe('privacy policy', () => {
     expect(policy).not.toHaveTextContent(/self-hosted|zero retention|not retained/i);
   });
 
+  it('discloses peer research, optional analytics and their 29-day deletion', () => {
+    render(Privacy);
+    const policy = screen.getByRole('main', { name: 'Privacy policy' });
+    expect(policy).toHaveTextContent(
+      'researches public YouTube channels and videos of similar artists',
+    );
+    expect(policy).toHaveTextContent('Nothing is added up across channels');
+    expect(policy).toHaveTextContent('If you choose Share analytics');
+    expect(policy).toHaveTextContent('You can use Soundboard without sharing');
+    expect(policy).toHaveTextContent('hidden from the app after 29 days');
+    expect(policy).toHaveTextContent('and the analytics results you shared');
+    expect(policy).toHaveTextContent('as are the values that came from the YouTube API');
+  });
+
   it.each([
     ['Google account permissions', 'https://security.google.com/settings/security/permissions'],
     ['Google Privacy Policy', 'https://policies.google.com/privacy'],

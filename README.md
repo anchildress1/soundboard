@@ -172,6 +172,7 @@ make dev
 - **Genre research retention:** database reads exclude research at least 30 days old. Deploy and enable the daily Neon cleanup separately using [the retention procedure](docs/operations/youtube-retention.md); an app deployment alone does not create that schedule.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
 - **Voice and brand guide:** every user with an artist profile gets a _Brand_ link to `/brand`. _Propose_ reads that artist's latest uploads through the user's own YouTube grant; edit the proposal, then _Approve_. Drafts for that artist follow only its own approved voice and guide; without one they use plain, generic rules. Unapproved proposals expire after 29 days, and Disconnect deletes them.
+- **Fanbase learning:** each release first researches similar artists and, if the user opted in on _Connections_, reads their own YouTube Analytics. Research runs through a Cloud Tasks queue that `deploy.sh` creates; see [the runner guide](docs/operations/research-runner.md) for the queue, the one-time setup of a separate environment such as `anchildress1-unstable`, and how to read a stuck run. Peer and analytics data is hidden after 29 days and deleted daily; Disconnect deletes the analytics results.
 - **Gemini API key:** create it in a paid-tier project. `make deploy` copies `GEMINI_API_KEY` from `.env` into the `soundboard-gemini-api-key` secret when it changes; dev and prod share the key, its spend, and its daily quota.
 
 ---
@@ -180,29 +181,31 @@ make dev
 
 Values live in `.env` for local development and in Secret Manager or Cloud Run environment variables when deployed. Do not commit real values.
 
-| Variable                                                | Purpose                                                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `GCP_PROJECT_ID`                                        | Project that hosts the service, bucket, and KMS key                                              |
-| `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days)                                            |
-| `GEMINI_API_KEY`                                        | Paid-tier Gemini API key; the only model credential                                              |
-| `GEMINI_ANALYST_MODEL`                                  | Model that watches and hears each window (default `gemini-3.8-flash`)                            |
-| `GEMINI_PICK_MODEL`                                     | Model for the draft, the Short hook, and the voice and brand guides (default `gemini-4-argon`)   |
-| `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
-| `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |
-| `KMS_KEY`                                               | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service |
-| `DATABASE_URL`                                          | Neon pooled URL for the restricted `soundboard_app` login; locally, a dev branch (never `main`)  |
-| `DATABASE_URL_UNPOOLED`                                 | Neon owner's direct URL for migrations and operator invites; never supplied to the app runtime   |
-| `SESSION_SECRET`                                        | Signs the sign-in session cookie                                                                 |
-| `PUBLIC_SENTRY_DSN`                                     | Sentry DSN (public by design)                                                                    |
-| `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)     | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only         |
+| Variable                                                  | Purpose                                                                                                    |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GCP_PROJECT_ID`                                          | Project that hosts the service, bucket, and KMS key                                                        |
+| `GCS_BUCKET`                                              | Bucket for uploads (`uploads/`, deleted after 7 days)                                                      |
+| `GEMINI_API_KEY`                                          | Paid-tier Gemini API key; the only model credential                                                        |
+| `GEMINI_ANALYST_MODEL`                                    | Model that watches and hears each window (default `gemini-3.8-flash`)                                      |
+| `GEMINI_PICK_MODEL`                                       | Model for the draft, the Short hook, and the voice and brand guides (default `gemini-4-argon`)             |
+| `YOUTUBE_API_KEY`                                         | Read-only key from a second GCP project, used for search and catalog reads                                 |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`   | Google sign-in and YouTube upload authorization                                                            |
+| `SIGNUP_MODE`                                             | `invite` (default): invited emails only. `open`: any Google account                                        |
+| `KMS_KEY`                                                 | Cloud KMS key that encrypts refresh tokens; `deploy.sh` creates it and sets this for the service           |
+| `DATABASE_URL`                                            | Neon pooled URL for the restricted `soundboard_app` login; locally, a dev branch (never `main`)            |
+| `DATABASE_URL_UNPOOLED`                                   | Neon owner's direct URL for migrations and operator invites; never supplied to the app runtime             |
+| `RESEARCH_QUEUE`, `RESEARCH_TASK_URL`, `RESEARCH_TASK_SA` | Cloud Tasks queue, target URL and OIDC account for research; all or none. Set by `deploy.sh`, unset in dev |
+| `PEER_HEARING`                                            | `1`: Gemini hears a peer's public upload when matching artists. Unset: metadata only                       |
+| `SESSION_SECRET`                                          | Signs the sign-in session cookie                                                                           |
+| `PUBLIC_SENTRY_DSN`                                       | Sentry DSN (public by design)                                                                              |
+| `SENTRY_AUTH_TOKEN` (in `.env.sentry-build-plugin`)       | Optional. Lets deploys upload source maps; stored in Secret Manager for Cloud Build only                   |
 
 ---
 
 ## Security
 
 - Video and audio are stored only in Cloud Storage. Each analysis step sends Gemini one short, low-resolution clip, never a link to the upload. Google keeps requests up to 55 days for abuse monitoring and may cache them; the [privacy page](https://soundboard.anchildress1.dev/privacy) has the details.
-- Sentry receives prompt and reply text for 30 days, with audio, images, and video replaced by size-only placeholders.
+- Sentry receives prompt and reply text for 30 days, with audio, images, and video replaced by size-only placeholders and values that came from the YouTube API replaced by `[YouTube data]`.
 - Every page except home and the sign-in pages, and every API, needs a signed-in Google account (an invited one while `SIGNUP_MODE=invite`). Each user sees and uploads only their own jobs, to their own channel; only accounts linked to Nathan's artist profile read or change his stored preferences.
 - Secrets live in Secret Manager or a local `.env`. YouTube refresh tokens stay on the server, encrypted with a Cloud KMS key only the app's service account can use.
 - No client access to the database: only the app, migrations, and the invite script connect, using connection strings from Secret Manager or a local `.env`.
