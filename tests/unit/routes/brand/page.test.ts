@@ -89,7 +89,7 @@ describe('brand page: proposing', () => {
     fetchMock.mockResolvedValue(json({ wait: 'model quota spent' }));
     setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
-    await waitFor(() => expect(screen.getByText('model quota spent')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Model quota spent')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
     await vi.runAllTimersAsync();
     expect(fetchMock).toHaveBeenCalledTimes(1);

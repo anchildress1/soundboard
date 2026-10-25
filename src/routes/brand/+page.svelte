@@ -72,7 +72,7 @@
           const result = await proposeBrand();
           if ('proposal' in result) return result.proposal;
           // Asking again can't help until the quota resets at midnight Pacific.
-          if (result.wait === 'model quota spent') throw new AbortError(result.wait);
+          if (result.wait === 'model quota spent') throw new AbortError(WAIT_TEXT[result.wait]);
           wait = result.wait;
           throw new Waiting(result.wait);
         },
