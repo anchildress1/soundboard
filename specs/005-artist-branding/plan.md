@@ -87,7 +87,7 @@ Every place the single-artist voice or brand guide lives after 004, plus the ret
 | 11  | `src/lib/brand.ts`                                                                        | `StoredBrand`, brand limits                                               | Voice types and limits, `voiceError`, `Proposal`, `Approved`, `GuideState`; `StoredBrand` gone.                                                             |
 | 12  | `src/lib/api.ts`                                                                          | `proposeBrand`, `approveBrand(guide, proposedAt)`, `discardBrandProposal` | `proposeGuide(kind)`, `approveGuide(kind, body, proposalId)`, `discardGuide(kind, proposalId)`.                                                             |
 | 13  | `src/routes/api/brand/{propose,approve,discard}/+server.ts`                               | brand-only routes                                                         | Deleted; `src/routes/api/guides/[kind=guide]/{propose,approve,discard}/+server.ts`.                                                                         |
-| 14  | `src/params/guide.ts` (new)                                                               | none                                                                      | Matcher `voice \| brand`.                                                                                                                                   |
+| 14  | `src/params.ts` (new)                                                                     | none                                                                      | Matcher `voice \| brand`.                                                                                                                                   |
 | 15  | `src/routes/brand/+page.server.ts`, `+page.svelte`                                        | brand only, `requireCurated`                                              | Voice and Brand guide sections; `requireArtist`.                                                                                                            |
 | 16  | `src/lib/components/VoiceGuide.svelte`, `BrandGuide.svelte` (new)                         | brand form inline in the page                                             | One component per kind; shared propose loop in `src/lib/propose.ts` (new).                                                                                  |
 | 17  | `src/routes/+layout.svelte`, `+layout.server.ts`                                          | "Brand guide" link when `curated`                                         | "Brand" for every user with a profile; layout data drops `curated`.                                                                                         |
@@ -118,7 +118,7 @@ specs/005-artist-branding/
 
 ```text
 src/
-├── params/guide.ts                          # new
+├── params.ts                                # new
 ├── lib/
 │   ├── brand.ts, api.ts, propose.ts (new)
 │   ├── components/{VoiceGuide,BrandGuide}.svelte   # new

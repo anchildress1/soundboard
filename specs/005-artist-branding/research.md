@@ -44,7 +44,7 @@ Checked 2026-10-25 against:
 - **Rationale:** FR-009 needs no action from Nathan. SC-003 holds because his rules are byte-identical and still the only voice text in his prompt (R7).
 - **Prompt header:** `ARTIST_VOICE` opens with "Write the description the way the artist writes his own:". The data holds only rules, so the header becomes code shared by every approved voice: "Write the description the way the artist writes their own:". One pronoun changes. The test asserts his 9 rules appear verbatim and in order.
 - **Fail loud:** 004's migration always inserts `flr` as the one curated artist, so a fresh database has exactly one. If none has `curated = true` (a broken 004 migration), the voice insert affects 0 rows and Nathan would drop to `GENERIC_VOICE`. The migration raises when the insert count isn't exactly 1.
-- **Test databases (Codex #13):** the unit helper migrates once and `truncate()` clears every row, and a fresh E2E database has no approved brand for the migration to copy. So tests seed Nathan's guides explicitly (`nathanGuides()`, T015). Only the migration-replay suite (T007) asserts what the migration itself produces.
+- **Test databases (Codex #13):** the unit helper migrates once and `truncate()` clears every row, and a fresh E2E database has no approved brand for the migration to copy. So tests seed Nathan's guides explicitly (the shared `USERS` seed and `approvedGuide()`, T015). Only the migration-replay suite (T007) asserts what the migration itself produces.
 
 ## R3 · Migration order
 

@@ -31,7 +31,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
   - `guides_delete` `FOR DELETE TO soundboard_app USING` own and `status = 'proposed'` (and fresh, through the read policy). Nothing in the app deletes an approved row.
   - `guides_cleanup_read` (`FOR SELECT`) and `guides_cleanup_delete` (`FOR DELETE`) `TO soundboard_cleanup`, `USING status = 'proposed' and proposed_at <= now() - interval '29 days'`.
 - **Grants:**
-  - `soundboard_app`: `SELECT`, `INSERT (artist_id, kind, status, body, sources, proposed_at, approved_at)`, `UPDATE (body, sources, proposed_at, approved_at)`, `DELETE`, and `EXECUTE` on `soundboard_save_proposal`.
+  - `soundboard_app`: `SELECT`, `INSERT`, `UPDATE (body, sources, proposed_at, approved_at)`, `DELETE`, and `EXECUTE` on `soundboard_save_proposal`. `INSERT` covers every column because Drizzle names them all; the insert policy allows only approved rows, and the approved check keeps their `grant_at` null.
   - `soundboard_cleanup`: `SELECT (id, status, proposed_at)`, `DELETE`.
 
 ## `guide_claims` (new table)
