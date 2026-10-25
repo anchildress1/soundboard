@@ -253,6 +253,48 @@ describe('agentOutput', () => {
   });
 });
 
+describe('guide proposals in spans', () => {
+  const SENTINEL_GUIDE = 'SENTINEL-GUIDE-7f3';
+  const guide = { agent: 'voice-guide', model: FLASH, maxTokens: 8192 } as const;
+
+  it('records a guide agent answer as its length only', () => {
+    agentOutput(span as unknown as Span, SENTINEL_GUIDE, 'brand-guide');
+    expect(span.setAttribute).toHaveBeenCalledWith(
+      'gen_ai.output.messages',
+      JSON.stringify([
+        {
+          role: 'assistant',
+          parts: [{ type: 'text', content: `[guide proposal: ${SENTINEL_GUIDE.length} chars]` }],
+        },
+      ]),
+    );
+  });
+
+  it('keeps a guide reply, its reasoning and a resent reply out of the chat span', async () => {
+    const resent: ModelRequest = {
+      system: 'Rules.',
+      turns: [
+        { role: 'user', parts: [{ type: 'text', text: 'Evidence.' }] },
+        { role: 'assistant', parts: [{ type: 'text', text: SENTINEL_GUIDE, source: 'guide' }] },
+      ],
+    };
+    await chatSpan(resent, guide, async () => ({
+      content: SENTINEL_GUIDE,
+      reasoning: `${SENTINEL_GUIDE} thoughts`,
+      usage: {},
+      finishReason: 'stop',
+      responseId: null,
+    }));
+    const recorded = JSON.stringify([
+      startSpan.mock.calls.map(([options]) => options),
+      span.setAttributes.mock.calls,
+    ]);
+    expect(recorded).not.toContain(SENTINEL_GUIDE);
+    expect(recorded).toContain(`[guide proposal: ${SENTINEL_GUIDE.length} chars]`);
+    expect(recorded).toContain(`[guide proposal: ${SENTINEL_GUIDE.length + 9} chars]`);
+  });
+});
+
 describe('chatSpan', () => {
   const PARAMS = { agent: CHUNK_ANALYST, model: FLASH, maxTokens: 2048 } as const;
   const reply = (over: Partial<ChatReply> = {}): ChatReply => ({

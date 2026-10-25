@@ -4,9 +4,8 @@ import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from 
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
   allowedLinks,
-  ARTIST_VOICE,
   buildPickRequest,
-  CREDIT_LINE,
+  CONTENT_RULES,
   digestChunks,
   finalizePick,
   GENERIC_VOICE,
@@ -22,6 +21,7 @@ import {
   type PickContext,
   type PickFixups,
   type RawPick,
+  voiceBlock,
 } from '#lib/server/ai/smart-pick.js';
 import type { Chunk, Measurements, Probe } from '#lib/types.js';
 import type { CandidateList } from '#lib/server/pipeline/hashtags.js';
@@ -31,17 +31,15 @@ import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { span } from '../../../../mocks/sentry';
 import { interaction, unavailable503 } from '../../../../helpers/gemini';
 import { omit } from '../../../../helpers/omit';
+import { NATHAN_VOICE_RULES } from '../../../../helpers/voice';
 
 const SYNTHWAVE = '#synthwave';
 const RETROWAVE_TAG = '#retrowave';
 const ARTIST = 'Flies Like Robots';
 const CONTACT = 'Contact at flieslikerobots@gmail.com.';
-const FLR: PickArtist = { name: ARTIST, contactLine: CONTACT, curated: true };
-const OTHER: PickArtist = {
-  name: 'Test Artist',
-  contactLine: 'Booking: test@example.com',
-  curated: false,
-};
+const FLR: PickArtist = { name: ARTIST, contactLine: CONTACT };
+const OTHER: PickArtist = { name: 'Test Artist', contactLine: 'Booking: test@example.com' };
+const NATHAN_VOICE = { rules: NATHAN_VOICE_RULES };
 const FRESH_TITLE = 'Fresh Title';
 
 const raw = (over: Partial<RawPick> = {}): RawPick => ({
@@ -143,6 +141,7 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   facts,
   feedback: [],
   skipped: [],
+  voice: NATHAN_VOICE,
   brand: null,
   ...over,
 });
@@ -253,8 +252,7 @@ describe('weighFeedback', () => {
 describe('buildPickRequest', () => {
   it("writes the description in the artist's own voice on runs that may name him", () => {
     const rules = system(buildPickRequest(ctx()));
-    expect(rules).toContain(ARTIST_VOICE);
-    expect(rules).toContain(CREDIT_LINE);
+    expect(rules).toContain(voiceBlock(NATHAN_VOICE));
     expect(rules).not.toContain(GENERIC_VOICE);
     expect(rules).toContain('hacked and slashed');
     expect(rules).toContain('Never copy them word for word, except the credit line.');
@@ -270,8 +268,7 @@ describe('buildPickRequest', () => {
     expect(rules).toContain('Correct spelling, capitalization, and grammar');
     expect(rules).toContain('Never open with or repeat the title');
     // Format rules stay out of the voice, which changes only from evidence of how he writes.
-    expect(ARTIST_VOICE).not.toContain('Correct spelling');
-    expect(ARTIST_VOICE).not.toContain('repeat the title');
+    expect(NATHAN_VOICE_RULES.join('\n')).not.toMatch(/Correct spelling|repeat the title/);
     expect(rules).not.toContain('The lyrics are based on');
     expect(rules).toContain('wording follows the artist voice below');
     expect(rules).not.toMatch(/persona/i);
@@ -322,13 +319,12 @@ describe('buildPickRequest', () => {
   });
 
   it("names another artist's profile and asks for its tag, in the generic voice", () => {
-    const messages = buildPickRequest(ctx({ artist: OTHER }));
+    const messages = buildPickRequest(ctx({ artist: OTHER, voice: null }));
     expect(context(messages).artist).toBe('Test Artist');
     const rules = system(messages);
     expect(rules).toContain('Include "Test Artist".');
     expect(rules).toContain(GENERIC_VOICE);
-    expect(rules).not.toContain(ARTIST_VOICE);
-    expect(rules).not.toContain(CREDIT_LINE);
+    expect(rules).not.toContain('the way the artist writes their own');
     expect(rules).toContain('Write no credit line.');
     expect(rules).toContain('Write no contact line, in the description or anywhere else.');
     expect(rules).toContain('bandcamp.credits: an empty string.');
@@ -337,7 +333,7 @@ describe('buildPickRequest', () => {
   });
 
   it.each([
-    ['the curated profile', FLR],
+    ["Nathan's profile", FLR],
     ['another profile', OTHER],
   ])('never sends the contact line to the model for %s', (_label, artist) => {
     const sent = JSON.stringify(buildPickRequest(ctx({ artist })));
@@ -346,12 +342,49 @@ describe('buildPickRequest', () => {
     expect(sent).not.toContain('flieslikerobots@');
   });
 
-  it('keeps identity and humor out of the voices', () => {
-    for (const voice of [ARTIST_VOICE, GENERIC_VOICE]) {
-      expect(voice).not.toContain('flieslikerobots@');
-      expect(voice).not.toContain('hacked and slashed');
-    }
+  it('keeps identity and humor out of the generic voice', () => {
+    expect(GENERIC_VOICE).not.toContain('flieslikerobots@');
+    expect(GENERIC_VOICE).not.toContain('hacked and slashed');
     expect(GENERIC_VOICE).not.toMatch(/humor|hehe|caps/i);
+  });
+
+  it("gives Nathan's carried-over voice the 004 rules word for word, with his credit line last", () => {
+    expect(voiceBlock(NATHAN_VOICE)).toBe(
+      [
+        'Write the description the way the artist writes their own:',
+        '- Short, plain, literal.',
+        '- At most one sentence about the song, said straight, from artistNotes or what the windows show. Never claim what the lyrics say.',
+        '- Album placement as a plain statement ("<song> is track 3 on the album <album>.") only when notes or facts give it.',
+        '- Never write placeholders, brackets, or notes about missing information.',
+        '- Dry, self-mocking humor: offhand labels for the video, or doubt about the genre said out loud, about this song.',
+        '- At most one aside like "hehe" or "Har! Har!", inside a sentence, never on its own line. At most one word in caps.',
+        '- Quoted phrases here show his style. Never copy them word for word, except the credit line.',
+        '- No marketing copy: no "explores", "journey", "sonic", "soundscape", "for fans of", no calls to like or subscribe, no emoji.',
+        '- His credit line in his own wording, like "Written, performed, recorded, hacked and slashed by", with the credited name exactly as in recentUploads.',
+      ].join('\n'),
+    );
+  });
+
+  it.each([
+    ['an approved voice', NATHAN_VOICE],
+    ['no approved voice', null],
+  ])('puts the content rules right after the voice with %s', (_label, voice) => {
+    const rules = system(buildPickRequest(ctx({ voice })));
+    expect(rules).toContain(`${voiceBlock(voice)}\n${CONTENT_RULES}`);
+  });
+
+  it("follows another artist's approved voice for credits, never Nathan's", () => {
+    const voice = { rules: ['Lowercase everything.', 'Credit line: "made by <name>".'] };
+    const rules = system(buildPickRequest(ctx({ artist: OTHER, voice })));
+    expect(rules).toContain('- Lowercase everything.');
+    expect(rules).toContain(
+      'Write a credit line only as the voice rules say, with the credited name exactly as in recentUploads.',
+    );
+    expect(rules).toContain(
+      'bandcamp.credits: the credit line from the description, exactly as written there.',
+    );
+    expect(rules).not.toContain(GENERIC_VOICE);
+    expect(rules).not.toContain('hacked and slashed');
   });
 
   it('sends every YouTube-derived list in a tagged part with its count', () => {

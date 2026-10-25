@@ -32,7 +32,9 @@ for (const [who, uid, artist] of [
     await control.click();
     const menu = page.locator('#menu');
     await expect(menu.getByRole('link', { name: 'Connections' })).toBeVisible();
-    await expect(menu.getByRole('link', { name: 'Brand guide' })).toHaveCount(artist ? 1 : 0);
+    await expect(menu.getByRole('link', { name: 'Brand', exact: true })).toHaveCount(
+      artist ? 1 : 0,
+    );
     await expect(menu.getByRole('link', { name: 'Settings' })).toBeVisible();
     await expect(menu.getByRole('button', { name: 'Sign out' })).toBeVisible();
   });

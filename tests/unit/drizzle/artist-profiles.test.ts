@@ -50,32 +50,28 @@ async function before(artistId: string) {
       job('plain-job', null, picks('Solo')),
       job('empty-job', null, []),
     ]);
-  await database.insert(schema.artistMemory).values([
-    { artistId, kind: 'fact', key: 'artist-name', data: { value: 'Flies Like Robots' } },
-    {
-      artistId,
-      kind: 'brand',
-      key: 'approved',
-      data: { statement: 's', basedOn: ['a', 'b', 'c'] },
-    },
-  ]);
+  // Raw SQL: the 'brand' kind is gone from today's schema types, but 0004's table still takes it.
+  await database.execute(sql`
+    insert into artist_memory (artist_id, kind, key, data) values
+      (${artistId}, 'fact', 'artist-name', '{"value":"Flies Like Robots"}'),
+      (${artistId}, 'brand', 'approved', '{"statement":"s","basedOn":["a","b","c"]}')
+  `);
   return { pglite, database };
 }
 
 // Runs on the shared migrated instance before any test truncates it.
 describe('artist profiles migration', () => {
-  it("seeds Nathan's curated profile with today's values", async () => {
-    expect(
-      await rows(db(), sql`select id, name, bandcamp_url, contact_line, curated from artists`),
-    ).toEqual([
-      {
-        id: 'flr',
-        name: 'Flies Like Robots',
-        bandcamp_url: 'https://flieslikerobots.bandcamp.com',
-        contact_line: 'Contact at flieslikerobots@gmail.com.',
-        curated: true,
-      },
-    ]);
+  it("seeds Nathan's profile with today's values", async () => {
+    expect(await rows(db(), sql`select id, name, bandcamp_url, contact_line from artists`)).toEqual(
+      [
+        {
+          id: 'flr',
+          name: 'Flies Like Robots',
+          bandcamp_url: 'https://flieslikerobots.bandcamp.com',
+          contact_line: 'Contact at flieslikerobots@gmail.com.',
+        },
+      ],
+    );
   });
 
   it('keeps the home and Mr. Kill facts and derives the artist name instead of storing it', async () => {

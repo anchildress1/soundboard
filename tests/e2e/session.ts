@@ -17,6 +17,11 @@ const DEVICE: Record<string, string> = { chromium: 'desktop', mobile: 'pixel' };
 export const newUser = ({ project }: TestInfo) => `uid-new-${DEVICE[project.name]}`;
 /** The project's own user with a profile, for tests that edit it. */
 export const renameUser = ({ project }: TestInfo) => `uid-rename-${DEVICE[project.name]}`;
+/** The project's own users with one pending voice proposal: one to approve, one to race on. */
+export const brandUser = ({ project }: TestInfo) => `uid-brand-${DEVICE[project.name]}`;
+export const raceUser = ({ project }: TestInfo) => `uid-race-${DEVICE[project.name]}`;
+/** The project's own user with no guides and C's connected channel, for tests that propose. */
+export const proposeUser = ({ project }: TestInfo) => `uid-propose-${DEVICE[project.name]}`;
 
 // Mirrors #lib/server/auth sign() with the E2E server's SESSION_SECRET (playwright.config.ts).
 export function sessionCookie(uid: string): string {

@@ -1,29 +1,14 @@
-import { error } from '@sveltejs/kit';
 import {
   BRAND_THUMBNAILS,
   BRAND_VIDEOS,
-  guideError,
   RULE_MAX,
   RULES_MAX,
   STATEMENT_MAX,
   type BrandGuide,
-  type StoredBrand,
 } from '#lib/brand.js';
-import type { Wait } from '#lib/types.js';
 import { ActionError } from '#lib/server/core/errors.js';
-import { and, eq } from 'drizzle-orm';
-import { query, type Tx } from '#lib/server/core/db.js';
-import { artistMemory } from '#lib/server/core/schema.js';
-import { memoryOf } from './memory';
-import type { ArtistProfile } from './profile';
-import {
-  chatJson,
-  hasModelTime,
-  ModelBusy,
-  modelFor,
-  ModelQuotaSpent,
-  stepDeadline,
-} from '#lib/server/ai/model.js';
+import { proposeStep, type ProposeResult } from './guides';
+import { chatJson, hasModelTime, modelFor } from '#lib/server/ai/model.js';
 import { stripDeep } from '#lib/server/ai/numerics.js';
 import { isString, isStrings, shape } from '#lib/server/ai/shape.js';
 import {
@@ -122,16 +107,17 @@ export function buildBrandRequest(
 
 const clip = (text: string, max: number) => text.trim().slice(0, max).trim();
 
-function cleanRules(rules: string[]): string[] {
+/** Trims, clips to `length`, dedupes ignoring case, and keeps the first `count` rules. */
+export function cleanRules(rules: string[], length = RULE_MAX, count = RULES_MAX): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const rule of rules.map((r) => clip(r, RULE_MAX)).filter(Boolean)) {
+  for (const rule of rules.map((r) => clip(r, length)).filter(Boolean)) {
     const key = rule.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(rule);
   }
-  return out.slice(0, RULES_MAX);
+  return out.slice(0, count);
 }
 
 /** Trims, caps, and dedupes a guide, and strips any audio figures the model emits. */
@@ -146,157 +132,73 @@ export function cleanGuide(raw: BrandGuide): BrandGuide {
 }
 
 /**
- * The brand guide is only for the curated profile until spec 005; everyone else gets the same 404
- * as a missing page. Returns the curated profile's ID.
+ * Proposes a guide from the owner's latest uploads, read on their own grant, as one claimed step.
+ * A lost or missing grant, a busy YouTube, a busy model or a spent quota returns its wait at once
+ * and saves nothing; the page calls again on `model busy` and `waiting on YouTube`.
  */
-export function requireCurated(user: { artist: ArtistProfile | null } | null): string {
-  if (!user?.artist?.curated) error(404, 'Not found');
-  return user.artist.id;
-}
-
-type Slot = 'approved' | 'proposal';
-const slot = (artistId: string, name: Slot) =>
-  and(memoryOf(artistId, 'brand'), eq(artistMemory.key, name));
-
-async function read(artistId: string, name: Slot): Promise<StoredBrand | null> {
-  const [row] = await query((tx) =>
-    tx.select({ data: artistMemory.data }).from(artistMemory).where(slot(artistId, name)),
-  );
-  return (row?.data as StoredBrand | undefined) ?? null;
-}
-
-async function write(tx: Tx, artistId: string, name: Slot, data: StoredBrand): Promise<void> {
-  await tx
-    .insert(artistMemory)
-    .values({ artistId, kind: 'brand', key: name, data })
-    .onConflictDoUpdate({
-      target: [artistMemory.artistId, artistMemory.kind, artistMemory.key],
-      set: { data },
+export async function proposeBrand(user: {
+  uid: string;
+  artistId: string;
+}): Promise<ProposeResult<BrandGuide>> {
+  return await proposeStep(user.artistId, 'brand', async (deadline) => {
+    const videos = await ownChannelUploads(user.uid, BRAND_VIDEOS, deadline, {
+      'guide.kind': 'brand',
     });
-}
+    if (!Array.isArray(videos)) return videos;
+    if (videos.length === 0)
+      throw new ActionError(409, 'The channel has no public uploads to learn from.');
+    const withThumbs = await Promise.all(
+      videos.map(async (v, i) => ({
+        ...v,
+        thumbnail:
+          i < BRAND_THUMBNAILS && v.thumbnailUrl
+            ? await thumbnailImage(v.thumbnailUrl, deadline)
+            : null,
+      })),
+    );
+    if (!hasModelTime('brand-guide', deadline)) return { wait: 'model busy' };
 
-/** The artist's approved guide and any pending proposal. */
-export async function getBrand(artistId: string): Promise<{
-  approved: StoredBrand | null;
-  proposal: StoredBrand | null;
-}> {
-  const [approved, proposal] = await Promise.all([
-    read(artistId, 'approved'),
-    read(artistId, 'proposal'),
-  ]);
-  return { approved, proposal };
-}
-
-/** The approved guide as smart pick consumes it, or null before the artist approves one. */
-export async function approvedBrand(artistId: string): Promise<BrandGuide | null> {
-  const approved = await read(artistId, 'approved');
-  if (!approved) return null;
-  const { statement, keep, fix, drop } = approved;
-  return { statement, keep, fix, drop };
-}
-
-/**
- * Proposes a guide from the owner's latest uploads, read on their own grant. A lost grant, a busy
- * YouTube, a busy model or a spent quota returns its wait at once, as pipeline steps do, and saves
- * nothing; the page calls again on `model busy` and `waiting on YouTube`.
- */
-export async function proposeBrand(
-  uid: string,
-  artistId: string,
-): Promise<{ wait: Wait } | { proposal: StoredBrand }> {
-  const deadline = stepDeadline();
-
-  const videos = await ownChannelUploads(uid, BRAND_VIDEOS, deadline);
-  if (!Array.isArray(videos)) return videos;
-  if (videos.length === 0)
-    throw new ActionError(409, 'The channel has no public uploads to learn from.');
-  const withThumbs = await Promise.all(
-    videos.map(async (v, i) => ({
-      ...v,
-      thumbnail:
-        i < BRAND_THUMBNAILS && v.thumbnailUrl
-          ? await thumbnailImage(v.thumbnailUrl, deadline)
-          : null,
-    })),
-  );
-  if (!hasModelTime('brand-guide', deadline)) return { wait: 'model busy' };
-
-  const guide = await invokeAgent('brand-guide', modelFor('brand-guide'), async (span) => {
-    span.setAttribute('brand.video_count', videos.length);
-    const request = buildBrandRequest(withThumbs);
-    agentInput(span, request);
-    const { value } = await chatJson(request, 'brand-guide', BRAND_SCHEMA, isBrandGuide, deadline);
-    if (!value) return null;
-    const cleaned = cleanGuide(value);
-    agentOutput(span, JSON.stringify(cleaned));
-    return cleaned;
-  }).catch((error: unknown) => {
-    if (error instanceof ModelBusy) return { wait: 'model busy' } as const;
-    if (error instanceof ModelQuotaSpent) return { wait: 'model quota spent' } as const;
-    throw error;
+    const guide = await invokeAgent('brand-guide', modelFor('brand-guide'), async (span) => {
+      span.setAttribute('brand.video_count', videos.length);
+      const request = buildBrandRequest(withThumbs);
+      agentInput(span, request);
+      const { value } = await chatJson(
+        request,
+        'brand-guide',
+        BRAND_SCHEMA,
+        isBrandGuide,
+        deadline,
+      );
+      if (!value) return null;
+      const cleaned = cleanGuide(value);
+      agentOutput(span, JSON.stringify(cleaned), 'brand-guide');
+      return cleaned;
+    });
+    if (!guide)
+      throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
+    return {
+      body: guide,
+      sources: {
+        uploads: videos.map(({ videoId, title, publishedAt }) => ({ videoId, title, publishedAt })),
+        drafts: [],
+        edits: 0,
+        approvals: 0,
+        thin: false,
+      },
+    };
   });
-  if (guide && 'wait' in guide) return guide;
-  if (!guide)
-    throw new ActionError(502, 'The model reply did not parse as a brand guide. Try again.');
-
-  const proposal: StoredBrand = {
-    ...guide,
-    status: 'PROPOSED',
-    // A count only: video IDs and text from YouTube are never stored (research R13).
-    uploadCount: videos.length,
-    createdAt: Date.now(),
-    approvedAt: null,
-  };
-  await query((tx) => write(tx, artistId, 'proposal', proposal));
-  return { proposal };
 }
 
 const trimRules = (rules: string[]) => rules.map((r) => r.trim()).filter(Boolean);
 
-/**
- * Approves the guide as edited, replacing any earlier one. The proposal is re-read in the same
- * transaction and must be the one under review (`proposedAt` is its `createdAt`), so a discard or
- * a newer proposal from another tab can't be approved with stale text.
- */
-export async function approveBrand(artistId: string, input: unknown): Promise<StoredBrand> {
+/** The edited guide from an approve body, trimmed; a wrong shape is a 400. */
+export function brandInput(input: unknown): BrandGuide {
   if (!isBrandGuide(input))
     throw new ActionError(400, 'Expected a statement and keep, fix, drop lists.');
-  const { proposedAt } = input as { proposedAt?: unknown };
-  if (typeof proposedAt !== 'number')
-    throw new ActionError(400, 'Name the proposal being approved.');
-  const guide: BrandGuide = {
+  return {
     statement: input.statement.trim(),
     keep: trimRules(input.keep),
     fix: trimRules(input.fix),
     drop: trimRules(input.drop),
   };
-  const problem = guideError(guide);
-  if (problem) throw new ActionError(422, problem);
-  return await query(async (tx) => {
-    const [row] = await tx
-      .select({ data: artistMemory.data })
-      .from(artistMemory)
-      .where(slot(artistId, 'proposal'))
-      .for('update');
-    if (!row) throw new ActionError(409, 'There is no proposal to approve.');
-    const proposal = row.data as StoredBrand;
-    if (proposal.createdAt !== proposedAt) {
-      throw new ActionError(409, 'A newer proposal replaced this one. Reload to review it.');
-    }
-    const approved: StoredBrand = {
-      ...guide,
-      status: 'APPROVED',
-      uploadCount: proposal.uploadCount,
-      createdAt: proposal.createdAt,
-      approvedAt: Date.now(),
-    };
-    await write(tx, artistId, 'approved', approved);
-    await tx.delete(artistMemory).where(slot(artistId, 'proposal'));
-    return approved;
-  });
-}
-
-/** Drops the pending proposal; the approved guide, if any, stays. */
-export async function discardBrandProposal(artistId: string): Promise<void> {
-  await query((tx) => tx.delete(artistMemory).where(slot(artistId, 'proposal')));
 }

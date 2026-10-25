@@ -30,3 +30,9 @@ export const undecryptable = (error: unknown): boolean => {
   const { code, details } = (error ?? {}) as { code?: unknown; details?: unknown };
   return code === 3 && typeof details === 'string' && details.startsWith('Decryption failed');
 };
+
+/** The Postgres error code, which Drizzle keeps on the wrapped driver error. */
+export const pgCode = (error: unknown): unknown => {
+  const { code, cause } = (error ?? {}) as { code?: unknown; cause?: { code?: unknown } };
+  return code ?? cause?.code;
+};

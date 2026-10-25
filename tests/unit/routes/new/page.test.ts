@@ -22,7 +22,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const ARTIST = { name: ARTIST_C.name, bandcampUrl: ARTIST_C.bandcampUrl, curated: false };
+const ARTIST = { name: ARTIST_C.name, bandcampUrl: ARTIST_C.bandcampUrl };
 const setup = (artist: PageData['artist'] = ARTIST) =>
   render(Page, { data: { artist } as PageData });
 

@@ -19,6 +19,12 @@
 - Q: Is the voice used automatically? → A: No. Soundboard proposes a voice and a brand guide, and the artist edits and approves them. Until then, picks use generic voice rules.
 - Build order: this depends on spec 004 (artist profile and connected channel). Spec 006 saves its peer-influence sliders with this brand guide, so 005 is built before 006.
 
+### Session 2026-10-25
+
+- Q: Do uploads whose descriptions Soundboard drafted count as voice evidence? → A: Yes, when the artist approved and published them, weighted below the artist's own writing and listed separately in the sources.
+- Q: Where does Nathan's credit wording go? → A: It becomes the ninth rule of his approved voice, editable like any rule.
+- Q: What does FR-007 mean for hook picks and Shorts? → A: A hook pick uses the owner's current approved voice. A Short's title, description and tags are its parent's approved fields, copied unchanged, so a guide approved later doesn't redraft them (FR-011).
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1: Propose and approve my voice (Priority: P1)
@@ -87,7 +93,7 @@ As the artist edits and approves drafts, Soundboard keeps those edits as voice e
 - **Very little writing** (for example, a channel whose descriptions are only links): the proposal says its evidence is thin and keeps its rules few, rather than inventing a style.
 - **Descriptions written by someone else** (a label or editor): the artist sees the proposal and the sources it used before approving, and can edit or discard it.
 - **The connection is lost or revoked mid-proposal:** the proposal stops with a reconnect message. Approved rules are untouched.
-- **An approved voice that conflicts with the app's content rules** (for example "always add 20 hashtags"): content rules win. Candidate-only tags, no model-made numbers, and YouTube length limits still apply.
+- **An approved voice that conflicts with the app's content rules** (for example "always add 20 hashtags"): content rules win. Candidate-only tags, no model-made audio measurements, and YouTube length limits still apply.
 - **The artist's own surname, or Nathan's,** in their descriptions: the app never filters it from runtime data, never adds it to code, and the artist decides what stays in the approved rules.
 - **Proposals and approvals racing in two tabs:** the latest approval wins, and the losing tab is told the guide changed.
 
@@ -101,8 +107,8 @@ As the artist edits and approves drafts, Soundboard keeps those edits as voice e
 - **FR-004**: The YouTube data used for a proposal MUST NOT be kept past 30 days. Only the artist-approved rules are kept, as the artist's own statement (per the owner's stated interpretation of YouTube Developer Policies III.E.4.h, as in spec 002). No YouTube statistics MUST be stored.
 - **FR-005**: The artist MUST be able to edit, approve or discard a proposal. Only an approved voice or brand guide MUST affect picks.
 - **FR-006**: Without an approved voice, picks MUST use generic voice rules, never another artist's voice. Without an approved brand guide, picks MUST run without one.
-- **FR-007**: Every pick, re-run, hook pick and Short draft MUST use the owner's approved voice and brand guide, and no other artist's.
-- **FR-008**: Content rules MUST outrank the voice and brand guide: candidate-only tags and hashtags, ffmpeg-only numbers, YouTube length limits, and never-invented facts.
+- **FR-007**: Every pick and re-run MUST use the owner's current approved voice and brand guide, and every hook pick the owner's current approved voice. None MUST use another artist's. A Short's title, description and tags are its parent's approved fields, inherited unchanged (FR-011), not redrafted.
+- **FR-008**: Content rules MUST outrank the voice and brand guide: candidate-only tags and hashtags, ffmpeg-only audio measurements (loudness, peak, clipping, silence), YouTube length limits, and never-invented facts.
 - **FR-009**: Nathan's current voice rules and approved brand guide MUST carry over as his approved versions, unchanged, with no action from him.
 - **FR-010**: The brand page MUST be available to every artist and show only their own voice and brand guide. Another user's MUST be not-found.
 - **FR-011**: Approving a new voice or brand guide MUST NOT change already approved or published job fields.

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHECK_CLEANUP_ROLE,
   DELETE_EXPIRED_GENRE_EVIDENCE,
+  DELETE_EXPIRED_PROPOSALS,
   handleGenreCleanup,
   type CleanupConnection,
 } from '#lib/server/core/genre-cleanup.js';
@@ -22,6 +23,9 @@ const driver = () => ({
   })),
   end: vi.fn(async () => undefined),
 });
+
+const PROPOSED_SOURCES = `'{"uploads":[],"drafts":[],"edits":0,"approvals":0,"thin":false}'`;
+const APPROVED_SOURCES = `'{"uploads":0,"drafts":0,"edits":0,"approvals":0,"carriedOver":false}'`;
 
 const databaseDriver = () => ({
   connect: vi.fn(async () => undefined),
@@ -57,8 +61,9 @@ describe('handleGenreCleanup', () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('deletes expired evidence at the database cutoff and ignores the supplied schedule time', async () => {
+  it('deletes expired evidence and proposals at the database cutoffs and ignores the supplied schedule time', async () => {
     await seed({
+      artists: [{ id: 'artist-1', name: 'Artist' }],
       users: [{ email: 'artist@example.test', uid: 'artist' }],
       jobs: ['expired', 'boundary', 'fresh'].map((id) => ({
         id,
@@ -78,19 +83,24 @@ describe('handleGenreCleanup', () => {
         insert into job_audience (job_id, retrieved_at, evidence) values
           ('expired', now() - interval '31 days', '{}'),
           ('boundary', now() - interval '30 days', '{}'),
-          ('fresh', now() - interval '29 days', '{}')
+          ('fresh', now() - interval '29 days', '{}');
+        insert into artist_guides (artist_id, kind, status, body, sources, proposed_at, approved_at) values
+          ('artist-1', 'voice', 'proposed', '{"rules":["a"]}', ${PROPOSED_SOURCES}, now() - interval '29 days', null),
+          ('artist-1', 'brand', 'proposed', '{"rules":["b"]}', ${PROPOSED_SOURCES}, now() - interval '28 days 23 hours', null),
+          ('artist-1', 'voice', 'approved', '{"rules":["c"]}', ${APPROVED_SOURCES}, now() - interval '400 days', now() - interval '400 days')
       `);
       await database.exec('set local session authorization soundboard_cleanup');
 
       const response = await handleGenreCleanup(triggerRequest(), factory);
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ deleted: 2 });
+      expect(await response.json()).toEqual({ deleted: 2, proposals: 1 });
       expect(factory).toHaveBeenCalledOnce();
       expect(connection.connect).toHaveBeenCalledOnce();
       expect(connection.query.mock.calls).toEqual([
         [CHECK_CLEANUP_ROLE],
         [DELETE_EXPIRED_GENRE_EVIDENCE],
+        [DELETE_EXPIRED_PROPOSALS],
       ]);
       expect(connection.end).toHaveBeenCalledOnce();
       // PGlite's RESET SESSION AUTHORIZATION keeps the current identity.
@@ -103,11 +113,18 @@ describe('handleGenreCleanup', () => {
         { id: 'expired' },
         { id: 'fresh' },
       ]);
+      // An approved guide never expires; the 28-day proposal is still inside its window.
+      expect(
+        (await database.query('select kind, status from artist_guides order by id')).rows,
+      ).toEqual([
+        { kind: 'brand', status: 'proposed' },
+        { kind: 'voice', status: 'approved' },
+      ]);
 
       await database.exec('set local session authorization soundboard_cleanup');
       const repeated = await handleGenreCleanup(triggerRequest('1900-01-01T00:00:00Z'), factory);
       expect(repeated.status).toBe(200);
-      expect(await repeated.json()).toEqual({ deleted: 0 });
+      expect(await repeated.json()).toEqual({ deleted: 0, proposals: 0 });
       expect(connection.end).toHaveBeenCalledTimes(2);
     } finally {
       await database.exec('rollback');
@@ -187,16 +204,21 @@ describe('handleGenreCleanup', () => {
     },
   );
 
-  it.each(['connect', 'role check', 'delete'] as const)(
+  it.each(['connect', 'role check', 'delete', 'proposal delete'] as const)(
     'closes the connection and hides database errors when %s fails',
     async (operation) => {
       const connection = driver();
       const error = new Error('private connection details');
       if (operation === 'connect') connection.connect.mockRejectedValueOnce(error);
       else if (operation === 'role check') connection.query.mockRejectedValueOnce(error);
+      else if (operation === 'delete')
+        connection.query
+          .mockResolvedValueOnce({ rows: [{ allowed: true }] })
+          .mockRejectedValueOnce(error);
       else
         connection.query
           .mockResolvedValueOnce({ rows: [{ allowed: true }] })
+          .mockResolvedValueOnce({ rows: [] })
           .mockRejectedValueOnce(error);
 
       const response = await handleGenreCleanup(triggerRequest(), () => connection);
@@ -209,10 +231,12 @@ describe('handleGenreCleanup', () => {
       else if (operation === 'role check')
         expect(connection.query).toHaveBeenCalledExactlyOnceWith(CHECK_CLEANUP_ROLE);
       else
-        expect(connection.query.mock.calls).toEqual([
-          [CHECK_CLEANUP_ROLE],
-          [DELETE_EXPIRED_GENRE_EVIDENCE],
-        ]);
+        expect(connection.query.mock.calls).toEqual(
+          [[CHECK_CLEANUP_ROLE], [DELETE_EXPIRED_GENRE_EVIDENCE], [DELETE_EXPIRED_PROPOSALS]].slice(
+            0,
+            operation === 'delete' ? 2 : 3,
+          ),
+        );
     },
   );
 
@@ -227,6 +251,7 @@ describe('handleGenreCleanup', () => {
     expect(connection.query.mock.calls).toEqual([
       [CHECK_CLEANUP_ROLE],
       [DELETE_EXPIRED_GENRE_EVIDENCE],
+      [DELETE_EXPIRED_PROPOSALS],
     ]);
     expect(connection.end).toHaveBeenCalledOnce();
   });

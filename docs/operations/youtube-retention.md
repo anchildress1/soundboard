@@ -27,7 +27,10 @@ pnpm dlx neon@8.10.3 triggers create \
 - The database clock determines expiry; the request body cannot choose a deletion cutoff.
 - A daily run at 03:00 UTC deletes expired rows even when the app is idle and the database has scaled to zero.
 - Child branches inherit schedules disabled; confirm the trigger is enabled on the deployment branch.
-- Verify an actual invocation in Neon logs and confirm its response reports a deletion count. An unsuccessful run returns HTTP 500 and must be investigated.
+- The same run deletes voice and brand proposals 29 days after their claim, so no proposal, or the upload list it read, outlives 30 days. Approved guides hold counts only and are never deleted by it.
+- A missed daily run breaks that 30-day bound for proposals as well as statistics; investigate any gap in the schedule the same day.
+- Verify an actual invocation in Neon logs and confirm its response reports both counts: `deleted` for evidence and `proposals` for expired proposals. An unsuccessful run returns HTTP 500 and must be investigated.
+- Redeploy `genrecleanup` before, or with, the first app revision that serves voice or brand proposals; an older function never deletes them.
 - Local tests prove SQL deletion and request handling, not that a remote schedule has been provisioned.
 
 ## Database roles
@@ -38,6 +41,7 @@ pnpm dlx neon@8.10.3 triggers create \
 - After switching the runtime, disable old owner-credential versions of its secret; secret access otherwise includes those historical versions.
 - Deploy `genrecleanup` with both `DATABASE_URL` and `DATABASE_URL_UNPOOLED` overridden to the branch's `soundboard_cleanup` credential; never leave the injected owner credential as its runtime connection.
 - `soundboard_cleanup` can read only expired job IDs and retrieval times and delete those rows; it cannot read evidence, jobs, connections, or artist memory.
+- For proposals it sees only `(id, status, proposed_at)` of rows already past 29 days, never their text, upload lists, or claims.
 - RLS hides expired evidence through both the base table and the invoker-security freshness view. A restricted save function refreshes owned research without exposing expired rows.
 - Test both branches using their actual runtime logins: no subject sees no rows, user A cannot read or mutate B's rows, revoked users lose access, and cleanup preserves fresh evidence.
 

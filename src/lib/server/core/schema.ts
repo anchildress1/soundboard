@@ -9,6 +9,7 @@ import {
   pgRole,
   pgTable,
   pgView,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -28,8 +29,7 @@ const callerArtist = sql`(select u.artist_id from public.users u where u.uid = $
 
 /**
  * One artist profile per user, linked by `users.artist_id`. New profiles are created only through
- * `soundboard_create_artist`; `curated` is migration-only and selects Nathan's voice and brand guide
- * until spec 005 replaces it.
+ * `soundboard_create_artist`.
  */
 export const artists = pgTable(
   'artists',
@@ -38,7 +38,6 @@ export const artists = pgTable(
     name: text('name').notNull(),
     bandcampUrl: text('bandcamp_url'),
     contactLine: text('contact_line'),
-    curated: boolean('curated').notNull().default(false),
     createdAt: at('created_at').notNull().defaultNow(),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
@@ -225,8 +224,8 @@ export const jobAudienceFresh = pgView('job_audience_fresh')
   );
 
 /**
- * Everything kept per artist. Facts, publishes and brand slots are keyed (fact key, video ID,
- * `proposal`/`approved`); feedback rows have no key and read newest-first by `id`.
+ * Everything kept per artist. Facts and publishes are keyed (fact key, video ID); feedback rows have
+ * no key and read newest-first by `id`.
  */
 export const artistMemory = pgTable(
   'artist_memory',
@@ -235,7 +234,7 @@ export const artistMemory = pgTable(
     artistId: text('artist_id')
       .notNull()
       .references(() => artists.id),
-    kind: text('kind', { enum: ['fact', 'feedback', 'publish', 'brand'] }).notNull(),
+    kind: text('kind', { enum: ['fact', 'feedback', 'publish'] }).notNull(),
     key: text('key'),
     data: jsonb('data').notNull(),
   },
@@ -249,7 +248,114 @@ export const artistMemory = pgTable(
     unique('artist_memory_key').on(t.artistId, t.kind, t.key),
     check(
       'artist_memory_kind_check',
-      sql`${t.kind} in ('fact', 'feedback', 'publish', 'brand') and (${t.key} is null) = (${t.kind} = 'feedback')`,
+      sql`${t.kind} in ('fact', 'feedback', 'publish') and (${t.key} is null) = (${t.kind} = 'feedback')`,
     ),
+  ],
+).enableRLS();
+
+/** The caller is linked to the row's artist; `artistId` must be the policy table's own column. */
+const ownArtist = (artistId: AnyPgColumn) =>
+  sql`exists (select 1 from public.users u where u.uid = ${principal} and u.active and u.artist_id = ${artistId})`;
+const GUIDE_EXPIRY = sql.raw(`interval '29 days'`);
+
+/**
+ * Per artist and kind, at most one proposal and one approved version. Proposals list the uploads
+ * they read, so they expire 29 days after their claim and only `soundboard_save_proposal` writes
+ * them; approved rows hold source counts only.
+ */
+export const artistGuides = pgTable(
+  'artist_guides',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    artistId: text('artist_id')
+      .notNull()
+      .references(() => artists.id),
+    kind: text('kind', { enum: ['voice', 'brand'] }).notNull(),
+    status: text('status', { enum: ['proposed', 'approved'] }).notNull(),
+    body: jsonb('body').notNull(),
+    sources: jsonb('sources').notNull(),
+    proposedAt: at('proposed_at').notNull(),
+    approvedAt: at('approved_at'),
+    // The connection generation (`connections.updated_at`) the proposal's uploads were read through.
+    grantAt: at('grant_at'),
+  },
+  (t) => {
+    const fresh = sql`(${t.status} = 'approved' or ${t.proposedAt} > now() - ${GUIDE_EXPIRY})`;
+    const approvedWrite = sql`${ownArtist(t.artistId)} and ${t.status} = 'approved' and ${t.proposedAt} <= now() and ${t.proposedAt} > now() - ${GUIDE_EXPIRY}`;
+    const expired = sql`${t.status} = 'proposed' and ${t.proposedAt} <= now() - ${GUIDE_EXPIRY}`;
+    const typed = (key: string, type: string) =>
+      sql.raw(`jsonb_typeof("artist_guides"."sources"->'${key}') is not distinct from '${type}'`);
+    return [
+      check('artist_guides_kind_check', sql`${t.kind} in ('voice', 'brand')`),
+      check('artist_guides_status_check', sql`${t.status} in ('proposed', 'approved')`),
+      check(
+        'artist_guides_approved_check',
+        sql`(${t.status} = 'approved') = (${t.approvedAt} is not null) and (${t.status} = 'proposed' or ${t.grantAt} is null)`,
+      ),
+      // Exact keys and types per status; a missing key fails instead of passing as SQL null.
+      check(
+        'artist_guides_sources_check',
+        sql`jsonb_typeof(${t.sources}) is not distinct from 'object' and case ${t.status}
+          when 'proposed' then ${t.sources} - array['uploads','drafts','edits','approvals','thin'] = '{}'::jsonb
+            and ${typed('uploads', 'array')} and ${typed('drafts', 'array')}
+            and ${typed('edits', 'number')} and ${typed('approvals', 'number')} and ${typed('thin', 'boolean')}
+          else ${t.sources} - array['uploads','drafts','edits','approvals','carriedOver'] = '{}'::jsonb
+            and ${typed('uploads', 'number')} and ${typed('drafts', 'number')}
+            and ${typed('edits', 'number')} and ${typed('approvals', 'number')} and ${typed('carriedOver', 'boolean')}
+          end`,
+      ),
+      unique('artist_guides_slot').on(t.artistId, t.kind, t.status),
+      index('artist_guides_expiry_idx')
+        .on(t.proposedAt)
+        .where(sql`${t.status} = 'proposed'`),
+      pgPolicy('guides_read', {
+        for: 'select',
+        to: appRole,
+        using: sql`${ownArtist(t.artistId)} and ${fresh}`,
+      }),
+      pgPolicy('guides_insert', { for: 'insert', to: appRole, withCheck: approvedWrite }),
+      pgPolicy('guides_update', {
+        for: 'update',
+        to: appRole,
+        using: sql`${ownArtist(t.artistId)} and ${fresh}`,
+        withCheck: approvedWrite,
+      }),
+      pgPolicy('guides_delete', {
+        for: 'delete',
+        to: appRole,
+        using: sql`${ownArtist(t.artistId)} and ${t.status} = 'proposed'`,
+      }),
+      pgPolicy('guides_cleanup_read', { for: 'select', to: cleanupRole, using: expired }),
+      pgPolicy('guides_cleanup_delete', { for: 'delete', to: cleanupRole, using: expired }),
+    ];
+  },
+).enableRLS();
+
+/**
+ * One proposal claim per artist and kind. Only `soundboard_claim_proposal` sets the claim time and
+ * connection generation, so the app can't backdate or forward-date a proposal through it.
+ */
+export const guideClaims = pgTable(
+  'guide_claims',
+  {
+    artistId: text('artist_id')
+      .notNull()
+      .references(() => artists.id),
+    kind: text('kind', { enum: ['voice', 'brand'] }).notNull(),
+    claimToken: text('claim_token'),
+    claimedAt: at('claimed_at'),
+    claimUntil: at('claim_until'),
+    limitUntil: at('limit_until'),
+    grantAt: at('grant_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artistId, t.kind] }),
+    check('guide_claims_kind_check', sql`${t.kind} in ('voice', 'brand')`),
+    pgPolicy('claims_own', {
+      for: 'all',
+      to: appRole,
+      using: ownArtist(t.artistId),
+      withCheck: ownArtist(t.artistId),
+    }),
   ],
 ).enableRLS();

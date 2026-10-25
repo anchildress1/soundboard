@@ -60,7 +60,7 @@ The models run on the paid tier of the Gemini API: `gemini-3.8-flash` watches an
 | Review                   | Edit any field, re-run for a new draft, or approve; edits and approvals inform later drafts                                                                                                                             |
 | Verified upload          | Uploads as private, then reads the video back from the YouTube API before marking it verified                                                                                                                           |
 | Metadata diff            | For an existing video, shows current and proposed metadata side by side with the reason for each change                                                                                                                 |
-| Brand guide              | Reads the channel's 30 latest videos (up to 8 tags each) and 10 thumbnails and proposes keep / fix / drop rules; once Nathan approves them, every draft for his channel follows them                                    |
+| Voice and brand guide    | Proposes a description voice from the artist's own writing and edits, and keep / fix / drop brand rules from 30 latest videos and 10 thumbnails; drafts follow what the artist approves                                 |
 | Short                    | Gemini picks the hook, ffmpeg's loudness places the cut, and ffmpeg fits it to 9:16 for review and the same private, verified upload; no generated frames                                                               |
 | Tracing                  | One Sentry trace per job, with each Gemini call recorded as an AI agent span                                                                                                                                            |
 
@@ -68,16 +68,16 @@ The models run on the paid tier of the Gemini API: `gemini-3.8-flash` watches an
 
 ## Tech Stack
 
-| Layer         | Choice                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------ |
-| App           | SvelteKit 3 + Svelte 5, TypeScript, Node 24                                                            |
-| Model         | Gemini API, paid tier: `gemini-3.8-flash` (analyst), `gemini-4-argon` (picks, brand guide), via AI SDK |
-| Media         | ffmpeg                                                                                                 |
-| Hosting       | Cloud Run, us-central1                                                                                 |
-| Data          | Neon Postgres (Drizzle), Cloud Storage, Secret Manager, Cloud KMS                                      |
-| YouTube       | YouTube Data API v3                                                                                    |
-| Observability | Sentry (AI agent tracing)                                                                              |
-| Tooling       | pnpm, Vitest, Playwright, ESLint, Prettier, Lefthook, commitlint, Release Please                       |
+| Layer         | Choice                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| App           | SvelteKit 3 + Svelte 5, TypeScript, Node 24                                                       |
+| Model         | Gemini API, paid tier: `gemini-3.8-flash` (analyst), `gemini-4-argon` (picks, guides), via AI SDK |
+| Media         | ffmpeg                                                                                            |
+| Hosting       | Cloud Run, us-central1                                                                            |
+| Data          | Neon Postgres (Drizzle), Cloud Storage, Secret Manager, Cloud KMS                                 |
+| YouTube       | YouTube Data API v3                                                                               |
+| Observability | Sentry (AI agent tracing)                                                                         |
+| Tooling       | pnpm, Vitest, Playwright, ESLint, Prettier, Lefthook, commitlint, Release Please                  |
 
 ---
 
@@ -171,7 +171,7 @@ make dev
 - **Connections:** signing in also connects the user's own YouTube channel. The _Connections_ page shows its status and offers Reconnect and Disconnect; a missing or revoked grant blocks approval until it's reconnected. Refresh tokens are stored encrypted with the Cloud KMS key.
 - **Genre research retention:** database reads exclude research at least 30 days old. Deploy and enable the daily Neon cleanup separately using [the retention procedure](docs/operations/youtube-retention.md); an app deployment alone does not create that schedule.
 - **OAuth consent screen:** set it to _In production_ before connecting; Testing-mode refresh tokens expire after 7 days. Add `https://soundboard.anchildress1.dev/auth/callback` and `<run.app service URL>/auth/callback` as redirect URIs: sign-in redirects back to whichever origin the user signed in from.
-- **Brand guide:** only the curated profile, Nathan's, gets a _Brand guide_ link to `/brand`. _Propose_ reads the latest uploads through the user's own YouTube grant; edit the statement and rules, then _Approve_. Drafts for Nathan's channel follow the approved guide; other users' drafts never read it.
+- **Voice and brand guide:** every user with an artist profile gets a _Brand_ link to `/brand`. _Propose_ reads that artist's latest uploads through the user's own YouTube grant; edit the proposal, then _Approve_. Drafts for that artist follow only its own approved voice and guide; without one they use plain, generic rules. Unapproved proposals expire after 29 days, and Disconnect deletes them.
 - **Gemini API key:** create it in a paid-tier project. `make deploy` copies `GEMINI_API_KEY` from `.env` into the `soundboard-gemini-api-key` secret when it changes; dev and prod share the key, its spend, and its daily quota.
 
 ---
@@ -186,7 +186,7 @@ Values live in `.env` for local development and in Secret Manager or Cloud Run e
 | `GCS_BUCKET`                                            | Bucket for uploads (`uploads/`, deleted after 7 days)                                            |
 | `GEMINI_API_KEY`                                        | Paid-tier Gemini API key; the only model credential                                              |
 | `GEMINI_ANALYST_MODEL`                                  | Model that watches and hears each window (default `gemini-3.8-flash`)                            |
-| `GEMINI_PICK_MODEL`                                     | Model for the draft, the Short hook, and the brand guide (default `gemini-4-argon`)              |
+| `GEMINI_PICK_MODEL`                                     | Model for the draft, the Short hook, and the voice and brand guides (default `gemini-4-argon`)   |
 | `YOUTUBE_API_KEY`                                       | Read-only key from a second GCP project, used for search and catalog reads                       |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google sign-in and YouTube upload authorization                                                  |
 | `SIGNUP_MODE`                                           | `invite` (default): invited emails only. `open`: any Google account                              |

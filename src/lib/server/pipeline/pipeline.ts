@@ -9,7 +9,7 @@ import {
   type PickFields,
   type Wait,
 } from '#lib/types.js';
-import { approvedBrand } from '#lib/server/artist/brand.js';
+import { approvedGuides } from '#lib/server/artist/guides.js';
 import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
 import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
@@ -163,7 +163,9 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   const by = deadline - PERSIST_RESERVE_MS;
   const artist = await artistProfile(job.ownerUid);
   if (!artist) return { wait: NO_ARTIST };
-  const recent = await ownChannelUploads(job.ownerUid, RECENT_COUNT, by, job.id);
+  const recent = await ownChannelUploads(job.ownerUid, RECENT_COUNT, by, {
+    'job.id': job.id,
+  });
   if (!Array.isArray(recent)) return recent;
   const [memory, chunks, picks] = await Promise.all([
     artistJob(job),
@@ -198,7 +200,7 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
     audience: AudienceEvidence,
     span: Span,
   ): Promise<StepOutput> {
-    const [facts, feedback, brand] = await memoryFor(artist, memory);
+    const [facts, feedback, { voice, brand }] = await memoryFor(artist, memory);
     const result = await runPick(
       {
         artist,
@@ -215,6 +217,7 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         chunks,
         facts,
         feedback,
+        voice,
         brand,
       },
       by,
@@ -235,12 +238,12 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   }
 }
 
-/** Facts, feedback and the brand guide; feedback and the guide only on jobs that use the memory. */
+/** Facts, feedback and the approved guides; feedback and guides only on jobs that use the memory. */
 const memoryFor = (artist: ArtistProfile, memory: boolean) =>
   Promise.all([
     listFacts(artist, memory),
     memory ? recentFeedback(artist.id) : [],
-    memory && artist.curated ? approvedBrand(artist.id) : null,
+    memory ? approvedGuides(artist.id) : { voice: null, brand: null },
   ]);
 
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
@@ -276,7 +279,7 @@ async function youtubeWait(
   if (failure === 'quota-spent') return pause(DAILY_LIMIT, { limitUntil: quotaResetAt(now) });
   if (failure !== 'access-lost') throw error;
   // The grant is dead: Connections must offer Reconnect, the fix the wait asks for.
-  await access.refused(job.id);
+  await access.refused({ 'job.id': job.id });
   return pause(RECONNECT);
 }
 

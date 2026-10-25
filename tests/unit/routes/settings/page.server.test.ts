@@ -7,7 +7,7 @@ type Event = Parameters<typeof load>[0];
 const run = (user: Event['locals']['user']) => load({ locals: { user } } as unknown as Event);
 
 describe('/settings load', () => {
-  it("returns the caller's own three editable fields, never the id or curated flag", async () => {
+  it("returns the caller's own three editable fields, never the id", async () => {
     expect(await run(USER_C)).toEqual({
       artist: {
         name: ARTIST_C.name,

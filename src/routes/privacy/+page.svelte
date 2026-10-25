@@ -4,7 +4,7 @@
 
 <main aria-labelledby="privacy-title">
   <h1 id="privacy-title">Privacy policy</h1>
-  <p class="help">Updated October 24, 2026</p>
+  <p class="help">Updated October 25, 2026</p>
 
   <p>
     Ashley Childress operates Soundboard, a private music-release assistant. This policy covers
@@ -23,8 +23,9 @@
       Uploaded media, song titles, notes, analysis, generated drafts, edits, approvals, and upload
       results support your releases. Each account stores an artist name and an optional Bandcamp URL
       and contact line, used for drafts and display. Artist memory linked to your profile stores
-      feedback and, for the curated profile, brand guidance. Recent uploads read to identify your
-      artist aren't stored.
+      feedback. Your profile also stores the voice and brand guide you approve, and any pending
+      proposal with the uploads it read, which is deleted within 30 days or when you disconnect
+      YouTube. Recent uploads read to identify your artist aren't stored.
     </li>
   </ul>
 
@@ -90,9 +91,10 @@
   <h2>YouTube access and your choices</h2>
   <p>
     Disconnect on the Connections page removes the stored connection token and asks Google to revoke
-    Soundboard's grant; it does not delete saved jobs or artist guidance. If Google does not confirm
-    revocation, the page asks you to finish revoking access in Google account permissions. You can
-    also revoke access directly in
+    Soundboard's grant. It deletes voice and brand proposals you haven't approved; it does not
+    delete saved jobs or your approved voice and brand guide. If Google does not confirm revocation,
+    the page asks you to finish revoking access in Google account permissions. You can also revoke
+    access directly in
     <a href="https://security.google.com/settings/security/permissions"
       >Google account permissions</a
     >. Contact Ashley to request deletion of saved data after disconnecting.

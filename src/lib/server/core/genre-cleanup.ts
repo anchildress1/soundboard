@@ -1,6 +1,10 @@
 export const DELETE_EXPIRED_GENRE_EVIDENCE =
   "delete from job_audience where retrieved_at <= now() - interval '30 days' returning job_id";
 
+/** Hidden from the app at 29 days, so a daily run deletes each proposal before it is 30 days old. */
+export const DELETE_EXPIRED_PROPOSALS =
+  "delete from artist_guides where status = 'proposed' and proposed_at <= now() - interval '29 days' returning id";
+
 export const CHECK_CLEANUP_ROLE = `
   select current_user = 'soundboard_cleanup' and session_user = 'soundboard_cleanup'
     and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
@@ -37,8 +41,9 @@ export async function handleGenreCleanup(
     const role = await client.query(CHECK_CLEANUP_ROLE);
     if ((role.rows[0] as { allowed?: unknown } | undefined)?.allowed !== true)
       throw new Error('Cleanup requires the unprivileged soundboard_cleanup login.');
-    const result = await client.query(DELETE_EXPIRED_GENRE_EVIDENCE);
-    response = Response.json({ deleted: result.rows.length });
+    const evidence = await client.query(DELETE_EXPIRED_GENRE_EVIDENCE);
+    const proposals = await client.query(DELETE_EXPIRED_PROPOSALS);
+    response = Response.json({ deleted: evidence.rows.length, proposals: proposals.rows.length });
   } catch {
     response = new Response('Genre evidence cleanup failed', { status: 500 });
   }

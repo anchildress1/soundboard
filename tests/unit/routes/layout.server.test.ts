@@ -117,15 +117,10 @@ describe('layout load', () => {
     });
   });
 
-  it("passes the user's email and the profile's name, Bandcamp URL and curated flag", async () => {
+  it("passes the user's email and the profile's name and Bandcamp URL", async () => {
     const data = await run(USER_C);
     expect(data.user).toEqual({ email: USER_C.email });
-    expect(data.artist).toEqual({
-      name: ARTIST_C.name,
-      bandcampUrl: ARTIST_C.bandcampUrl,
-      curated: false,
-    });
-    expect((await run(USER_A)).artist).toMatchObject({ curated: true });
+    expect(data.artist).toEqual({ name: ARTIST_C.name, bandcampUrl: ARTIST_C.bandcampUrl });
   });
 
   it("never passes the profile's id or contact line", async () => {

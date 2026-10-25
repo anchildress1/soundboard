@@ -209,7 +209,6 @@ describe('getUser', () => {
       name: 'Flies Like Robots',
       bandcampUrl: 'https://flieslikerobots.bandcamp.com',
       contactLine: 'Contact at flieslikerobots@gmail.com.',
-      curated: true,
     });
   });
 

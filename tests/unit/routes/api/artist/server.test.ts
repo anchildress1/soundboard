@@ -43,7 +43,7 @@ describe('PUT /api/artist', () => {
     expect(await response.json()).toEqual({ error: 'Sign in first.', fields: null });
   });
 
-  it('creates the profile for a user with none, answering without id or curated', async () => {
+  it('creates the profile for a user with none, answering without its id', async () => {
     const response = await put({ name: 'B Band', bandcampUrl: '', contactLine: '' }, USER_B);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -77,10 +77,10 @@ describe('PUT /api/artist', () => {
     },
   );
 
-  it('ignores curated and id in the body', async () => {
-    const response = await put({ ...C_FORM, curated: true, id: 'flr' }, USER_C);
+  it('ignores an id in the body', async () => {
+    const response = await put({ ...C_FORM, id: 'flr' }, USER_C);
     expect(response.status).toBe(200);
-    expect(await storedC()).toMatchObject({ id: ARTIST_C.id, curated: false });
+    expect(await storedC()).toMatchObject({ id: ARTIST_C.id, name: C_FORM.name });
   });
 
   it('400s a body that is not JSON', async () => {

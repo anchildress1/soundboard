@@ -1,25 +1,19 @@
 // @vitest-environment node
-import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { and, eq } from 'drizzle-orm';
-import { RULE_MAX, RULES_MAX, STATEMENT_MAX, type StoredBrand } from '#lib/brand.js';
-import { ActionError } from '#lib/server/core/errors.js';
+import { eq } from 'drizzle-orm';
+import { RULE_MAX, RULES_MAX, STATEMENT_MAX, type BrandGuide, type Proposal } from '#lib/brand.js';
 import {
-  approveBrand,
-  approvedBrand,
   BRAND_SCHEMA,
+  brandInput,
   buildBrandRequest,
   cleanGuide,
-  discardBrandProposal,
-  getBrand,
   isBrandGuide,
   proposeBrand,
-  requireCurated,
 } from '#lib/server/artist/brand.js';
 import { resetClients } from '#lib/server/core/clients.js';
 import { db } from '#lib/server/core/db.js';
-import { artistMemory } from '#lib/server/core/schema.js';
-import { memoryOf } from '#lib/server/artist/memory.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { artistGuides, connections, guideClaims, users } from '#lib/server/core/schema.js';
 import {
   clearStatsCache,
   type CatalogVideo,
@@ -29,10 +23,11 @@ import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { seed, truncate } from '../../../../helpers/db';
 import {
   ARTIST_A,
-  ARTIST_C,
   CHANNEL_A,
+  pendingProposal,
   REFRESH_A,
   USER_A,
+  USER_B,
   USERS,
 } from '../../../../helpers/pipeline';
 import {
@@ -61,38 +56,24 @@ vi.mock('google-auth-library', () => ({
 }));
 
 const FLR = ARTIST_A.id;
-const propose = () => proposeBrand(USER_A.uid, FLR);
+const propose = (user: { uid: string; artistId: string } = { uid: USER_A.uid, artistId: FLR }) =>
+  withIdentity(user.uid, () => proposeBrand(user));
 
-type Slot = 'proposal' | 'approved';
-
-const read = async (slot: Slot) =>
+/** The stored brand proposal, or null. */
+const pending = async () =>
   (
     await db()
-      .select({ data: artistMemory.data })
-      .from(artistMemory)
-      .where(and(memoryOf(FLR, 'brand'), eq(artistMemory.key, slot)))
-  )[0]?.data ?? null;
-const has = async (slot: Slot) => (await read(slot)) !== null;
-const put = async (slot: Slot, data: StoredBrand) => {
-  await db()
-    .delete(artistMemory)
-    .where(and(memoryOf(FLR, 'brand'), eq(artistMemory.key, slot)));
-  await seed({ artistMemory: [{ artistId: FLR, kind: 'brand', key: slot, data }] });
-};
+      .select()
+      .from(artistGuides)
+      .where(eq(artistGuides.kind, 'brand'))
+      .orderBy(artistGuides.id)
+  ).find((row) => row.status === 'proposed') ?? null;
 
 const GUIDE = {
   statement: 'Song title first, then a two-line story.',
   keep: ['Song title alone in the title'],
   fix: ['Put the stream links in one block'],
   drop: ['All-caps titles'],
-};
-
-const PROPOSAL: StoredBrand = {
-  ...GUIDE,
-  status: 'PROPOSED',
-  uploadCount: 2,
-  createdAt: 100,
-  approvedAt: null,
 };
 
 const json = (body: unknown, status = 200) =>
@@ -288,34 +269,52 @@ describe('proposeBrand', () => {
     on(GEMINI, () => reply());
     expect(await propose()).toEqual({ wait: 'model busy' });
     expect(called(GEMINI)).toHaveLength(1);
-    expect(await has('proposal')).toBe(false);
+    expect(await pending()).toBeNull();
   });
 
-  it('waits on a spent per-day quota and stores nothing', async () => {
+  it('holds every propose on a spent per-day quota until the reset, with no more calls', async () => {
     on(GEMINI, () => perDay429());
-    expect(await propose()).toEqual({ wait: 'model quota spent' });
-    expect(await has('proposal')).toBe(false);
+    const first = await propose();
+    expect(first).toEqual({ wait: 'model quota spent', limitUntil: expect.any(Number) });
+    expect(await pending()).toBeNull();
+    const reads = calls.length;
+    expect(await propose()).toEqual(first);
+    expect(calls).toHaveLength(reads);
+    const [claim] = await db().select().from(guideClaims);
+    expect(claim).toMatchObject({ claimToken: null, kind: 'brand' });
+    expect(claim!.limitUntil!.getTime()).toBe((first as { limitUntil: number }).limitUntil);
   });
 
   it('keeps an earlier proposal while the model is busy', async () => {
-    await put('proposal', PROPOSAL);
+    await seed({ artistGuides: [pendingProposal(FLR, 'brand', GUIDE)] });
+    const before = await pending();
     on(GEMINI, () => busy429());
     await propose();
-    expect(await read('proposal')).toEqual(PROPOSAL);
+    expect(await pending()).toEqual(before);
   });
 
-  it('propagates any other model error', async () => {
+  it('propagates any other model error and frees the slot', async () => {
     on(GEMINI, () => geminiError(500, 'INTERNAL'));
     await expect(propose()).rejects.toThrow(/^Gemini 500/);
-    expect(await has('proposal')).toBe(false);
+    expect(await pending()).toBeNull();
+    expect(await db().select().from(guideClaims)).toMatchObject([{ claimToken: null }]);
   });
 
-  it('reads 30 uploads and 10 thumbnails and stores the proposal', async () => {
-    const result = await propose();
-    expect(result).toMatchObject({ proposal: { ...GUIDE, status: 'PROPOSED', approvedAt: null } });
-    const stored = (await read('proposal')) as StoredBrand;
-    expect(stored.uploadCount).toBe(30);
-    expect(JSON.stringify(stored)).not.toMatch(/"v\d+"|Song v|Out now/);
+  it('reads 30 uploads and 10 thumbnails and stores the proposal with its upload list', async () => {
+    const result = (await propose()) as { proposal: Proposal<BrandGuide> };
+    expect(result.proposal).toMatchObject({ id: expect.any(Number), body: GUIDE });
+    expect(result.proposal.sources.uploads).toHaveLength(30);
+    expect(result.proposal.sources.uploads[0]).toEqual({
+      videoId: 'v1',
+      title: 'Song v1',
+      publishedAt: '',
+    });
+    expect(result.proposal.sources).toMatchObject({ drafts: [], edits: 0, approvals: 0 });
+    const stored = (await pending())!;
+    expect(stored.id).toBe(result.proposal.id);
+    expect(stored.grantAt).not.toBeNull();
+    // The list names each upload; descriptions, tags and thumbnails are never stored.
+    expect(JSON.stringify(stored)).not.toMatch(/Out now|ytimg/);
     expect(called(/i\.ytimg\.com/)).toHaveLength(10);
     const body = geminiBody();
     expect(body.input[0]!.content.filter((p) => p.type === 'image')).toHaveLength(10);
@@ -327,28 +326,48 @@ describe('proposeBrand', () => {
     expect(JSON.stringify(body.response_format)).toContain(JSON.stringify(BRAND_SCHEMA));
   });
 
-  it("reads the owner's own channel on their own grant, with no API key", async () => {
+  it('replaces an earlier proposal with a new id', async () => {
+    const first = (await propose()) as { proposal: Proposal<BrandGuide> };
+    const second = (await propose()) as { proposal: Proposal<BrandGuide> };
+    expect(second.proposal.id).not.toBe(first.proposal.id);
+    expect((await pending())!.id).toBe(second.proposal.id);
+  });
+
+  it("reads the owner's own channel on their own grant, with no API key or statistics", async () => {
     await propose();
     const reads = called(/youtube\/v3\//);
     expect(reads.length).toBeGreaterThan(0);
     for (const { url, init } of reads) {
       expect(new URL(url).searchParams.get('key')).toBeNull();
+      expect(new URL(url).searchParams.get('part')).not.toMatch(/statistics/);
       expect((init.headers as Record<string, string>).authorization).toBe(
         `Bearer access:${REFRESH_A}`,
       );
     }
+    expect(called(/commentThreads/)).toHaveLength(0);
     expect(new URL(called(/youtube\/v3\/channels\?/)[0]!.url).searchParams.get('mine')).toBe(
       'true',
     );
   });
 
-  it('records only a count of the uploads on the agent span, never their text', async () => {
+  it('records a count of the uploads and a placeholder for the reply, never their text', async () => {
     clearAgentSpan();
     await propose();
-    const [request] = agentSpanIO().input;
-    expect(request!['gen_ai.input.messages']).toContain('[YouTube uploads: 30]');
-    expect(request!['gen_ai.input.messages']).not.toContain('Out now.');
-    expect(request!['gen_ai.input.messages']).not.toContain('Song v1');
+    const { input, output } = agentSpanIO();
+    expect(input).toHaveLength(1);
+    const messages = input[0]!['gen_ai.input.messages'] as string;
+    expect(messages).toContain('[YouTube uploads: 30]');
+    expect(messages).toContain('"type":"image"');
+    expect(messages).not.toMatch(/Out now|Song v1|base64/);
+    expect(output).toEqual([`[guide proposal: ${JSON.stringify(GUIDE).length} chars]`]);
+  });
+
+  it('strips model audio numbers from the stored guide', async () => {
+    on(GEMINI, () =>
+      interaction(JSON.stringify({ ...GUIDE, fix: ['Master to -14 LUFS before upload'] })),
+    );
+    await propose();
+    expect(JSON.stringify((await pending())!.body)).not.toMatch(/LUFS|\d/);
   });
 
   it.each([
@@ -358,18 +377,45 @@ describe('proposeBrand', () => {
     auth.refreshError = Object.assign(new Error('refresh'), { response });
     expect(await propose()).toEqual({ wait });
     expect(called(GEMINI)).toHaveLength(0);
-    expect(await has('proposal')).toBe(false);
+    expect(await pending()).toBeNull();
   });
 
   it('waits on a reconnect for an owner with no connection', async () => {
-    expect(await proposeBrand('uid-b', FLR)).toEqual({ wait: 'reconnect YouTube' });
+    await db().update(users).set({ artistId: null }).where(eq(users.uid, USER_A.uid));
+    await db().update(users).set({ artistId: FLR }).where(eq(users.uid, USER_B.uid));
+    expect(await propose({ uid: USER_B.uid, artistId: FLR })).toEqual({
+      wait: 'reconnect YouTube',
+    });
     expect(called(/youtube/)).toHaveLength(0);
+  });
+
+  it('waits on a reconnect, calling no model, when the grant no longer decrypts', async () => {
+    const foreign = Buffer.from('sealed under another key').toString('base64');
+    await db()
+      .update(connections)
+      .set({ tokenCiphertext: foreign })
+      .where(eq(connections.uid, USER_A.uid));
+    expect(await propose()).toEqual({ wait: 'reconnect YouTube' });
+    expect(called(/youtube/)).toHaveLength(0);
+    expect(called(GEMINI)).toHaveLength(0);
+    expect(await pending()).toBeNull();
+    const [row] = await db().select().from(connections).where(eq(connections.uid, USER_A.uid));
+    expect(row).toMatchObject({ status: 'revoked', tokenCiphertext: null });
   });
 
   it('waits on YouTube when a read is busy', async () => {
     on(/youtube\/v3\/playlistItems\?/, () => json({}, 503));
     expect(await propose()).toEqual({ wait: 'waiting on YouTube' });
     expect(called(GEMINI)).toHaveLength(0);
+  });
+
+  it('waits on a reconnect and stores nothing when YouTube is disconnected before the save', async () => {
+    on(GEMINI, async () => {
+      await db().delete(connections).where(eq(connections.uid, USER_A.uid));
+      return interaction(JSON.stringify(GUIDE));
+    });
+    expect(await propose()).toEqual({ wait: 'reconnect YouTube' });
+    expect(await pending()).toBeNull();
   });
 
   it('waits on the model without a call when the reads leave no model time', async () => {
@@ -389,31 +435,12 @@ describe('proposeBrand', () => {
     expect(called(GEMINI)).toHaveLength(0);
   });
 
-  it('records the redacted request and the guide on the agent span', async () => {
-    clearAgentSpan();
-    await propose();
-    const { input, output } = agentSpanIO();
-    expect(input).toHaveLength(1);
-    expect(input[0]!['gen_ai.input.messages']).toContain('"type":"image"');
-    expect(input[0]!['gen_ai.input.messages']).not.toContain('base64');
-    expect(JSON.parse(output[0]!)).toEqual(GUIDE);
-  });
-
-  it('records the cleaned guide, minus model audio numbers, as the agent output', async () => {
-    const loud = { ...GUIDE, fix: ['Master to -14 LUFS before upload'] };
-    on(GEMINI, () => interaction(JSON.stringify(loud)));
-    clearAgentSpan();
-    const result = await propose();
-    const [output] = agentSpanIO().output;
-    expect(output).not.toMatch(/LUFS|\d/);
-    expect(JSON.parse(output!)).toMatchObject({
-      fix: (result as { proposal: StoredBrand }).proposal.fix,
-    });
-  });
-
   it('409s when the channel has no uploads', async () => {
     uploads = [];
-    await expect(propose()).rejects.toMatchObject({ status: 409 });
+    await expect(propose()).rejects.toMatchObject({
+      status: 409,
+      message: 'The channel has no public uploads to learn from.',
+    });
     expect(called(GEMINI)).toHaveLength(0);
   });
 
@@ -421,133 +448,44 @@ describe('proposeBrand', () => {
     on(GEMINI, () => interaction('{"statement": 1}'));
     clearAgentSpan();
     await expect(propose()).rejects.toMatchObject({ status: 502 });
-    expect(await has('proposal')).toBe(false);
+    expect(await pending()).toBeNull();
     expect(agentSpanIO().output).toEqual([]);
   });
+
+  it('409s a second propose while the first holds the slot', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    on(GEMINI, async () => {
+      await held;
+      return interaction(JSON.stringify(GUIDE));
+    });
+    const first = propose();
+    await vi.waitFor(() => expect(called(GEMINI)).toHaveLength(1));
+    await expect(propose()).rejects.toMatchObject({
+      status: 409,
+      message: 'A proposal is already running in another tab.',
+    });
+    release();
+    expect(await first).toMatchObject({ proposal: { body: GUIDE } });
+  });
 });
 
-describe('approveBrand', () => {
-  beforeEach(() => put('proposal', PROPOSAL));
-
-  it('approves the edited guide, trimmed, and clears the proposal', async () => {
-    const approved = await approveBrand(FLR, {
-      statement: '  Edited statement. ',
-      keep: [' Keep this ', '   '],
+describe('brandInput', () => {
+  it('trims the statement and rules and drops blank rules', () => {
+    expect(brandInput({ statement: '  S. ', keep: [' K ', '  '], fix: [], drop: ['D'] })).toEqual({
+      statement: 'S.',
+      keep: ['K'],
       fix: [],
-      drop: ['Drop this'],
-      proposedAt: PROPOSAL.createdAt,
+      drop: ['D'],
     });
-    expect(approved).toMatchObject({
-      statement: 'Edited statement.',
-      keep: ['Keep this'],
-      fix: [],
-      drop: ['Drop this'],
-      status: 'APPROVED',
-      uploadCount: PROPOSAL.uploadCount,
-      createdAt: PROPOSAL.createdAt,
-    });
-    expect(await read('approved')).toEqual(approved);
-    expect(await has('proposal')).toBe(false);
   });
 
-  it('replaces an earlier approved guide', async () => {
-    await put('approved', { ...PROPOSAL, statement: 'Old', status: 'APPROVED' });
-    await approveBrand(FLR, { ...GUIDE, proposedAt: PROPOSAL.createdAt });
-    expect(((await read('approved')) as StoredBrand).statement).toBe(GUIDE.statement);
-  });
-
-  it('400s on a malformed body', async () => {
-    await expect(approveBrand(FLR, { statement: 'x' })).rejects.toMatchObject({ status: 400 });
-  });
-
-  it('422s on an invalid guide and writes nothing', async () => {
-    await expect(
-      approveBrand(FLR, { ...GUIDE, statement: '   ', proposedAt: PROPOSAL.createdAt }),
-    ).rejects.toMatchObject({
-      status: 422,
-    });
-    expect(await has('approved')).toBe(false);
-    expect(await has('proposal')).toBe(true);
-  });
-
-  it('409s once the proposal is gone', async () => {
-    await discardBrandProposal(FLR);
-    const error = await approveBrand(FLR, { ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
-      (e: unknown) => e,
+  it.each([null, { statement: 's' }, { ...GUIDE, keep: [1] }])('400s on %j', (value) => {
+    expect(() => brandInput(value)).toThrow(
+      expect.objectContaining({
+        status: 400,
+        message: 'Expected a statement and keep, fix, drop lists.',
+      }),
     );
-    expect(error).toBeInstanceOf(ActionError);
-    expect((error as ActionError).status).toBe(409);
-    expect(await has('approved')).toBe(false);
-  });
-
-  it('400s without the reviewed proposal named', async () => {
-    await expect(approveBrand(FLR, GUIDE)).rejects.toMatchObject({ status: 400 });
-    expect(await has('proposal')).toBe(true);
-  });
-
-  it('409s on stale text when another tab replaced the proposal, changing neither guide', async () => {
-    const newer = { ...PROPOSAL, statement: 'Newer proposal.', createdAt: PROPOSAL.createdAt + 1 };
-    await put('proposal', newer);
-    const error = await approveBrand(FLR, { ...GUIDE, proposedAt: PROPOSAL.createdAt }).catch(
-      (e: unknown) => e,
-    );
-    expect(error).toMatchObject({ status: 409 });
-    expect(await has('approved')).toBe(false);
-    expect(await read('proposal')).toEqual(newer);
-  });
-});
-
-describe('reads', () => {
-  it('has neither guide before the first proposal', async () => {
-    expect(await getBrand(FLR)).toEqual({ approved: null, proposal: null });
-    expect(await approvedBrand(FLR)).toBeNull();
-  });
-
-  it('gives smart pick only the guide fields', async () => {
-    await put('approved', { ...PROPOSAL, status: 'APPROVED', approvedAt: 5 });
-    expect(await approvedBrand(FLR)).toEqual(GUIDE);
-  });
-
-  it('keeps the approved guide when a proposal is discarded', async () => {
-    await put('approved', { ...PROPOSAL, status: 'APPROVED' });
-    await put('proposal', PROPOSAL);
-    await discardBrandProposal(FLR);
-    const { approved, proposal } = await getBrand(FLR);
-    expect(approved).not.toBeNull();
-    expect(proposal).toBeNull();
-  });
-});
-
-describe('brand rows per artist', () => {
-  it("never reads or discards another artist's guide", async () => {
-    await put('approved', { ...PROPOSAL, status: 'APPROVED' });
-    await put('proposal', PROPOSAL);
-    expect(await getBrand(ARTIST_C.id)).toEqual({ approved: null, proposal: null });
-    expect(await approvedBrand(ARTIST_C.id)).toBeNull();
-    await discardBrandProposal(ARTIST_C.id);
-    expect(await has('proposal')).toBe(true);
-    await expect(
-      approveBrand(ARTIST_C.id, { ...GUIDE, proposedAt: PROPOSAL.createdAt }),
-    ).rejects.toMatchObject({ status: 409 });
-  });
-});
-
-describe('requireCurated', () => {
-  it.each([
-    ['signed out', null],
-    ['without a profile', { artist: null }],
-    ['on a profile that is not curated', { artist: { ...ARTIST_C } }],
-  ])('404s when %s', (_label, user) => {
-    let thrown: unknown;
-    try {
-      requireCurated(user);
-    } catch (error) {
-      thrown = error;
-    }
-    expect(isHttpError(thrown) && thrown.status).toBe(404);
-  });
-
-  it("returns the curated profile's id", () => {
-    expect(requireCurated({ artist: { ...ARTIST_A } })).toBe(FLR);
   });
 });

@@ -1,6 +1,7 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
+import { dropProposals } from '#lib/server/artist/guides.js';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
 import { DeadlineExceeded } from '#lib/server/core/deadline.js';
 import { required } from '#lib/server/core/env.js';
@@ -95,9 +96,10 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
 
 /**
  * Disconnects YouTube: revokes the stored grant at Google, then deletes the row unless a reconnect
- * replaced its grant meanwhile. A failed revoke is reported and the row is deleted anyway, so the
- * revoked token is never kept. Returns whether Google confirmed the revoke; true when there was no
- * token to revoke.
+ * replaced its grant meanwhile, with the guide proposals read through that grant or an older one
+ * and, once the row is gone, those saved with no grant. A failed revoke is reported and the row is
+ * deleted anyway, so the revoked token is never kept. Returns whether Google confirmed the revoke;
+ * true when there was no token to revoke.
  */
 export async function revokeGrant(uid: string): Promise<boolean> {
   const connection = await getConnection(uid);
@@ -110,29 +112,42 @@ export async function revokeGrant(uid: string): Promise<boolean> {
   const observed = tokenCiphertext
     ? or(eq(connections.tokenCiphertext, tokenCiphertext), tokenless)
     : tokenless;
-  await query((tx) => tx.delete(connections).where(and(mine(uid), observed)));
+  await query(async (tx) => {
+    const removed = await tx
+      .delete(connections)
+      .where(and(mine(uid), observed))
+      .returning({ uid: connections.uid });
+    await dropProposals(tx, uid, connection.updatedAt, removed.length > 0);
+  });
   return revoked;
 }
 
+/** The refused grant: its token's ciphertext and its generation, the connection's `updated_at`. */
+export type Grant = { tokenCiphertext: string; updatedAt: Date };
+
 /**
- * Marks the grant stored as `tokenCiphertext` revoked, dropping its token in the same write; a
- * dead token is never kept. A newer grant from a reconnect that landed mid-refresh is left alone.
+ * Marks the grant revoked, dropping its token in the same write, and deletes the guide proposals
+ * read through it or an older grant, plus those saved with no grant when it was still current; a
+ * dead token is never kept. A newer grant from a reconnect that landed mid-refresh is left alone,
+ * and so are its proposals.
  */
-export async function markRevoked(uid: string, tokenCiphertext: string): Promise<void> {
-  await query((tx) =>
-    tx
+export async function markRevoked(uid: string, grant: Grant): Promise<void> {
+  await query(async (tx) => {
+    const revoked = await tx
       .update(connections)
       .set({ status: 'revoked', tokenCiphertext: null, updatedAt: new Date() })
-      .where(and(mine(uid), eq(connections.tokenCiphertext, tokenCiphertext))),
-  );
+      .where(and(mine(uid), eq(connections.tokenCiphertext, grant.tokenCiphertext)))
+      .returning({ uid: connections.uid });
+    await dropProposals(tx, uid, grant.updatedAt, revoked.length > 0);
+  });
 }
 
 /**
  * A fresh access token, and how to give up its grant once YouTube refuses the token. `refused`
- * never throws: a failed write is reported (tagged with the job, when there is one), so the caller
+ * never throws: a failed write is reported (with the caller's tags, such as the job), so the caller
  * still answers with its reconnect wait.
  */
-export type Access = { token: string; refused: (jobId?: string) => Promise<void> };
+export type Access = { token: string; refused: (tags?: Record<string, string>) => Promise<void> };
 
 // gRPC DEADLINE_EXCEEDED: gax's own timeout, the twin of `within`'s.
 const GRPC_DEADLINE_EXCEEDED = 4;
@@ -160,6 +175,7 @@ export async function accessTokenFor(
   // than returning null.
   if (connection.channelId !== channelId) throw new ChannelMismatch();
   const cipher = connection.tokenCiphertext;
+  const grant: Grant = { tokenCiphertext: cipher, updatedAt: connection.updatedAt };
   let refreshToken: string;
   try {
     refreshToken = await decrypt(cipher, { timeout: Math.max(0, deadline - Date.now()) });
@@ -169,7 +185,7 @@ export async function accessTokenFor(
     if (outOfBudget(cause) || Date.now() >= deadline) throw new DeadlineSpent();
     if (!undecryptable(cause)) throw new Error("Couldn't unlock the YouTube grant.", { cause });
     captureMessage('YouTube grant does not decrypt', { level: 'warning' });
-    await markRevoked(uid, cipher);
+    await markRevoked(uid, grant);
     return null;
   }
   const client = new OAuth2Client({
@@ -185,17 +201,16 @@ export async function accessTokenFor(
     if (!invalidGrant(error))
       throw new Error("Couldn't refresh the YouTube grant.", { cause: error });
     captureMessage('YouTube grant revoked', { level: 'info' });
-    await markRevoked(uid, cipher);
+    await markRevoked(uid, grant);
     return null;
   }
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
   return {
     token,
-    refused: async (jobId) => {
-      const tags: Record<string, string> = jobId ? { 'job.id': jobId } : {};
+    refused: async (tags = {}) => {
       captureMessage('YouTube refused the grant', { level: 'warning', tags });
       try {
-        await markRevoked(uid, cipher);
+        await markRevoked(uid, grant);
       } catch (error) {
         captureException(error, { tags: { ...tags, component: 'youtube-revoke-mark' } });
       }
@@ -214,7 +229,7 @@ export async function ownChannelUploads(
   uid: string,
   count: number,
   deadline: number,
-  jobId?: string,
+  tags: Record<string, string> = {},
 ): Promise<CatalogVideo[] | { wait: IdentityWait }> {
   const connection = await getConnection(uid);
   if (connection?.status !== 'connected') return { wait: 'reconnect YouTube' };
@@ -227,7 +242,7 @@ export async function ownChannelUploads(
     const failure = identityFailure(error);
     if (failure === 'app-rejected') throw error;
     if (failure === 'busy') return { wait: 'waiting on YouTube' };
-    await access?.refused(jobId);
+    await access?.refused(tags);
     return { wait: 'reconnect YouTube' };
   }
 }

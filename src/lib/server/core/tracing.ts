@@ -5,15 +5,23 @@ export const PROVIDER = 'gcp.gemini';
 /** Groups every agent, model, and tool span under one pipeline in Sentry's AI views. */
 export const PIPELINE = 'soundboard';
 
-export type AgentName = 'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'hook-pick';
+export type AgentName =
+  'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'voice-guide' | 'hook-pick';
+
+/** Guide proposals restate their YouTube sources, so spans keep no reply or reasoning text. */
+export const GUIDE_AGENTS: ReadonlySet<AgentName> = new Set(['voice-guide', 'brand-guide']);
+
+/** What spans record in place of a guide agent's reply or reasoning. */
+export const guidePlaceholder = (text: string) => `[guide proposal: ${text.length} chars]`;
 export type AgentSpan = Span;
 
 export type Part =
   /**
    * `source: 'youtube'` marks text drawn from YouTube data; spans record only
-   * `[YouTube uploads: <count>]` in its place, while the model still gets the text.
+   * `[YouTube uploads: <count>]` in its place, while the model still gets the text. `source:
+   * 'guide'` marks a guide agent's earlier reply resent for a re-ask, recorded as its placeholder.
    */
-  | { type: 'text'; text: string; source?: 'youtube'; count?: number }
+  | { type: 'text'; text: string; source?: 'youtube' | 'guide'; count?: number }
   /** Base64 image, such as a thumbnail. */
   | { type: 'image'; data: string; mime_type: string }
   /** One window's inline clip; `start` and `end` are source seconds. */
@@ -52,12 +60,14 @@ export const youtubePart = (value: unknown, count: number): Part => ({
   count,
 });
 
+function redactText(part: Extract<Part, { type: 'text' }>): string {
+  if (part.source === 'youtube') return `[YouTube uploads: ${part.count ?? 0}]`;
+  if (part.source === 'guide') return guidePlaceholder(part.text);
+  return part.text;
+}
+
 function redactPart(part: Part) {
-  if (part.type === 'text') {
-    return part.source === 'youtube'
-      ? { type: 'text', content: `[YouTube uploads: ${part.count ?? 0}]` }
-      : { type: 'text', content: part.text };
-  }
+  if (part.type === 'text') return { type: 'text', content: redactText(part) };
   if (part.type === 'image') {
     return { type: 'image', mime: part.mime_type, bytes: base64Bytes(part.data) };
   }
@@ -132,11 +142,12 @@ export function agentInput(span: AgentSpan, request: ModelRequest): void {
   span.setAttributes(requestAttributes(request));
 }
 
-/** The agent's final answer on its `invoke_agent` span. */
-export function agentOutput(span: AgentSpan, content: string): void {
+/** The agent's final answer on its `invoke_agent` span; a guide agent's as its placeholder. */
+export function agentOutput(span: AgentSpan, content: string, agent?: AgentName): void {
+  const recorded = agent && GUIDE_AGENTS.has(agent) ? guidePlaceholder(content) : content;
   span.setAttribute(
     'gen_ai.output.messages',
-    JSON.stringify([{ role: 'assistant', parts: [{ type: 'text', content }] }]),
+    JSON.stringify([{ role: 'assistant', parts: [{ type: 'text', content: recorded }] }]),
   );
 }
 
@@ -144,8 +155,8 @@ const optionalCount = (key: string, value: number | undefined) =>
   value === undefined ? {} : { [key]: value };
 
 /**
- * `chat` span: system prompt, redacted turns, the reply and its reasoning, finish reason, and token
- * counts. A reply that later fails to parse is still recorded here; a thrown error passes through
+ * `chat` span: system prompt, redacted turns, the reply and its reasoning (placeholders for guide
+ * agents), finish reason, and token counts. A reply that later fails to parse is still recorded here; a thrown error passes through
  * untouched.
  */
 export function chatSpan<T extends ChatReply>(
@@ -170,9 +181,10 @@ export function chatSpan<T extends ChatReply>(
     async (span) => {
       const result = await fn();
       const { usage } = result;
+      const record = GUIDE_AGENTS.has(params.agent) ? guidePlaceholder : (text: string) => text;
       const parts = [
-        ...(result.reasoning ? [{ type: 'reasoning', content: result.reasoning }] : []),
-        { type: 'text', content: result.content },
+        ...(result.reasoning ? [{ type: 'reasoning', content: record(result.reasoning) }] : []),
+        { type: 'text', content: record(result.content) },
       ];
       span.setAttributes({
         'gen_ai.response.model': params.model,

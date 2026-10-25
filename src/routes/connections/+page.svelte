@@ -134,10 +134,11 @@
       <p class="help">Connecting YouTube from a different Google account is refused.</p>
     </div>
     <div class="panel">
-      <h3>Disconnect pauses, never deletes</h3>
+      <h3>Disconnect pauses releases</h3>
       <p class="help">
-        Unfinished uploads and checks wait. Approved fields and progress are kept, and reconnecting
-        the same channel picks up without a duplicate upload.
+        Unfinished uploads and checks wait. Approved fields, progress, and your approved voice and
+        brand guide are kept, and reconnecting the same channel picks up without a duplicate upload.
+        Voice and brand proposals you haven't approved are deleted.
       </p>
     </div>
     <div class="panel">
