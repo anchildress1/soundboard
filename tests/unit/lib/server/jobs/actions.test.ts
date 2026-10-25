@@ -293,6 +293,18 @@ describe('approve', () => {
     expect((await getJob('job1'))!.state).toBe('PUBLISHING');
   });
 
+  it('stores the artist tag as the pick spelled it, and every tag trimmed', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await approve(job, inputC({ tags: [' test ARTIST ', ' SYNTHWAVE '] }));
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Test Artist', 'SYNTHWAVE']);
+  });
+
+  it('trims tags on a pick with no stored artist name', async () => {
+    const job = await makeJob();
+    await approve(job, input({ tags: [' Synthwave '] }));
+    expect((await getJob('job1'))!.finalFields!.tags).toEqual(['Synthwave']);
+  });
+
   it('allows no artist tag outside the candidates on a pick with no stored name', async () => {
     const job = await makeJob();
     const error = await rejection(approve(job, input({ tags: ['synthwave', ARTIST] })));
@@ -729,6 +741,17 @@ describe('makeShort', () => {
       version: 1,
       brandCheck: '',
     });
+  });
+
+  it.each([
+    ['the same name', 'Test Artist'],
+    ['a renamed profile', 'Renamed Band'],
+  ])('carries one artist tag from an approval typed in another case: %s', async (_l, name) => {
+    const job = await makeJob({ owner: USER_C, patch: { probe: PROBE, chunkCount: 3 } });
+    await approve(job, inputC({ tags: [' test artist ', 'synthwave'] }));
+    await patchJob({ state: 'VERIFIED' });
+    const id = await makeShort((await getJob('job1'))!, name);
+    expect((await listPicks(id))[0]!.tags).toEqual([name, 'synthwave']);
   });
 
   it("copies the owner and artist link from Nathan's video, never its destination", async () => {

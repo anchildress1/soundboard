@@ -94,11 +94,17 @@ function finalFields(input: ApprovalInput, job: JobDoc, draft: Pick): PickFields
   if (Object.keys(errors).length > 0)
     throw new ActionError(422, 'Fix the highlighted fields.', errors);
   const byLower = new Map(candidates.map((c) => [c.toLowerCase(), c]));
+  const artist = draft.artistName;
+  // Validation ignores case and edge spaces, so store the artist tag as the pick spelled it: a Short
+  // swaps it out by that spelling, and any variant would survive next to the new name.
+  const approved = input.tags
+    .map((tag) => tag.trim())
+    .map((tag) => (artist?.toLowerCase() === tag.toLowerCase() ? artist : tag));
   return {
     title: input.title.trim(),
     description: input.description.trim(),
     hashtags: parseHashtags(input.description).map((t) => byLower.get(t) ?? t),
-    tags: input.tags,
+    tags: approved,
   };
 }
 
