@@ -357,7 +357,11 @@ function listen() {
   if (listening) return;
   listening = true;
   globalThis.addEventListener('online', () => {
-    for (const run of runs.values()) run.wake?.();
+    for (const run of runs.values()) {
+      // Offline failures say nothing about storage: a link that's back starts the backoff over.
+      run.retries = 0;
+      run.wake?.();
+    }
   });
   document.addEventListener('visibilitychange', onVisibility);
 }

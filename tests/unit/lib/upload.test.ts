@@ -309,6 +309,21 @@ describe('the upload loop', () => {
     expect(ops()).toHaveLength(2);
   });
 
+  it('starts the backoff over when the link comes back', async () => {
+    const upload = await tab();
+    FakeXhr.handler = (xhr) => xhr.drop();
+    await started(upload);
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000 + 8000);
+    FakeXhr.handler = (xhr) => xhr.respond(503);
+    globalThis.dispatchEvent(new Event('online'));
+    await flush();
+    const before = ops().length;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(ops()).toHaveLength(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ops()).toHaveLength(before + 1);
+  });
+
   it('pauses as storage busy on 429 and 5xx, and as no connection on 408', async () => {
     const upload = await tab();
     await started(upload);
