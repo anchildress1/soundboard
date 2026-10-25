@@ -171,10 +171,10 @@ export function chat(
       });
       return {
         content: result.text,
-        reasoning: result.reasoningText ?? '',
+        reasoning: result.finalStep.reasoningText ?? '',
         usage: usageOf(result.usage),
         finishReason: result.finishReason,
-        responseId: result.response.id,
+        responseId: result.finalStep.response.id,
         ms: Date.now() - started,
       };
     } catch (error) {
