@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
   import { clearDraft, loadDraft, saveDraft } from '$lib/draft';
   import {
+    DESCRIPTION_MAX,
     parseHashtags,
     splitTags,
     tagsLength,
@@ -129,7 +130,7 @@
       </p>
     </div>
     <div class="field" class:err={errors.description}>
-      <label for="desc">Description <span>{description.length} / 5000</span></label>
+      <label for="desc">Description <span>{description.length} / {DESCRIPTION_MAX}</span></label>
       <textarea id="desc" rows="10" bind:value={description}></textarea>
       {#if errors.description}<span class="msg">{errors.description}</span>{/if}
     </div>
