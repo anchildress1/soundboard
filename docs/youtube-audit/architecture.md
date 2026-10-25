@@ -32,7 +32,7 @@ flowchart LR
 - Approval gate: the Gemini version isn't deployed until YouTube approves the request covering this Gemini processing and storage and the Sentry text retention.
 - Thumbnails are fetched from YouTube's image host only for smart pick and the brand guide, sent to the model, and not stored.
 - Voice and brand proposals read the artist's own uploads through the artist's own grant, never through the API key or another account's grant. A pending proposal stores its rules and the list of uploads it read (video ID, title, publish date), never descriptions or statistics.
-- The database hides a proposal 29 days after its claim, the daily cleanup deletes it, and Disconnect deletes every proposal that read uploads under that grant.
+- The database hides a proposal 29 days after its claim, the daily cleanup deletes it, and Disconnect deletes every pending proposal of that user's artist.
 - Approval keeps the rules as the artist's own statement, per the owner's reading of III.E.4.h, with a source summary of counts only; the upload list is dropped.
 - Header channel stats are cached in memory only and never written to the database.
 - The daily cleanup function runs at 03:00 UTC on the production database branch, deployed on 2026-10-24. It rejects any call that doesn't come from Neon's scheduler and can only delete research that is already past 30 days.

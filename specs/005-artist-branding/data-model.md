@@ -4,17 +4,17 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 
 ## `artist_guides` (new table)
 
-| Column        | Type                          | Rules                                                                                    |
-| ------------- | ----------------------------- | ---------------------------------------------------------------------------------------- |
-| `id`          | `integer` PK, identity always | The `proposalId` approve and discard name (R9).                                          |
-| `artist_id`   | `text` NN                     | `REFERENCES artists(id)`.                                                                |
-| `kind`        | `text` NN                     | `CHECK kind in ('voice', 'brand')`.                                                      |
-| `status`      | `text` NN                     | `CHECK status in ('proposed', 'approved')`.                                              |
-| `body`        | `jsonb` NN                    | Voice: `{ rules: string[] }`. Brand: `{ statement, keep[], fix[], drop[] }`.             |
-| `sources`     | `jsonb` NN                    | Proposed: `ProposalSources`. Approved: `SourceSummary` (below).                          |
-| `proposed_at` | `timestamptz` NN              | The claim's `claimed_at`, taken before the first input read (R4). Approved rows keep it. |
-| `approved_at` | `timestamptz` null            | `CHECK (status = 'approved') = (approved_at is not null)`.                               |
-| `grant_at`    | `timestamptz` null            | The connection generation the uploads were read through (T037). Null when approved.      |
+| Column        | Type                          | Rules                                                                                      |
+| ------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `id`          | `integer` PK, identity always | The `proposalId` approve and discard name (R9).                                            |
+| `artist_id`   | `text` NN                     | `REFERENCES artists(id)`.                                                                  |
+| `kind`        | `text` NN                     | `CHECK kind in ('voice', 'brand')`.                                                        |
+| `status`      | `text` NN                     | `CHECK status in ('proposed', 'approved')`.                                                |
+| `body`        | `jsonb` NN                    | Voice: `{ rules: string[] }`. Brand: `{ statement, keep[], fix[], drop[] }`.               |
+| `sources`     | `jsonb` NN                    | Proposed: `ProposalSources`. Approved: `SourceSummary` (below).                            |
+| `proposed_at` | `timestamptz` NN              | The claim's `claimed_at`, taken before the first input read (R4). Approved rows keep it.   |
+| `approved_at` | `timestamptz` null            | `CHECK (status = 'approved') = (approved_at is not null)`.                                 |
+| `grant_at`    | `timestamptz` null            | The connection generation the claim saw (T037). Null when approved or claimed unconnected. |
 
 - **Unique** `artist_guides_slot` on `(artist_id, kind, status)`: at most one proposal and one approved version per artist and kind (FR-001).
 - **Check** `artist_guides_sources_check`: exact keys and types, null-safe (R4). Every comparison uses `IS NOT DISTINCT FROM`, so a missing key fails instead of passing as SQL `NULL`:

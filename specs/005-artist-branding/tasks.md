@@ -116,7 +116,7 @@ description: 'Task list for per-artist voice and brand guide'
       - inserts for the caller's artist with `proposed_at` equal to the claim's `claimed_at`
       - replaces a fresh and an expired (seeded 30 days back) proposal with a new `id`, and releases the claim
       - `42501` with no identity or no profile; `55000` with a wrong or expired token; never touches the approved row
-      - with uploads and no `connected` connection row → `28000`, nothing stored; edits-only (`uploads: []`, `drafts: []`) saves without one
+      - with uploads and no `connected` connection row → `28000`, nothing stored; edits-only (`uploads: []`, `drafts: []`) claimed while connected also needs the claimed grant; claimed with no connection, it saves with `grant_at` null
     - cleanup role: sees and deletes only proposals at or past 29 days; never an approved row or a fresh proposal; can't read `body` or `sources`
 - [x] T008 [P] Shared types in `src/lib/brand.ts` (data-model, inventory #11):
   - `VoiceRules`, `VOICE_RULES_MAX = 12`, `VOICE_RULE_MAX = 240`, `VOICE_UPLOADS = 30` (or T004's lower value).
@@ -236,8 +236,8 @@ description: 'Task list for per-artist voice and brand guide'
   - Tests: an app `UPDATE guide_claims SET claimed_at = …` is denied (`42501`); a claim row a privileged write moved 365 days ahead, or 4 minutes back, can't be saved through the function; a direct `INSERT` is denied.
 - [x] T037 Connection-generation binding (Codex final #3). Part of T005, T009, T013 and T016:
   - The generation is `connections.updated_at` of the `connected` row: every new grant writes it, and nothing else changes a connected row. It isn't secret.
-  - The claim copies it into `guide_claims.grant_at` (null when not connected). The save requires, when the proposal lists uploads or drafts, a `connected` row with `updated_at = grant_at` (`FOR SHARE`), else `28000`; it stores `grant_at` on the proposal.
-  - `revokeGrant` and `markRevoked` delete only proposals whose `grant_at` is the revoked grant's generation, in the same transaction as the connection write; `markRevoked` takes the connection it refused (`{ tokenCiphertext, updatedAt }`).
+  - The claim copies it into `guide_claims.grant_at` (null when not connected). The save requires, whenever the claim saw a grant, a `connected` row with `updated_at = grant_at` (`FOR SHARE`), else `28000`; uploads or drafts on a claim with no grant are also `28000`. It stores `grant_at` on the proposal.
+  - `revokeGrant` and `markRevoked` delete proposals whose `grant_at` is the revoked grant's generation, and the unbound ones (`grant_at` null) when the write removed the current grant, in the same transaction as the connection write; `markRevoked` takes the connection it refused (`{ tokenCiphertext, updatedAt }`).
   - Tests: claim → read → disconnect → reconnect → save is refused with `reconnect YouTube` and stores nothing (reconnect-before-save); a proposal saved on the new grant survives a stale `markRevoked` / `revokeGrant` of the old one (stale-revocation-after-reconnect), and a proposal of the old grant is deleted by it.
 
 **Checkpoint**: `make ai-checks` green. Nathan's picks unchanged (T014 golden test, T007 migration replay). Brand page works on the new table.

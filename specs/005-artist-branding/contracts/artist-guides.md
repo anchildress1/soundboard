@@ -4,7 +4,7 @@ Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-m
 
 ## Common to every `/api/guides/{kind}/*` route
 
-- `kind` is `voice` or `brand` (param matcher `src/params/guide.ts`). Anything else is a 404.
+- `kind` is `voice` or `brand` (the `guide` matcher in `src/params.ts`). Anything else is a 404.
 - Signed out → `401 "Sign in first."`. No profile → `404 "Not found"` (`requireArtist`). Never 403.
 - Every read and write is keyed by `locals.user.artist.id`. A body naming another artist is ignored; there is no artist field.
 - The old `/api/brand/{propose,approve,discard}` routes are deleted.
