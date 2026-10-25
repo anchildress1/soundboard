@@ -1,9 +1,13 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import type { Page } from '@playwright/test';
 
-/** Seeded in tests/e2e/fakes/fixtures.ts: A is linked to FLR and connected, B is unlinked. */
+/**
+ * Seeded in tests/e2e/fakes/fixtures.ts: A is linked to FLR and connected, B is unlinked. The
+ * upload user is unlinked and owns no fixture jobs: each upload test makes its own through `/new`.
+ */
 export const USER_A = 'uid-a';
 export const USER_B = 'uid-b';
+export const USER_UPLOAD = 'uid-upload';
 
 // Mirrors #lib/server/auth sign() with the E2E server's SESSION_SECRET (playwright.config.ts).
 export function sessionCookie(uid: string): string {

@@ -27,6 +27,12 @@ export default defineConfig({
   ],
   webServer: [
     {
+      // Its own process: the browser's PUTs and the app server's storage calls must reach one state.
+      command: 'node tests/e2e/fakes/gcs-session.ts',
+      url: 'http://localhost:4174',
+      reuseExistingServer: false,
+    },
+    {
       // The preloads answer Gemini HTTP and the artist channel's upload reads inside the preview
       // server, so the real SDK and clients run.
       command:
