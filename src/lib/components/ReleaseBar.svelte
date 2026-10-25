@@ -23,7 +23,7 @@
       <span><span class="visually-hidden">Back to releases from</span> {title}</span>
     </a>
     <span class="label">{label}</span>
-    <!-- Before Listening there is nothing saved yet, and leaving mid-upload loses the file. -->
+    <!-- Before Listening there is nothing saved to come back to. -->
     {#if step > 0 && step < STEPS.length}
       <a class="btn small" href={resolve('/')}>Save &amp; leave</a>
     {/if}

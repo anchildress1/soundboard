@@ -43,7 +43,7 @@
       {/if}
 
       {#each releases.running as job (job.id)}
-        <!-- The browser does the first upload, so it only runs while the release's page is open. -->
+        <!-- The upload runs while the tab is open, but only the job page finishes it and starts analysis. -->
         {@const uploading = job.state === 'AWAITING_UPLOAD'}
         <section class="running" aria-label={job.songTitle}>
           <div>
