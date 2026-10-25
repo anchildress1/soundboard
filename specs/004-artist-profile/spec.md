@@ -24,6 +24,16 @@
 - Q: When is the name entered? → A: After first sign-in, a short form asks for it before the first job can start. Everything stays editable later on the Settings page (`/settings`).
 - Q: Does this include per-artist voice and brand? → A: No. This covers identity inputs and where they show. Learning each artist's voice is a separate future spec: other artists get generic voice rules, and Nathan keeps his.
 
+### Session 2026-10-25
+
+- Q: What happens when the YouTube grant is missing or revoked at pick time? → A: The pick waits with "Reconnect YouTube" (constitution III). It never runs without identity.
+- Q: How is Nathan's voice and brand guide selected? → A: A migration-only `curated` flag on his profile. Spec 005 deletes it.
+- Q: Which Bandcamp addresses are accepted? → A: Only `https://<name>.bandcamp.com`, the form gate G1 verified.
+- Q: Which artist names are refused besides length and `<`/`>`? → A: Names with a comma, and names starting with `#`. The required artist tag is exempt from the song-title rule and can't be removed in the tag editor.
+- Q: Do non-Nathan drafts carry a credit line? → A: Never. Only Nathan's curated profile gets his credit line.
+- Q: Which name does a Short use? → A: The owner's current profile name when the Short is created.
+- Q: What happens to a pick on an older job whose owner has no profile yet? → A: It waits with "Add your artist name first." and a link to Settings.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1: Tell Soundboard who the artist is (Priority: P1)
@@ -57,7 +67,7 @@ The user runs a job. The draft's forced artist tag, the artist name in the promp
 1. **Given** an artist profile, **When** a pick runs, **Then** the artist name is the required tag and the name used in the prompt.
 2. **Given** a contact line, **When** a draft is written, **Then** it uses that line. **Given** no contact line, **Then** the draft has no contact line.
 3. **Given** a connected YouTube channel, **When** the pick reads the artist's recent uploads for identity, **Then** it reads that user's own channel through that user's own grant.
-4. **Given** a disconnected or missing channel, **When** a pick runs, **Then** it runs without identity from recent uploads and says so. It never falls back to another artist's channel.
+4. **Given** a disconnected, missing or revoked YouTube grant, **When** a pick runs, **Then** it waits with "Reconnect YouTube" and makes no model call. It never runs without identity, and it never falls back to another artist's channel.
 
 ---
 
@@ -94,11 +104,13 @@ On the Settings page, the user edits their artist name, Bandcamp URL or contact 
 
 ### Edge Cases
 
-- **A name YouTube won't accept as a tag** (too long, or containing `<` or `>`): it's refused at entry with the reason, so the forced tag can never break the 500-character tags limit.
+- **A name that can't survive as one tag** (too long, containing `<`, `>` or a comma, or starting with `#`): it's refused at entry with the reason. A comma would split it into two tags in the editor, and a leading `#` reads as a hashtag. The forced tag can never break the 500-character tags limit.
+- **A name that contains the song title** (a self-titled song): the required artist tag is exempt from the song-title rule.
 - **A name matching one of the song's tag candidates:** it's still added once, never duplicated.
 - **Two users entering the same artist name:** allowed. Profiles are per account, not unique names.
-- **A Bandcamp URL that isn't an `https` address:** refused.
-- **A contact line containing a link:** allowed as the user wrote it. It's their own contact.
+- **A Bandcamp URL that isn't `https://<name>.bandcamp.com`:** refused, custom domains included.
+- **A contact line containing a link:** allowed as the user wrote it. It's their own contact, placed by the app, not rewritten by the model.
+- **A cleared contact line:** the next draft has none, even if older uploads or feedback carry one.
 - **A user who signed in before this feature and has no profile:** they see the form on their next visit before starting a job. Their existing jobs stay readable.
 - **The connected channel changes:** identity reads follow the current connection. Jobs already approved keep their recorded destination channel (spec 001).
 - **Nathan's surname:** never pre-filled or written anywhere by the app. His profile name stays "Flies Like Robots".
@@ -110,10 +122,10 @@ On the Settings page, the user edits their artist name, Bandcamp URL or contact 
 - **FR-001**: Each signed-in user MUST have at most one artist profile, owned by that account and never shared.
 - **FR-002**: An artist profile MUST hold a required artist name, an optional Bandcamp URL and an optional contact line.
 - **FR-003**: A user without an artist profile MUST see the artist form before the new-release form, and MUST NOT be able to start a job until a profile is saved.
-- **FR-004**: The artist name MUST be 1–100 characters, MUST NOT contain `<` or `>`, and MUST be trimmed. The Bandcamp URL MUST be an `https` address. The contact line MUST be at most 200 characters.
-- **FR-005**: Every pick, re-run, hook pick and Short MUST use the job owner's artist name as the required tag and as the artist name in model prompts.
-- **FR-006**: Drafts MUST use the owner's contact line when set, and none when it isn't.
-- **FR-007**: Identity reads (recent uploads) and brand-guide reads MUST use the owner's connected YouTube channel through the owner's own grant. A missing or disconnected channel MUST mean no identity reads. The app MUST never read another artist's channel instead.
+- **FR-004**: The artist name MUST be trimmed and 1–100 characters, MUST NOT contain `<`, `>` or `,`, and MUST NOT start with `#`. The Bandcamp URL MUST be `https://<name>.bandcamp.com`, with no path, port or credentials. The contact line MUST be at most 200 characters and MUST NOT contain `<` or `>`.
+- **FR-005**: Every pick, re-run and Short MUST carry the job owner's artist name as the required tag, exactly once. Every model prompt that names the artist MUST use that name; the hook prompt names no artist. A Short MUST use the owner's current name at Short creation. The required artist tag MUST be exempt from the song-title rule and MUST NOT be removable in the tag editor.
+- **FR-006**: Drafts (description and Bandcamp credits) MUST end with the owner's current contact line exactly when set, and contain no contact line when it isn't. The app places it; the model doesn't write it.
+- **FR-007**: Identity reads (recent uploads) and brand-guide reads MUST use the owner's connected YouTube channel through the owner's own grant. A missing, disconnected or revoked grant MUST make the pick wait with "Reconnect YouTube" before any model call (constitution III). The app MUST never read another artist's channel instead.
 - **FR-008**: The Bandcamp screen MUST link to the owner's Bandcamp editor when a Bandcamp URL is set, and show an "add it in Settings" note when it isn't.
 - **FR-009**: When signed in, the header MUST show the user's artist name, and the footer MUST credit the user's artist, linked to their Bandcamp page when set. When signed out, neither MUST name any user's artist.
 - **FR-010**: The page description shared with link previews MUST describe the product generically, never a specific artist.
@@ -146,5 +158,6 @@ On the Settings page, the user edits their artist name, Bandcamp URL or contact 
 - **Brand guide:** stays limited to Nathan's profile in this spec. Its channel read moves to his connected channel, which is the same channel as today.
 - **Artist memory:** every user now has a profile, so artist memory and feedback (spec 001's artist gating) apply to every user's own artist, keyed by their profile. Profiles are never shared.
 - **Footer credit:** the signed-out footer drops the Flies Like Robots credit and keeps only Ashley's credit, the privacy link and the social links.
-- **Recent uploads:** identity reads are used only during the pick and are not stored past the job's existing 30-day rules.
+- **Recent uploads:** identity reads are used only inside the step that reads them. They're never stored in the database, and YouTube-sourced text is replaced with a placeholder in traces.
+- **Credit line:** only Nathan's curated profile gets a credit line. Other artists' drafts carry none.
 - **Dependencies:** sign-in and Connections from spec 001. Nothing from specs 002, 003, 005 or 006 is required.

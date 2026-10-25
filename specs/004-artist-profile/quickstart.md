@@ -20,6 +20,7 @@ The unit suite covers this:
 - `artists` has the `flr` row with today's name, Bandcamp URL and contact line, and `curated = true`.
 - The `flr` facts are `home` and `mr-kill`, and there's no stored `artist-name`.
 - A seeded pre-migration pick on an `flr` job reads back with `artistName: 'Flies Like Robots'`.
+- A seeded brand row with `basedOn` reads back with `uploadCount` and no video IDs.
 
 ## Q3 · First-run form (US1)
 
@@ -41,34 +42,46 @@ The unit suite covers this:
 - **Before:** read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md`. Stop if the run's budget is spent.
 - **Video:** the shortest `$HOME/Downloads/*.mp4` (read-only), ideally ≤ 60 s. That's one analyst window and one pick. PRD cost: about $0.25 for a 15-minute job, so a one-window job costs a small fraction of the share.
 - **Run:**
-  1. As the non-Nathan user, start the release and watch it reach Review.
+  1. As the non-Nathan user, with their own YouTube channel connected (identity reads are read-only), start the release and watch it reach Review.
   2. Log each model call in the ledger: agent, model, approximate input and output tokens, estimated cost.
 - **Check the draft:**
   - The tags include the profile name exactly once.
-  - Description and Bandcamp credits use the contact line, or have none.
+  - The description body and Bandcamp credits end with the contact line exactly. A cleared contact means none.
+  - There's no credit line (generic profile).
   - No "Flies Like Robots", `flieslikerobots` or Nathan contact text anywhere.
-  - Not connected → "Drafted without your recent uploads."
+  - If the dev server reports to Sentry, the `smart-pick` span input shows `[YouTube uploads: 3]` instead of upload text. The unit suite asserts this either way.
+- **Grant wait, no model call:**
+  1. Disconnect YouTube on Connections.
+  2. Re-run: the job waits on "Reconnect YouTube", and the ledger gets no entry.
+  3. Reconnect: the pick continues.
 - **Rename (US4):**
   1. Rename on `/settings`.
   2. Re-run the model, but only if the ledger still has room: the new pick uses the new name.
   3. An approved job's fields don't change. Check this with a seeded or earlier approved job, not by uploading.
 - **No approval or upload in this check.** If an upload is ever needed, it goes only as `private`, and never when the connected channel looks like Nathan's (brief).
 
-## Q6 · Gate G1: Bandcamp editor URL (task T003, research R11)
+## Q6 · Gate G1: Bandcamp editor URL (task T004, research R12)
 
 - Open `https://<a second artist>.bandcamp.com/edit_track` signed out. It should lead to Bandcamp's sign-in, not a 404.
-- Record the result and date here before T027 starts. Custom domains stay unverified until checked the same way.
+- Validation accepts only `https://<name>.bandcamp.com`, so this gate covers every accepted URL. Reaching the editor after sign-in follows Bandcamp's `bounce` parameter, which today's feature already exercises for Nathan's own account.
 - **Result, 2026-10-25** (`curl`, signed out, no cookies):
   - `https://flieslikerobots.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=https://flieslikerobots.bandcamp.com/edit_track`.
   - A second artist, `https://amandapalmer.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=https://amandapalmer.bandcamp.com/edit_track`.
   - A subdomain that doesn't exist bounces to `bandcamp.com/edit_track` instead, so a mistyped subdomain lands on Bandcamp's own editor after sign-in.
-  - **Passes for `*.bandcamp.com`. Custom domains are not checked.**
+  - **Passes for every accepted URL. Custom domains are refused by validation.**
 
 ## Q7 · Nathan unchanged (SC-004)
 
-On a database copy that has Nathan's linked row:
+On a database copy that has Nathan's linked row, with his YouTube channel connected (identity reads now need his grant):
 
 - `/new` shows the new-release form, not the artist form.
 - The header shows "Flies Like Robots".
 - The Bandcamp screen opens `https://flieslikerobots.bandcamp.com/edit_track`.
-- A unit test asserts his pick prompt carries `ARTIST_VOICE` and the contact line `Contact at flieslikerobots@gmail.com.`, exactly as before.
+- A unit test asserts his pick prompt carries `ARTIST_VOICE` and the credit-line instruction, and his finalized description ends with `Contact at flieslikerobots@gmail.com.`, placed by the app.
+
+## Q8 · Gate G2: the deadline aborts a stalled token refresh (task T005, research R14)
+
+- **Result, 2026-10-25:** a real `OAuth2Client` (`google-auth-library` 11.1.0, `gaxios` 7.3.1), refresh token `fake`, `endpoints.oauth2TokenUrl` pointed at a local server that never answers.
+  - With `transporterOptions: { signal: AbortSignal.timeout(1500) }`, `getAccessToken()` rejected "The operation was aborted." after 1505 ms.
+  - The run was a throwaway script, deleted afterwards. Nothing reached Google.
+- **Passes.** A library upgrade reruns this check.

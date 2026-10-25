@@ -4,189 +4,215 @@ Checked 2026-10-25 against:
 
 - the code on `main` at `fcee227` (every file:line in [plan.md](plan.md#hard-coded-inventory))
 - migration `drizzle/0004_tenant_rls.sql` (RLS, grants, `soundboard_admit`, `soundboard_owns_job`)
-- YouTube Data API reference, [`videos` resource](https://developers.google.com/youtube/v3/docs/videos) (`snippet.tags`, `snippet.description`)
-- YouTube API Services [Developer Policies](https://developers.google.com/youtube/terms/developer-policies) III.E.3 and III.E.4
+- YouTube Data API: the [`videos` resource](https://developers.google.com/youtube/v3/docs/videos), [`channels.list`](https://developers.google.com/youtube/v3/docs/channels/list), the [error reference](https://developers.google.com/youtube/v3/docs/errors)
+- YouTube API Services [Developer Policies](https://developers.google.com/youtube/terms/developer-policies) III.D, III.E.3 and III.E.4
+- Sentry [data retention periods](https://docs.sentry.io/security-legal-pii/security/data-retention-periods/)
+- installed `google-auth-library` 11.1.0 and `gaxios` 7.3.1 types (`AuthClientOptions.transporterOptions`, `GaxiosOptions extends RequestInit`)
+
+Decisions marked **(owner)** were made on 2026-10-25 and are binding. They're recorded in spec Clarifications.
+
+## R0 · Constitution gate (T000, decided)
+
+- **III, grant waits:** constitution III wins **(owner)**. A missing or revoked grant makes the pick wait. Spec US2 AS4 and FR-007 were rewritten to match, so no III violation remains.
+- **II and IV, temporary exceptions:** two rules can't hold until spec 005:
+  - II: "Description voice MUST be grounded in the artist's own writing". Non-curated artists get `GENERIC_VOICE`.
+  - IV: "Artist-specific values (name, voice, channel IDs) MUST NOT be constants in core code". `ARTIST_VOICE` and Nathan's credit wording stay in `smart-pick.ts`.
+  - Both become explicit, time-boxed exceptions, removed by spec 005.
+- **Classification: MAJOR (2.0.1 → 3.0.0).** Governance reads: "MAJOR for removed or redefined principles, MINOR for added or expanded ones, PATCH for wording."
+  - An exception narrows what a MUST requires, so it redefines the principle.
+  - Precedent: `cef38f2` added the II peer-influence exception and the III exceptions, and bumped 1.0.3 → 2.0.0.
+  - Spec 005's removal of the exceptions is also a redefinition (MAJOR).
+- **Mechanism:** `/speckit-constitution` on this branch (task T001), before any code task (T006 on).
 
 ## R1 · Where the profile lives
 
 - **Decision:** a new `artists` table. `users.artist_id` stays the link and gains a foreign key to `artists.id` and a unique constraint.
-  - One column per user means at most one profile per account (FR-001).
-  - Unique means no profile is ever shared (FR-001).
-  - Nathan's row keeps the ID `flr` (spec, Key Entities).
+  - One column per user means at most one profile per account, and unique means it's never shared (FR-001).
+  - Nathan's row keeps the ID `flr`.
 - **Rationale:**
-  - Every existing policy already keys on `users.artist_id`: `memory_artist`, `jobs_insert`, `soundboard_owns_job`. They keep working unchanged.
-  - `artistJob`'s "job and owner both linked" check keeps its meaning. It just stops comparing against a constant.
+  - Every existing policy keys on `users.artist_id` (`memory_artist`, `jobs_insert`, `soundboard_owns_job`), so they keep working.
+  - `artistJob` keeps its meaning without a constant.
 - **Alternatives:**
-  - `artists.owner_uid` with `users.artist_id` dropped: every policy and `artistJob` would be rewritten. It also can't seed Nathan's profile when his `users` row has no `uid` yet. Rejected.
-  - Profile columns on `users`: the app has no `UPDATE` on `users` (R10 bars ordinary queries from changing activation, artist assignment or bindings). Widening that grant to three columns mixes the allowlist with profile data. Rejected.
+  - `artists.owner_uid`: forces a rewrite of every policy, and can't seed Nathan while his `uid` is unbound. Rejected.
+  - Profile columns on `users`: the app has no `UPDATE` there (PRD R10). Rejected.
 
 ## R2 · Creating and editing a profile
 
-- **Create:** one `SECURITY DEFINER` function, `soundboard_create_artist(p_name, p_bandcamp, p_contact)`.
-  - Locks the caller's active `users` row (`app.user_sub`) `FOR UPDATE`.
-  - Refuses when the row already has an `artist_id`.
-  - Inserts the `artists` row with a random ID (`gen_random_uuid()::text`) and sets `users.artist_id`, all in one transaction.
-  - Two tabs saving at once: the second sees the link under the lock and gets "already has a profile", which the app turns into an update (see the contract).
-- **Edit:** a plain `UPDATE` on `artists` through RLS. The app gets `UPDATE (name, bandcamp_url, contact_line, updated_at)` only, and never `curated` (R4) or `id`.
-- **Rationale:** artist assignment stays out of reach of ordinary app queries (PRD R10). The only new path is "claim one new profile for myself, once." That mirrors how `soundboard_admit` binds `uid`.
-- **Alternatives:** a `GRANT UPDATE (artist_id) ON users` with an RLS check. The check can't express "only from null to a profile I just created." Rejected.
+- **Create:** `soundboard_create_artist(p_name, p_bandcamp, p_contact)`, `SECURITY DEFINER`.
+  - Locks the caller's active `users` row `FOR UPDATE`, refuses an existing link (`23505`), inserts with `gen_random_uuid()::text`, sets `users.artist_id`.
+  - Concurrent second save: `23505`, then the handler updates instead.
+- **Edit:** an RLS-checked `UPDATE` with `UPDATE (name, bandcamp_url, contact_line, updated_at)` only. Never `curated` or `id`.
+- **Rationale:** artist assignment stays out of reach of ordinary queries. The only new path is "claim one profile for myself, once", mirroring `soundboard_admit`.
 
 ## R3 · Migrating Nathan's profile
 
-- **Decision:** one migration, `drizzle-kit generate --name artist_profiles`. Before the migration is committed or applied anywhere, a data block goes between `CREATE TABLE artists` and the foreign keys. Editing an unapplied migration is allowed; AGENTS.md bars editing applied ones.
-  1. `INSERT` the `flr` row: name `Flies Like Robots`, Bandcamp URL `https://flieslikerobots.bandcamp.com`, contact line `Contact at flieslikerobots@gmail.com.`, `curated = true`. These are today's values from `Footer.svelte:8`, `Bandcamp.svelte:4` and `smart-pick.ts:118`.
-  2. `INSERT … ON CONFLICT DO NOTHING` Nathan's two other seed facts (`home`: Virginia, FACT, public; `mr-kill`: INFERENCE, private) for `flr`. They move from `SEED_FACTS` (code) to data.
-  3. `DELETE` the stored `artist-name` fact for `flr`, since it's now derived from the profile (R5).
-  4. Backfill every stored pick with `artistName` and `uploadsRead` (R7, data-model).
-  5. Then the foreign keys and the unique constraint on `users.artist_id`.
-- **Linking:** none needed. Nathan's `users` row already has `artist_id = 'flr'`, put there by `scripts/invite.ts --artist flr`. No email or `uid` appears in code or SQL.
-- **"Replaces the operator-assigned link" (spec, Key Entities):** a profile no longer exists only because an operator assigned an ID. Every user creates their own through the form. `--artist` survives only to attach an invite to a profile that already exists, which means Nathan's `flr` in a fresh environment. It never creates a profile.
-- **Fresh environments:** the `flr` row is always inserted. An operator links Nathan's invite with the existing `--artist flr` flag, which stays. Nathan never sees the form (FR-012).
-- **Fail loud:** if production has `artist_id` values other than `flr`, or two users linked to `flr`, the foreign key or unique constraint aborts the migration. Quickstart Q0 checks this with `scripts/invite.ts list` before deploying.
-- **Rationale:**
-  - Nathan's drafts keep the same name, links and contact (SC-004) without code constants.
-  - The surname never appears: the credit line comes from his own uploads at pick time, as it does today.
+- **Decision:** one migration, `drizzle-kit generate --name artist_profiles`. Before it's committed or applied anywhere, a data block goes between `CREATE TABLE artists` and the foreign keys and unique constraint. Editing an unapplied migration is allowed.
+  1. `INSERT` `flr`: name `Flies Like Robots`, Bandcamp `https://flieslikerobots.bandcamp.com`, contact `Contact at flieslikerobots@gmail.com.`, `curated = true`. These are today's values from `Footer.svelte:8`, `Bandcamp.svelte:4` and `smart-pick.ts:118`.
+  2. `INSERT … ON CONFLICT DO NOTHING` the `home` (Virginia, FACT, public) and `mr-kill` (INFERENCE, private) facts for `flr`.
+  3. `DELETE` the stored `artist-name` fact for `flr`; it's derived now (R5).
+  4. Backfill every stored pick with `artistName`: `'Flies Like Robots'` on `flr` jobs, `null` elsewhere (R7).
+  5. Brand rows: replace `basedOn` (video IDs) with `uploadCount` (R13).
+- **Linking:** none needed. Nathan's row already has `artist_id = 'flr'`. No email or `uid` appears in code or SQL.
+- **"Replaces the operator-assigned link":** profiles are self-created now. `--artist` survives only to attach an invite to an existing profile (Nathan's `flr` in a fresh environment). It never creates one.
+- **Fail loud:** any other `artist_id` value, or two users linked to `flr`, aborts the migration. Quickstart Q0 checks first.
 - **Alternatives:**
-  - A seed script run by hand: one more manual step, easy to forget, and no atomicity with the schema. Rejected.
-  - A first-use seed in app code (today's `listFacts` pattern): keeps FLR values in code (FR-013). Rejected.
+  - A hand-run seed script: forgettable, and not atomic with the schema. Rejected.
+  - A first-use seed in code: keeps FLR values in code (FR-013). Rejected.
 
-## R4 · Who gets Nathan's voice and the brand guide
+## R4 · Nathan's voice and the brand guide
 
-- **Decision:** `artists.curated boolean not null default false`. Only the migration sets it, for `flr`, and the app can't write it.
-  - `curated` selects `ARTIST_VOICE` and Nathan's credit wording (`ARTIST_CREDITS`) over the generic rules (R10).
-  - It also gates `/brand` and the brand-guide APIs (spec Assumption: brand stays Nathan's).
-  - Spec 005 replaces the column with per-artist voice and brand.
-- **Rationale:** FR-013 bars FLR values in code. The artist ID `flr` is one, so `profile.id === 'flr'` would break FR-013. Constitution IV puts artist-specific values on the profile, and a flag on the profile does exactly that.
-- **Alternatives:**
-  - An `id === 'flr'` constant: smallest diff, but breaks FR-013. **Listed as an open question for the owner.**
-  - A `NATHAN_ARTIST_ID` env var: config sprawl for one row. Rejected.
-  - Voice rules stored as data per artist: that's spec 005's job. Rejected for 004.
+- **Decision (owner):** `artists.curated boolean not null default false`. Only the migration sets it, for `flr`, and the app can't write it.
+  - It selects `ARTIST_VOICE` and Nathan's credit line.
+  - It gates `/brand` and the brand APIs.
+- **Removal:** spec 005 deletes `curated` and both R0 exceptions, replacing them with per-artist voice and brand. Recorded for spec 005's planner.
+- **Rejected:** an `id === 'flr'` constant (breaks FR-013), and an env var (config for one row).
 
 ## R5 · Artist facts
 
-- **Decision:** `listFacts(artist, memory)` returns facts derived from the profile, plus stored facts only when `memory` is true (`artistJob`).
-  - **Always, from the profile:** `artist-name` (FACT, public, FR-014). Also `contact` (FACT, public) when a contact line is set.
-  - **Memory only:** stored rows, which is Nathan's `home` and `mr-kill` today.
-  - `SEED_FACTS` and the first-use seed are deleted.
-- **Why `contact` is a fact:** `allowedLinks` keeps only links found in public FACT and APPROVED records. A contact line with a link (spec edge case: "allowed as the user wrote it") would otherwise be stripped from the description and the Bandcamp credits.
-- **Alternatives:** have the server append the contact line instead of the model. That changes where the line sits in Nathan's descriptions (SC-004 risk). Rejected.
+- **Decision:** `listFacts(artist, memory)` returns the derived `artist-name` fact (FACT, public, FR-014) always. It returns stored facts only when `memory` (`artistJob`) is true. `SEED_FACTS` and the first-use seed are deleted.
+- **The contact line is not a fact.** The server places it (R10), so it never passes through `allowedLinks`. A link in it survives exactly as written.
 
 ## R6 · Identity reads through the owner's grant
 
-- **Decision:** a new `ownUploads(accessToken, count)` in `src/lib/server/platforms/youtube/youtube.ts`. It replaces the key-based `recentVideos`, which is deleted.
-  - `channels.list?mine=true&part=contentDetails` (bearer) gives the uploads playlist.
-  - `playlistItems.list?part=contentDetails&maxResults=count+5` (bearer).
-  - `videos.list?part=snippet` (bearer). No `statistics`: identity needs only titles, descriptions and thumbnails, and no statistic is fetched or stored (FR-015).
-  - The pick reads 3. The brand guide reads `BRAND_VIDEOS` (30), which fits inside one `playlistItems` page (`maxResults` ≤ 50).
-- **Access:** `getConnection(owner)`, then `accessTokenFor(owner, connection.channelId)`.
-  - Not connected, or `accessTokenFor` returns null (revoked at Google): the pick runs without identity and records `uploadsRead: false` (US2 AS4).
-  - YouTube answers 401 or 403 (`uploadFailure` → `access-lost`): `access.refused(job.id)` marks the grant, and the pick runs without identity.
-  - Any other error is rethrown and fails the step, as `recentVideos` errors do today.
-- **Gate:** identity reads still need `artistJob` (AGENTS.md). Every job created from now on has an artist, so that's every new job.
-- **Quota:** 3 units per pick and 3 per brand proposal, charged to the OAuth client's project. That's negligible next to uploads.
-- **Policy:** this is Authorized Data shown only to the authorizing user (Developer Policies III.E.3.b). The channel is identified as the connection's channel (III.E.3.e).
-- **Alternatives:** keep the API key and pass the connection's channel ID. FR-007 and FR-015 require the owner's own grant. Rejected.
+- **Decision:** `ownUploads(token, channelId, count, deadline)` in `platforms/youtube/youtube.ts` replaces the key-based `recentVideos`, which is deleted.
+  1. `channels.list?mine=true&part=contentDetails`. The response is a collection, so it selects only the item whose `id === channelId`. No match counts as `access-lost` (R8).
+  2. `playlistItems.list?part=contentDetails&maxResults=count+5` (≤ 50: the pick reads 3, brand `BRAND_VIDEOS` = 30).
+  3. `videos.list?part=snippet`. No `statistics` (FR-015).
+- **Gate:** identity needs the owner's profile and grant, not `artistJob`, because the channel is always the owner's own.
+  - Memory, feedback and brand still need `artistJob` (AGENTS.md is updated).
+  - Every pick reads identity or waits (R8), so no pick runs without it and none needs a provenance flag.
+- **Quota:** 3 units per pick and 3 per brand proposal, from the OAuth client's project.
+- **Policy:** Authorized Data shown only to the authorizing user (III.E.3.b). The channel is the connection's (III.E.3.e).
 
-## R7 · Which name a pick and an approval use
+## R7 · Which name a pick, an approval and a Short use
 
-- **Decision:**
-  - The pick step reads the owner's current profile when it runs, so renames apply to the next pick and re-run (US4 AS1).
-  - The name is stored on the pick as `Pick.artistName`.
-  - Approval allows the pick's own `artistName` as a tag, not the current profile's. So a rename between pick and approval can't reject the draft's own artist tag, and approved fields never change (FR-011, SC-005).
-  - A Short copies the parent pick (`createShort`), `artistName` included.
-- **Backfill (R3 step 4):** jobs with `artist_id = 'flr'` get `artistName: 'Flies Like Robots'`. Every other stored pick gets `artistName: null`, meaning it was made before profiles, for a user without one. Every stored pick also gets `uploadsRead: false`.
-- **Alternatives:** validate against the current profile name at approval. A rename would then break a pending review. Rejected.
+- **Pick:** reads the owner's current profile when it runs (US4) and stores `Pick.artistName`.
+- **Approval:** allows the pick's own `artistName`, so a rename between pick and approval can't break the draft (FR-011, SC-005).
+- **Short (owner):** `createShort` sets `artistName` to the owner's current profile name. It rebuilds the Short's tags:
+  - drop the parent pick's `artistName` (case-insensitive) from the copied approved tags
+  - put the current name first, with its length reserved (R9)
+  - leave the parent's approved fields untouched
+  - a legacy parent with `artistName: null` just gains the current name
+- **Backfill:** R3 step 4. `null` means unknown, never a guessed name. `'Flies Like Robots'` on `flr` jobs is what the constant put in those picks.
 
-## R8 · The artist tag always fits
+## R8 · Identity-read outcomes (platform layer)
 
-- **Finding:** `pickTags` (`smart-pick.ts:374-392`) adds the artist key last. The 500-character loop then drops whatever no longer fits. A long name (up to 100 characters, 102 with the quotes YouTube adds for spaces) can be dropped, which breaks SC-003.
-- **Decision:** count the artist tag's length first, then fill the model's picks into what's left. The artist tag is kept exactly once, and deduplicated case-insensitively against candidates, as today.
-- **YouTube rules (videos docs):** tags total ≤ 500 characters. Commas between items count. A tag with spaces counts its quotation marks. No characters are documented as forbidden in tags. Titles and descriptions forbid `<` and `>`.
+New `identityFailure(error)` in `platforms/youtube/youtube.ts`, used by the pick and the brand flows:
 
-## R9 · Validation
+| Outcome        | Inputs                                                                                                                                                                                     | Pick step                           | Brand propose                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------- |
+| `access-lost`  | No connected row; `accessTokenFor` → null (`invalid_grant` marks it revoked); YouTube 401; 403 `insufficientPermissions` or `forbidden`; no `mine=true` item matching the channel          | wait `reconnect YouTube`            | `{ wait: 'reconnect YouTube' }`  |
+| `busy`         | 403 `quotaExceeded`, `rateLimitExceeded` or `userRateLimitExceeded`; 429; 5xx; network error; the deadline's abort; `accessTokenFor`'s channel-mismatch throw (a reconnect raced the read) | wait `waiting on YouTube`           | `{ wait: 'waiting on YouTube' }` |
+| `app-rejected` | Token refresh `invalid_client` or `unauthorized_client`; 403 `accessNotConfigured`; any other 4xx                                                                                          | throw (a failure, constitution III) | throw                            |
 
-- **Shared module:** `src/lib/artist.ts` (pure, used by the form and the server, like `src/lib/metadata.ts`). It returns `FieldErrors`. The database repeats the rules as `CHECK` constraints.
-- **Name:** trimmed, 1–100 characters, no `<` or `>` (FR-004).
-- **Bandcamp URL:** trimmed, and empty means none. It must parse with `new URL()` and have protocol `https:`, a host, and no username or password (FR-004).
-  - At most 2,000 characters: a defensive cap on an unbounded text field, not a product rule.
-- **Contact line:** trimmed, and empty means none. At most 200 characters (FR-004).
-  - It also can't contain `<` or `>`: YouTube descriptions forbid them, and `tidy()` strips them, so a line with them could never appear as written.
-- **Messages** (plain labels):
+- `access-lost` from a live token calls `access.refused(job.id)`, which marks the grant like uploads do.
+- `busy` never touches the grant.
+- A wait never counts toward `consecutiveFailures` and never fails the job.
+- Quota uses `waiting on YouTube`, not `limitUntil`. `limitUntil` drives `quotaHold`'s "model quota spent" on model steps, so it can't carry a YouTube limit.
 
-  | Problem                   | Message                                     |
-  | ------------------------- | ------------------------------------------- |
-  | Empty name                | "Add the artist name."                      |
-  | Name over 100             | "Artist names are at most 100 characters."  |
-  | `<` or `>` in the name    | "Artist names can't contain < or >."        |
-  | Bad Bandcamp URL          | "Use an https:// address for Bandcamp."     |
-  | Contact over 200          | "Contact lines are at most 200 characters." |
-  | `<` or `>` in the contact | "Contact lines can't contain < or >."       |
+## R9 · The required artist tag
 
-## R10 · Voice and credits by profile
+- **Reserve first:** `pickTags` (`smart-pick.ts:374-392`) adds the artist key last today, so a long name can be dropped by the 500-character loop. Count the artist tag's `tagsLength` first, then fill model picks into the rest. Deduplicated case-insensitively, kept exactly once (SC-003).
+- **Exempt from the song-title rule** (`pickTags` `containsWords`, `actions.ts:48`): a self-titled song keeps the artist tag.
+- **The tag editor preserves it:**
+  - `Review.svelte` shows `pick.artistName` as a fixed tag outside the editable comma field.
+  - The submit sends `[artistName, ...splitTags(text)]`, deduplicated case-insensitively.
+  - The live counter includes it.
+  - Server `finalFields` requires it exactly once. Missing → 422 `tags: "Keep the artist tag: <name>."`
+- **Entry rules that keep it one tag:**
+  - no comma: `splitTags` splits on commas, and Bandcamp's tags field is comma-separated
+  - no leading `#`: `metadata.ts:64` rejects it as a hashtag
+  - no `<` or `>`
+- **YouTube:** tags total ≤ 500, commas count, and spaced tags count their quotes. No characters are documented as forbidden in tags.
 
-- **`curated` (Nathan):** `ARTIST_VOICE` unchanged. `ARTIST_CREDITS` is built from the profile's contact line: the "hacked and slashed" credit line, then the contact line exactly. No contact line means no contact instruction.
-- **Generic (everyone else, spec Assumption):** a new `GENERIC_VOICE`. It keeps `ARTIST_VOICE`'s plain-copy rules (short and literal, one straight sentence about the song, album placement only from notes or facts, no placeholders, no marketing words, no emoji). It drops Nathan's humor, asides and caps lines.
-- **Generic credits:** a credit line only when `recentUploads` carry one, in their wording and with the credited name exactly as there. The contact line exactly, when set.
-  - This credit-line rule is not settled by the spec. **Listed as an open question.**
-- **Wording fix:** `smart-pick.ts:184` says "Keep his slang". It becomes "Keep the artist's slang" for every run.
-- **Bandcamp credits:** every profile now gets "the credit line and contact line from the description, exactly as written there", not an empty string.
-- `ARTIST_VOICE` itself doesn't change (AGENTS.md: only on new evidence).
+## R10 · Voice, credits and the contact line
 
-## R11 · Bandcamp links
+- **Curated (Nathan):** `ARTIST_VOICE` unchanged, plus the "hacked and slashed" credit-line instruction.
+- **Generic (owner):** `GENERIC_VOICE`, which is `ARTIST_VOICE`'s plain-copy lines without the humor, asides and caps lines. The prompt says no credit line and no contact line, and `bandcamp.credits` is an empty string.
+- **Contact line (FR-006), placed in code, deterministically:**
+  - The prompt tells every run to write no contact line.
+  - `finalizePick` strips from the model's description and credits every line that contains an email address or starts with `contact` (case-insensitive). That covers stale contacts copied from uploads or feedback.
+  - It then appends the profile's `contactLine` as the last body line, before the closing hashtags. It's reserved before `clip`, so it's never truncated.
+  - It also appends it as the last line of `bandcamp.credits`.
+  - Null contact means nothing is appended, so a cleared contact leaves none.
+- **Wording:** `smart-pick.ts:184` "Keep his slang" → "Keep the artist's slang".
+- **SC-004:** Nathan's contact text is identical. Its position is the end of the body, where his credit and contact lines sit today.
 
-- **Editor:** `new URL('/edit_track', bandcampUrl).href`. For Nathan that's `https://flieslikerobots.bandcamp.com/edit_track`, exactly today's constant (SC-004).
-- **Footer:** links to the stored URL as entered.
-- **Undocumented:** Bandcamp publishes no docs for `/edit_track`.
-  - Gate G1 (quickstart Q6, 2026-10-25): any `*.bandcamp.com` artist subdomain sends signed-out visitors to sign-in, and bounces them back to that artist's `/edit_track`.
-  - Whether custom-domain artist sites serve it is unknown and unchecked. **Listed as an open question:** should the field accept only `*.bandcamp.com`?
+## R11 · Validation
 
-## R12 · Display
+- **Shared:** `parseArtist` in `src/lib/artist.ts` (form and server). The database repeats the rules as `CHECK`s.
 
-- **Layout data:** `+layout.server.ts` returns `artist: { name, bandcampUrl, curated } | null` from `locals.user.artist`. Signed out, it's null.
-- **Header:** the artist name leads the channel row, followed by the channel handle and counts when connected (FR-009).
-- **Menu:** Settings for every signed-in user. Brand guide only when `curated`.
-- **Footer:** signed in with a profile, "Built for <name> by Ashley Childress", with the name linked to the Bandcamp URL when set. Otherwise "Built by Ashley Childress". The license, socials and legal links are unchanged (FR-009, spec Assumption).
-- **Page description (FR-010):** "Release agent for musicians: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
-- **Privacy page:** `privacy/+page.svelte:24-25` says "Linked artist profiles also store…". It must say every account stores an artist name and an optional Bandcamp URL and contact line. The privacy policy has to disclose new stored data.
+| Field       | Rule                                                                                                                                                        | Message                                         |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| name        | empty after trim                                                                                                                                            | "Add the artist name."                          |
+| name        | > 100                                                                                                                                                       | "Artist names are at most 100 characters."      |
+| name        | `<` or `>`                                                                                                                                                  | "Artist names can't contain < or >."            |
+| name        | `,`                                                                                                                                                         | "Artist names can't contain commas."            |
+| name        | starts with `#`                                                                                                                                             | "Artist names can't start with #."              |
+| bandcampUrl | not `https:`, host not `<sub>.bandcamp.com` (`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.bandcamp\.com$`, lowercased), a port, credentials, or a path other than `/` | "Use your https://<name>.bandcamp.com address." |
+| contactLine | > 200                                                                                                                                                       | "Contact lines are at most 200 characters."     |
+| contactLine | `<` or `>`                                                                                                                                                  | "Contact lines can't contain < or >."           |
 
-## R13 · A pick whose owner has no profile
+- **Storage:** the URL is stored normalized as `https://<sub>.bandcamp.com`. Empty optional fields become null.
 
-- **Case:** only jobs created before this feature by users who haven't saved a profile yet. Job creation requires one from now on (R14).
-- **Decision:** the pick step returns the wait `'Add your artist name first.'` before any model or YouTube call. The working screen shows it with a link to `/settings`. A wait never fails the job (constitution III). Re-run and retry reach the same wait.
-- **Alternatives:**
-  - Run the old unnamed pick: breaks FR-005, and it's a compatibility path (constitution VI). Rejected.
-  - Fail the job: a missing input isn't a failure. Rejected.
-- Not settled by the spec. **Listed as an open question.**
+## R12 · Bandcamp links and gate G1
 
-## R14 · Starting a job needs a profile
+- **Editor:** `${bandcampUrl}/edit_track`. Footer: `bandcampUrl`.
+- **G1 (2026-10-25, quickstart Q6):** a signed-out `GET` on `<sub>.bandcamp.com/edit_track` → `303` to `bandcamp.com/login?bounce=<sub>.bandcamp.com/edit_track`, for Nathan's subdomain and for a second artist's.
+- **After sign-in:** the editor is reached by following that `bounce`. Today's feature proves this for Nathan's own account. Other accounts follow the same `bounce` URL; the app never needs another artist's login.
+- **Coverage:** validation accepts only this URL class (owner), so the gate covers everything accepted. Custom domains are refused.
 
-- **`POST /api/jobs`** returns `409 "Add your artist name first."` when `locals.user.artist` is null (FR-003 AS4).
-- **`POST /api/jobs/{id}/short`** refuses the same way, since a Short is a job.
-- **Database:** `jobs_insert` tightens to `artist_id is not null and artist_id = <caller's artist_id>` for top-level jobs. Shorts keep `soundboard_owns_job(parent_id, artist_id)`.
+## R13 · Retention and revocation of YouTube data
 
-## R15 · Rebasing onto 003-resumable-upload
+- **Developer Policies:**
+  - III.E.4.c: other Authorized Data is kept "no longer than 30 calendar days", then deleted or refreshed.
+  - III.D: deletion within 7 days of in-app revocation.
+  - The text has no exemption for resource IDs, so IDs count as API Data.
+- **Identity reads:** used in memory within one step.
+  - Never written to the database: the pick stores only model output and `artistName`.
+  - A test asserts a sentinel string from a fake upload description appears in no `jobs` or `artist_memory` row.
+- **Sentry:**
+  - Span retention is plan-dependent: 30 days on Developer and Team, 90 days on transaction-billed Team and Business, 13 months downsampled on Business and Enterprise.
+  - The org's plan is unknown (PRD Open Questions), so the retention counts as unknown.
+  - **Decision:** YouTube-sourced text never reaches Sentry.
+    - The pick's `recentUploads` and the brand request's `uploads` go in their own text part, tagged `source: 'youtube'`.
+    - `redactTurns` (`core/tracing.ts:60`) replaces it with `{ type: 'text', content: '[YouTube uploads: <n>]' }` in both `invoke_agent` and `chat` span attributes.
+    - Thumbnails are already placeholders. The model sees the full text.
+    - AGENTS.md's "Keep prompt and reply text for every agent" gains this exception, and so does PRD R11.
+- **Brand source IDs:** `basedOn: string[]` (`artist/brand.ts:226`, shown only as a count at `brand/+page.svelte:157`) becomes `uploadCount: number`. The migration converts stored rows (R3 step 5).
+- **Revocation:**
+  - Disconnect revokes and deletes the grant (`connection.ts:91-110`).
+  - After that, `accessTokenFor` returns null, so identity and brand reads stop (test).
+  - No other YouTube-sourced identity data is stored, so nothing else needs deleting.
+- **Out of scope, noted for the owner:** genre-search evidence (Non-Authorized Data) is already kept in Sentry prompt text today (`smart-pick` `audienceTopVideos`, `candidateLists`), under the same unknown retention. The same `source: 'youtube'` tag would cover it, but that changes spec 002 and 003 behavior.
 
-- 003 touches `jobs/create.ts`, `jobs/actions.ts`, `media/gcs.ts`, `routes/new/+page.svelte`, `playwright.config.ts`, `deploy.sh`, and maybe adds a migration.
-- 004 adds no `jobs` column. Its schema change is the new `artists` table plus foreign keys, a unique constraint and a policy.
-- If 003 lands a migration numbered `0005`, then after the rebase: delete 004's migration and its snapshot and journal entry, rerun `pnpm drizzle-kit generate --name artist_profiles`, and paste the R3 data block back in at the same place. Never renumber by hand.
-- Expected textual conflicts:
-  - `create.ts` (the profile guard sits next to 003's session code)
-  - `new/+page.svelte` (004 only wraps the form in a profile check)
-  - `playwright.config.ts` and `deploy.sh` (004 only deletes `FLR_CHANNEL_ID` lines)
+## R14 · Step deadline
 
-## R16 · Test scope
+- **Decision:** the step's shared 110 s `deadline` (epoch ms) is threaded through. No helper starts its own fixed timeout.
+  - `accessTokenFor(uid, channelId, deadline)` builds its `OAuth2Client` with `transporterOptions: { signal: AbortSignal.timeout(Math.max(0, deadline - Date.now())) }`.
+  - `ownUploads` passes `AbortSignal.timeout(remaining)` to each `fetch`.
+- **Other callers:** every other `accessTokenFor` caller passes its own step deadline (`stepDeadline()` in actions). That covers publishing, verify, confirm-upload and brand.
+- **G2 (2026-10-25, quickstart Q8):** a real `OAuth2Client` (11.1.0) against a local token endpoint that never answers, with `transporterOptions.signal = AbortSignal.timeout(1500)`, rejected "The operation was aborted." after 1505 ms. The signal reaches the refresh request.
+- **On abort:** the error classifies as `busy` (R8), so the step returns `waiting on YouTube`, and `runStep` releases the claim as for any wait. Publishing and verify apply the same `busy` check to a refresh error; their other errors keep today's handling.
 
-- **Unit (PGlite, real migrations):**
-  - the migration's `flr` row and facts
-  - RLS on `artists`: read and update only your own; no `curated`; no second profile; no direct link
-  - the profile API
-  - the pick prompt, tags and facts for a curated and a generic profile
-  - the owner-grant identity read and its failures
-  - approval against the pick's `artistName`
-  - the missing-profile wait
-- **E2E (both projects, Pixel 7 primary):**
-  - the form on `/new` for a user without a profile
-  - Settings edits
-  - header, footer and Bandcamp screen for a non-Nathan user
-  - signed-out pages naming no artist
-- **Not tested:** YouTube's own tag acceptance, and Bandcamp's editor page. Those are provider behavior, and re-proving it catches no break in this code.
+## R15 · Missing profile at pick time
+
+- **(Owner)** The pick step returns `'Add your artist name first.'` before any YouTube or model call. The working screen links to `/settings`. A wait never fails the job.
+
+## R16 · Starting a job needs a profile
+
+- `POST /api/jobs` and `POST /api/jobs/{id}/short` → `409 "Add your artist name first."`
+- `jobs_insert` tightens for top-level jobs: `artist_id is not null and artist_id = <caller's>`. The Short branch is unchanged.
+
+## R17 · Rebasing onto 003-resumable-upload
+
+- 004 adds no `jobs` column. If 003 lands migration `0005`, delete 004's migration, snapshot and journal entry, regenerate, and paste the data block back (task T042).
+- Expected conflicts:
+  - `create.ts` and `new/+page.svelte`: 004 only adds a guard and a wrapping `{#if}`.
+  - `playwright.config.ts` and `deploy.sh`: 004 only deletes `FLR_CHANNEL_ID`.
+
+## R18 · Test scope
+
+- **Unit:** the migration and backfill, RLS, the profile API, prompt and finalize (curated and generic), owner-grant reads with every R8 outcome, deadline aborts, Sentry redaction, no persistence, approval and Short rename, and the missing-profile wait.
+- **E2E (both projects, Pixel 7 primary):** the first-run form, Settings edits, display for a non-Nathan user, signed-out pages, and the fixed artist tag in review.
+- **Not tested:** YouTube's own tag acceptance, and Bandcamp's post-login redirect (provider behavior).

@@ -1,63 +1,76 @@
 # Contract: artist profile
 
-Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-model.md), and the reasoning is in [research.md](../research.md).
+Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-model.md); reasoning in [research.md](../research.md).
 
 ## `PUT /api/artist`
 
-Creates the caller's profile, or updates it. The first-run form on `/new` and the form on `/settings` both use it.
+Creates the caller's profile, or updates it. The first-run form on `/new` and the Artist section on `/settings` both use it.
 
-- **Auth:** a session is required. Signed out → `401 "Sign in first."`, and nothing is written.
-- **Body:** `{ "name": string, "bandcampUrl": string, "contactLine": string }`. Absent fields are read as `""`, and empty optional fields store null.
-- **Validation:** `parseArtist` in `src/lib/artist.ts` (research R9).
-  - Any error → `422 { "error": "Fix the highlighted fields.", "fields": { "name"?: string, "bandcampUrl"?: string, "contactLine"?: string } }`, and nothing is written. The old values stay (US4 AS3).
-- **No profile yet:** `soundboard_create_artist`.
-  - It raises `23505` when a concurrent request created the profile first. The handler then retries once as an update.
-- **Has a profile:** `UPDATE artists SET name, bandcamp_url, contact_line, updated_at = now() WHERE id = <caller's artist_id>`, through RLS.
-- **200:** `{ "artist": { "name": string, "bandcampUrl": string | null, "contactLine": string | null } }`.
-- **Never** returns or accepts `id` or `curated`.
-- **Type change:** `ActionError.fields` widens from `FieldErrors` to `FieldErrors | ArtistFieldErrors`. `src/lib/api.ts` gets `saveArtist(body)` through the existing `call`.
+- **Auth:** a session is required. Signed out → `401 "Sign in first."`, nothing written.
+- **Body:** `{ "name": string, "bandcampUrl": string, "contactLine": string }`.
+  - All three are always sent. The forms are pre-filled, so an untouched optional field resubmits its stored value.
+  - Absent fields read as `""`, and empty optional fields store null.
+- **Validation:** `parseArtist` (research R11).
+  - Error → `422 { "error": "Fix the highlighted fields.", "fields": { "name"?, "bandcampUrl"?, "contactLine"? } }`. Nothing is written, and the old values stay.
+- **No profile yet:** `soundboard_create_artist`. On `23505` (a concurrent create), retry once as an update.
+- **Has a profile:** `UPDATE artists … WHERE id = <caller's artist_id>`, through RLS.
+- **200:** `{ "artist": { "name", "bandcampUrl", "contactLine" } }`. Never `id` or `curated`, and both are ignored if sent.
+- **Types:** `ActionError.fields` widens to `FieldErrors | ArtistFieldErrors`. `src/lib/api.ts` gains `saveArtist(body)`.
 
-## `POST /api/jobs` (changed)
+## `POST /api/jobs` and `POST /api/jobs/{id}/short` (changed)
 
-- `locals.user.artist === null` → `409 "Add your artist name first."`, checked before signing an upload URL. No job is created (FR-003 AS4).
-- The job's `artist_id` is `locals.user.artist.id`. The `jobs_insert` policy rejects anything else (R14).
+- **No profile:** `locals.user.artist === null` → `409 "Add your artist name first."`, checked before signing or creating anything.
+- **Job's `artist_id`:** set to `locals.user.artist.id`. `jobs_insert` rejects anything else.
+- **Short creation** (R7):
+  - `artistName` is the owner's current profile name.
+  - Tags are the parent's approved tags with the parent pick's `artistName` removed (case-insensitive), with the current name first.
+  - The parent's fields are unchanged.
 
-## `POST /api/jobs/{id}/short` (changed)
+## `POST /api/jobs/{id}/step`, pick step (changed)
 
-- Same `409` when the caller has no profile.
+Checks run in this order, all before any model call:
 
-## `POST /api/jobs/{id}/step` (changed behavior)
-
-- **Pick step:**
-  - The owner has no profile → `{ wait: 'Add your artist name first.' }`. No YouTube or model call runs (R13).
-  - Otherwise the stored pick carries `artistName` (the owner's profile name at that moment) and `uploadsRead`.
+1. **Owner has no profile:** `{ wait: 'Add your artist name first.' }`.
+2. **Identity read:** `getConnection` → `accessTokenFor(owner, channelId, deadline)` → `ownUploads(token, channelId, 3, deadline)`.
+   - `access-lost` → `{ wait: 'reconnect YouTube' }`. A live token is marked refused.
+   - `busy` → `{ wait: 'waiting on YouTube' }`. The grant is untouched.
+   - `app-rejected` → the step fails (counts toward `consecutiveFailures`).
+3. **Model call and stored pick:** the stored pick carries `artistName`.
+   - The description and `bandcamp.credits` end with the owner's `contactLine` when set, placed in code.
+   - No YouTube-sourced text from the read is stored, and none reaches Sentry.
 
 ## `POST /api/jobs/{id}/approve` (changed validation)
 
-- Allowed tags are the job's tag candidates plus `pick.artistName` when it isn't null (R7). It's no longer a constant.
+- **Allowed tags:** the job's candidates plus `pick.artistName`.
+- **Artist tag:**
+  - It must be present exactly once when `pick.artistName` isn't null. Otherwise → `422 tags: "Keep the artist tag: <name>."`
+  - It's exempt from the song-title rule.
 
 ## Brand guide: `/brand`, `POST /api/brand/{propose,approve,discard}`
 
-- **Gate:** `requireCurated(locals.user)` → 404 unless `locals.user.artist?.curated` is true. It replaces `requireArtist`.
-- **Propose:** reads the owner's own uploads through their grant (`ownUploads`, R6).
-  - Not connected → `409 "Connect YouTube to read your channel."`
+- **Gate:** `requireCurated(locals.user)` → 404 unless `locals.user.artist?.curated`.
+- **Propose:** `ownUploads(token, channelId, BRAND_VIDEOS, deadline)` through the caller's grant.
+  - `access-lost` → `{ wait: 'reconnect YouTube' }`.
+  - `busy` → `{ wait: 'waiting on YouTube' }`.
+  - `app-rejected` → error.
   - Zero uploads → the existing `409`.
-- **Storage:** memory rows are keyed by `locals.user.artist.id`.
+- **Stored proposal:** keeps `uploadCount`, not video IDs.
+- **Memory:** keyed by `locals.user.artist.id`.
 
-## Page data
+## Page data and screens
 
-- **`+layout.server.ts`** returns `artist: { name, bandcampUrl, curated } | null` beside `user` and `channel`. Signed out, `artist` is null and no artist value reaches the page (FR-009, SC-006).
-- **`/new`:** no profile → the artist form (heading "Who's the artist?", fields Artist name, Bandcamp URL, Contact line, button Save). Once saved, `invalidateAll()` brings up the new-release form (US1 AS1, AS3).
-- **`/settings`:** open to every signed-in user.
-  - An **Artist** section holds the same form, pre-filled, with the button "Save changes", followed by the existing Peer influence section.
-  - A saved edit shows "Saved." (US4).
-- **Job page, Bandcamp screen:** `Bandcamp.svelte` takes `bandcampUrl: string | null`.
-  - Set → the editor link opens `new URL('/edit_track', bandcampUrl)`.
-  - Null → no link, and the note "Add your Bandcamp URL in Settings" links to `/settings`. The copy fields stay (US3 AS2).
-- **Review, Description step:** `uploadsRead === false` → one plain line under Why this: "Drafted without your recent uploads." (US2 AS4).
-- **Working screen:** the wait `'Add your artist name first.'` shows as text, plus a link to Settings.
+- **`+layout.server.ts`:** `artist: { name, bandcampUrl, curated } | null`. Signed out it's null, and no artist value reaches the page.
+- **`/new`:** no profile → `ArtistForm` (heading "Who's the artist?", fields Artist name, Bandcamp URL, Contact line, button Save). Once saved, `invalidateAll()` shows the new-release form.
+- **`/settings`:**
+  - The loader returns the owner's editable `artist: { name, bandcampUrl, contactLine } | null`, from `locals.user.artist` only.
+  - The Artist section shows `ArtistForm`, pre-filled, with the button "Save changes", then "Saved." and `invalidateAll()`.
+  - Peer influence follows.
+- **Bandcamp screen:**
+  - `Bandcamp.svelte` takes `bandcampUrl: string | null`. Set → the editor link is `${bandcampUrl}/edit_track`.
+  - Null → no link. The note "Add your Bandcamp URL in Settings" links to `/settings`, and the copy fields stay.
+- **Review, Tags step:** `pick.artistName` shows as a fixed tag outside the editable field, included in the counter and in the submit.
+- **Working screen:** `'Add your artist name first.'` shows with a link to Settings. `'reconnect YouTube'` during the pick shows with a link to Connections.
 
 ## Operator script
 
-- `scripts/invite.ts`: no change to its commands. The usage comment's example `--artist flr` stays valid, because `flr` now exists in `artists`.
-- A link to a missing profile fails on the foreign key, with the database's error printed as it is today.
+- `scripts/invite.ts`: unchanged. Its usage example `--artist flr` stays valid.
