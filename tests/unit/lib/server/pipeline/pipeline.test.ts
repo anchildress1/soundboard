@@ -46,7 +46,8 @@ import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
 import { failurePatch, runStep, VERIFY_ATTEMPTS } from '#lib/server/pipeline/pipeline.js';
 import { HOOK_SCHEMA } from '#lib/server/pipeline/short.js';
-import { clearStatsCache, quotaResetAt } from '#lib/server/platforms/youtube/youtube.js';
+import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
+import { quotaResetAt } from '#lib/server/core/quota.js';
 
 const ARTIST_NAME_KEY = 'artist-name';
 const BAD_PICK_JSON = '{"title": 1}';

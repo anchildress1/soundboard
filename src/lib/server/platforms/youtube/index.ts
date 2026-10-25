@@ -16,7 +16,6 @@ export {
   channelsMine,
   channelStats,
   finalChunk,
-  quotaResetAt,
   readBack,
   recentVideos,
   searchMusicVideos,

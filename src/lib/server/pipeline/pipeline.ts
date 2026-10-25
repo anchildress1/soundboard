@@ -37,10 +37,10 @@ import { hookStep, renderStep } from './short';
 import { runPick } from '#lib/server/ai/smart-pick.js';
 import type { JobPatch } from '#lib/server/jobs/rows.js';
 import { invokeAgent } from '#lib/server/core/tracing.js';
+import { quotaResetAt } from '#lib/server/core/quota.js';
 import {
   accessTokenFor,
   finalChunk,
-  quotaResetAt,
   readBack,
   recentVideos,
   sourceRange,
