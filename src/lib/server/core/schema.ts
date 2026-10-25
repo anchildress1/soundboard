@@ -14,9 +14,9 @@ import {
   unique,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-// Relative, not $lib: drizzle-kit loads this file outside Vite's aliases.
+// Relative, not #lib: drizzle-kit loads this file outside Vite, which maps .js to .ts.
 import { JOB_STATES } from '../../types';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 const quotedStates = JOB_STATES.map((state) => `'${state}'`).join(', ');

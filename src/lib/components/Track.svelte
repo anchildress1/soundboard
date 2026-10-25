@@ -1,14 +1,21 @@
 <script lang="ts">
-  import type { Status } from '$lib/status';
+  import type { Status } from '#lib/status.js';
 
-  let { status, model }: { status: Status; model: string } = $props();
+  let {
+    status,
+    model,
+    seconds = null,
+  }: { status: Status; model: string; seconds?: number | null } = $props();
 </script>
 
 <div class="track">
   <div class="row">
     <span class="state" data-tone={status.tone} role="status" aria-live="polite">{status.text}</span
     >
-    <span class="model">{model}</span>
+    <span class="model">
+      <span>{model}</span>
+      {#if seconds}<span>Total model time: {seconds}s</span>{/if}
+    </span>
   </div>
   <div
     class="bar"
@@ -68,6 +75,9 @@
   }
 
   .model {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: var(--muted);

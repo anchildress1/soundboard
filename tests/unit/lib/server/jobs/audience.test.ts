@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { jobAudience, jobAudienceFresh, jobs } from '$lib/server/core/schema';
-import { deleteExpiredAudience, readAudience, saveAudience } from '$lib/server/jobs/audience';
-import { claimJob, getJob, latestPick, releaseJob, transitionJob } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
-import type { Pick } from '$lib/types';
+import { db } from '#lib/server/core/db.js';
+import { jobAudience, jobAudienceFresh, jobs } from '#lib/server/core/schema.js';
+import { deleteExpiredAudience, readAudience, saveAudience } from '#lib/server/jobs/audience.js';
+import { claimJob, getJob, latestPick, releaseJob, transitionJob } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
+import type { Pick } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, USERS } from '../../../../helpers/pipeline';
 

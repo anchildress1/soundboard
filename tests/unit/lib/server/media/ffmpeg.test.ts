@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { startSpan } from '../../../../mocks/sentry';
 import {
   chunkCount,
-  extractWindow,
-  FRAMES_PER_WINDOW,
+  encodeClip,
   loudnessCurve,
   measureFile,
+  measureRange,
   parseLoudness,
   parseMeasurements,
   parseProbe,
@@ -17,8 +17,7 @@ import {
   SHORT_HEIGHT,
   SHORT_WIDTH,
   shortFilter,
-  splitJpegs,
-} from '$lib/server/media/ffmpeg';
+} from '#lib/server/media/ffmpeg.js';
 
 const SIGNED_OBJECT_URL = 'https://storage.example/obj?X-Goog-Signature=secret';
 const FFMPEG_OP = 'process.ffmpeg';
@@ -46,30 +45,29 @@ const STDERR = `[Parsed_ebur128_0 @ 0x1] Summary:
 type FakeRun = {
   stdout?: Buffer;
   stderr?: string;
-  fd3?: Buffer;
   code?: number | null;
   error?: Error;
+  /** A started process: an error (an abort) is followed by its exit, as with a real kill. */
+  started?: boolean;
   noPipes?: boolean;
 };
 
 function fakeChild(run: FakeRun) {
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
-  const fd3 = new EventEmitter();
   const child = Object.assign(new EventEmitter(), {
+    pid: run.started ? 4242 : undefined,
     stdout: run.noPipes ? null : stdout,
     stderr: run.noPipes ? null : stderr,
-    stdio: run.noPipes ? [null, null, null, null] : [null, stdout, stderr, fd3],
   });
   setImmediate(() => {
     if (run.error) {
       child.emit('error', run.error);
-      return;
+      if (!run.started) return;
     }
     if (run.stdout) stdout.emit('data', run.stdout);
     if (run.stderr) stderr.emit('data', Buffer.from(run.stderr));
-    if (run.fd3) fd3.emit('data', run.fd3);
-    child.emit('close', run.code === undefined ? 0 : run.code);
+    setImmediate(() => child.emit('close', run.code === undefined ? 0 : run.code));
   });
   return child;
 }
@@ -77,8 +75,6 @@ function fakeChild(run: FakeRun) {
 function nextRun(run: FakeRun) {
   spawnMock.mockImplementationOnce((() => fakeChild(run)) as unknown as typeof spawn);
 }
-
-const jpeg = (body: number[]) => Buffer.from([0xff, 0xd8, 0xff, ...body, 0xff, 0xd9]);
 
 beforeEach(() => {
   spawnMock.mockReset();
@@ -88,7 +84,8 @@ describe('source input restrictions', () => {
   it.each([
     ['probe', () => probe(OBJECT_URL)],
     ['measure', () => measureFile(OBJECT_URL, 1)],
-    ['window', () => extractWindow(OBJECT_URL, 0, 1)],
+    ['measure range', () => measureRange(OBJECT_URL, 0, 1, 1000)],
+    ['clip', () => encodeClip(OBJECT_URL, 0, 1, 'clip.mp4', 1000)],
     ['loudness', () => loudnessCurve(OBJECT_URL, 0, 1)],
     [
       'render',
@@ -269,41 +266,17 @@ describe('parseMeasurements', () => {
   });
 });
 
-describe('splitJpegs', () => {
-  it('splits back-to-back frames on SOI/EOI markers', () => {
-    const a = jpeg([1, 2, 3]);
-    const b = jpeg([4, 5]);
-    const frames = splitJpegs(Buffer.concat([a, b]));
-    expect(frames).toHaveLength(2);
-    expect(Buffer.compare(frames[0]!, a)).toBe(0);
-    expect(Buffer.compare(frames[1]!, b)).toBe(0);
-  });
-
-  it('skips leading garbage and drops a truncated trailing frame', () => {
-    const a = jpeg([9]);
-    const truncated = Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]);
-    const frames = splitJpegs(Buffer.concat([Buffer.from([0, 0, 0]), a, truncated]));
-    expect(frames).toHaveLength(1);
-    expect(Buffer.compare(frames[0]!, a)).toBe(0);
-  });
-
-  it('returns nothing for an empty or marker-free stream', () => {
-    expect(splitJpegs(Buffer.alloc(0))).toEqual([]);
-    expect(splitJpegs(Buffer.from([1, 2, 3, 4]))).toEqual([]);
-  });
-});
-
 describe('chunkCount', () => {
-  it('covers the file in 29.5 s windows', () => {
-    // 30.6 s needs two 29.5 s windows; a 30 s window would cover it in one.
-    expect(chunkCount(30.6)).toBe(2);
-    expect(chunkCount(60)).toBe(2);
-    expect(chunkCount(183)).toBe(7);
+  it('covers the file in 60 s windows', () => {
+    expect(chunkCount(60)).toBe(1);
+    expect(chunkCount(61.5)).toBe(2);
+    expect(chunkCount(900)).toBe(15);
   });
 
   it('ignores a trailing sliver under a second', () => {
-    expect(chunkCount(30.5)).toBe(1);
-    expect(chunkCount(31)).toBe(2);
+    expect(chunkCount(60.5)).toBe(1);
+    expect(chunkCount(61)).toBe(1);
+    expect(chunkCount(121.5)).toBe(3);
   });
 
   it('never returns fewer than one window', () => {
@@ -324,7 +297,7 @@ describe('probe', () => {
     expect(command).toBe('ffprobe');
     expect(args).toContain('https://storage.example/obj?sig=1');
     expect(args).toContain('-show_streams');
-    expect(options).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
+    expect(options).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
     expect((options as { signal: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -370,12 +343,12 @@ describe('ffmpeg spans', () => {
     nextRun({ stderr: '' });
     await probe(SIGNED_OBJECT_URL);
     await measureFile(SIGNED_OBJECT_URL, 10);
-    await extractWindow(SIGNED_OBJECT_URL, 0, 10);
+    await encodeClip(SIGNED_OBJECT_URL, 0, 10, '/tmp/w.mp4', 1000);
     const spans = startSpan.mock.calls.map(([options]) => options as { op: string; name: string });
     expect(spans.map((s) => [s.op, s.name])).toEqual([
       [FFMPEG_OP, 'ffprobe probe'],
       [FFMPEG_OP, 'ffmpeg measure'],
-      [FFMPEG_OP, 'ffmpeg window'],
+      [FFMPEG_OP, 'ffmpeg clip'],
     ]);
     expect(JSON.stringify(spans)).not.toContain('Signature');
   });
@@ -402,49 +375,74 @@ describe('measureFile', () => {
     expect(graph).toMatch(/^\[0:a:0\]ebur128=peak=true/);
     expect(graph).toContain('silencedetect=n=-60dB:d=2');
   });
+});
 
-  it('rejects on ffmpeg failure', async () => {
-    nextRun({ stderr: 'Invalid data found when processing input', code: 183 });
-    await expect(measureFile('u', 10)).rejects.toThrow(
-      'ffmpeg exited 183: Invalid data found when processing input',
-    );
+describe('measureRange', () => {
+  it('measures one stretch of audio, shifted to file time', async () => {
+    nextRun({ stderr: STDERR });
+    const measurements = await measureRange(OBJECT_URL, 60, 60, 20_000);
+    expect(measurements.silences).toEqual([{ start: 64, end: 67 }]);
+    expect(measurements.integratedLufs).toBe(-9.7);
+    const args = spawnMock.mock.calls[0]![1]!;
+    expect(args[args.indexOf('-ss') + 1]).toBe('60.000');
+    expect(args[args.indexOf('-t') + 1]).toBe('60.000');
+    expect(args).toContain('-vn');
+    expect(args[args.indexOf(FILTER_GRAPH) + 1]).toMatch(/^\[0:a:0\]ebur128=peak=true/);
+  });
+
+  it('closes open silence at the end of the stretch', async () => {
+    nextRun({ stderr: 'silence_start: 6\n' });
+    expect((await measureRange('u', 59, 10, 1000)).silences).toEqual([{ start: 65, end: 69 }]);
+  });
+
+  it("gives ffmpeg the caller's time limit and rejects on failure", async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    onTestFinished(() => timeout.mockRestore());
+    nextRun({ stderr: 'boom', code: 2 });
+    await expect(measureRange('u', 0, 60, 12_345)).rejects.toThrow('ffmpeg exited 2: boom');
+    expect(timeout).toHaveBeenCalledWith(12_345);
   });
 });
 
-describe('extractWindow', () => {
-  it('seeks the window and returns WAV, frames, and offset measurements', async () => {
-    const wav = Buffer.from('RIFF....WAVE');
-    const frames = Array.from({ length: FRAMES_PER_WINDOW }, (_, i) => jpeg([i]));
-    nextRun({ stdout: wav, stderr: STDERR, fd3: Buffer.concat(frames) });
-
-    const window = await extractWindow(OBJECT_URL, 29.5, 29.5);
-
-    expect(Buffer.compare(window.wav, wav)).toBe(0);
-    expect(window.frames).toHaveLength(8);
-    expect(window.measurements.silences).toEqual([{ start: 33.5, end: 36.5 }]);
+describe('encodeClip', () => {
+  it('encodes the window to a small upright MP4 with stereo AAC', async () => {
+    nextRun({});
+    await encodeClip(OBJECT_URL, 120, 60, '/tmp/w.mp4', 45_000);
     const args = spawnMock.mock.calls[0]![1]!;
-    expect(args[args.indexOf('-ss') + 1]).toBe('29.500');
-    expect(args[args.indexOf('-t') + 1]).toBe('29.500');
-    expect(args).toContain('pipe:1');
-    expect(args).toContain('pipe:3');
-    expect(args[args.indexOf('-frames:v') + 1]).toBe('8');
-    const graph = args[args.indexOf(FILTER_GRAPH) + 1]!;
-    expect(graph).toContain('fps=0.2712');
-    expect(graph).toContain('aresample=16000');
-    expect(graph).toContain('scale=-2:360');
+    const value = (flag: string) => args[args.indexOf(flag) + 1];
+    expect(value('-ss')).toBe('120.000');
+    expect(value('-t')).toBe('60.000');
+    expect(value('-vf')).toBe(
+      "scale=w='min(640,iw)':h='min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+    );
+    expect(value('-fpsmax')).toBe('30');
+    expect(value('-c:v')).toBe('libx264');
+    expect(value('-maxrate')).toBe('600k');
+    expect(value('-bufsize')).toBe('1200k');
+    expect(value('-pix_fmt')).toBe('yuv420p');
+    expect(value('-c:a')).toBe('aac');
+    expect(value('-b:a')).toBe('96k');
+    expect(value('-ac')).toBe('2');
+    expect(value('-ar')).toBe('48000');
+    expect(value('-movflags')).toBe('+faststart');
+    expect(args.at(-1)).toBe('/tmp/w.mp4');
+    expect(args).not.toContain('-fs');
+    expect(args).not.toContain('-shortest');
   });
+});
 
-  it('closes open silence at the end of the window', async () => {
-    nextRun({ stderr: 'silence_start: 6\n' });
-    const window = await extractWindow('u', 59, 10);
-    expect(window.measurements.silences).toEqual([{ start: 65, end: 69 }]);
-    expect(window.frames).toEqual([]);
-    expect(window.wav).toHaveLength(0);
-  });
-
-  it('rejects on a non-zero exit', async () => {
-    nextRun({ stderr: 'boom', code: 2 });
-    await expect(extractWindow('u', 0, 29.5)).rejects.toThrow('ffmpeg exited 2: boom');
+describe('aborted runs', () => {
+  it('reject only once the killed process has exited', async () => {
+    const order: string[] = [];
+    nextRun({ error: new DOMException('timed out', 'AbortError'), started: true, code: null });
+    const child = encodeClip('u', 0, 60, '/tmp/w.mp4', 1000).catch((error: Error) => {
+      order.push(`rejected ${error.name}`);
+    });
+    const proc = spawnMock.mock.results[0]!.value as EventEmitter;
+    proc.on('error', () => order.push('error'));
+    proc.on('close', () => order.push('close'));
+    await child;
+    expect(order).toEqual(['error', 'close', 'rejected AbortError']);
   });
 });
 
@@ -499,11 +497,6 @@ describe('loudnessCurve', () => {
     const options = startSpan.mock.calls.at(-1)![0] as { name: string };
     expect(options.name).toBe('ffmpeg loudness');
     expect(JSON.stringify(options)).not.toContain('Signature');
-  });
-
-  it('rejects on a non-zero exit', async () => {
-    nextRun({ stderr: 'Server returned 403 Forbidden', code: 1 });
-    await expect(loudnessCurve('u', 0, 10)).rejects.toThrow('ffmpeg exited 1');
   });
 });
 
@@ -562,19 +555,5 @@ describe('renderShort', () => {
     await renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS);
     const args = spawnMock.mock.calls[0]![1]!;
     expect(args[args.indexOf(FILTER_GRAPH) + 1]).toBe(shortFilter('blur'));
-  });
-
-  it('rejects when ffmpeg fails', async () => {
-    nextRun({ stderr: 'Conversion failed!', code: 1 });
-    await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'blur' }, RENDER_MS),
-    ).rejects.toThrow('ffmpeg exited 1: Conversion failed!');
-  });
-
-  it('rejects when the process cannot start', async () => {
-    nextRun({ error: new Error('spawn ffmpeg ENOENT') });
-    await expect(
-      renderShort('s', 't', { startSec: 0, lengthSec: 15, reframe: 'crop' }, RENDER_MS),
-    ).rejects.toThrow('ENOENT');
   });
 });

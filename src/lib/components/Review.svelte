@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
-  import { loadDraft, saveDraft } from '$lib/draft';
+  import { loadDraft, saveDraft } from '#lib/draft.js';
   import {
     DESCRIPTION_MAX,
     parseHashtags,
@@ -11,9 +11,14 @@
     TITLE_MAX,
     validateFields,
     type FieldErrors,
-  } from '$lib/metadata';
-  import { nextReviewStep, previousReviewStep, REVIEW_STEPS, type ReviewStep } from '$lib/release';
-  import type { Destination, Pick, PickFields } from '$lib/types';
+  } from '#lib/metadata.js';
+  import {
+    nextReviewStep,
+    previousReviewStep,
+    REVIEW_STEPS,
+    type ReviewStep,
+  } from '#lib/release.js';
+  import type { Destination, Pick, PickFields } from '#lib/types.js';
 
   type Fields = { title: string; description: string; tags: string[] };
 
@@ -232,7 +237,7 @@
         <span class="help"
           >Everything you approved here is kept. Reconnecting the same channel picks up right here.</span
         >
-        <a class="btn primary" href={resolve('/connections')}>Reconnect YouTube</a>
+        <a class="btn primary" href={resolve('connections')}>Reconnect YouTube</a>
       </div>
     {/if}
     <div class="actions">

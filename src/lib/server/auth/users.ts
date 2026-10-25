@@ -1,8 +1,8 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { query } from '$lib/server/core/db';
-import { signupMode } from '$lib/server/core/env';
-import { withIdentity } from '$lib/server/core/identity';
-import { users } from '$lib/server/core/schema';
+import { query } from '#lib/server/core/db.js';
+import { signupMode } from '#lib/server/core/env.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { users } from '#lib/server/core/schema.js';
 
 /** A user who has signed in: `uid` is bound. */
 export type User = Omit<typeof users.$inferSelect, 'uid'> & { uid: string };

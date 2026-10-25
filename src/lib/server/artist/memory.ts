@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
-import type { PickFields } from '$lib/types';
-import { query, type Database, type Tx } from '$lib/server/core/db';
-import { artistMemory, jobs, users } from '$lib/server/core/schema';
+import type { PickFields } from '#lib/types.js';
+import { query, type Database, type Tx } from '#lib/server/core/db.js';
+import { artistMemory, jobs, users } from '#lib/server/core/schema.js';
 
 export const ARTIST_ID = 'flr';
 export const ARTIST_NAME = 'Flies Like Robots';

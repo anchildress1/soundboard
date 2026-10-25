@@ -9,10 +9,10 @@ export default defineConfig({
   resolve: { conditions: ['browser', ...defaultClientConditions] },
   test: {
     // Unit tests run real SQL on PGlite instead of mocking the database module. Exact match only:
-    // db.test.ts imports `$lib/server/core/db.js` to reach the real module past this alias.
+    // db.test.ts imports `#src/lib/server/core/db.js` to reach the real module past this alias.
     alias: [
       {
-        find: /^\$lib\/server\/core\/db$/,
+        find: /^#lib\/server\/core\/db\.js$/,
         replacement: fileURLToPath(new URL('tests/helpers/db.ts', import.meta.url)),
       },
     ],

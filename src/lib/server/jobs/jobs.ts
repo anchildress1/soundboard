@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import type { Chunk, JobState, Pick, PublicJob } from '$lib/types';
-import { query, type Tx } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import type { Chunk, JobState, Pick, PublicJob } from '#lib/types.js';
+import { query, type Tx } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { fromRow, jobRow, jobSet, type JobPatch } from './rows';
 import { readAudience, saveAudience } from './audience';
 
@@ -208,20 +208,26 @@ const released = { claimToken: null, claimUntil: null };
  * Applies the step's result and drops the claim, only while `token` still holds it. When an action
  * (discard, re-run) moved the job off the state the step started from, only the video ID, upload
  * session, and upload progress land, so the record of what YouTube holds survives; a token whose
- * claim lapsed to someone else writes nothing and leaves the newer claim in place.
+ * claim lapsed to someone else writes nothing and leaves the newer claim in place. `clearChunks`
+ * empties the stored chunks under the same guard; a plain patch can't.
  */
 export async function releaseJob(
   id: string,
   token: string,
   claimedState: JobState,
   patch: JobPatch = {},
-  writes: { pick?: Pick; chunk?: Chunk; alsoWrite?: (tx: Tx) => Promise<void> } = {},
+  writes: {
+    pick?: Pick;
+    chunk?: Chunk;
+    clearChunks?: boolean;
+    alsoWrite?: (tx: Tx) => Promise<void>;
+  } = {},
 ): Promise<boolean> {
   const held = and(eq(jobs.id, id), eq(jobs.claimToken, token));
   return await query(async (tx) => {
     const [kept] = await tx
       .update(jobs)
-      .set({ ...jobSet(patch), ...released })
+      .set({ ...jobSet(patch), ...released, ...(writes.clearChunks ? { chunks: [] } : {}) })
       .where(and(held, eq(jobs.state, claimedState)))
       .returning({ id: jobs.id });
     if (!kept) {

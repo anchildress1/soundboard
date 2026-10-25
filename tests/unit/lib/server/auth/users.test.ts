@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { admit, getUser } from '$lib/server/auth/users';
-import { db } from '$lib/server/core/db';
-import { users } from '$lib/server/core/schema';
+import { admit, getUser } from '#lib/server/auth/users.js';
+import { db } from '#lib/server/core/db.js';
+import { users } from '#lib/server/core/schema.js';
 import { client, seed } from '../../../../helpers/db';
 
 const NATHAN = 'sub-nathan';

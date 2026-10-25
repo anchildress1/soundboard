@@ -7,7 +7,7 @@ import {
   SHORT_MAX_SEC,
   SHORT_MIN_SEC,
   tenth,
-} from '$lib/short';
+} from '#lib/short.js';
 
 describe('tenth', () => {
   it('rounds to a tenth of a second', () => {

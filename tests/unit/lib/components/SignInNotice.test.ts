@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({ page: { url: new URL('https://soundboard.test/') } }));
 vi.mock('$app/state', () => ({ page: h.page }));
 
-import SignInNotice from '$lib/components/SignInNotice.svelte';
+import SignInNotice from '#lib/components/SignInNotice.svelte';
 
 const visit = (query = '') => {
   h.page.url = new URL(`https://soundboard.test/${query}`);

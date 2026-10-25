@@ -9,9 +9,19 @@ export function optional(name: string, fallback = ''): string {
   return process.env[name] || fallback;
 }
 
-/** `llama-server` base: local in development, the Vertex endpoint's invoke URL when deployed. */
-export function modelUrl(): string {
-  return optional('MODEL_URL', 'http://127.0.0.1:8081');
+/** Gemini API authorization key; the only model credential. */
+export function geminiApiKey(): string {
+  return required('GEMINI_API_KEY');
+}
+
+/** Model for the chunk analyst, the one agent that must hear audio. */
+export function analystModel(): string {
+  return optional('GEMINI_ANALYST_MODEL', 'gemini-3.8-flash');
+}
+
+/** Model for smart pick, hook pick and the brand guide. */
+export function pickModel(): string {
+  return optional('GEMINI_PICK_MODEL', 'gemini-4-argon');
 }
 
 /** Who may sign in: invited emails only (the default), or any Google account. */

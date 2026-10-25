@@ -34,6 +34,7 @@
 - The provider and model names are the feature itself, so they appear in the spec by design (same as spec 001 naming Google and YouTube).
 - SC-007 and SC-001 name Sentry and GPU spend: both are the operator's own outcomes, kept as written.
 - 2026-10-22: gate G1 ran. Registering the full upload was too slow (120–255 s), so each 60 s window is cut into a small clip and sent inline (6.4 s). Registration, `@google/genai` and the Gemini bucket grants are dropped. One credential: the authorization key.
-- 2026-10-23 update (YouTube API policy review): added FR-017–FR-021 and SC-007–SC-009. They cover API data kept out of traces, the privacy-page disclosure, the owner's III.E.4.h interpretation, the artist's own data going only to that artist's request, and pick latency at the #20 prompt size. All items still pass. No clarification markers.
-- 2026-10-23, PR #21 review: `store: false` doesn't turn off Google's 55-day abuse-monitoring log. FR-018's disclosure and FR-019 now say so, and the open III.E.4 question is recorded with a Vertex AI zero-retention fallback.
-- 2026-10-23, PR #21 review: FR-017 and SC-007 now cover copied output. Picked tags and hashtags, description hashtags and re-ask assistant turns are recorded as counts, because they're copied verbatim from YouTube candidates.
+- 2026-10-24 review: FR-017–FR-019 now retain text diagnostics under the owner's accepted storage risk; media and credentials stay redacted. Implicit caching and actual hosted Sentry retention are disclosed, with no zero-retention fallback claim.
+- FR-023/SC-010 block every feature deployment until the YouTube request covering the disclosed processing/storage is approved; acceptance of risk is not approval.
+- Review gaps now have explicit contracts and validation scenarios: typed errors, clip/request limits, shared deadline, atomic reset, existing Shorts, raw parse diagnostics, configured-model labels and E2E fakes for provider HTTP and window media.
+- These checks assess requirement quality, not completed implementation: G2 passed on 2026-10-24 (configuration A); external approval and deployed checks remain outstanding.

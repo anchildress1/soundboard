@@ -1,13 +1,12 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
 import {
   claimJob,
   createJob,
   createShort,
-  fail,
   getJob,
   latestPick,
   listChunks,
@@ -15,7 +14,6 @@ import {
   listPicks,
   newJobDoc,
   newJobId,
-  ok,
   outcomeUnknown,
   releaseJob,
   skipAndRepick,
@@ -23,10 +21,10 @@ import {
   transitionJob,
   type JobDoc,
   type NewJob,
-} from '$lib/server/jobs/jobs';
-import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import { saveAudience } from '$lib/server/jobs/audience';
-import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '$lib/types';
+} from '#lib/server/jobs/jobs.js';
+import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
+import { saveAudience } from '#lib/server/jobs/audience.js';
+import { SHORT_SOURCE_STATES, type Chunk, type Pick } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, SESSION_URI, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
@@ -383,6 +381,72 @@ describe('claimJob / releaseJob', () => {
     expect(await claimRow('j')).toEqual({ token: null, until: null });
   });
 
+  describe('clearChunks', () => {
+    const RESET: JobPatch = { state: 'PREP', chunkIndex: 0, error: null, consecutiveFailures: 0 };
+
+    /** An ANALYZE job with two stored chunks, claimed. */
+    async function analyzing() {
+      await createJob(input, 'j');
+      const first = (await claimJob('j'))!;
+      await releaseJob(
+        'j',
+        first.token,
+        'AWAITING_UPLOAD',
+        { state: 'ANALYZE', chunkIndex: 1 },
+        {
+          chunk: chunk(0),
+        },
+      );
+      const second = (await claimJob('j'))!;
+      await releaseJob('j', second.token, 'ANALYZE', { chunkIndex: 2 }, { chunk: chunk(1) });
+      return (await claimJob('j'))!;
+    }
+
+    it('empties the chunks with the state patch for the holder', async () => {
+      const { token } = await analyzing();
+      expect(await releaseJob('j', token, 'ANALYZE', RESET, { clearChunks: true })).toBe(true);
+      expect(await getJob('j')).toMatchObject({ state: 'PREP', chunkIndex: 0 });
+      expect(await listChunks('j')).toEqual([]);
+    });
+
+    it('changes neither chunks nor state for a stolen claim', async () => {
+      const stale = await analyzing();
+      await expireClaim('j');
+      await claimJob('j');
+      expect(await releaseJob('j', stale.token, 'ANALYZE', RESET, { clearChunks: true })).toBe(
+        false,
+      );
+      expect(await getJob('j')).toMatchObject({ state: 'ANALYZE', chunkIndex: 2 });
+      expect(await listChunks('j')).toEqual([chunk(0), chunk(1)]);
+    });
+
+    it('changes neither chunks nor state after a concurrent discard', async () => {
+      const { token } = await analyzing();
+      await patch('j', { state: 'DISCARDED' });
+      expect(await releaseJob('j', token, 'ANALYZE', RESET, { clearChunks: true })).toBe(false);
+      expect((await getJob('j'))?.state).toBe('DISCARDED');
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+
+    it('rolls back both when the transaction fails', async () => {
+      const { token } = await analyzing();
+      await expect(
+        releaseJob('j', token, 'ANALYZE', RESET, {
+          clearChunks: true,
+          alsoWrite: () => Promise.reject(new Error('write failed')),
+        }),
+      ).rejects.toThrow('write failed');
+      expect(await getJob('j')).toMatchObject({ state: 'ANALYZE', chunkIndex: 2 });
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+
+    it('is the only way to empty chunks: a plain patch leaves them', async () => {
+      const { token } = await analyzing();
+      expect(await releaseJob('j', token, 'ANALYZE', RESET)).toBe(true);
+      expect(await listChunks('j')).toHaveLength(2);
+    });
+  });
+
   it(REFUSES_MISSING, async () => {
     expect(await releaseJob('ghost', 't', 'PREP')).toBe(false);
   });
@@ -617,16 +681,6 @@ describe('createShort', () => {
   });
 });
 
-describe('ok', () => {
-  it('resets the failure streak and the shown error', () => {
-    expect(ok({ state: 'RENDER' })).toEqual({
-      state: 'RENDER',
-      consecutiveFailures: 0,
-      error: null,
-    });
-  });
-});
-
 describe('toPublic', () => {
   it('passes the Short link, parent, destination and approved fields through', async () => {
     const job = await createJob(input, 'j');
@@ -717,16 +771,6 @@ describe('jobSet', () => {
     ]) {
       expect(row!.data).not.toHaveProperty(key);
     }
-  });
-});
-
-describe('fail', () => {
-  it('records the failed state for a retry', () => {
-    expect(fail('ANALYZE', 'boom')).toEqual({
-      state: 'FAILED',
-      failedState: 'ANALYZE',
-      error: 'boom',
-    });
   });
 });
 

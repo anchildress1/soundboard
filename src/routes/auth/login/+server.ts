@@ -1,5 +1,11 @@
 import { error, redirect } from '@sveltejs/kit';
-import { authUrl, newOAuthState, OAUTH_COOKIE, OAUTH_TTL_SEC, sign } from '$lib/server/auth/auth';
+import {
+  authUrl,
+  newOAuthState,
+  OAUTH_COOKIE,
+  OAUTH_TTL_SEC,
+  sign,
+} from '#lib/server/auth/auth.js';
 import type { RequestHandler } from './$types';
 
 /** `/auth/login` signs in with Google; `?connect=youtube` re-grants the signed-in user's channel. */
@@ -17,5 +23,8 @@ export const GET: RequestHandler = ({ url, cookies, locals }) => {
     sameSite: 'lax',
     maxAge: OAUTH_TTL_SEC,
   });
-  redirect(303, authUrl(url.origin, state, locals.user?.email));
+  // Google's consent page is the app's only off-site redirect; any other origin throws.
+  redirect(303, authUrl(url.origin, state, locals.user?.email), {
+    external: ['https://accounts.google.com'],
+  });
 };

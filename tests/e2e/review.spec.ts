@@ -6,6 +6,13 @@ const JOB = '/jobs/e2e-tabs';
 
 const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
+// A fill before hydration lands in the server-rendered input and is lost; clearing the title
+// disables Next only once hydration has attached the handlers.
+const clearTitleOnceHydrated = (page: Page) =>
+  expect(async () => {
+    await page.getByLabel(/^Title/).fill('');
+    await expect(button(page, 'Keep it, next')).toBeDisabled({ timeout: 1000 });
+  }).toPass();
 
 test('walks the draft one field at a time to approval', async ({ page }) => {
   await signIn(page, USER_A);
@@ -36,13 +43,13 @@ test('walks the draft one field at a time to approval', async ({ page }) => {
 test('blocks the next step on an invalid field', async ({ page }) => {
   await signIn(page, USER_A);
   await page.goto(JOB);
-  await page.getByLabel(/^Title/).fill('');
-  await expect(button(page, 'Keep it, next')).toBeDisabled();
+  await clearTitleOnceHydrated(page);
 });
 
 test('keeps edits and the step across a reload', async ({ page }) => {
   await signIn(page, USER_A);
   await page.goto(JOB);
+  await clearTitleOnceHydrated(page);
   await page.getByLabel(/^Title/).fill('PeekaBoo (Live)');
   await button(page, 'Keep it, next').click();
   await expect(h1(page)).toHaveText('Read the description');

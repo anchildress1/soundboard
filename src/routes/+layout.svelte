@@ -5,7 +5,7 @@
   import displayFont from '@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-opsz-normal.woff2?url';
   import '../app.css';
   import { resolve } from '$app/paths';
-  import Footer from '$lib/components/Footer.svelte';
+  import Footer from '#lib/components/Footer.svelte';
   import type { Snippet } from 'svelte';
   import type { LayoutData } from './$types';
 
@@ -28,7 +28,7 @@
   <link rel="preload" href={displayFont} as="font" type="font/woff2" crossorigin="anonymous" />
   <meta
     name="description"
-    content="Release agent for Flies Like Robots: a self-hosted model watches and listens to a music video, then drafts and verifies the YouTube upload."
+    content="Release agent for Flies Like Robots: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload."
   />
 </svelte:head>
 
@@ -54,10 +54,10 @@
       </button>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <nav id="menu" aria-label="Menu" popover bind:this={menu} onclick={closeOnLink}>
-        <a href={resolve('/connections')}>Connections</a>
+        <a href={resolve('connections')}>Connections</a>
         {#if artist}
-          <a href={resolve('/brand')}>Brand guide</a>
-          <a href={resolve('/settings')}>Settings</a>
+          <a href={resolve('brand')}>Brand guide</a>
+          <a href={resolve('settings')}>Settings</a>
         {/if}
         <form method="POST" action="/auth/logout">
           <button type="submit" title={data.user.email}>Sign out</button>

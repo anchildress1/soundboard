@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import { STEPS, stepLabel } from '$lib/release';
+  import { STEPS, stepLabel } from '#lib/release.js';
 
   let {
     title,

@@ -1,6 +1,6 @@
-import { create, type CreateInput } from '$lib/server/jobs/create';
-import { ActionError } from '$lib/server/core/errors';
-import { readBody, respond } from '$lib/server/core/http';
+import { create, type CreateInput } from '#lib/server/jobs/create.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { readBody, respond } from '#lib/server/core/http.js';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ request, locals }) =>

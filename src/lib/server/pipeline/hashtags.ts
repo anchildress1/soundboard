@@ -1,12 +1,12 @@
-import { parseHashtags } from '$lib/metadata';
-import type { Chunk } from '$lib/types';
-import { toolSpan } from '$lib/server/core/tracing';
+import { parseHashtags } from '#lib/metadata.js';
+import type { Chunk } from '#lib/types.js';
+import { toolSpan } from '#lib/server/core/tracing.js';
 import {
   searchMusicVideos,
   videosByIds,
   type CatalogVideo,
   type VideoDuration,
-} from '$lib/server/platforms/youtube';
+} from '#lib/server/platforms/youtube/index.js';
 
 export const CANDIDATE_LIMIT = 30;
 export const SEARCH_RESULTS = 50;

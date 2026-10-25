@@ -114,15 +114,15 @@ export const STATE_LABELS: Record<JobState, { text: string; tone: Tone }> = {
 export function workCopy({ job, wait }: JobView): { title: string; body: string } {
   const leave = 'Nothing for you to do yet. Leave if you like; Home brings you back.';
   switch (wait) {
-    case 'waking model':
+    case 'model busy':
       return {
         title: WAIT_TEXT[wait],
-        body: 'It sleeps when nobody is using it and takes about a minute to start. ' + leave,
+        body: 'This page asks the model again on its own. ' + leave,
       };
-    case 'waiting on another run':
+    case 'model quota spent':
       return {
         title: WAIT_TEXT[wait],
-        body: 'One release runs at a time. Yours starts when the other one finishes.',
+        body: "Today's model quota is used up. This page tries again once it resets. " + leave,
       };
     case 'step running in another tab':
       return {

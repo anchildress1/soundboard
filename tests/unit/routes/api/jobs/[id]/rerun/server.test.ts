@@ -2,12 +2,12 @@
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory, jobs } from '$lib/server/core/schema';
-import { listPicks } from '$lib/server/jobs/jobs';
-import { POST } from '$routes/api/jobs/[id]/rerun/+server';
-import type { JobView } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory, jobs } from '#lib/server/core/schema.js';
+import { listPicks } from '#lib/server/jobs/jobs.js';
+import { POST } from '#src/routes/api/jobs/[id]/rerun/+server.js';
+import type { JobView } from '#lib/types.js';
 import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
 import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 

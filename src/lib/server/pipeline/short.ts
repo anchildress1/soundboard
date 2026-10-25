@@ -2,37 +2,49 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pRetry from 'p-retry';
-import { REASK_ONCE } from '$lib/retry';
-import { floorTenth, lengthBounds, tenth } from '$lib/short';
-import type { Chunk, Hook, Short } from '$lib/types';
+import { REASK_ONCE } from '#lib/retry.js';
+import { floorTenth, lengthBounds, tenth } from '#lib/short.js';
+import type { Chunk, Hook, Short } from '#lib/types.js';
 import {
+  chunkCount,
   LOUDNESS_TIMEOUT_MS,
   loudnessCurve,
   probe,
   renderShort,
   WINDOW_SEC,
   type LoudnessPoint,
-} from '$lib/server/media/ffmpeg';
-import { signedReadUrl, uploadFile } from '$lib/server/media/gcs';
-import { fail, listChunks, ok, type JobDoc } from '$lib/server/jobs/jobs';
-import type { JobPatch } from '$lib/server/jobs/rows';
-import { chatJson, stepDeadline } from '$lib/server/ai/model';
-import { stripNumerics } from '$lib/server/ai/numerics';
-import { isFiniteNumber, isString, shape } from '$lib/server/ai/shape';
-import { digestChunks } from '$lib/server/ai/smart-pick';
+} from '#lib/server/media/ffmpeg.js';
+import { signedReadUrl, uploadFile } from '#lib/server/media/gcs.js';
+import { fail, getJob, listChunks, ok, type JobDoc } from '#lib/server/jobs/jobs.js';
+import type { JobPatch } from '#lib/server/jobs/rows.js';
+import { chatJson, modelFor } from '#lib/server/ai/model.js';
+import { stripNumerics } from '#lib/server/ai/numerics.js';
+import { isFiniteNumber, isString, shape } from '#lib/server/ai/shape.js';
+import { digestChunks } from '#lib/server/ai/smart-pick.js';
 import {
   agentInput,
   agentOutput,
   invokeAgent,
+  textTurn,
   type AgentSpan,
-  type ChatMessage,
-} from '$lib/server/core/tracing';
+  type ModelRequest,
+} from '#lib/server/core/tracing.js';
 
 /**
  * Time the hook step keeps after the model: the loudness pass's whole time limit, plus signing its
  * URL and writing the job, so a slow model call can't push the step past its budget.
  */
 const LOUDNESS_RESERVE_MS = LOUDNESS_TIMEOUT_MS + 5_000;
+
+export const STALE_ANALYSIS =
+  'This video was analyzed by an older version. Upload it again to make a Short.';
+
+/**
+ * Whether a video's windows were counted at another window length; its window indices would place
+ * a hook at the wrong time.
+ */
+export const staleAnalysis = (video: Pick<JobDoc, 'chunkCount'>, durationSec: number) =>
+  video.chunkCount !== chunkCount(durationSec);
 
 export const HOOK_SCHEMA = {
   type: 'object',
@@ -63,7 +75,7 @@ export type HookContext = {
   skipped: Short['skipped'];
 };
 
-export function buildHookMessages(ctx: HookContext): ChatMessage[] {
+export function buildHookRequest(ctx: HookContext): ModelRequest {
   const { min, max } = lengthBounds(ctx.sourceDurationSec);
   const rules = [
     'Pick the hook for a YouTube Short cut from this music video: the part a new listener should hear and see first, like the chorus, the drop, a riff, or the strongest visual moment.',
@@ -85,10 +97,10 @@ export function buildHookMessages(ctx: HookContext): ChatMessage[] {
     })),
     skippedHooks: ctx.skipped.length > 0 ? ctx.skipped : undefined,
   };
-  return [
-    { role: 'system', content: rules.join('\n') },
-    { role: 'user', content: JSON.stringify(context) },
-  ];
+  return {
+    system: rules.join('\n'),
+    turns: [{ role: 'user', parts: [{ type: 'text', text: JSON.stringify(context) }] }],
+  };
 }
 
 /**
@@ -118,23 +130,23 @@ const repeats = (hook: RawHook, skipped: Short['skipped']) =>
 
 /**
  * Asks the model for the hook, retrying once when it repeats a skipped one. Null when the reply
- * never parses; `hook: null` when the retry repeats too. With `span`, records the first request and
- * the settled hook on the agent span.
+ * never parses; `hook: null` when the retry repeats too. The step's `deadline` covers every call.
+ * With `span`, records the first request and the settled hook on the agent span.
  */
 export async function runHook(
   ctx: HookContext,
-  deadline = stepDeadline(),
+  deadline: number,
   span?: AgentSpan,
 ): Promise<{ hook: RawHook | null; ms: number } | null> {
   let ms = 0;
-  let messages = buildHookMessages(ctx);
-  if (span) agentInput(span, messages);
+  let request = buildHookRequest(ctx);
+  if (span) agentInput(span, request);
   try {
     return await pRetry(
       async () => {
         const { value, ms: took } = await chatJson(
-          messages,
-          'hook_pick',
+          request,
+          'hook-pick',
           HOOK_SCHEMA,
           isRawHook,
           deadline,
@@ -150,11 +162,14 @@ export async function runHook(
         ...REASK_ONCE,
         onFailedAttempt: ({ error }) => {
           if (!(error instanceof RepeatedHook)) return;
-          messages = [
-            ...messages,
-            { role: 'assistant', content: JSON.stringify(error.value) },
-            { role: 'user', content: 'That repeats a skipped hook. Pick a different one.' },
-          ];
+          request = {
+            ...request,
+            turns: [
+              ...request.turns,
+              textTurn('assistant', JSON.stringify(error.value)),
+              textTurn('user', 'That repeats a skipped hook. Pick a different one.'),
+            ],
+          };
         },
         shouldRetry: ({ error }) => error instanceof RepeatedHook,
       },
@@ -209,10 +224,16 @@ export function placeCut(
   return Math.max(0, Math.min(tenth(onset), floorTenth(latest)));
 }
 
-/** HOOK step: the model picks the window and length, then ffmpeg's loudness places the start. */
-export async function hookStep(job: JobDoc): Promise<JobPatch> {
+/**
+ * HOOK step: the model picks the window and length, then ffmpeg's loudness places the start. Both
+ * fit inside the step's `deadline`.
+ */
+export async function hookStep(job: JobDoc, deadline: number): Promise<JobPatch> {
   const short = requireShort(job);
-  const chunks = job.parentId ? await listChunks(job.parentId) : [];
+  const parent = job.parentId ? await getJob(job.parentId) : null;
+  // The Short's own chunk count is a default; the windows it picks from are its video's.
+  if (parent && staleAnalysis(parent, short.sourceDurationSec)) return fail('HOOK', STALE_ANALYSIS);
+  const chunks = parent ? await listChunks(parent.id) : [];
   if (chunks.length === 0) throw new Error("The source video's analysis is gone.");
   const ctx: HookContext = {
     songTitle: job.songTitle,
@@ -221,8 +242,8 @@ export async function hookStep(job: JobDoc): Promise<JobPatch> {
     skipped: short.skipped,
     chunks,
   };
-  const result = await invokeAgent('hook-pick', async (span) => {
-    const picked = await runHook(ctx, stepDeadline() - LOUDNESS_RESERVE_MS, span);
+  const result = await invokeAgent('hook-pick', modelFor('hook-pick'), async (span) => {
+    const picked = await runHook(ctx, deadline - LOUDNESS_RESERVE_MS, span);
     if (picked?.hook) span.setAttribute('short.window', picked.hook.window);
     return picked;
   });
@@ -263,14 +284,14 @@ const READBACK_TIMEOUT_MS = 10_000;
  * is read back from storage before review. A new object per render means the player never shows a
  * cached earlier cut.
  */
-export async function renderStep(job: JobDoc): Promise<JobPatch> {
+export async function renderStep(job: JobDoc, deadline: number): Promise<JobPatch> {
   const short = requireShort(job);
   if (!short.hook) throw new Error('The Short has no hook to cut.');
   const renders = short.renders + 1;
   const object = `uploads/${job.id}-${renders}`;
   const local = join(tmpdir(), `short-${job.id}-${renders}.mp4`);
-  // One deadline across render, upload, and read-back, so the step can't outlast its budget.
-  const renderBy = stepDeadline() - UPLOAD_TIMEOUT_MS - READBACK_TIMEOUT_MS;
+  // The step's deadline spans render, upload, and read-back, so the step can't outlast its budget.
+  const renderBy = deadline - UPLOAD_TIMEOUT_MS - READBACK_TIMEOUT_MS;
   try {
     const source = await signedReadUrl(requireSource(job));
     await renderShort(

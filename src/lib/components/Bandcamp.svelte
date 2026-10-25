@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Pick } from '$lib/types';
+  import type { Pick } from '#lib/types.js';
 
   const EDITOR = 'https://flieslikerobots.bandcamp.com/edit_track';
 

@@ -9,8 +9,8 @@ import {
   STEPS,
   workCopy,
   type ReleaseItem,
-} from '$lib/release';
-import { JOB_STATES, type JobState, type JobView, type Wait } from '$lib/types';
+} from '#lib/release.js';
+import { JOB_STATES, type JobState, type JobView, type Wait } from '#lib/types.js';
 
 describe('stepIndex', () => {
   it.each([
@@ -160,8 +160,8 @@ describe('workCopy', () => {
   });
 
   it.each([
-    ['waking model', 'Waking the model'],
-    ['waiting on another run', 'Waiting on another release'],
+    ['model busy', 'Model busy'],
+    ['model quota spent', 'Model quota spent'],
     ['step running in another tab', 'Running in another tab'],
     ['waiting on YouTube', 'Waiting on YouTube'],
     ['reconnect YouTube', 'Upload paused'],

@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { eq, sql, type SQL } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db, query, type Database, type Tx } from '$lib/server/core/db';
-import { withIdentity } from '$lib/server/core/identity';
-import { artistMemory, connections, jobAudience, jobs, users } from '$lib/server/core/schema';
-import { artistJob, writeFeedback, type Feedback } from '$lib/server/artist/memory';
-import { readAudience, saveAudience } from '$lib/server/jobs/audience';
-import { markFinalChunk, markUploadStarted } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import { db, query, type Database, type Tx } from '#lib/server/core/db.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { artistMemory, connections, jobAudience, jobs, users } from '#lib/server/core/schema.js';
+import { artistJob, writeFeedback, type Feedback } from '#lib/server/artist/memory.js';
+import { readAudience, saveAudience } from '#lib/server/jobs/audience.js';
+import { markFinalChunk, markUploadStarted } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

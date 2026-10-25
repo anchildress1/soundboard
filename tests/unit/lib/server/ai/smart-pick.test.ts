@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '$lib/metadata';
-import type { Fact, Feedback } from '$lib/server/artist/memory';
+import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '#lib/metadata.js';
+import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
   allowedLinks,
   ARTIST_CREDITS,
   ARTIST_VOICE,
   CONTACT_LINE,
-  buildPickMessages,
+  buildPickRequest,
   digestChunks,
   finalizePick,
   isRawPick,
@@ -21,12 +21,14 @@ import {
   type PickContext,
   type PickFixups,
   type RawPick,
-} from '$lib/server/ai/smart-pick';
-import type { Chunk, Measurements, Probe } from '$lib/types';
-import type { CandidateList } from '$lib/server/pipeline/hashtags';
-import type { AgentSpan } from '$lib/server/core/tracing';
+} from '#lib/server/ai/smart-pick.js';
+import type { Chunk, Measurements, Probe } from '#lib/types.js';
+import type { CandidateList } from '#lib/server/pipeline/hashtags.js';
+import type { AgentSpan, Part } from '#lib/server/core/tracing.js';
+import { stepDeadline } from '#lib/server/ai/model.js';
 import { agentSpanIO, clearAgentSpan } from '../../../../helpers/agent-span';
 import { span } from '../../../../mocks/sentry';
+import { interaction, unavailable503 } from '../../../../helpers/gemini';
 import { omit } from '../../../../helpers/omit';
 
 const SYNTHWAVE = '#synthwave';
@@ -240,9 +242,9 @@ describe('weighFeedback', () => {
   });
 });
 
-describe('buildPickMessages', () => {
+describe('buildPickRequest', () => {
   it("writes the description in the artist's own voice on runs that may name him", () => {
-    const rules = system(buildPickMessages(ctx()));
+    const rules = system(buildPickRequest(ctx()));
     expect(rules).toContain(ARTIST_VOICE);
     expect(rules).toContain(ARTIST_CREDITS);
     expect(rules).toContain('hacked and slashed');
@@ -264,11 +266,11 @@ describe('buildPickMessages', () => {
     expect(rules).not.toMatch(/persona/i);
   });
 
-  const userParts = (messages: ReturnType<typeof buildPickMessages>) =>
-    messages[1]!.content as { type: string; text?: string; image_url?: { url: string } }[];
-  const context = (messages: ReturnType<typeof buildPickMessages>) =>
-    JSON.parse(userParts(messages)[0]!.text!) as Record<string, unknown>;
-  const system = (messages: ReturnType<typeof buildPickMessages>) => messages[0]!.content as string;
+  type Request = ReturnType<typeof buildPickRequest>;
+  const userParts = (request: Request): Part[] => request.turns[0]!.parts;
+  const context = (request: Request) =>
+    JSON.parse((userParts(request)[0] as { text: string }).text) as Record<string, unknown>;
+  const system = (request: Request) => request.system;
 
   it('keeps each reference list labeled without pooled terms or frequency fields', () => {
     const lists = [
@@ -279,7 +281,7 @@ describe('buildPickMessages', () => {
         tags: cands('synthwave', 'outrun'),
       }),
     ];
-    const body = context(buildPickMessages(ctx({ candidateLists: lists })));
+    const body = context(buildPickRequest(ctx({ candidateLists: lists })));
 
     expect(body.candidateLists).toEqual([source({ tags: cands('synthwave') }), lists[1]]);
     expect(body).not.toHaveProperty('candidateHashtags');
@@ -288,9 +290,8 @@ describe('buildPickMessages', () => {
   });
 
   it('names the artist when allowed', () => {
-    const messages = buildPickMessages(ctx({ notes: 'live take', measurements: measurements() }));
-    expect(messages[0]!.role).toBe('system');
-    expect(messages[1]!.role).toBe('user');
+    const messages = buildPickRequest(ctx({ notes: 'live take', measurements: measurements() }));
+    expect(messages.turns.map((t) => t.role)).toEqual(['user']);
     const body = context(messages);
     expect(body.artist).toBe(ARTIST);
     expect(body.artistNotes).toBe('live take');
@@ -304,7 +305,7 @@ describe('buildPickMessages', () => {
   });
 
   it('names no artist and asks for no artist tag on an unlinked job', () => {
-    const messages = buildPickMessages(ctx({ artist: false }));
+    const messages = buildPickRequest(ctx({ artist: false }));
     const body = context(messages);
     expect(body).not.toHaveProperty('artist');
     expect(body.candidateLists).toEqual(candidateLists);
@@ -314,7 +315,7 @@ describe('buildPickMessages', () => {
   });
 
   it("keeps the artist's credit and contact lines out of an unlinked job", () => {
-    const rules = system(buildPickMessages(ctx({ artist: false })));
+    const rules = system(buildPickRequest(ctx({ artist: false })));
     expect(rules).not.toContain(ARTIST_CREDITS);
     expect(rules).not.toContain(CONTACT_LINE);
     expect(rules).not.toContain('flieslikerobots@');
@@ -330,7 +331,7 @@ describe('buildPickMessages', () => {
 
   it('grounds title, description, and tags in the genre search', () => {
     const audience = [{ title: 'Top hit', description: 'Credits.', tags: ['outrun'], views: 9000 }];
-    const messages = buildPickMessages(ctx({ audience }));
+    const messages = buildPickRequest(ctx({ audience }));
     const body = context(messages);
     expect(body.audienceTopVideos).toEqual([
       { title: 'Top hit', description: 'Credits.', tags: ['outrun'] },
@@ -367,24 +368,24 @@ describe('buildPickMessages', () => {
         thumbnail: null,
       },
     ];
-    const uploads = context(buildPickMessages(ctx({ recent }))).recentUploads as object[];
+    const uploads = context(buildPickRequest(ctx({ recent }))).recentUploads as object[];
     expect(uploads).toEqual([
       { title: 'A', description: 'Written and performed by Nathan.', publishedAt: 'p' },
     ]);
   });
 
   it('omits empty notes, measurements, and skipped versions', () => {
-    const body = context(buildPickMessages(ctx()));
+    const body = context(buildPickRequest(ctx()));
     expect(body).not.toHaveProperty('artistNotes');
     expect(body).not.toHaveProperty('ffmpeg');
     expect(body).not.toHaveProperty('skippedVersions');
   });
 
   it('adds the skipped instruction only when there are skipped versions', () => {
-    const without = buildPickMessages(ctx());
+    const without = buildPickRequest(ctx());
     expect(system(without)).not.toContain('skippedVersions were rejected');
     const skipped = [{ title: 'Old Title', description: 'old' }];
-    const withSkips = buildPickMessages(ctx({ skipped }));
+    const withSkips = buildPickRequest(ctx({ skipped }));
     expect(system(withSkips)).toContain(
       'skippedVersions were rejected. Write a different title and a different description',
     );
@@ -393,13 +394,13 @@ describe('buildPickMessages', () => {
 
   it('sends an approved brand guide and checks the proposal against it', () => {
     const brand = { statement: 'Plain titles.', keep: ['Song only'], fix: [], drop: ['Emoji'] };
-    const messages = buildPickMessages(ctx({ brand }));
+    const messages = buildPickRequest(ctx({ brand }));
     expect(context(messages).brandGuide).toEqual(brand);
     expect(system(messages)).toContain('brandGuide');
   });
 
   it('leaves the brand guide out until one is approved', () => {
-    const messages = buildPickMessages(ctx());
+    const messages = buildPickRequest(ctx());
     expect(context(messages)).not.toHaveProperty('brandGuide');
     expect(system(messages)).not.toContain('brandGuide');
   });
@@ -415,7 +416,7 @@ describe('buildPickMessages', () => {
         thumbnailUrl: 'u',
         views: 0,
         durationSec: 0,
-        thumbnail: 'data:image/jpeg;base64,AAA',
+        thumbnail: { data: 'AAA', mime_type: 'image/jpeg' },
       },
       {
         videoId: 'b',
@@ -437,32 +438,29 @@ describe('buildPickMessages', () => {
         thumbnailUrl: 'u',
         views: 0,
         durationSec: 0,
-        thumbnail: 'data:image/png;base64,BBB',
+        thumbnail: { data: 'BBB', mime_type: 'image/png' },
       },
     ];
-    const messages = buildPickMessages(ctx({ recent }));
+    const messages = buildPickRequest(ctx({ recent }));
     const parts = userParts(messages);
     expect(parts).toHaveLength(4);
     expect(parts[1]).toEqual({
       type: 'text',
       text: 'Thumbnails of the recent uploads, newest first:',
     });
-    expect(parts[2]).toEqual({
-      type: 'image_url',
-      image_url: { url: 'data:image/jpeg;base64,AAA' },
-    });
-    expect(parts[3]!.image_url!.url).toBe('data:image/png;base64,BBB');
+    expect(parts[2]).toEqual({ type: 'image', data: 'AAA', mime_type: 'image/jpeg' });
+    expect(parts[3]).toEqual({ type: 'image', data: 'BBB', mime_type: 'image/png' });
     const uploads = context(messages).recentUploads as { description: string }[];
     expect(uploads).toHaveLength(3);
     expect(uploads[0]!.description).toHaveLength(700);
   });
 
   it('sends only the context text when no thumbnails exist', () => {
-    expect(userParts(buildPickMessages(ctx()))).toHaveLength(1);
+    expect(userParts(buildPickRequest(ctx()))).toHaveLength(1);
   });
 
   it('keeps private facts out of the prompt and weighs feedback', () => {
-    const body = context(buildPickMessages(ctx({ feedback: [feedback('SKIPPED')] })));
+    const body = context(buildPickRequest(ctx({ feedback: [feedback('SKIPPED')] })));
     const sent = body.facts as { public: boolean }[];
     expect(sent.length).toBeGreaterThan(0);
     expect(sent.every((f) => f.public)).toBe(true);
@@ -842,11 +840,11 @@ describe('finalizePick: links, tags, and limits', () => {
   });
 
   it('lists the artist name once even when the search returned it', () => {
-    const messages = buildPickMessages(
+    const messages = buildPickRequest(
       ctx({ candidateLists: [source({ tags: cands('synthwave', 'flies like robots') })] }),
     );
-    const parts = messages[1]!.content as { text?: string }[];
-    expect(JSON.parse(parts[0]!.text!).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
+    const parts = messages.turns[0]!.parts as { text: string }[];
+    expect(JSON.parse(parts[0]!.text).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
     expect(finalizePick(raw(), fix()).tags.filter((tag) => tag === ARTIST)).toHaveLength(1);
   });
 
@@ -997,33 +995,32 @@ describe('finalizePick: links, tags, and limits', () => {
 
 describe('runPick', () => {
   const fetchMock = vi.fn<typeof fetch>();
-  const reply = (content: string) =>
-    new Response(
-      JSON.stringify({
-        choices: [{ message: { content, reasoning_content: 'thinking' } }],
-        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+  const reply = (text: string) => interaction(text);
+  type Turn = { type: string; content: { type: string; text?: string }[] };
   const sentBodies = () =>
     fetchMock.mock.calls.map(
       ([, init]) =>
         JSON.parse(String((init as RequestInit).body)) as {
-          messages: { role: string; content: unknown }[];
-          temperature: number;
-          max_tokens: number;
-          response_format: { type: string; json_schema: { name: string } };
+          model: string;
+          input: Turn[];
+          store: boolean;
+          response_format: unknown;
+          generation_config: { max_output_tokens: number; thinking_level: string };
         },
     );
+  const lastTurns = (call: number) => sentBodies()[call]!.input.slice(-2);
+  const userText = (text: string) => ({ type: 'user_input', content: [{ type: 'text', text }] });
 
   beforeEach(() => {
     clearAgentSpan();
     fetchMock.mockReset();
+    vi.stubEnv('GEMINI_API_KEY', 'test-key');
     vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('records the first request and the finalized pick on the agent span', async () => {
@@ -1032,7 +1029,7 @@ describe('runPick', () => {
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
     const result = await runPick(
       ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }),
-      undefined,
+      stepDeadline(),
       span as unknown as AgentSpan,
     );
     const { input, output } = agentSpanIO();
@@ -1044,47 +1041,68 @@ describe('runPick', () => {
 
   it('records no agent output when the pick fails', async () => {
     fetchMock.mockImplementation(async () => reply('not json'));
-    expect(await runPick(ctx(), undefined, span as unknown as AgentSpan)).toBeNull();
+    expect(await runPick(ctx(), stepDeadline(), span as unknown as AgentSpan)).toBeNull();
     expect(agentSpanIO().input).toHaveLength(1);
     expect(agentSpanIO().output).toEqual([]);
   });
 
-  it('records nothing on a span when none is given', async () => {
+  it('returns the finalized pick from one call to the pick model', async () => {
     fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
-    await runPick(ctx());
-    expect(agentSpanIO()).toEqual({ input: [], output: [] });
-  });
-
-  it('returns the finalized pick from one call', async () => {
-    fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
-    const result = await runPick(ctx());
+    const result = await runPick(ctx(), stepDeadline());
     expect(result).not.toBeNull();
     expect(result!.pick.title).toBe('PeekaBoo');
     expect(allInCandidates(result!.pick.description)).toBe(true);
     expect(result!.ms).toBeGreaterThanOrEqual(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('http://127.0.0.1:8081/v1/chat/completions');
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/v1beta\/interactions$/);
     const [body] = sentBodies();
-    expect(body!.temperature).toBeCloseTo(0.2);
-    expect(body!.max_tokens).toBeGreaterThanOrEqual(2048);
-    expect(body!.response_format.type).toBe('json_schema');
-    expect(body!.response_format.json_schema.name).toBe('smart_pick');
+    expect(body!.model).toBe('gemini-4-argon');
+    expect(body!.store).toBe(false);
+    expect(body!.generation_config).toMatchObject({
+      max_output_tokens: 8192,
+      thinking_level: 'medium',
+    });
+    expect(JSON.stringify(body!.response_format)).toContain(JSON.stringify(PICK_SCHEMA));
+  });
+
+  it('sends thumbnails inline as image parts', async () => {
+    fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw())));
+    const recent = [
+      {
+        videoId: 'a',
+        title: 'A',
+        description: '',
+        tags: [],
+        publishedAt: 'p',
+        thumbnailUrl: 'u',
+        views: 0,
+        durationSec: 0,
+        thumbnail: { data: 'AAA', mime_type: 'image/jpeg' },
+      },
+    ];
+    await runPick(ctx({ recent }), stepDeadline());
+    const content = sentBodies()[0]!.input[0]!.content;
+    expect(content.map((c) => c.type)).toEqual(['text', 'image']);
+    expect(content[0]!.text).toContain('Thumbnails of the recent uploads, newest first:');
+    expect(content[1]).toMatchObject({ data: 'AAA', mime_type: 'image/jpeg' });
   });
 
   it('retries once when the title repeats a skipped version and keeps the new title', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
-    const result = await runPick(ctx({ skipped: [{ title: 'old title', description: 'x' }] }));
+    const result = await runPick(
+      ctx({ skipped: [{ title: 'old title', description: 'x' }] }),
+      stepDeadline(),
+    );
     expect(result!.pick.title).toBe(FRESH_TITLE);
     expect(result!.pick.flags).not.toContain('Title repeats a skipped version');
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const second = sentBodies()[1]!.messages;
-    expect(second.at(-2)!.role).toBe('assistant');
-    expect(second.at(-1)).toEqual({
-      role: 'user',
-      content: 'That title repeats a skipped version. Write a different title.',
-    });
+    const [assistant, user] = lastTurns(1);
+    expect(assistant!.type).toBe('model_output');
+    expect(user).toEqual(
+      userText('That title repeats a skipped version. Write a different title.'),
+    );
   });
 
   it('retries when only the description repeats a skipped version, hashtags aside', async () => {
@@ -1096,52 +1114,74 @@ describe('runPick', () => {
       );
     const result = await runPick(
       ctx({ skipped: [{ title: 'Old Title', description: skippedDescription }] }),
+      stepDeadline(),
     );
     expect(result!.pick.description.startsWith('A darker take.')).toBe(true);
-    expect(sentBodies()[1]!.messages.at(-1)).toEqual({
-      role: 'user',
-      content: 'That description repeats a skipped version. Write a different description.',
-    });
+    expect(lastTurns(1)[1]).toEqual(
+      userText('That description repeats a skipped version. Write a different description.'),
+    );
   });
 
   it('names both fields when the title and description both repeat', async () => {
     fetchMock.mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
     const skipped = [{ title: 'Old Title', description: 'A bright synth track.' }];
-    expect(await runPick(ctx({ skipped }))).toBeNull();
-    expect(sentBodies()[1]!.messages.at(-1)).toEqual({
-      role: 'user',
-      content:
+    expect(await runPick(ctx({ skipped }), stepDeadline())).toBeNull();
+    expect(lastTurns(1)[1]).toEqual(
+      userText(
         'That title and description repeat a skipped version. Write a different title and description.',
-    });
+      ),
+    );
   });
 
   it('fails the pick when the retry repeats a skipped title again', async () => {
     fetchMock.mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
-    expect(await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }))).toBeNull();
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
+    ).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns null when the reply never parses', async () => {
     fetchMock.mockImplementation(async () => reply('not json'));
-    expect(await runPick(ctx())).toBeNull();
+    expect(await runPick(ctx(), stepDeadline())).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns null when the reply parses but fails the schema', async () => {
     fetchMock.mockImplementation(async () => reply(JSON.stringify({ title: 'only a title' })));
-    expect(await runPick(ctx())).toBeNull();
+    expect(await runPick(ctx(), stepDeadline())).toBeNull();
   });
 
   it('returns null when the retry after a skipped repeat never parses', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
       .mockImplementation(async () => reply('{'));
-    expect(await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }))).toBeNull();
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
+    ).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('propagates a llama-server error', async () => {
-    fetchMock.mockImplementation(async () => new Response('overloaded', { status: 503 }));
-    await expect(runPick(ctx())).rejects.toThrow('llama-server 503');
+  it('fails the step when no time is left to re-ask a repeated title', async () => {
+    const now = Date.now();
+    fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))));
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(now)
+      .mockReturnValue(now + 80_000);
+    await expect(
+      runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), now + 110_000),
+    ).rejects.toThrow('ran out of time');
+    vi.restoreAllMocks();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts no call once the deadline is too close', async () => {
+    await expect(runPick(ctx(), Date.now() + 1_000)).rejects.toThrow('ran out of time');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates a Gemini error', async () => {
+    fetchMock.mockImplementation(async () => unavailable503());
+    await expect(runPick(ctx(), stepDeadline())).rejects.toThrow('Gemini 503');
   });
 });

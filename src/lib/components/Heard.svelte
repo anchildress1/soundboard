@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Measurements } from '$lib/types';
+  import type { Measurements } from '#lib/types.js';
 
   let { tags, measurements }: { tags: string[]; measurements: Measurements | null } = $props();
 

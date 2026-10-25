@@ -15,7 +15,7 @@ export class ModelQuotaSpent extends Error {
   readonly until: number;
 }
 
-/** One schema-constrained call. Throws `ModelBusy` on 429/503, `Error` on any other failure. */
+/** One schema-constrained call; throws typed busy/quota errors or a hard failure. */
 export function chat(
   request: ModelRequest,
   agent: Agent,
@@ -44,17 +44,17 @@ export function modelFor(agent: Agent): string; // configured model id
 - Video parts are AI SDK inline `file` parts: `{ type: 'file', mediaType: 'video/mp4', data: bytes }`, the window clip from `cutWindowClip` (research R3). Never a URL: the SDK would download it.
 - `thinkingLevel` and `maxOutputTokens` are per agent (research R5). No temperature.
 - AI SDK telemetry is off on every call, because Sentry's default `vercelAIIntegration` would otherwise add an unredacted span. `chatSpan` owns the span.
-- The per-call timeout is `min(CALL_TIMEOUT_MS, deadline - now)`. A timeout of 0 or less throws before the call.
+- The per-call timeout is `min(CALL_TIMEOUT_MS, deadline - now)` with `CALL_TIMEOUT_MS = 90_000`. Callers pass the remaining shared step budget after finalization reserves; no helper starts a fresh step budget. A timeout of 0 or less throws before the call. The first call and every re-ask require the agent's minimum call budget.
 - `NoObjectGeneratedError` (raw = `error.text`), `NoOutputGeneratedError` (raw = empty), an empty text or a non-`stop` finish reason → treated as unparsed (re-ask once, keep raw). Usage is still recorded on the span.
 - `APICallError` with `statusCode` 429 whose details (`data.error.details`, else `responseBody`) carry a `QuotaFailure` with a `PerDay` quota → `ModelQuotaSpent`. Any other 429, or 503 → `ModelBusy`.
 - A re-ask starts only when the time left is at least that agent's minimum call budget, set from G1's p95: analyst 8 s, smart pick and brand 33 s, hook 35 s. Otherwise the raw text is kept.
-- **Analyze order:** `limited()` → `cutWindowClip` (`media/ffmpeg.ts`, temp file deleted in `finally`) → `measureWindow` → `chatJson`. `limited()` skips the provider during a spent quota.
-- **Brand propose:** `ModelQuotaSpent` returns `{ wait: 'model quota spent' }`, and the brand page stops polling on that wait. `ModelBusy` returns `model busy` and keeps polling.
+- **Analyze order:** claim-owned compatibility reset if needed → `limited()` → `cutWindowClip` → file-size check → `measureWindow` → `chatJson`. Start one 110 s deadline on entry to the claimed step; reserve its last 5 s for cleanup and persistence. Cut and measure have caps of 45 s and 20 s, each further limited by the remaining work budget. Abort and await ffmpeg termination before deleting the temp file in `finally`; never save a partial chunk. Existing hook loudness and render reserves still fit inside the same deadline.
+- **Brand propose:** `ModelQuotaSpent` returns `{ wait: 'model quota spent' }`, and the brand page stops polling on that wait. `ModelBusy` returns `model busy` and keeps polling. Nothing is persisted.
 - Wrapped in `chatSpan` with provider `gcp.gemini` and `modelFor(agent)`.
-- **YouTube API data never reaches Sentry (FR-017):**
-  - Callers (smart pick, hook, brand) put every YouTube-sourced field in its own part marked `source: 'youtube'`.
-  - Recorded output, both the raw reply and the finalized pick, and re-ask assistant turns record `hashtags` and `tags` as `{count}` and each description `#hashtag` as `#…`, because those are copied verbatim from YouTube candidates.
-  - Spans, the `hashtag_search` tool result and captured errors record those parts only as `{source, chars}` or `{mime, bytes, source}` (research R13).
+- **Tracing (FR-017):** `chat` and `invoke_agent` retain system/user/assistant text, replies and reasoning for every agent; images and video remain placeholders. No `recordText` setting or per-agent error wrapper.
+- Classify provider errors before recording them. `ModelBusy`, `ModelQuotaSpent.until` and structured-output errors retain their identity and fields through the caller; telemetry must never change the thrown value. Captured exception payloads exclude SDK request bodies, headers and media-bearing causes; safe messages still pass through credential/URL scrubbing.
+- Each failed structured-output attempt records its available raw reply, finish reason and usage on the chat span before conversion to the unparsed result. After exhaustion, `chatJson` returns `{ value: null, raw, ms }`; the analyst stores stripped raw text, pick/hook fail their step and brand returns its retryable error. No database raw-response field is added.
+- `hashtag_search` retains its existing diagnostic output; media and secrets remain excluded. No additional provider telemetry span is enabled.
 
 ## Removed exports
 

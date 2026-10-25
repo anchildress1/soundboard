@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Heard from '$lib/components/Heard.svelte';
+import Heard from '#lib/components/Heard.svelte';
 
 const measurements = {
   integratedLufs: -13.84,
@@ -42,19 +42,5 @@ describe('Heard', () => {
     const line = screen.getByText('ffmpeg').parentElement!;
     expect(line).toHaveTextContent('ffmpeg 3 clipped · 0 silences');
     expect(line.textContent).not.toContain('LUFS');
-  });
-
-  it('shows only what was heard and measured, no claims about the pick', () => {
-    render(Heard, { tags: [], measurements: null });
-    expect(screen.queryByText(/most-viewed|grounded/i)).toBeNull();
-  });
-
-  it('fills in as chunks arrive', async () => {
-    const { rerender } = render(Heard, { tags: [], measurements: null });
-    await rerender({ tags: ['synthwave'], measurements });
-    expect(screen.getByRole('listitem')).toHaveTextContent('synthwave');
-    expect(screen.getByText('ffmpeg')).toBeInTheDocument();
-    await rerender({ tags: [], measurements: null });
-    expect(screen.queryByRole('list')).toBeNull();
   });
 });

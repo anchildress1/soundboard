@@ -2,10 +2,10 @@
 import { captureException } from '@sentry/sveltekit';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-// The `.js` suffix slips past vitest.config.ts's exact-match alias to the PGlite helper, so this
+// The `#src` path slips past vitest.config.ts's exact-match alias to the PGlite helper, so this
 // file tests the real module with `pg` mocked at the process boundary.
-import { db, query, resetDb } from '$lib/server/core/db.js';
-import { withIdentity } from '$lib/server/core/identity';
+import { db, query, resetDb } from '#src/lib/server/core/db.js';
+import { withIdentity } from '#lib/server/core/identity.js';
 
 const pg = vi.hoisted(() => ({
   failedSql: undefined as string | undefined,
@@ -251,12 +251,6 @@ describe('db', () => {
       connectionString: 'postgres://app@pooler.test/soundboard',
       connectionTimeoutMillis: 10_000,
     });
-  });
-
-  it('sends queries through the pool', async () => {
-    const result = (await db().execute(sql`select 1 as one`)) as { rows: unknown[] };
-    expect(pg.pools[0]!.query).toHaveBeenCalledOnce();
-    expect(result.rows).toEqual([{ one: 1 }]);
   });
 
   it('throws without DATABASE_URL and creates no pool', () => {

@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { and, asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { artistMemory, jobs, users } from '$lib/server/core/schema';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory, jobs, users } from '#lib/server/core/schema.js';
 import {
   approvalFeedback,
   artistJob,
@@ -14,8 +14,8 @@ import {
   SEED_FACTS,
   type Fact,
   type Feedback,
-} from '$lib/server/artist/memory';
-import type { PickFields } from '$lib/types';
+} from '#lib/server/artist/memory.js';
+import type { PickFields } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

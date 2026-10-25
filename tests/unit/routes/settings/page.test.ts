@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Page from '$routes/settings/+page.svelte';
+import Page from '#src/routes/settings/+page.svelte';
 
 describe('settings page', () => {
   it('lists every spec 006 role with its default source', () => {

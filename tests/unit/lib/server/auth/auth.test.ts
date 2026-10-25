@@ -14,7 +14,7 @@ import {
   sessionCookie,
   sign,
   unsign,
-} from '$lib/server/auth/auth';
+} from '#lib/server/auth/auth.js';
 
 const NATHAN_EMAIL = 'nathan@example.com';
 const UID = 'sub-nathan';

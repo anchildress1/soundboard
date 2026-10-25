@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import Label from '$lib/components/Label.svelte';
-import type { PickFields } from '$lib/types';
+import Label from '#lib/components/Label.svelte';
+import type { PickFields } from '#lib/types.js';
 
 const OFFICIAL_TITLE = 'PeekaBoo (Official Video)';
 const RERUN = 'Re-run model';

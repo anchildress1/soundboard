@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
-import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '$lib/types';
+import {
+  heardTags,
+  jobStatus,
+  modelLabel,
+  modelRole,
+  modelSeconds,
+  modelWorking,
+  publishPaused,
+} from '#lib/status.js';
+import type { Chunk, ChunkAnalysis, JobState, JobView, Pick, PublicJob } from '#lib/types.js';
 
-const WAKING = 'waking model';
+const BUSY = 'model busy';
 const SYNTH_BASS = 'synth bass';
 
 const job = (patch: Partial<PublicJob> = {}): PublicJob => ({
@@ -33,6 +41,7 @@ const view = (patch: Partial<PublicJob> = {}, extra: Partial<JobView> = {}): Job
   job: job(patch),
   chunks: [],
   pick: null,
+  model: 'gemini-4-argon',
   ...extra,
 });
 
@@ -83,13 +92,19 @@ describe('publishPaused', () => {
 });
 
 describe('jobStatus', () => {
-  it('shows a named wait in plain words with running progress ahead of the state label', () => {
-    expect(jobStatus(view({ state: 'ANALYZE' }), WAKING)).toEqual({
-      tone: 'info',
-      text: 'Waking the model',
-      progress: 6 + 21,
-    });
-  });
+  it.each([
+    [BUSY, 'Model busy'],
+    ['model quota spent', 'Model quota spent'],
+  ] as const)(
+    'shows the %s wait in plain words with running progress ahead of the state label',
+    (wait, text) => {
+      expect(jobStatus(view({ state: 'ANALYZE' }), wait)).toEqual({
+        tone: 'info',
+        text,
+        progress: 6 + 21,
+      });
+    },
+  );
 
   it('shows upload percent while awaiting the browser upload', () => {
     expect(jobStatus(view({ state: 'AWAITING_UPLOAD' }), undefined, 42)).toEqual({
@@ -296,10 +311,45 @@ describe('modelWorking', () => {
     expect(modelWorking(view({ state: 'PICK' }))).toBe(true);
   });
 
-  it('is false while the model loads, during chunks, or outside model states', () => {
-    expect(modelWorking(view({ state: 'PICK' }, { wait: WAKING }))).toBe(false);
+  it('is false while the model waits, during chunks, or outside model states', () => {
+    expect(modelWorking(view({ state: 'PICK' }, { wait: BUSY }))).toBe(false);
+    expect(modelWorking(view({ state: 'PICK' }, { wait: 'model quota spent' }))).toBe(false);
     expect(modelWorking(view({ state: 'ANALYZE' }))).toBe(false);
     expect(modelWorking(view({ state: 'PREP' }))).toBe(false);
     expect(modelWorking(view({ state: 'REVIEW' }))).toBe(false);
+  });
+});
+
+describe('modelRole', () => {
+  it.each([
+    ['AWAITING_UPLOAD', 'picker'],
+    ['PREP', 'analyst'],
+    ['ANALYZE', 'analyst'],
+    ['PICK', 'picker'],
+    ['REVIEW', 'picker'],
+    ['VERIFIED', 'picker'],
+  ] as const)('uses the %s role from the state', (state, role) => {
+    expect(modelRole(job({ state }))).toBe(role);
+  });
+
+  it('takes a failed job role from the step it failed at', () => {
+    expect(modelRole(job({ state: 'FAILED', failedState: 'ANALYZE' }))).toBe('analyst');
+    expect(modelRole(job({ state: 'FAILED', failedState: 'PICK' }))).toBe('picker');
+    expect(modelRole(job({ state: 'FAILED', failedState: null }))).toBe('analyst');
+  });
+
+  it('always uses the picker for a Short', () => {
+    const short = { modelMs: 0 } as PublicJob['short'];
+    expect(modelRole(job({ state: 'RENDER', short }))).toBe('picker');
+    expect(modelRole(job({ state: 'FAILED', failedState: 'PREP', short }))).toBe('picker');
+  });
+});
+
+describe('modelLabel', () => {
+  it('names the configured model and its role', () => {
+    expect(modelLabel(view({ state: 'ANALYZE' }, { model: 'gemini-3.8-flash' }))).toBe(
+      'Configured analyst: gemini-3.8-flash',
+    );
+    expect(modelLabel(view({ state: 'REVIEW' }))).toBe('Configured picker: gemini-4-argon');
   });
 });

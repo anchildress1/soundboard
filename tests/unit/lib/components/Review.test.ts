@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Review from '$lib/components/Review.svelte';
-import type { Pick } from '$lib/types';
+import Review from '#lib/components/Review.svelte';
+import type { Pick } from '#lib/types.js';
 
 const KEY = 'review:j1:1';
 const APPROVE = 'Approve & upload';

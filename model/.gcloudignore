@@ -1,3 +1,0 @@
-# Only the Dockerfile is needed; weights are downloaded inside the build.
-*
-!Dockerfile

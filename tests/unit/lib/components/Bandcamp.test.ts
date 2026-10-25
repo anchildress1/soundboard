@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Bandcamp from '$lib/components/Bandcamp.svelte';
-import type { Pick } from '$lib/types';
+import Bandcamp from '#lib/components/Bandcamp.svelte';
+import type { Pick } from '#lib/types.js';
 
 const ABOUT = 'A terminal screen and some noise.';
 const COPY_ABOUT = 'Copy About';

@@ -21,8 +21,8 @@
       <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
     </nav>
     <nav aria-label="Legal">
-      <a href={resolve('/terms')} data-sveltekit-reload>Terms of Service</a>
-      <a href={resolve('/privacy')} data-sveltekit-reload>Privacy policy</a>
+      <a href={resolve('terms')} data-sveltekit-reload>Terms of Service</a>
+      <a href={resolve('privacy')} data-sveltekit-reload>Privacy policy</a>
     </nav>
   </div>
 </footer>

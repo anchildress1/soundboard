@@ -7,13 +7,13 @@ Current implementation: sign-in through private upload verification.
 sequenceDiagram
   autonumber
   accTitle: Soundboard artist sign-in, review and private upload
-  accDescr: The artist signs in and grants Google and YouTube consent, uploads a finished video directly to Cloud Storage, and keeps the page open to drive analysis steps. Soundboard uses Gemma and genre research to draft metadata. The artist reviews and approves a private YouTube upload, which Soundboard verifies through videos.list. Alternative paths cover incomplete consent, a busy model and an unknown upload outcome.
+  accDescr: The artist signs in and grants Google and YouTube consent, uploads a finished video directly to Cloud Storage, and keeps the page open to drive analysis steps. Soundboard sends window clips to the Gemini API and uses genre research to draft metadata. The artist reviews and approves a private YouTube upload, which Soundboard verifies through videos.list. Alternative paths cover incomplete consent, a busy model and an unknown upload outcome.
 
   actor Artist
   participant App as Soundboard
   participant Google as Google OAuth
   participant Storage as Cloud Storage
-  participant Model as Gemma on Vertex AI
+  participant Model as Gemini API, paid tier
   participant YouTube as YouTube Data API
 
   Artist->>App: Sign in with Google
@@ -49,14 +49,14 @@ sequenceDiagram
 
   loop Page requests steps until all analysis windows finish
     Artist->>App: Page requests next analyze step
-    App->>Model: Check readiness
-    alt Model busy, loading or scaled to zero
-      Model-->>App: Not ready
-      App-->>Artist: Show wait reason, page retries later
-    else Model ready
-      App->>Storage: Read current window
-      Storage-->>App: Media stream
-      App->>Model: Window audio, frames and measurements
+    App->>Storage: Read current window
+    Storage-->>App: Media stream
+    App->>App: ffmpeg cuts a small clip with sound and measures the window
+    App->>Model: Window clip and measurements
+    alt Model busy or daily quota spent
+      Model-->>App: 429 or 503
+      App-->>Artist: Show model busy or model quota spent, page retries later
+    else Model answers
       Model-->>App: Perceptual analysis
       App-->>Artist: Save and show progress
     end

@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import type { JobDoc } from '$lib/server/jobs/jobs';
-import { load } from '$routes/jobs/[id]/+page.server';
-import type { JobView } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
+import { load } from '#src/routes/jobs/[id]/+page.server.js';
+import type { JobView } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, seedJob, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 

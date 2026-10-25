@@ -4,7 +4,7 @@
 
 <main aria-labelledby="privacy-title">
   <h1 id="privacy-title">Privacy policy</h1>
-  <p class="help">Updated October 22, 2026</p>
+  <p class="help">Updated October 24, 2026</p>
 
   <p>
     Ashley Childress operates Soundboard, a private music-release assistant. This policy covers
@@ -28,16 +28,37 @@
 
   <h2>Processing and service providers</h2>
   <p>
-    Google Cloud hosts the app, uploaded media, encryption keys, and the self-hosted model that
-    analyzes media and generates drafts. Neon stores account, connection, job, and artist-profile
-    records. Google receives account authorization requests and the videos and metadata you approve
-    for YouTube upload.
+    Google Cloud hosts the app, uploaded media, and encryption keys. Neon stores account,
+    connection, job, and artist-profile records. Google receives account authorization requests and
+    the videos and metadata you approve for YouTube upload.
   </p>
   <p>
+    The paid tier of Google's Gemini API analyzes media and writes drafts. It receives short clips
+    of your uploaded video with their audio, your song details and notes, and YouTube metadata such
+    as video titles, descriptions, tags, and thumbnails. On the paid tier, Google does not use this
+    content to improve its products.
+  </p>
+  <ul>
+    <li>
+      Soundboard asks Gemini not to store each request and response for later use. That setting
+      turns off stored interaction history only.
+    </li>
+    <li>
+      Gemini may cache parts of a request automatically to answer similar requests faster. Google
+      does not publish how long those cached copies last.
+    </li>
+    <li>
+      Google keeps requests and responses for up to 55 days to detect abuse, and its policy terms
+      allow that copy to be used to enforce those policies. Authorized Google staff may review
+      flagged requests.
+    </li>
+  </ul>
+  <p>
     Sentry receives error reports and performance traces, including text prompts, generated
-    responses, and model reasoning that may contain song titles, notes, or release details. Audio
-    and image payloads are replaced with placeholders in traces, and URL query strings are scrubbed
-    to remove credentials. Soundboard does not sell your information or use it for advertising.
+    responses, and model reasoning that may contain song titles, notes, or release details. Audio,
+    image, and video payloads are replaced with placeholders in traces, and URL query strings are
+    scrubbed to remove credentials. Sentry keeps error reports and traces for 30 days. Soundboard
+    does not sell your information or use it for advertising.
   </p>
 
   <h2>Cookies</h2>
@@ -60,7 +81,8 @@
     <a href="mailto:anchildress1@gmail.com">anchildress1@gmail.com</a>
     from your account email address. Ashley handles requests manually and deletes the relevant data as
     soon as possible, within seven calendar days. Deleting Soundboard data does not delete videos or other
-    information held by YouTube.
+    information held by YouTube. It also cannot reach the copies Google keeps for abuse monitoring or
+    caching, or the traces Sentry holds; those expire on the schedules above.
   </p>
 
   <h2>YouTube access and your choices</h2>

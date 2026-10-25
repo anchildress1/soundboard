@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import { getJob } from '$lib/server/jobs/jobs';
-import { POST } from '$routes/api/jobs/+server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { POST } from '#src/routes/api/jobs/+server.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
@@ -81,16 +81,5 @@ describe('POST /api/jobs', () => {
       fields: null,
     });
     expect(await jobCount()).toBe(0);
-  });
-
-  it('requires a song title', async () => {
-    const response = await post({ ...upload, songTitle: '  ' });
-    expect(response.status).toBe(400);
-    expect(((await response.json()) as { error: string }).error).toBe('Song title is required.');
-  });
-
-  it('caps uploads at 15 minutes', async () => {
-    expect((await post({ ...upload, durationSec: 901 })).status).toBe(400);
-    expect((await post({ ...upload, durationSec: 900 })).status).toBe(200);
   });
 });

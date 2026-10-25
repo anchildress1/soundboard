@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import Short from '$lib/components/Short.svelte';
-import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '$lib/types';
+import Short from '#lib/components/Short.svelte';
+import type { JobState, JobView, Pick, PublicJob, Short as ShortSpec } from '#lib/types.js';
 
 const INVALID = 'aria-invalid';
+const PICKER = 'Configured picker: gemini-4-argon';
 const CONNECTED = { channelId: 'UCflr', channelTitle: 'Flies Like Robots' };
 
 const SPEC: ShortSpec = {
@@ -60,6 +61,7 @@ const view = (
   },
   chunks: [],
   pick: PICK,
+  model: 'gemini-4-argon',
   ...extra,
 });
 
@@ -95,7 +97,8 @@ describe('Short: running', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Picking the hook');
     expect(screen.queryByRole('heading', { name: 'Cut' })).toBeNull();
     expect(container.querySelector('video')).toBeNull();
-    expect(screen.getByText('gemma-4-12b-it')).toBeInTheDocument();
+    expect(screen.getByText(PICKER)).toBeInTheDocument();
+    expect(screen.queryByText(/Total model time/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Approve & upload' })).toBeNull();
     expect((screen.getByLabelText(/^Title/) as HTMLInputElement).readOnly).toBe(true);
   });
@@ -108,9 +111,12 @@ describe('Short: running', () => {
     expect(screen.queryByRole('button', { name: 'Re-cut' })).toBeNull();
   });
 
-  it('shows the named wait while the model wakes', () => {
-    setup({ view: view('HOOK', { hook: null }, {}, { wait: 'waking model' }) });
-    expect(screen.getByRole('status')).toHaveTextContent('Waking the model');
+  it.each([
+    ['model busy', 'Model busy'],
+    ['model quota spent', 'Model quota spent'],
+  ] as const)('shows the %s wait on the chip', (wait, text) => {
+    setup({ view: view('HOOK', { hook: null }, {}, { wait }) });
+    expect(screen.getByRole('status')).toHaveTextContent(text);
   });
 });
 
@@ -125,7 +131,8 @@ describe('Short: review', () => {
     expect(container.querySelector('.monitor')).toHaveClass('vertical');
     expect(screen.getByText('00:01:10 – 00:01:40 · 30s')).toBeInTheDocument();
     expect(screen.getByText(/The chorus lands with the full band\./)).toBeInTheDocument();
-    expect(screen.getByText('gemma-4-12b-it · 6s')).toBeInTheDocument();
+    expect(screen.getByText(PICKER)).toBeInTheDocument();
+    expect(screen.getByText('Total model time: 6s')).toBeInTheDocument();
     expect(screen.getByText('720p · vertical')).toBeInTheDocument();
   });
 

@@ -2,10 +2,10 @@
 import { eq } from 'drizzle-orm';
 import { captureException } from '@sentry/sveltekit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { connections } from '$lib/server/core/schema';
-import { clearStatsCache } from '$lib/server/platforms/youtube/youtube';
-import { load } from '$routes/+layout.server';
+import { db } from '#lib/server/core/db.js';
+import { connections } from '#lib/server/core/schema.js';
+import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
+import { load } from '#src/routes/+layout.server.js';
 import { seed, truncate } from '../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 

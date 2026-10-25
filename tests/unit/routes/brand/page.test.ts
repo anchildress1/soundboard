@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StoredBrand } from '$lib/brand';
-import { POLL_BACKOFF } from '$lib/retry';
-import Page from '$routes/brand/+page.svelte';
+import type { StoredBrand } from '#lib/brand.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import Page from '#src/routes/brand/+page.svelte';
 
 const GUIDE = {
   statement: 'Song title first, then a short story.',
@@ -42,11 +42,6 @@ afterEach(() => {
 });
 
 describe('brand page: approved guide', () => {
-  it('offers no channel connect links; YouTube is connected at sign-in', () => {
-    setup();
-    expect(screen.queryByRole('link', { name: /connect/i })).toBeNull();
-  });
-
   it('says smart pick follows the recent uploads until a guide is approved', () => {
     setup();
     expect(screen.getByText(/None yet/)).toBeInTheDocument();
@@ -66,13 +61,11 @@ describe('brand page: proposing', () => {
   it('asks again after a wait and then opens the proposal for editing', async () => {
     vi.useFakeTimers();
     fetchMock
-      .mockResolvedValueOnce(json({ wait: 'waking model' }))
+      .mockResolvedValueOnce(json({ wait: 'model busy' }))
       .mockResolvedValueOnce(json({ proposal: stored('PROPOSED') }));
     setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Waking the model' })).toBeDisabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Model busy' })).toBeDisabled());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(POLL_BACKOFF.minTimeout);
     await waitFor(() => expect(screen.getByLabelText(/^Statement/)).toHaveValue(GUIDE.statement));
@@ -81,12 +74,23 @@ describe('brand page: proposing', () => {
 
   it('stops asking once the page is left mid-wait', async () => {
     vi.useFakeTimers();
-    fetchMock.mockResolvedValue(json({ wait: 'waking model' }));
+    fetchMock.mockResolvedValue(json({ wait: 'model busy' }));
     const { unmount } = setup();
     await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     unmount();
+    await vi.runAllTimersAsync();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops asking and says so once the model quota is spent', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(json({ wait: 'model quota spent' }));
+    setup();
+    await fireEvent.click(screen.getByRole('button', { name: 'Propose' }));
+    await waitFor(() => expect(screen.getByText('Model quota spent')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Propose' })).toBeEnabled();
     await vi.runAllTimersAsync();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

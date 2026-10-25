@@ -8,7 +8,6 @@ SEPARATOR="=================================================="
 
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
 command -v envsubst > /dev/null || { echo "Error: envsubst (gettext) is not installed." >&2; exit 1; }
-command -v curl > /dev/null || { echo "Error: curl is not installed." >&2; exit 1; }
 command -v pnpm > /dev/null || { echo "Error: pnpm is not installed." >&2; exit 1; }
 
 # .env.sentry-build-plugin holds the Sentry source-map upload token; it's optional.
@@ -43,18 +42,10 @@ SIGNUP_MODE="${SIGNUP_MODE:-invite}"
 case "$SIGNUP_MODE" in invite | open) ;; *) echo "Error: SIGNUP_MODE must be invite or open." >&2; exit 1 ;; esac
 PUBLIC_SENTRY_DSN="${PUBLIC_SENTRY_DSN:-}"
 
-# The model image is named by the git tree hash of model/, as build-model.sh tags it, so a stale
-# value in .env can't deploy an old image.
-MODEL_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/model:$(git rev-parse --short=12 HEAD:model)"
-if ! gcloud artifacts docker images describe "$MODEL_IMAGE" --project "$GCP_PROJECT_ID" &> /dev/null; then
-  echo "Error: $MODEL_IMAGE is not built; run make model-image first." >&2
-  exit 1
-fi
-
 KMS_KEYRING="soundboard"
 KMS_KEY_NAME="refresh-tokens"
 KMS_KEY="projects/${GCP_PROJECT_ID}/locations/${REGION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY_NAME}"
-export GCP_PROJECT_ID GCS_BUCKET MODEL_IMAGE FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
+export GCP_PROJECT_ID GCS_BUCKET FLR_CHANNEL_ID GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
   PUBLIC_SENTRY_DSN
 SERVICE_ACCOUNT="${SERVICE}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 GIT_SHA="$(git rev-parse --short HEAD)"
@@ -65,12 +56,11 @@ echo "$SEPARATOR"
 echo "Project: $GCP_PROJECT_ID"
 echo "Region:  $REGION"
 echo "App:     $APP_IMAGE"
-echo "Model:   $MODEL_IMAGE"
 echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com cloudkms.googleapis.com \
-  secretmanager.googleapis.com aiplatform.googleapis.com --project "$GCP_PROJECT_ID" --quiet
+  secretmanager.googleapis.com --project "$GCP_PROJECT_ID" --quiet
 
 # Runtime identity: create it once, and let the deploying account attach it to the service
 # (Cloud Run requires iam.serviceAccounts.actAs on a user-managed service account).
@@ -91,7 +81,7 @@ if ! gcloud artifacts repositories describe "$SERVICE" \
   gcloud artifacts repositories create "$SERVICE" \
     --repository-format docker --location "$REGION" --project "$GCP_PROJECT_ID"
 fi
-# Storage is billed per GB: keep the 5 newest app images and the 2 newest model images.
+# Storage is billed per GB: keep the 5 newest app images.
 gcloud artifacts repositories set-cleanup-policies "$SERVICE" \
   --location "$REGION" --project "$GCP_PROJECT_ID" \
   --policy cleanup-policy.json --no-dry-run --quiet > /dev/null
@@ -155,6 +145,7 @@ grant_secret() {
 sync_secret soundboard-session-secret SESSION_SECRET
 sync_secret soundboard-oauth-client-secret GOOGLE_OAUTH_CLIENT_SECRET
 sync_secret soundboard-youtube-api-key YOUTUBE_API_KEY
+sync_secret soundboard-gemini-api-key GEMINI_API_KEY
 # The prod database URL lives only in Secret Manager: .env's points local dev at its own Neon branch.
 gcloud secrets describe DATABASE_URL --project "$GCP_PROJECT_ID" &> /dev/null || {
   echo "Error: secret 'DATABASE_URL' is missing; create it from Neon's main branch (README)." >&2
@@ -167,138 +158,6 @@ gcloud secrets describe DATABASE_URL_UNPOOLED --project "$GCP_PROJECT_ID" &> /de
   exit 1
 }
 grant_secret DATABASE_URL_UNPOOLED "${DEPLOYER_TYPE}:${DEPLOYER}"
-
-# Model: one Vertex AI dedicated endpoint (Cloud Run has no L4 quota for this project). The model
-# image is uploaded once per tag and deployed only when the endpoint isn't already serving it.
-MODEL_ENDPOINT="soundboard-model"
-MODEL_NAME="soundboard-model-${MODEL_IMAGE##*:}"
-VERTEX="https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_ID}/locations/${REGION}"
-
-# Starts a Vertex long-running create and waits for it to finish, failing with the API's error.
-# A model upload copies the ~7 GB image and takes several minutes.
-vertex_create() {
-  local operation state response code
-  operation="$(curl -fsS -X POST "${VERTEX}/$1" \
-    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-    -H "Content-Type: application/json" -d "$2" |
-    python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])')"
-  for _ in $(seq 180); do
-    # A network error (000), 429, or 5xx is transient: the operation keeps running server side, and
-    # abandoning it invites a duplicate create on rerun. Anything else non-200 won't heal by waiting.
-    response="$(curl -sS -w '\n%{http_code}' \
-      "https://${REGION}-aiplatform.googleapis.com/v1beta1/${operation}" \
-      -H "Authorization: Bearer $(gcloud auth print-access-token)" 2> /dev/null || printf '\n000')"
-    code="${response##*$'\n'}"
-    case "$code" in
-      200) ;;
-      000 | 429 | 5??) sleep 10; continue ;;
-      *) echo "Error: polling $1 returned HTTP $code: ${response%$'\n'*}" >&2; exit 1 ;;
-    esac
-    state="$(python3 -c '
-import json, sys
-op = json.loads(sys.argv[1])
-print("failed: " + json.dumps(op["error"]) if "error" in op else "done" if op.get("done") else "")' \
-      "${response%$'\n'*}")"
-    case "$state" in
-      done) return ;;
-      failed*) echo "Error: $1 $state" >&2; exit 1 ;;
-    esac
-    sleep 10
-  done
-  echo "Error: $1 did not finish in 30 minutes: $operation" >&2
-  exit 1
-}
-
-endpoint_id() {
-  gcloud ai endpoints list --region "$REGION" --project "$GCP_PROJECT_ID" \
-    --filter "display_name=${MODEL_ENDPOINT}" --format 'value(name.basename())' 2> /dev/null
-}
-model_id() {
-  gcloud ai models list --region "$REGION" --project "$GCP_PROJECT_ID" \
-    --filter "display_name=${MODEL_NAME}" --format 'value(name.basename())' 2> /dev/null
-}
-
-# Scale to zero needs a dedicated endpoint, which gcloud can't create; the REST API can.
-if [[ -z "$(endpoint_id)" ]]; then
-  vertex_create endpoints "{\"displayName\": \"${MODEL_ENDPOINT}\", \"dedicatedEndpointEnabled\": true}"
-fi
-ENDPOINT_ID="$(endpoint_id)"
-
-# invokeRoutePrefix passes llama-server's own paths through (/invoke/health → /health); gcloud has
-# no flag for it. The deployment timeout covers loading ~7 GB of weights onto the GPU.
-if [[ -z "$(model_id)" ]]; then
-  vertex_create models:upload "$(cat << MODEL
-{"model": {"displayName": "${MODEL_NAME}", "containerSpec": {
-  "imageUri": "${MODEL_IMAGE}", "ports": [{"containerPort": 8081}],
-  "healthRoute": "/health", "invokeRoutePrefix": "/*", "deploymentTimeout": "1800s"}}}
-MODEL
-)"
-fi
-MODEL_ID="$(model_id)"
-
-DEPLOYED="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
-  --project "$GCP_PROJECT_ID" --format 'value(deployedModels.model)')"
-if [[ "${DEPLOYED};" != *"/models/${MODEL_ID};"* ]]; then
-  # gcloud stops waiting after 30 minutes while the deploy carries on server side, and a deploy can
-  # wait far longer for an L4. Queuing a second one behind it only holds another GPU of quota.
-  PENDING="$(python3 - "${VERTEX}/endpoints/${ENDPOINT_ID}/operations" \
-    "$(gcloud auth print-access-token)" << 'PY'
-import json, sys, urllib.parse, urllib.request
-url, token, page = sys.argv[1], sys.argv[2], ""
-while True:
-    query = "?" + urllib.parse.urlencode({"pageToken": page}) if page else ""
-    request = urllib.request.Request(url + query, headers={"Authorization": f"Bearer {token}"})
-    body = json.load(urllib.request.urlopen(request))
-    for op in body.get("operations", []):
-        kind = op.get("metadata", {}).get("@type", "")
-        if not op.get("done") and kind.endswith("DeployModelOperationMetadata"):
-            print(op["name"])
-    page = body.get("nextPageToken", "")
-    if not page:
-        break
-PY
-)"
-  if [[ -n "$PENDING" ]]; then
-    echo "Error: a model deploy is still running; rerun once it finishes: $PENDING" >&2
-    exit 1
-  fi
-  # One L4, scale to zero after 5 idle minutes (the floor for both periods). Container logs are the
-  # only record of why a model server failed to start.
-  gcloud beta ai endpoints deploy-model "$ENDPOINT_ID" --region "$REGION" \
-    --project "$GCP_PROJECT_ID" --model "$MODEL_ID" --display-name "$MODEL_NAME" \
-    --machine-type g2-standard-4 --accelerator type=nvidia-l4,count=1 \
-    --min-replica-count 0 --max-replica-count 1 \
-    --idle-scaledown-period 300 --min-scaleup-period 300 --traffic-split 0=100 \
-    --enable-container-logging
-  for old in $(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
-    --project "$GCP_PROJECT_ID" --format json | python3 -c '
-import json, sys
-model = sys.argv[1]
-for deployed in json.load(sys.stdin).get("deployedModels", []):
-    if not deployed["model"].endswith("/" + model):
-        print(deployed["id"])' "$MODEL_ID"); do
-    gcloud ai endpoints undeploy-model "$ENDPOINT_ID" --region "$REGION" \
-      --project "$GCP_PROJECT_ID" --deployed-model-id "$old" --quiet
-  done
-fi
-
-ENDPOINT_FIELDS="$(gcloud ai endpoints describe "$ENDPOINT_ID" --region "$REGION" \
-  --project "$GCP_PROJECT_ID" --format 'value(dedicatedEndpointDns,name)')"
-read -r ENDPOINT_DNS ENDPOINT_NAME <<< "$ENDPOINT_FIELDS"
-MODEL_URL="https://${ENDPOINT_DNS}/v1/${ENDPOINT_NAME}/invoke"
-export MODEL_URL
-echo "Model URL: $MODEL_URL"
-
-# The runtime identity may call the endpoint and nothing else in Vertex: aiplatform.user would
-# also let it create and deploy GPU resources.
-INVOKER_ROLE="soundboardModelInvoker"
-if ! gcloud iam roles describe "$INVOKER_ROLE" --project "$GCP_PROJECT_ID" &> /dev/null; then
-  gcloud iam roles create "$INVOKER_ROLE" --project "$GCP_PROJECT_ID" \
-    --title "Soundboard model invoker" --permissions aiplatform.endpoints.predict --quiet > /dev/null
-fi
-gcloud projects add-iam-policy-binding "$GCP_PROJECT_ID" \
-  --member "serviceAccount:${SERVICE_ACCOUNT}" \
-  --role "projects/${GCP_PROJECT_ID}/roles/${INVOKER_ROLE}" --condition None --quiet > /dev/null
 
 # With a Sentry token, the build uploads source maps for this commit's release. Only Cloud Build's
 # identity reads the token; the running service never sees it.
@@ -323,7 +182,7 @@ rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
-envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${MODEL_URL} ${GCP_PROJECT_ID} ${GCS_BUCKET}
+envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${GCP_PROJECT_ID} ${GCS_BUCKET}
   ${FLR_CHANNEL_ID} ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}' \
   < service.yaml > "$rendered"
 

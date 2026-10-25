@@ -1,7 +1,7 @@
-import { retry } from '$lib/server/jobs/actions';
-import { respond } from '$lib/server/core/http';
-import { getJob } from '$lib/server/jobs/jobs';
-import { authorizedJob, buildView } from '$lib/server/jobs/view';
+import { retry } from '#lib/server/jobs/actions.js';
+import { respond } from '#lib/server/core/http.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { authorizedJob, buildView } from '#lib/server/jobs/view.js';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = ({ params, locals }) =>

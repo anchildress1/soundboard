@@ -1,5 +1,4 @@
-import { json } from '@sveltejs/kit';
-import { revokeGrant } from '$lib/server/platforms/youtube';
+import { revokeGrant } from '#lib/server/platforms/youtube/index.js';
 import type { RequestHandler } from './$types';
 
 /**
@@ -7,6 +6,6 @@ import type { RequestHandler } from './$types';
  * reconnect.
  */
 export const POST: RequestHandler = async ({ locals }) => {
-  if (!locals.user) return json({ message: 'Sign in first.' }, { status: 401 });
-  return json({ revokedAtGoogle: await revokeGrant(locals.user.uid) });
+  if (!locals.user) return Response.json({ message: 'Sign in first.' }, { status: 401 });
+  return Response.json({ revokedAtGoogle: await revokeGrant(locals.user.uid) });
 };

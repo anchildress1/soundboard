@@ -1,10 +1,10 @@
 import { captureException } from '@sentry/sveltekit';
-import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '$lib/short';
-import { containsWords, parseHashtags, validateFields } from '$lib/metadata';
+import { canCutShort, cutErrors, SHORT_MIN_SEC, tenth } from '#lib/short.js';
+import { containsWords, parseHashtags, validateFields } from '#lib/metadata.js';
 import { and, eq, isNull } from 'drizzle-orm';
-import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '$lib/types';
-import { query } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
+import { SHORT_SOURCE_STATES, type JobState, type PickFields, type Reframe } from '#lib/types.js';
+import { query } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
 import {
   createShort,
   latestPick,
@@ -16,8 +16,8 @@ import {
   type JobDoc,
 } from './jobs';
 import { jobSet } from './rows';
-import { approvalFeedback, artistJob, writeFeedback } from '$lib/server/artist/memory';
-import { tagPool } from '$lib/server/ai/smart-pick';
+import { approvalFeedback, artistJob, writeFeedback } from '#lib/server/artist/memory.js';
+import { tagPool } from '#lib/server/ai/smart-pick.js';
 import {
   accessTokenFor,
   getConnection,
@@ -25,9 +25,10 @@ import {
   videoChannel,
   videoIdFromUrl,
   type Access,
-} from '$lib/server/platforms/youtube';
-import { ActionError } from '$lib/server/core/errors';
-import { objectInfo } from '$lib/server/media/gcs';
+} from '#lib/server/platforms/youtube/index.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { objectInfo } from '#lib/server/media/gcs.js';
+import { STALE_ANALYSIS, staleAnalysis } from '#lib/server/pipeline/short.js';
 
 function requireState(job: JobDoc, states: JobState[]): void {
   if (!states.includes(job.state))
@@ -331,6 +332,7 @@ export async function makeShort(job: JobDoc): Promise<string> {
   if (!canCutShort(job.probe.durationSec)) {
     throw new ActionError(409, `A Short needs a video of at least ${SHORT_MIN_SEC} seconds.`);
   }
+  if (staleAnalysis(job, job.probe.durationSec)) throw new ActionError(409, STALE_ANALYSIS);
   // The Short renders from this video's upload, which the bucket's 7-day lifecycle deletes.
   if (!(await objectInfo(job.object))) {
     throw new ActionError(409, 'This video is gone from storage. Upload it again to make a Short.');

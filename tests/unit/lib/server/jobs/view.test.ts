@@ -2,12 +2,12 @@
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import { createJob, listChunks, type NewJob } from '$lib/server/jobs/jobs';
-import { authorizedJob, buildView, mediaExpired } from '$lib/server/jobs/view';
-import type { Chunk, JobState, Pick, Short } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import { createJob, listChunks, type NewJob } from '#lib/server/jobs/jobs.js';
+import { authorizedJob, buildView, mediaExpired } from '#lib/server/jobs/view.js';
+import type { Chunk, JobState, Pick, Short } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { jobDoc, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
@@ -143,10 +143,30 @@ describe('buildView', () => {
 
   it('carries a wait reason when given one', async () => {
     const job = await createJob(input(), 'v');
-    const view = await buildView(job, 'waking model');
-    expect(view.wait).toBe('waking model');
+    const view = await buildView(job, 'model busy');
+    expect(view.wait).toBe('model busy');
     expect(view.pick).toBeNull();
     expect(view.chunks).toEqual([]);
+  });
+
+  it('names the configured analyst while windows are analyzed, the picker after', async () => {
+    const job = await createJob(input(), 'v');
+    expect((await buildView({ ...job, state: 'ANALYZE' })).model).toBe('gemini-3.8-flash');
+    expect((await buildView({ ...job, state: 'REVIEW' })).model).toBe('gemini-4-argon');
+    const failed = { ...job, state: 'FAILED' as const };
+    expect((await buildView({ ...failed, failedState: 'PREP' })).model).toBe('gemini-3.8-flash');
+    expect((await buildView({ ...failed, failedState: 'PICK' })).model).toBe('gemini-4-argon');
+    expect((await buildView({ ...job, state: 'HOOK', short: SHORT })).model).toBe('gemini-4-argon');
+  });
+
+  it('reads the model config on every view, even for an earlier result', async () => {
+    const job = await createJob(input(), 'v');
+    await seedPicks('v', 1);
+    const done = { ...job, state: 'REVIEW' as const };
+    vi.stubEnv('GEMINI_PICK_MODEL', 'gemini-4-argon-next');
+    expect((await buildView(done)).model).toBe('gemini-4-argon-next');
+    vi.stubEnv('GEMINI_PICK_MODEL', undefined);
+    expect((await buildView(done)).model).toBe('gemini-4-argon');
   });
 
   it('reads only the job it was given', async () => {

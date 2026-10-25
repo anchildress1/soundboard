@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import SignInNotice from '$lib/components/SignInNotice.svelte';
-  import { groupReleases, STATE_LABELS } from '$lib/release';
+  import SignInNotice from '#lib/components/SignInNotice.svelte';
+  import { groupReleases, STATE_LABELS } from '#lib/release.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -22,7 +22,7 @@
           <li>You keep each one, fix it, or ask for another draft.</li>
           <li>It uploads as Private and checks YouTube really has it.</li>
         </ol>
-        <a class="btn primary" href={resolve('/new')}>Start</a>
+        <a class="btn primary" href={resolve('new')}>Start</a>
       </section>
     {:else}
       <h1 class="visually-hidden">Releases</h1>
@@ -65,7 +65,7 @@
       {/each}
 
       <div class="start">
-        <a class="btn" class:primary={!releases.next} href={resolve('/new')}>
+        <a class="btn" class:primary={!releases.next} href={resolve('new')}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           Start a new release
         </a>
@@ -108,7 +108,7 @@
     <SignInNotice />
     <div class="panel">
       <!-- A full page load: the login route redirects off-site to Google. -->
-      <a class="btn primary" href={resolve('/auth/login')} data-sveltekit-reload
+      <a class="btn primary" href={resolve('auth/login')} data-sveltekit-reload
         >Continue with Google</a
       >
       <p class="help">

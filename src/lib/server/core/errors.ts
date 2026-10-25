@@ -1,4 +1,4 @@
-import type { FieldErrors } from '$lib/metadata';
+import type { FieldErrors } from '#lib/metadata.js';
 
 /** An expected request failure: `respond` sends its status, message, and field errors as JSON. */
 export class ActionError extends Error {

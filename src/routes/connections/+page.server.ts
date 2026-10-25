@@ -1,5 +1,5 @@
 import { redirect } from '@sveltejs/kit';
-import { getConnection } from '$lib/server/platforms/youtube';
+import { getConnection } from '#lib/server/platforms/youtube/index.js';
 import type { PageServerLoad } from './$types';
 
 /** Outcomes the connect callback names in `?connect=`; anything else shows nothing. */

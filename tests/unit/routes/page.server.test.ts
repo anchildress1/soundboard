@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from 'vitest';
-import { load } from '$routes/+page.server';
+import { load } from '#src/routes/+page.server.js';
 import { seed, truncate } from '../../helpers/db';
 import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../helpers/pipeline';
 

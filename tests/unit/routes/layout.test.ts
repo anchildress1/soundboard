@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Layout from '$routes/+layout.svelte';
+import Layout from '#src/routes/+layout.svelte';
 
 const HANDLE = '@flieslikerobots';
 const NATHAN_EMAIL = 'nathan@example.com';
@@ -51,7 +51,6 @@ describe('layout', () => {
     const footer = screen.getByRole('contentinfo');
     expect(footer).toHaveTextContent('Built for Flies Like Robots by Ashley Childress');
     expect(footer).toHaveTextContent('PolyForm Noncommercial 1.0.0');
-    expect(footer).not.toHaveTextContent('Hacktoberfest');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
     const artist = within(footer).getByRole('link', { name: 'Flies Like Robots' });
     expect(artist).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');

@@ -1,6 +1,6 @@
 import { KeyManagementServiceClient } from '@google-cloud/kms';
 import { Storage } from '@google-cloud/storage';
-import { resetDb } from '$lib/server/core/db';
+import { resetDb } from '#lib/server/core/db.js';
 import { required } from './env';
 
 let storage: Storage | null = null;

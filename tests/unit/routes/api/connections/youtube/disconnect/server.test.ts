@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { captureMessage } from '@sentry/sveltekit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { getConnection } from '$lib/server/platforms/youtube';
-import { POST } from '$routes/api/connections/youtube/disconnect/+server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { getConnection } from '#lib/server/platforms/youtube/index.js';
+import { POST } from '#src/routes/api/connections/youtube/disconnect/+server.js';
 import { seed, truncate } from '../../../../../../helpers/db';
 import { REFRESH_A, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 

@@ -1,8 +1,9 @@
 // Pure fixtures and fakes for the pipeline tests; the module mocks stay in the test file.
 import { EventEmitter } from 'node:events';
-import type { JobDoc } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
 import { seed, type Seed } from './db';
+import { interaction } from './gemini';
 
 export const SYNTHWAVE = '#synthwave';
 export const RETROWAVE = '#retrowave';
@@ -54,7 +55,7 @@ export function child(run: Run) {
   return proc;
 }
 
-// ---- network: llama-server, YouTube, GCS signed URLs ----
+// ---- network: Gemini, YouTube, GCS signed URLs ----
 
 export const ANALYSIS = {
   visual: 'Neon city streets at night, quick cuts.',
@@ -91,24 +92,19 @@ export const json = (body: unknown, init: ResponseInit = {}) =>
   });
 
 export const headers = (init: RequestInit) => (init.headers ?? {}) as Record<string, string>;
-export const completion = (content: string) =>
-  json({
-    choices: [{ message: { content, reasoning_content: 'thinking' } }],
-    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-  });
 
+/**
+ * Gemini answers the analyst's schema with `ANALYSIS` and every other schema with `RAW_PICK`. Busy,
+ * per-day, 503 and 400 replies come from `./gemini`.
+ */
 export function defaultHandlers(): Handler[] {
   return [
-    { test: /127\.0\.0\.1:8081\/health$/, reply: () => json({ status: 'ok' }) },
-    { test: /127\.0\.0\.1:8081\/slots$/, reply: () => json([{ is_processing: false }]) },
     {
-      test: /127\.0\.0\.1:8081\/v1\/chat\/completions$/,
+      test: /generativelanguage\.googleapis\.com\/v1beta\/interactions$/,
       reply: (_url, init) => {
-        const body = JSON.parse(String(init.body)) as {
-          response_format: { json_schema: { name: string } };
-        };
-        const name = body.response_format.json_schema.name;
-        return completion(JSON.stringify(name === 'chunk_analysis' ? ANALYSIS : RAW_PICK));
+        const body = JSON.parse(String(init.body)) as { response_format: unknown };
+        const analyst = JSON.stringify(body.response_format).includes('"qualityFlags"');
+        return interaction(JSON.stringify(analyst ? ANALYSIS : RAW_PICK));
       },
     },
     {

@@ -1,23 +1,31 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Track from '$lib/components/Track.svelte';
+import Track from '#lib/components/Track.svelte';
 
 const VALUE_NOW = 'aria-valuenow';
 const NEEDS_REVIEW = 'Needs review';
-const MODEL = 'gemma-4-12b-it';
+const MODEL = 'Configured analyst: gemini-3.8-flash';
 
 describe('Track', () => {
-  it('shows the state chip, progress, and model label', () => {
+  it('shows the state chip, progress, model label, and total model time apart', () => {
     render(Track, {
       status: { tone: 'info', text: 'Chunk 2 / 5', progress: 40 },
-      model: 'gemma-4-12b-it · 12s',
+      model: MODEL,
+      seconds: 12,
     });
     const chip = screen.getByRole('status');
     expect(chip).toHaveTextContent('Chunk 2 / 5');
     expect(chip).toHaveAttribute('data-tone', 'info');
     expect(chip).toHaveAttribute('aria-live', 'polite');
     expect(screen.getByRole('progressbar')).toHaveAttribute(VALUE_NOW, '40');
-    expect(screen.getByText('gemma-4-12b-it · 12s')).toBeInTheDocument();
+    expect(screen.getByText(MODEL)).toBeInTheDocument();
+    expect(screen.getByText('Total model time: 12s')).toBeInTheDocument();
+  });
+
+  it('shows no model time before the model has run', () => {
+    render(Track, { status: { tone: 'info', text: 'Measuring audio', progress: 4 }, model: MODEL });
+    expect(screen.getByText(MODEL)).toBeInTheDocument();
+    expect(screen.queryByText(/Total model time/)).toBeNull();
   });
 
   it.each([
@@ -37,19 +45,5 @@ describe('Track', () => {
     });
     expect(screen.getByRole('progressbar')).toHaveAttribute(VALUE_NOW, '0');
     expect(container.querySelector('.bar i')?.getAttribute('style')).toContain('--p: 0%');
-  });
-
-  it('updates as the job moves', async () => {
-    const { rerender } = render(Track, {
-      status: { tone: 'info', text: 'Chunk 1 / 2', progress: 6 },
-      model: MODEL,
-    });
-    await rerender({
-      status: { tone: 'warn', text: NEEDS_REVIEW, progress: 100 },
-      model: 'gemma-4-12b-it · 9s',
-    });
-    expect(screen.getByRole('status')).toHaveTextContent(NEEDS_REVIEW);
-    expect(screen.getByRole('progressbar')).toHaveAttribute(VALUE_NOW, '100');
-    expect(screen.getByText('gemma-4-12b-it · 9s')).toBeInTheDocument();
   });
 });

@@ -61,10 +61,10 @@ test.describe('up next', () => {
     );
     await page.goto('/jobs/e2e-analyzing');
     expect(await (await step).json()).toMatchObject({
-      wait: 'waking model',
+      wait: 'model busy',
       job: { state: 'ANALYZE', error: null },
     });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Waking the model');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
     await expect(offers(page)).toHaveCount(0);
   });
 });
@@ -107,14 +107,29 @@ test.describe('the Short', () => {
     await offers(page)
       .getByRole('button', { name: /Make a Short/ })
       .click();
-    // The test model's health endpoint returns 503, so no hook or media call starts.
+    // The preload answers the hook pick with a 429 before any media call starts.
     expect(await (await step).json()).toMatchObject({
-      wait: 'waking model',
+      wait: 'model busy',
       job: { state: 'HOOK', error: null },
     });
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Is this the hook?');
-    await expect(theShort(page).getByRole('status')).toHaveText('Waking the model');
+    await expect(theShort(page).getByRole('status')).toHaveText('Model busy');
     await expect(page.getByRole('heading', { name: 'YouTube Short' })).toBeVisible();
+  });
+
+  test('refuses a Short of a video analyzed by an older version', async ({ page }) => {
+    await page.goto('/jobs/e2e-stale');
+    const make = page.waitForResponse((response) => response.url().endsWith('/short'));
+    await offers(page)
+      .getByRole('button', { name: /Make a Short/ })
+      .click();
+    expect((await make).status()).toBe(409);
+    await expect(
+      offers(page).getByText(
+        'This video was analyzed by an older version. Upload it again to make a Short.',
+      ),
+    ).toBeVisible();
+    await expect(offers(page).getByRole('button', { name: /Make a Short/ })).toBeEnabled();
   });
 
   test('reviews a cut Short in a 9:16 frame with an accessible cut form', async ({ page }) => {

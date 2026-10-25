@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { isRedirect } from '@sveltejs/kit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { load } from '$routes/connections/+page.server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { load } from '#src/routes/connections/+page.server.js';
 import { seed, truncate } from '../../../helpers/db';
 import { USER_A, USER_B, USERS } from '../../../helpers/pipeline';
 

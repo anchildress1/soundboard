@@ -1,5 +1,6 @@
+import { readFile, rm } from 'node:fs/promises';
 import { captureException, captureMessage, startSpan, type Span } from '@sentry/sveltekit';
-import { scrubUrl } from '$lib/scrub';
+import { scrubUrl } from '#lib/scrub.js';
 import {
   DRIVEN_STATES,
   type Chunk,
@@ -7,11 +8,12 @@ import {
   type Pick,
   type PickFields,
   type Wait,
-} from '$lib/types';
-import { approvedBrand } from '$lib/server/artist/brand';
-import { analyzeChunk } from '$lib/server/ai/chunk-analyst';
-import { chunkCount, measureFile, probe, WINDOW_SEC } from '$lib/server/media/ffmpeg';
-import { objectInfo, signedReadUrl } from '$lib/server/media/gcs';
+} from '#lib/types.js';
+import { approvedBrand } from '#lib/server/artist/brand.js';
+import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
+import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
+import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
+import { objectInfo, signedReadUrl } from '#lib/server/media/gcs.js';
 import { audienceEvidence, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
@@ -26,34 +28,36 @@ import {
   releaseJob,
   transitionJob,
   type JobDoc,
-} from '$lib/server/jobs/jobs';
-import { artistJob, listFacts, recentFeedback, recordPublish } from '$lib/server/artist/memory';
-import type { Tx } from '$lib/server/core/db';
-import { required } from '$lib/server/core/env';
-import { ModelWaking, modelStatus, stepDeadline } from '$lib/server/ai/model';
+} from '#lib/server/jobs/jobs.js';
+import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
+import type { Tx } from '#lib/server/core/db.js';
+import { required } from '#lib/server/core/env.js';
+import { ModelBusy, modelFor, ModelQuotaSpent, stepDeadline } from '#lib/server/ai/model.js';
 import { hookStep, renderStep } from './short';
-import { runPick } from '$lib/server/ai/smart-pick';
-import type { JobPatch } from '$lib/server/jobs/rows';
-import { invokeAgent } from '$lib/server/core/tracing';
+import { runPick } from '#lib/server/ai/smart-pick.js';
+import type { JobPatch } from '#lib/server/jobs/rows.js';
+import { invokeAgent } from '#lib/server/core/tracing.js';
+import { quotaResetAt } from '#lib/server/core/quota.js';
 import {
   accessTokenFor,
   finalChunk,
-  quotaResetAt,
   readBack,
   recentVideos,
   sourceRange,
   startResumableUpload,
-  thumbnailDataUrl,
+  thumbnailImage,
   uploadChunk,
   uploadFailure,
   uploadOffset,
   type Access,
   type ChunkResult,
   type ReadBack,
-} from '$lib/server/platforms/youtube';
+} from '#lib/server/platforms/youtube/index.js';
 
 export const VERIFY_ATTEMPTS = 10;
 const RECENT_COUNT = 3;
+/** The end of each step's budget held back for cleanup and the release write. */
+const PERSIST_RESERVE_MS = 5_000;
 
 type Patch = JobPatch;
 /**
@@ -63,6 +67,7 @@ type Patch = JobPatch;
 type StepOutput = Patch & {
   pick?: Pick;
   chunk?: Chunk;
+  clearChunks?: boolean;
   wait?: Wait;
   alsoWrite?: (tx: Tx) => Promise<void>;
 };
@@ -103,28 +108,49 @@ async function prep(job: JobDoc): Promise<Patch> {
   });
 }
 
-async function analyze(job: JobDoc): Promise<StepOutput> {
+async function analyze(job: JobDoc, deadline: number): Promise<StepOutput> {
+  const duration = job.probe?.durationSec ?? 0;
+  // Windows prepared under another window length can't be resumed; prep counts them again.
+  if (job.chunkCount !== chunkCount(duration)) {
+    return { ...ok({ state: 'PREP', chunkIndex: 0 }), clearChunks: true };
+  }
+  const held = quotaHold(job);
+  if (held) return held;
   const index = job.chunkIndex;
   const startSec = index * WINDOW_SEC;
-  const duration = job.probe?.durationSec ?? 0;
-  const chunk = await analyzeChunk({
-    url: await signedReadUrl(job.object),
-    durationSec: Math.min(WINDOW_SEC, duration - startSec),
-    songTitle: job.songTitle,
-    notes: job.notes,
-    index,
-    startSec,
-  });
-  const next = index + 1;
-  return {
-    ...ok({ chunkIndex: next, state: next >= job.chunkCount ? 'PICK' : 'ANALYZE' }),
-    chunk,
-  };
+  const endSec = Math.min(startSec + WINDOW_SEC, duration);
+  const url = await signedReadUrl(job.object);
+  const by = deadline - PERSIST_RESERVE_MS;
+  const path = await cutWindowClip(url, startSec, endSec, by);
+  try {
+    const measurements = await measureWindow(url, startSec, endSec, by);
+    const chunk = await analyzeChunk(
+      {
+        songTitle: job.songTitle,
+        notes: job.notes,
+        startSec,
+        durationSec: endSec - startSec,
+        measurements,
+        clip: await readFile(path),
+        index,
+      },
+      by,
+    );
+    const next = index + 1;
+    return unlimited(job, {
+      ...ok({ chunkIndex: next, state: next >= job.chunkCount ? 'PICK' : 'ANALYZE' }),
+      chunk,
+    });
+  } finally {
+    await rm(path, { force: true });
+  }
 }
 
-async function pick(job: JobDoc): Promise<StepOutput> {
+async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
+  const held = quotaHold(job);
+  if (held) return held;
   // The budget covers the catalog and search reads too, not only the model calls.
-  const deadline = stepDeadline();
+  const by = deadline - PERSIST_RESERVE_MS;
   const artist = await artistJob(job);
   const [chunks, picks, recent] = await Promise.all([
     listChunks(job.id),
@@ -134,10 +160,10 @@ async function pick(job: JobDoc): Promise<StepOutput> {
   const withThumbs = await Promise.all(
     recent.map(async (v) => ({
       ...v,
-      thumbnail: v.thumbnailUrl ? await thumbnailDataUrl(v.thumbnailUrl) : null,
+      thumbnail: v.thumbnailUrl ? await thumbnailImage(v.thumbnailUrl) : null,
     })),
   );
-  return invokeAgent('smart-pick', async (span) => {
+  return invokeAgent('smart-pick', modelFor('smart-pick'), async (span) => {
     const audience =
       job.audience ?? (await audienceEvidence(chunks, job.probe?.durationSec ?? null));
     try {
@@ -170,13 +196,13 @@ async function pick(job: JobDoc): Promise<StepOutput> {
         feedback,
         brand,
       },
-      deadline,
+      by,
       span,
     );
     if (!result) throw new Error('The model reply did not parse as a recommendation.');
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
-    return {
+    return unlimited(job, {
       ...ok({
         state: 'REVIEW',
         pickVersion: version,
@@ -184,7 +210,7 @@ async function pick(job: JobDoc): Promise<StepOutput> {
       }),
       // Each stored pick carries the running total, so a re-run never loses earlier pick time.
       pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
-    };
+    });
   }
 }
 
@@ -198,7 +224,14 @@ const pause = (wait: Wait, patch: Patch = {}): StepOutput => ({ ...ok(patch), wa
 
 const limited = (job: JobDoc, now: number) => job.limitUntil !== null && now < job.limitUntil;
 
-/** A step that reached YouTube clears a limit that has passed. */
+/**
+ * Holds a model step, before any media or model work, while the per-day model quota is spent. Not a
+ * failure, so the streak and error stay as they were.
+ */
+const quotaHold = (job: JobDoc): StepOutput | null =>
+  limited(job, Date.now()) ? { wait: 'model quota spent' } : null;
+
+/** A step that reached YouTube or the model clears a limit that has passed. */
 const unlimited = (job: JobDoc, output: StepOutput): StepOutput =>
   job.limitUntil ? { ...output, limitUntil: null } : output;
 
@@ -368,17 +401,18 @@ function verified(job: JobDoc, videoId: string, video: ReadBack | null): StepOut
   );
 }
 
-const HANDLERS: Partial<Record<JobState, (job: JobDoc) => Promise<StepOutput>>> = {
+/** A step's handler; `deadline` is the step budget's end, started when the claim was taken. */
+type Handler = (job: JobDoc, deadline: number) => Promise<StepOutput>;
+
+const HANDLERS: Partial<Record<JobState, Handler>> = {
   PREP: prep,
   ANALYZE: analyze,
   PICK: pick,
-  HOOK: hookStep,
+  HOOK: async (job, deadline) => quotaHold(job) ?? unlimited(job, await hookStep(job, deadline)),
   RENDER: renderStep,
   PUBLISHING: publishing,
   CLAIMED_COMPLETE: verify,
 };
-
-const NEEDS_MODEL: ReadonlySet<JobState> = new Set(['ANALYZE', 'PICK', 'HOOK']);
 
 /**
  * A step that throws counts as a failure; two in a row stop the job at that step for a retry. The
@@ -393,21 +427,11 @@ export function failurePatch(job: JobDoc, error: unknown): Patch {
 
 export type StepResult = { wait?: Wait };
 
-async function modelWait(): Promise<Wait | undefined> {
-  const status = await modelStatus();
-  if (status === 'loading') return 'waking model';
-  if (status === 'busy') return 'waiting on another run';
-  return undefined;
-}
-
 /**
  * Runs the claimed step's handler; a throw becomes the failure patch, keeping any finished output.
- * A model that scaled to zero mid-step is a wait, not a failure.
+ * A busy or spent model is a wait instead.
  */
-async function runHandler(
-  job: JobDoc,
-  handler: (job: JobDoc) => Promise<StepOutput>,
-): Promise<StepOutput> {
+async function runHandler(job: JobDoc, handler: Handler, deadline: number): Promise<StepOutput> {
   try {
     return await startSpan(
       {
@@ -415,21 +439,22 @@ async function runHandler(
         name: `step ${job.state}`,
         attributes: { 'job.id': job.id, 'job.chunk': job.chunkIndex },
       },
-      () => handler(job),
+      () => handler(job, deadline),
     );
   } catch (error) {
     const failure = error instanceof StepFailure ? error : null;
     const cause = failure ? failure.cause : error;
-    if (cause instanceof ModelWaking) return { ...failure?.keep, wait: 'waking model' };
+    // Provider waits aren't failures: no strike, no report, and the finished work is kept.
+    if (cause instanceof ModelBusy) return { ...failure?.keep, wait: 'model busy' };
+    if (cause instanceof ModelQuotaSpent) {
+      return { ...failure?.keep, limitUntil: cause.until, wait: 'model quota spent' };
+    }
     captureException(cause, { tags: { step: job.state } });
     return { ...failurePatch(job, error), ...failure?.keep };
   }
 }
 
-/**
- * Runs exactly one pipeline step for the job. Model loading or busy returns a wait at once, without
- * claiming the job; otherwise the step claims the job, runs, and releases it with its result.
- */
+/** Runs exactly one pipeline step for the job: claims it, runs, and releases it with its result. */
 export async function runStep(snapshot: JobDoc): Promise<StepResult> {
   if (snapshot.state === 'AWAITING_UPLOAD') {
     await startOnceUploaded(snapshot);
@@ -439,22 +464,17 @@ export async function runStep(snapshot: JobDoc): Promise<StepResult> {
 
   const claimed = await claimJob(snapshot.id);
   if (!claimed) return { wait: 'step running in another tab' };
+  const deadline = stepDeadline();
   const { token, job } = claimed;
   const handler = handlerFor(job.state);
   if (!handler) {
     await releaseJob(job.id, token, job.state);
     return {};
   }
-  // Readiness is checked against the claimed state, which may be ahead of the caller's snapshot.
-  const wait = NEEDS_MODEL.has(job.state) ? await modelWait() : undefined;
-  if (wait) {
-    await releaseJob(job.id, token, job.state);
-    return { wait };
-  }
-
-  const output = await runHandler(job, handler);
-  const { pick: newPick, chunk, wait: woke, alsoWrite, ...patch } = output;
-  if (!(await releaseJob(job.id, token, job.state, patch, { pick: newPick, chunk, alsoWrite }))) {
+  const output = await runHandler(job, handler, deadline);
+  const { pick: newPick, chunk, clearChunks, wait: woke, alsoWrite, ...patch } = output;
+  const writes = { pick: newPick, chunk, clearChunks, alsoWrite };
+  if (!(await releaseJob(job.id, token, job.state, patch, writes))) {
     captureMessage('Step result dropped: the claim lapsed or the job moved on', {
       level: 'warning',
       tags: { step: job.state },
@@ -473,6 +493,6 @@ async function startOnceUploaded(job: JobDoc): Promise<void> {
 }
 
 /** The step to run for a state the page drives, or null for any other state. */
-function handlerFor(state: JobState): ((job: JobDoc) => Promise<StepOutput>) | null {
+function handlerFor(state: JobState): Handler | null {
   return DRIVEN_STATES.includes(state) ? (HANDLERS[state] ?? null) : null;
 }

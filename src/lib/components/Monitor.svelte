@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { resolution, timecode } from '$lib/format';
+  import { resolution, timecode } from '#lib/format.js';
 
   let {
     src = null,

@@ -1,13 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { draftKey } from '$lib/draft';
-import { setPending } from '$lib/pending';
-import { POLL_BACKOFF } from '$lib/retry';
-import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '$lib/types';
-import Page from '$routes/jobs/[id]/+page.svelte';
+import { draftKey } from '#lib/draft.js';
+import { setPending } from '#lib/pending.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import type { Chunk, JobState, JobView, Pick, PublicJob, Short } from '#lib/types.js';
+import Page from '#src/routes/jobs/[id]/+page.svelte';
 
 const PLAYBACK_URL = 'https://storage.googleapis.com/bkt/uploads/j1?sig=read';
-const WAKING = 'waking model';
+const BUSY = 'model busy';
 const STEP_PATH = '/api/jobs/j1/step';
 const FFMPEG_EXITED = 'ffmpeg exited 1';
 const APPROVE = 'Approve & upload';
@@ -99,6 +99,7 @@ const view = (patch: Partial<PublicJob> = {}, extra: Partial<JobView> = {}): Job
   job: job(patch),
   chunks: [],
   pick: null,
+  model: 'gemini-4-argon',
   ...extra,
 });
 
@@ -203,23 +204,23 @@ describe('job page: working screens', () => {
       fetchMock.mockImplementation(hang);
       setup(view({ state: 'PICK' }, { pick: PICK, chunks: [chunk(0)] }));
       // A re-run keeps the earlier pick's 12s and counts the new call on top.
-      expect(screen.getByText('gemma-4-12b-it · 16s')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 16s')).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(3000);
-      expect(screen.getByText('gemma-4-12b-it · 19s')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 19s')).toBeInTheDocument();
       expect(heading('Drafting the title, description, and tags')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('does not count while the model is loading', async () => {
+  it('does not count while the model is busy', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       fetchMock.mockImplementation(hang);
-      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: WAKING }));
+      setup(view({ state: 'PICK' }, { chunks: [chunk(0)], wait: BUSY }));
       await vi.advanceTimersByTimeAsync(3000);
-      expect(screen.getByText('gemma-4-12b-it · 4s')).toBeInTheDocument();
-      expect(heading('Waking the model')).toBeInTheDocument();
+      expect(screen.getByText('Total model time: 4s')).toBeInTheDocument();
+      expect(heading('Model busy')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -227,8 +228,15 @@ describe('job page: working screens', () => {
 
   it('shows chunk progress, what it heard, and drives the next step with the job trace', async () => {
     fetchMock.mockImplementation(hang);
-    setup(view({ state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 }, { chunks: [chunk(0)] }));
+    setup(
+      view(
+        { state: 'ANALYZE', chunkIndex: 1, chunkCount: 5 },
+        { chunks: [chunk(0)], model: 'gemini-3.8-flash' },
+      ),
+    );
     expect(chip()).toHaveTextContent('Window 2 of 5');
+    expect(screen.getByText('Configured analyst: gemini-3.8-flash')).toBeInTheDocument();
+    expect(screen.getByText('Total model time: 4s')).toBeInTheDocument();
     expect(heading('Listening to the video')).toBeInTheDocument();
     expect(screen.getByText('Step 2 of 8 · Listening')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to releases from PeekaBoo' })).toHaveAttribute(
@@ -246,11 +254,11 @@ describe('job page: working screens', () => {
 
   it('shows a named wait from the step', async () => {
     fetchMock
-      .mockResolvedValueOnce(json(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: WAKING })))
+      .mockResolvedValueOnce(json(view({ state: 'ANALYZE', chunkIndex: 0 }, { wait: BUSY })))
       .mockImplementation(hang);
     setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
     // The headline names the wait once; the status row keeps showing progress.
-    await waitFor(() => expect(heading('Waking the model')).toBeInTheDocument());
+    await waitFor(() => expect(heading('Model busy')).toBeInTheDocument());
     expect(chip()).toHaveTextContent('Window 1 of 5');
   });
 
@@ -530,7 +538,7 @@ describe('job page: driving', () => {
   it('goes home to sign in when a step finds the session gone', async () => {
     fetchMock.mockResolvedValueOnce(json({ message: 'Sign in first.' }, 401));
     setup(view({ state: 'ANALYZE', chunkIndex: 0 }));
-    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { invalidateAll: true }));
+    await waitFor(() => expect(h.goto).toHaveBeenCalledWith('/', { refreshAll: true }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -810,6 +818,7 @@ const shortView = (
   }),
   chunks: [],
   pick: PICK,
+  model: 'gemini-4-argon',
   ...extra,
 });
 

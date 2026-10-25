@@ -1,5 +1,5 @@
 import pRetry from 'p-retry';
-import type { BrandGuide } from '$lib/brand';
+import type { BrandGuide } from '#lib/brand.js';
 import {
   containsWords,
   DESCRIPTION_MAX,
@@ -7,21 +7,23 @@ import {
   tagsLength,
   TAGS_MAX,
   TITLE_MAX,
-} from '$lib/metadata';
-import type { Chunk, Measurements, Pick, Probe } from '$lib/types';
-import { REASK_ONCE } from '$lib/retry';
-import { ARTIST_NAME, type Fact, type Feedback } from '$lib/server/artist/memory';
-import { chatJson, stepDeadline } from './model';
+} from '#lib/metadata.js';
+import type { Chunk, Measurements, Pick, Probe } from '#lib/types.js';
+import { REASK_ONCE } from '#lib/retry.js';
+import { ARTIST_NAME, type Fact, type Feedback } from '#lib/server/artist/memory.js';
+import { chatJson } from './model';
 import { stripDeep } from './numerics';
 import { isString, isStrings, shape } from './shape';
-import type { AudienceVideo, CandidateList, TagCandidate } from '$lib/server/pipeline/hashtags';
+import type { AudienceVideo, CandidateList, TagCandidate } from '#lib/server/pipeline/hashtags.js';
 import {
   agentInput,
   agentOutput,
+  imageParts,
+  textTurn,
   type AgentSpan,
-  type ChatMessage,
-} from '$lib/server/core/tracing';
-import type { CatalogVideo } from '$lib/server/platforms/youtube';
+  type ModelRequest,
+} from '#lib/server/core/tracing.js';
+import type { CatalogVideo, Thumbnail } from '#lib/server/platforms/youtube/index.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
@@ -83,7 +85,7 @@ export type PickContext = {
   chunks: Chunk[];
   measurements: Measurements | null;
   probe: Probe | null;
-  recent: (CatalogVideo & { thumbnail: string | null })[];
+  recent: (CatalogVideo & { thumbnail: Thumbnail | null })[];
   /** Candidates remain labeled by their source video (R4). */
   candidateLists: CandidateList[];
   /** Genre search examples for metadata format, without causal performance claims. */
@@ -164,7 +166,7 @@ export function tagPool(fix: { artist: boolean; candidateLists: CandidateList[] 
   return [...found.values(), ...(fix.artist ? [{ tag: ARTIST_NAME }] : [])];
 }
 
-export function buildPickMessages(ctx: PickContext): ChatMessage[] {
+export function buildPickRequest(ctx: PickContext): ModelRequest {
   const artistTag = ctx.artist
     ? ` Include "${ARTIST_NAME}". This required artist tag may be absent from the reference lists.`
     : '';
@@ -232,25 +234,21 @@ export function buildPickMessages(ctx: PickContext): ChatMessage[] {
     feedback: weighFeedback(ctx.feedback),
     skippedVersions: ctx.skipped.length > 0 ? ctx.skipped : undefined,
   };
-  const thumbnails = ctx.recent
-    .map((v) => v.thumbnail)
-    .filter((t): t is string => Boolean(t))
-    .map((url) => ({ type: 'image_url' as const, image_url: { url } }));
-  return [
-    { role: 'system', content: rules.join('\n') },
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: JSON.stringify(context) },
-        ...(thumbnails.length > 0
-          ? [
-              { type: 'text' as const, text: 'Thumbnails of the recent uploads, newest first:' },
-              ...thumbnails,
-            ]
-          : []),
-      ],
-    },
-  ];
+  return {
+    system: rules.join('\n'),
+    turns: [
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: JSON.stringify(context) },
+          ...imageParts(
+            'Thumbnails of the recent uploads, newest first:',
+            ctx.recent.map((v) => v.thumbnail),
+          ),
+        ],
+      },
+    ],
+  };
 }
 
 const URL_PATTERN = /https?:\/\/[^\s)]+/g;
@@ -455,22 +453,22 @@ class Repeated extends Error {
 
 /**
  * Runs the pick, retrying once when the title repeats a skipped version. Returns null when the
- * model's reply never parses.
+ * model's reply never parses. The step's `deadline` covers every call, re-asks included.
  */
 export async function runPick(
   ctx: PickContext,
-  deadline = stepDeadline(),
+  deadline: number,
   span?: AgentSpan,
 ): Promise<{ pick: FinalPick; ms: number } | null> {
   let ms = 0;
-  let messages = buildPickMessages(ctx);
-  if (span) agentInput(span, messages);
+  let request = buildPickRequest(ctx);
+  if (span) agentInput(span, request);
   try {
     return await pRetry(
       async () => {
         const { value, ms: took } = await chatJson(
-          messages,
-          'smart_pick',
+          request,
+          'smart-pick',
           PICK_SCHEMA,
           isRawPick,
           deadline,
@@ -492,14 +490,17 @@ export async function runPick(
           if (!(error instanceof Repeated)) return;
           const fields = error.fields.join(' and ');
           const verb = error.fields.length > 1 ? 'repeat' : 'repeats';
-          messages = [
-            ...messages,
-            { role: 'assistant', content: JSON.stringify(error.value) },
-            {
-              role: 'user',
-              content: `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
-            },
-          ];
+          request = {
+            ...request,
+            turns: [
+              ...request.turns,
+              textTurn('assistant', JSON.stringify(error.value)),
+              textTurn(
+                'user',
+                `That ${fields} ${verb} a skipped version. Write a different ${fields}.`,
+              ),
+            ],
+          };
         },
         shouldRetry: ({ error }) => error instanceof Repeated,
       },

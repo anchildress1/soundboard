@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('$app/state', () => ({ page: h.page }));
 
-import ErrorPage from '$routes/+error.svelte';
+import ErrorPage from '#src/routes/+error.svelte';
 
 beforeEach(() => {
   h.page.status = 404;

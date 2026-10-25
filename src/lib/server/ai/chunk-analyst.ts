@@ -1,9 +1,13 @@
-import type { Chunk, ChunkAnalysis, Measurements } from '$lib/types';
-import { extractWindow } from '$lib/server/media/ffmpeg';
-import { chatJson, stepDeadline } from './model';
+import type { Chunk, ChunkAnalysis, Measurements } from '#lib/types.js';
+import { chatJson, modelFor } from './model';
 import { stripDeep, stripNumerics } from './numerics';
 import { isString, isStrings, shape } from './shape';
-import { agentInput, agentOutput, invokeAgent, type ChatMessage } from '$lib/server/core/tracing';
+import {
+  agentInput,
+  agentOutput,
+  invokeAgent,
+  type ModelRequest,
+} from '#lib/server/core/tracing.js';
 
 const stringArray = { type: 'array', items: { type: 'string' } };
 
@@ -46,7 +50,7 @@ export function isChunkAnalysis(value: unknown): value is ChunkAnalysis {
 }
 
 const INSTRUCTIONS = [
-  'Analyze one window of a music video: its audio and frames sampled across it.',
+  'Analyze one window of a music video, given as a short clip: watch it and listen to it.',
   'Report what you see and hear in short plain phrases.',
   'visual: one or two sentences on imagery, setting, color, and editing pace.',
   'music: genre terms, tempo feel in words, instrumentation, vocal type, mood words.',
@@ -55,55 +59,58 @@ const INSTRUCTIONS = [
   'Do not transcribe lyrics.',
 ].join('\n');
 
-export function buildChunkMessages(input: {
+type WindowInput = {
   songTitle: string;
   notes: string;
   startSec: number;
   durationSec: number;
   measurements: Measurements;
-  frames: Buffer[];
-  wav: Buffer;
-}): ChatMessage[] {
+  /** The window's MP4 clip, sent inline. */
+  clip: Uint8Array;
+};
+
+export function buildChunkRequest(input: WindowInput): ModelRequest {
   const context = {
     songTitle: input.songTitle,
     artistNotes: input.notes || undefined,
     window: { startSec: input.startSec, durationSec: input.durationSec },
     ffmpeg: input.measurements,
   };
-  return [
-    { role: 'system', content: INSTRUCTIONS },
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: JSON.stringify(context) },
-        ...input.frames.map((frame) => ({
-          type: 'image_url' as const,
-          image_url: { url: `data:image/jpeg;base64,${frame.toString('base64')}` },
-        })),
-        { type: 'input_audio', input_audio: { data: input.wav.toString('base64'), format: 'wav' } },
-      ],
-    },
-  ];
+  return {
+    system: INSTRUCTIONS,
+    turns: [
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: JSON.stringify(context) },
+          {
+            type: 'video',
+            data: input.clip,
+            mime_type: 'video/mp4',
+            start: input.startSec,
+            end: input.startSec + input.durationSec,
+          },
+        ],
+      },
+    ],
+  };
 }
 
-/** Cuts one window from the source and runs it through the chunk analyst. */
-export async function analyzeChunk(input: {
-  url: string;
-  index: number;
-  startSec: number;
-  durationSec: number;
-  songTitle: string;
-  notes: string;
-}): Promise<Chunk> {
-  const deadline = stepDeadline();
-  const window = await extractWindow(input.url, input.startSec, input.durationSec);
-  return invokeAgent('chunk-analyst', async (span) => {
+/**
+ * Runs one window's clip through the chunk analyst. A reply that never parses is kept as
+ * numerics-stripped raw text.
+ */
+export function analyzeChunk(
+  input: WindowInput & { index: number },
+  deadline: number,
+): Promise<Chunk> {
+  return invokeAgent('chunk-analyst', modelFor('chunk-analyst'), async (span) => {
     span.setAttribute('chunk.index', input.index);
-    const messages = buildChunkMessages({ ...input, ...window });
-    agentInput(span, messages);
+    const request = buildChunkRequest(input);
+    agentInput(span, request);
     const { value, raw, ms } = await chatJson(
-      messages,
-      'chunk_analysis',
+      request,
+      'chunk-analyst',
       CHUNK_SCHEMA,
       isChunkAnalysis,
       deadline,
@@ -115,7 +122,7 @@ export async function analyzeChunk(input: {
       index: input.index,
       startSec: input.startSec,
       durationSec: input.durationSec,
-      measurements: window.measurements,
+      measurements: input.measurements,
       raw: stripped,
       modelMs: ms,
       analysis,

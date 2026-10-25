@@ -2,11 +2,11 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
-  import { ApiError, createJob } from '$lib/api';
-  import Monitor from '$lib/components/Monitor.svelte';
-  import ReleaseBar from '$lib/components/ReleaseBar.svelte';
-  import { setPending } from '$lib/pending';
-  import { TITLE_MAX } from '$lib/metadata';
+  import { ApiError, createJob } from '#lib/api.js';
+  import Monitor from '#lib/components/Monitor.svelte';
+  import ReleaseBar from '#lib/components/ReleaseBar.svelte';
+  import { setPending } from '#lib/pending.js';
+  import { TITLE_MAX } from '#lib/metadata.js';
 
   const maxMinutes = 15;
 

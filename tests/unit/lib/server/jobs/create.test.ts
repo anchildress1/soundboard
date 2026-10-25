@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import { ActionError } from '$lib/server/core/errors';
-import { resetClients } from '$lib/server/core/clients';
-import { create, MAX_BYTES, NOTES_MAX, type CreateInput } from '$lib/server/jobs/create';
-import { getJob, type JobDoc } from '$lib/server/jobs/jobs';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { resetClients } from '#lib/server/core/clients.js';
+import { create, MAX_BYTES, NOTES_MAX, type CreateInput } from '#lib/server/jobs/create.js';
+import { getJob, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { omit } from '../../../../helpers/omit';
 import { USER_A, USER_B, USERS } from '../../../../helpers/pipeline';

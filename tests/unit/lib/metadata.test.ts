@@ -7,7 +7,7 @@ import {
   tagsLength,
   TITLE_MAX,
   validateFields,
-} from '$lib/metadata';
+} from '#lib/metadata.js';
 
 describe('parseHashtags', () => {
   it('ignores URL fragments and mid-word #', () => {

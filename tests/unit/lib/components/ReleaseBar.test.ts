@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import ReleaseBar from '$lib/components/ReleaseBar.svelte';
+import ReleaseBar from '#lib/components/ReleaseBar.svelte';
 
 const rail = (container: HTMLElement) => [...container.querySelectorAll('.rail li')];
 

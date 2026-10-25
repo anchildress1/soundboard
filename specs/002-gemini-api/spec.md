@@ -28,8 +28,19 @@
 ### Session 2026-10-23
 
 - Q: Do AI drafts informed by YouTube API data count as "new or derived data" under YouTube's Developer Policies (III.E.4.h)? → A: No. The owner's position is that a draft is new content for the user's own upload, not a metric and not a replacement for YouTube's data. That position is stated in the spec, disclosed in the privacy policy, and described in the YouTube audit application.
-- Q: Can YouTube API data appear in model-call traces? → A: No. Traces keep the song title, notes and model output, but YouTube-sourced text and images are replaced by placeholders, so no API data sits in a third-party store past 30 days (III.E.4).
+- Q: Can YouTube API data appear in model-call traces? → A: Superseded by the 2026-10-24 decision: keep text traces and accept the storage risk, with deployment blocked until the YouTube request is approved.
 - Q: The pick now receives up to 10 separate candidate lists (#20). Does the latency target still hold? → A: It must. The pick is re-timed at that prompt size before the pick changes are built.
+
+### Session 2026-10-24
+
+- Q: What happens when someone makes a Short from a job analyzed before the swap (29.5 s windows), now that the hook position uses 60 s windows? → A: Refuse it. A job whose stored chunk count doesn't match its duration at 60 s windows takes the existing "new upload required" path. No schema change.
+- Q: Is Gemini on Vertex AI a zero-retention fallback if Google's 55-day abuse log counts against YouTube's 30-day limit? → A: No, so the fallback is dropped. Without a Master Agreement, Vertex logs Gemini prompts for up to 90 days. Its only 30-day "Frontier" model is an allowlisted cybersecurity variant of Argon.
+- Q: Keep the per-agent sizes-only tracing design? → A: No. Keep text traces for every agent and accept their storage risk. Prefer shorter hosted Sentry retention if available; do not add app retention machinery. Nothing in this feature is deployed until YouTube approves the request covering the disclosed processing and storage.
+- Q: Do the YouTube audit docs change with the swap? → A: Yes. `docs/youtube-audit/` is updated in the same change as the code. The audit application is updated separately, on the owner's timing.
+- Q: What actually restarts a job that's mid-analysis at deploy? The plan has no mechanism. → A: The analyze step itself. A stored chunk count that doesn't match the duration at 60 s windows clears the chunks and moves the job to prep. It's the same check as the old-job Short rule, with no migration.
+- Q: Does the privacy page need more than the 55-day log for unreleased music? → A: Yes. It also says authorized Google staff may review flagged prompts, and that a deletion request can't reach Google's abuse-monitoring copy.
+- Q: Simplify the review additions? → A: Yes. No durable brand quota state (the brand page stops polling on the wait), no request-body size check beyond the clip's 8 MB limit, and chunk counts keep skipping a sub-second tail.
+- Q: Is Flash good enough to hear the music? G1 only used a synthetic video. → A: Unproven. Gate G2 runs Flash (planned settings), Flash (default settings) and Argon on a few of Nathan's real videos, scored against today's Gemma output. The analyst is built only after it passes.
 
 ## User Scenarios & Testing _(mandatory)_
 
@@ -39,7 +50,7 @@ Nathan uploads a video and types the song title. The status page runs prep, one 
 
 **Why this priority**: This is the product. Everything else is cleanup around it.
 
-**Independent Test**: Run a 3-minute and a 15-minute video end to end on the deployed app with the Vertex endpoint deleted. Both reach review; every hashtag and tag is in the job's candidate lists; no model-emitted loudness number appears.
+**Independent Test**: Run a 3-minute and a 15-minute video end to end on the deployed app, with no Vertex call anywhere in the request path. The endpoint itself is deleted afterwards (User Story 4). Both reach review; every hashtag and tag is in the job's candidate lists; no model-emitted loudness number appears.
 
 **Acceptance Scenarios**:
 
@@ -47,7 +58,7 @@ Nathan uploads a video and types the song title. The status page runs prep, one 
 2. **Given** a prepared job, **When** each analyze step runs, **Then** the model receives one window of the video (its pictures and sound) plus that window's ffmpeg measurements, the song title and notes, and returns visual, music and quality flags in today's shape.
 3. **Given** a 15-minute video, **When** the page drives the run, **Then** every step returns within about 2 minutes and the page shows chunk N/M throughout.
 4. **Given** the analyses, **When** the pick runs, **Then** it produces one title, description, hashtags, tags and Bandcamp copy under every existing R4 rule.
-5. **Given** a model reply that fails to parse, **When** the step budget allows, **Then** it retries once, then keeps the raw text, as today.
+5. **Given** an analyst reply that fails to parse, **When** the step budget allows, **Then** it retries once, then stores numerics-stripped raw text on the chunk; other agents follow FR-008.
 
 ---
 
@@ -100,13 +111,18 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 
 ### Edge Cases
 
-- A video right at the 2 GB upload cap: each step still reads only its own window, so call time doesn't grow with file size. A larger file is already refused at upload (R1).
+- A video right at the 2 GB upload cap: each step seeks to its window without buffering the source; seek/decode time still depends on the source and is bounded by the shared deadline. A larger file is refused at upload (R1).
 - The source object hit the 7-day delete rule: the job follows the existing "missing media, new upload required" path.
-- A provider safety block or empty reply: treated like a parse failure (retry once, keep raw text).
+- A provider safety block or empty reply: one parse re-ask while budget allows; afterward the analyst stores raw text (possibly empty), pick/hook fail the step, and brand returns a retryable error (FR-008).
 - The last window is shorter than the window length: the model sees only what remains, as today.
+- A Short requested from a job analyzed before the swap (29.5 s windows): its chunk count doesn't match its duration at 60 s windows, so it takes the "new upload required" path instead of placing the hook in the wrong window.
+- A job mid-analysis at deploy (29.5 s chunk count): its next analyze step atomically clears its chunks, resets its index and failure state, and returns it to prep under the matching claim; a lost claim or concurrent discard changes nothing. Prep recomputes the count.
 - A provider price change: model names are configuration, so moving the analyst to the Lite model needs no code change.
 - A pick with all 10 candidate lists full plus 5 example videos: it still meets the pick latency target, or the plan lowers its thinking level before raising any budget.
-- A failed call whose error message quotes a prompt fragment: YouTube-sourced text in it is redacted the same way as in spans.
+- A failed call: tracing never replaces the thrown error or strips its control-flow fields; media, credentials and signed-URL queries remain excluded from captured events.
+
+- An oversized clip or expired deadline: no provider call starts, the temp file is removed, and the existing failure/retry path applies without saving a partial chunk.
+- A Short already in `HOOK`, including a retry or re-pick, checks its parent before a model call; incompatible windows require a new upload. An existing absolute cut may finish `RENDER`, review and publishing, and may be re-cut without a new hook pick.
 
 ## Requirements _(mandatory)_
 
@@ -114,31 +130,34 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 
 - **FR-001**: Every model call MUST go through one shared server-side client built on a provider-agnostic SDK, so changing a model or provider touches only that client and configuration. No browser code MUST reach the provider.
 - **FR-002**: The app MUST use only a paid-tier Gemini project, so content is not used to improve Google's products.
-- **FR-003**: Each analyze step MUST cut its window from the stored video into a small clip (360p, a few MB) and send it with the call. The whole video MUST never be loaded into app memory, and the clip's temporary file MUST be deleted when the step ends.
+- **FR-003**: Each analyze step MUST cut its window into a bounded 360p clip and send it inline. The encoder's bitrate cap keeps a 60 s clip near 5 MB, and the clip MUST be at most 8,000,000 bytes before it's read into memory, keeping the request under the provider's 20 MB inline limit. Oversize input MUST fail before a provider call, without silently shortening the window. The whole source MUST never be loaded into app memory; the temporary file MUST be deleted on success, rejection and timeout.
 - **FR-004**: Each analyze step MUST send one window of the stored video, sound included, plus that window's ffmpeg measurements, song title and notes, and MUST return today's chunk analysis shape.
 - **FR-005**: The app MUST NOT extract still frames or separate audio for the model; the model gets the window as one video clip with its sound. ffmpeg keeps prep probing, whole-file and per-window measurements, the window clip, Short cut placement and render.
-- **FR-006**: Each step MUST stay under about 2 minutes. Windows MUST be 60 s long (the last one shorter); a 15-minute video is 15 windows.
+- **FR-006**: Each step MUST stay under about 2 minutes, with one 110-second deadline shared by media work, model calls, retries and finalization. Windows MUST be 60 s long (the last one shorter); a 15-minute video is 15 windows. Media and provider work MUST be cancelled within that budget, reserving time for cleanup and persistence.
 - **FR-007**: The analyst model and the pick model MUST each be set by configuration. Defaults: `gemini-3.8-flash` for the analyst; `gemini-4-argon` for smart pick, hook pick and brand guide.
-- **FR-008**: Every model reply MUST be schema-constrained JSON, validated in code, retried once on a parse failure while budget allows, then kept as raw text.
+- **FR-008**: Every model reply MUST be schema-constrained JSON, validated in code and retried once on parse failure while budget allows. After exhaustion, the analyst MUST store numerics-stripped raw text on its chunk and continue. Smart pick and hook pick MUST fail through the existing two-strike step path; brand MUST return its existing retryable error. Their raw replies remain diagnostic trace data, not new database records or publishable output. Empty and blocked replies follow the same rules.
 - **FR-009**: Provider rate-limit and overload responses MUST return a "model busy" wait at once, keep finished work, and MUST NOT count as a failure. A spent daily quota MUST return its own wait that resumes after the quota resets, without calling the provider until then. Other provider errors MUST count as failures.
 - **FR-010**: The "waking model" and "waiting on another run" waits, the readiness and slot checks, and the endpoint URL setting MUST be removed with their code, config and tests.
 - **FR-011**: All existing output rules MUST hold unchanged: numbers only from ffmpeg with model numerics stripped, hashtags and tags only from the job's candidates, the artist voice, the server-built flags, and verified-by-read-back.
 - **FR-012**: Sentry spans MUST name the provider and the actual model of each call. Image parts MUST be recorded as `{type, mime, bytes}` and video parts as `{type, mime, bytes, clip}` placeholders, never their content.
-- **FR-013**: The model label on the job page and the Short screen MUST name the model in use instead of `gemma-4-12b-it`, with the same total-model-time counter.
+- **FR-013**: The job page and Short screen MUST label current configuration as `Configured analyst: <model>` or `Configured picker: <model>`, with total model time displayed separately. This MUST NOT claim which model generated historical results; per-call traces retain that evidence. No provenance migration is required.
 - **FR-014**: Deploys MUST NOT create a model endpoint or build a model image. A one-time teardown MUST delete the existing endpoint, deployed model and model image.
 - **FR-015**: Provider behavior the docs leave open MUST be proven by a recorded manual gate before dependent code is built. Gate G1 ran on 2026-10-22: clip handling, token scaling, latency and Argon timing are recorded in research R12.
-- **FR-016**: The PRD, README, AGENTS.md, the public privacy page and the constitution MUST be updated to match: the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, call settings, wait names, the model label, and the mock boundary.
+- **FR-016**: The PRD, README, AGENTS.md, the public privacy page, the constitution and the YouTube audit docs (`docs/youtube-audit/architecture.md`, `user-flows.md`) MUST be updated to match: the provider and model lines, the "audio stays in the project" line, the third-party-inference non-goal, System Design and cost, call settings, wait names, the model label, the mock boundary, and the audit docs' model provider, data flow and trace handling. The audit application itself is updated separately, outside this spec.
 
-- **FR-017**: Model-call traces MUST NOT contain YouTube API data. Titles, descriptions, tags, statistics and thumbnails from YouTube (genre-search results and the artist's own channel) MUST be replaced by placeholders naming the source and size. That includes model output that copies them: the picked tags and hashtags, the hashtags that close the description, and any earlier answer resent in a re-ask, in every span (model call, finalized pick, tool result). These are recorded as counts. The song title, notes and the rest of the model output (title, description text, why, Bandcamp copy) MAY be recorded.
-- **FR-018**: The public privacy page MUST state that analysis and drafts are produced by the Gemini API (paid tier, not used for training). It MUST say Google keeps prompts and responses for up to 55 days solely for abuse monitoring, and that `store: false` turns off its separate interaction storage. It MUST say the API receives short clips of the artist's video and YouTube metadata (YouTube Developer Policies III.A.2.e).
-- **FR-019**: YouTube API data sent to the model MUST be used for that one call only. The app MUST NOT ask the provider to store it (no interaction storage, caching, file uploads or grounding). The only provider copy MUST be Google's abuse-monitoring log, which is kept up to 55 days and used solely for policy enforcement. The app MUST keep it no longer than 30 days. Drafts informed by it MUST be new content for the requesting user's own upload, never metrics, scores or replacements for YouTube's data (III.E.4.h, per the owner's stated interpretation).
+- **FR-017**: All agents MUST use the same text-tracing policy: prompts, replies, reasoning and re-ask turns remain available for debugging, including YouTube-derived text. Media bytes, secrets and signed-URL credential queries MUST remain redacted. No per-agent text switch or replacement of thrown errors for tracing is required. The owner accepts third-party storage risk; shorter hosted Sentry retention is an operational preference, not custom app logic. Deployment remains blocked by FR-023.
+- **FR-018**: The public privacy page MUST name paid-tier Gemini as processor of video clips and YouTube metadata, and Sentry as processor of text traces. It MUST distinguish `store: false` interaction storage, automatic implicit caching and the up-to-55-day abuse log, without claiming zero retention or an unestablished cache expiry. It MUST disclose possible human review, deletion limits, actual Sentry retention, and that content is not used to improve Google products; policy-enforcement model use remains covered by the abuse-monitoring terms.
+- **FR-019**: The app MUST use `store: false` and MUST NOT request explicit caching, file uploads or grounding. Implicit caching, abuse logs and Sentry text retention are accepted storage risks subject to FR-023; the abuse log MUST NOT be described as the only provider copy. Existing database research expiry and daily cleanup remain unchanged. Drafts MUST be new content for the requesting user's own upload, never metrics, scores or replacements for YouTube data (III.E.4.h, per the owner's stated interpretation).
 - **FR-020**: The artist's own authorized channel data (recent videos, thumbnails) MUST be sent to the model only for that artist's own request, and MUST never be shown to another user (III.E.3.b).
 - **FR-021**: The smart pick MUST meet its latency target with the full prompt from #20: up to 10 separate candidate lists plus 5 example videos.
+- **FR-022**: Before the analyst is built, gate G2 MUST record a comparison on 3–5 of Nathan's real videos covering three configurations: Flash at the planned low media resolution and low thinking, Flash at default resolution and medium thinking, and Argon. Each is scored per window against today's Gemma analysis of the same videos for genre terms, instruments, vocals and quality flags. The analyst ships on the cheapest configuration that's at least as good as Gemma. If none is, the spec reopens.
+
+- **FR-023**: This feature MUST NOT be deployed, including for hosted validation, until the owner records YouTube's approval of the request covering the disclosed Gemini processing/storage and Sentry text retention. Local design and implementation may proceed; G2 still blocks analyst implementation. Submission, silence, owner risk acceptance or shorter Sentry retention alone MUST NOT satisfy this gate. A contrary or narrower approval reopens the affected design before deployment.
 
 ### Key Entities
 
-- **Job**: unchanged. Nothing provider-side is stored; each window's clip is a temporary file deleted at the end of its step. Chunks keep today's shape, one per 60 s window.
-- **Model setting**: two configured model names, analyst and picker.
+- **Job**: unchanged database schema. The app stores no provider interaction IDs; each clip is temporary. Chunks keep today's shape, one per 60 s window; incompatible partial analysis is reset atomically.
+- **Model setting**: two configured model names, analyst and picker. G2 (FR-022) can change the analyst's default model, media resolution and thinking level.
 
 ## Success Criteria _(mandatory)_
 
@@ -150,9 +169,11 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - **SC-004**: 100% of hashtags and tags in picks come from the job's candidate lists across the regression suite.
 - **SC-005**: A forced rate-limit during analyze or pick fails 0 jobs.
 - **SC-006**: Typical model cost for a 15-minute job (the upload cap) stays under $0.50 at the post-increase prices. The worst case (full thinking budgets plus every re-ask) is stated in research R6, not capped.
-- **SC-007**: No Sentry event contains media bytes, a signed URL's credential query, or YouTube-sourced titles, descriptions, tags, statistics or thumbnails, including tags and hashtags a draft copied from them.
+- **SC-007**: No Sentry event contains media bytes, credentials or signed-URL credential queries; all agents retain text diagnostics, and typed waits and parse retries still behave correctly.
 - **SC-008**: The live privacy page names the Gemini API as a processor of video clips and YouTube metadata on the day the swap ships.
 - **SC-009**: Smart pick p95 stays at or under 45 s with a full-size prompt (10 candidate lists, 5 example videos).
+
+- **SC-010**: Before any deployment, the owner has recorded the approval reference and scope, actual Sentry retention and any restrictions in the release evidence.
 
 ## Evidence Boundary
 
@@ -165,7 +186,7 @@ Deploys create no model endpoint and build no model image. The old endpoint, dep
 - Temperature and thinking level follow Gemini's guidance per agent, chosen in planning; today's 0.2 isn't kept by default.
 - Argon's intro price doubles on 2026-12-01 and Flash's on 2027-01-01. SC-006 uses the higher prices.
 - E2E keeps no live model: model steps end at a faked provider wait, as they end at "waking model" today.
-- Pre-beta: no migration of in-flight jobs. A job mid-analysis at deploy restarts from prep.
-- Google's abuse-monitoring log keeps prompts, including any YouTube API data in them, for up to 55 days. Whether a processor's own enforcement log counts toward YouTube's 30-day limit (III.E.4) is unsettled. If the audit or the owner decides it does, the client switches to Gemini on Vertex AI, which offers guaranteed zero data retention. That's a configuration change, per research R1.
+- Pre-beta: no migration of in-flight jobs. A job mid-analysis at deploy restarts from prep automatically (Edge Cases). A job already past analysis keeps its review; a new hook pick from incompatible analysis needs a new upload, while existing absolute Short cuts remain usable (Edge Cases).
+- Google retains prompts and responses for up to 55 days for abuse monitoring and also uses implicit caching on stateless calls. The owner accepts that storage risk; FR-023 gates deployment on approval of the disclosed use, without asserting a 30-day provider-retention guarantee.
 - The owner's interpretation of III.E.4.h (drafts are new content, not derived data) is a stated position, not a YouTube ruling. The audit application describes it, and an audit answer that contradicts it reopens this spec.
 - Genre-search evidence storage (the `job_audience` table, the fresh-evidence view and the daily cleanup) shipped in #20 and is unchanged here.

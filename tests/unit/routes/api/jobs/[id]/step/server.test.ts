@@ -1,11 +1,12 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { getJob } from '$lib/server/jobs/jobs';
-import { POST } from '$routes/api/jobs/[id]/step/+server';
-import type { JobState, JobView } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { POST } from '#src/routes/api/jobs/[id]/step/+server.js';
+import type { JobState, JobView } from '#lib/types.js';
 import { seed, truncate, vanishOnUpdate } from '../../../../../../helpers/db';
+import { busy429 } from '../../../../../../helpers/gemini';
 import { seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
 const h = vi.hoisted(() => ({ objects: new Set<string>() }));
@@ -35,6 +36,7 @@ const fetchMock = vi.fn<typeof fetch>();
 beforeEach(async () => {
   vi.stubEnv('GCP_PROJECT_ID', 'p');
   vi.stubEnv('GCS_BUCKET', 'bkt');
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
   resetClients();
   await truncate();
   await seed(USERS);
@@ -65,13 +67,22 @@ describe('POST /api/jobs/[id]/step', () => {
     expect(view.job.state).toBe('PREP');
   });
 
-  it('names the wait while the model loads', async () => {
-    await put('ANALYZE');
-    fetchMock.mockResolvedValue(new Response('loading', { status: 503 }));
+  it('names the wait while the model is busy', async () => {
+    const audience = { retrievedAt: Date.now(), query: 'q', candidateLists: [], top: [] };
+    await seedJob({ state: 'PICK', chunkCount: 2, audience });
+    fetchMock.mockImplementation(async () => busy429());
     const view = (await (await step('j1')).json()) as JobView;
-    expect(view.wait).toBe('waking model');
-    expect(view.job.state).toBe('ANALYZE');
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('http://127.0.0.1:8081/health');
+    expect(view.wait).toBe('model busy');
+    expect(view.job).toMatchObject({ state: 'PICK', error: null });
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/v1beta\/interactions$/);
+  });
+
+  it('names the wait while the per-day model quota is spent, calling nothing', async () => {
+    await seedJob({ state: 'PICK', chunkCount: 2, limitUntil: Date.now() + 60_000 });
+    const view = (await (await step('j1')).json()) as JobView;
+    expect(view.wait).toBe('model quota spent');
+    expect(view.job.state).toBe('PICK');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("404s another user's job without running it", async () => {

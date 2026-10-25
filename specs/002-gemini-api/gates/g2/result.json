@@ -1,0 +1,530 @@
+{
+  "date": "2026-10-24T15:37:32.287Z",
+  "configs": {
+    "A": {
+      "model": "gemini-3.8-flash",
+      "low": true,
+      "thinkingLevel": "low",
+      "maxOutputTokens": 2048
+    },
+    "B": {
+      "model": "gemini-3.8-flash",
+      "low": false,
+      "thinkingLevel": "medium",
+      "maxOutputTokens": 8192
+    },
+    "C": {
+      "model": "gemini-4-argon",
+      "low": false,
+      "thinkingLevel": "medium",
+      "maxOutputTokens": 8192
+    }
+  },
+  "videos": [
+    {
+      "file": "YouCut_20261004_184604917.mp4",
+      "duration": 55.19,
+      "gemma": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 29.5,
+          "frames": 8,
+          "ms": 24551,
+          "usage": {
+            "completion_tokens": 581,
+            "prompt_tokens": 1650,
+            "total_tokens": 2231,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "output": {
+            "visual": "A wide shot of a crowded 1980s-style office with heavy VHS scanlines and glitch effects, transitioning into a black screen with flickering green terminal text.",
+            "music": {
+              "genre": ["glitch", "industrial", "electronic"],
+              "tempoFeel": "fast and erratic",
+              "instrumentation": ["distorted synth bass", "mechanical clicks", "white noise"],
+              "vocals": "distorted, robotic male vocals",
+              "mood": ["tense", "chaotic", "unsettling"]
+            },
+            "qualityFlags": []
+          }
+        },
+        {
+          "index": 1,
+          "start": 29.5,
+          "len": 25.69,
+          "frames": 8,
+          "ms": 9895,
+          "usage": {
+            "completion_tokens": 156,
+            "prompt_tokens": 1560,
+            "total_tokens": 1716,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "The video features a retro-futuristic, glitchy aesthetic with green text on a dark screen, transitioning into a neon-lit hallway and a vibrant, distorted office scene with heavy scanline effects and color shifts.",
+            "music": {
+              "genre": ["electronic", "synthwave", "glitch"],
+              "tempoFeel": "fast, driving",
+              "instrumentation": ["synthesizers", "heavy percussion", "distorted bass"],
+              "vocals": "distorted, processed male vocals",
+              "mood": ["tense", "chaotic", "cyberpunk"]
+            },
+            "qualityFlags": []
+          }
+        }
+      ],
+      "gemini": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 55.19,
+          "bytes": 1852242,
+          "cutMs": 733,
+          "A": {
+            "ms": 5388,
+            "finish": "stop",
+            "usage": {
+              "input": 5215,
+              "output": 205,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "A vertical retro CRT aesthetic features 1980s office CCTV footage interspersed with green phosphor terminal text and wireframe synthwave mazes. Heavy scanlines, chromatic aberration, and VHS tracking artifacts frame the deliberate, thematic cuts.",
+              "music": {
+                "genre": ["synthwave", "darksynth", "electronic"],
+                "tempoFeel": "mid-tempo",
+                "instrumentation": [
+                  "analog synthesizers",
+                  "electronic drums",
+                  "bass synth",
+                  "sound effects"
+                ],
+                "vocals": "deep robotic, vocoded male vocals preceded by an office worker's spoken frustration",
+                "mood": ["cyberpunk", "retro-futuristic", "ominous", "nostalgic"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "B": {
+            "ms": 8988,
+            "finish": "stop",
+            "usage": {
+              "input": 5215,
+              "output": 581,
+              "reasoning": 372
+            },
+            "output": {
+              "visual": "A vintage 1980s office surveillance tape shows a frustrated worker throwing a computer through a high-rise window, transitioning to retro green CRT terminal text and neon synthwave 3D gridscapes. Heavy scanline distortion, fisheye curvature, and glitch artifacts frame the moderately paced montage.",
+              "music": {
+                "genre": ["synthwave", "synth-pop", "electronic"],
+                "tempoFeel": "steady midtempo",
+                "instrumentation": [
+                  "drum machine",
+                  "analog synthesizers",
+                  "synth bass",
+                  "percussion"
+                ],
+                "vocals": "deep deadpan male vocals with robotic processing",
+                "mood": ["retro", "dystopian", "hypnotic", "nostalgic"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "C": {
+            "ms": 7498,
+            "finish": "stop",
+            "usage": {
+              "input": 6296,
+              "output": 206,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "Retro VHS-style security footage of an 80s office where workers throw CRT monitors out windows, cutting to green CRT terminal text and neon 3D grid mazes. Heavy scanline and color-bleed filters with moderate editing pace.",
+              "music": {
+                "genre": ["synthwave", "synth-pop", "electronic"],
+                "tempoFeel": "upbeat, driving",
+                "instrumentation": ["synthesizer", "synth bass", "electronic drums"],
+                "vocals": "female spoken intro followed by male lead vocals",
+                "mood": ["energetic", "retro", "rebellious", "futuristic"]
+              },
+              "qualityFlags": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "YouCut_20261004_191032679.mp4",
+      "duration": 49.02,
+      "gemma": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 29.5,
+          "frames": 8,
+          "ms": 27900,
+          "usage": {
+            "completion_tokens": 673,
+            "prompt_tokens": 1648,
+            "total_tokens": 2321,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "The video features a series of cuts between a green-text CRT monitor, a dark industrial hallway with neon pink and blue lights, and a vibrant neon-lit arcade. The aesthetic is lo-fi and retro-futuristic with a dark, moody color palette.",
+            "music": {
+              "genre": ["synthwave", "electronic", "lo-fi"],
+              "tempoFeel": "slow and atmospheric",
+              "instrumentation": ["heavy synthesizers", "deep bass", "percussion"],
+              "vocals": "muffled, distorted, radio-filtered",
+              "mood": ["eerie", "nostalgic", "mysterious"]
+            },
+            "qualityFlags": []
+          }
+        },
+        {
+          "index": 1,
+          "start": 29.5,
+          "len": 19.52,
+          "frames": 8,
+          "ms": 27390,
+          "usage": {
+            "completion_tokens": 671,
+            "prompt_tokens": 1408,
+            "total_tokens": 2079,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "Stylized 3D environments featuring neon-lit hallways, arcade machines, and a pool area with a retro-futuristic aesthetic. The editing is fast-paced with frequent cuts between different locations.",
+            "music": {
+              "genre": ["synthwave", "electronic"],
+              "tempoFeel": "steady, driving",
+              "instrumentation": ["heavy synthesizers", "electronic drums"],
+              "vocals": "distorted, processed male vocals",
+              "mood": ["moody", "nostalgic", "energetic"]
+            },
+            "qualityFlags": []
+          }
+        }
+      ],
+      "gemini": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 49.02,
+          "bytes": 1868685,
+          "cutMs": 686,
+          "A": {
+            "ms": 5028,
+            "finish": "stop",
+            "usage": {
+              "input": 4671,
+              "output": 205,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "A computer-generated exploration of vaporwave backrooms and liminal spaces, featuring neon lights, retro arcade cabinets, Greek busts, and VHS overlays. The camera constantly glides forward through maze-like corridors and deserted malls with rhythmic cuts to various digital scenes.",
+              "music": {
+                "genre": ["synthwave", "vaporwave", "electropop"],
+                "tempoFeel": "midtempo",
+                "instrumentation": ["synthesizer", "drum machine", "electric bass", "synth pads"],
+                "vocals": "deep baritone male vocals with pitch-shifting effects and robot intro",
+                "mood": ["nostalgic", "eerie", "futuristic", "hypnotic"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "B": {
+            "ms": 7154,
+            "finish": "stop",
+            "usage": {
+              "input": 4671,
+              "output": 485,
+              "reasoning": 286
+            },
+            "output": {
+              "visual": "A montage of eerie liminal spaces, Backrooms-style hallways, retro arcade cabinets, and vaporwave mazes illuminated by cyan and magenta neon lights. The camera steadily tracks through desolate 3D corridors treated with CRT monitors and VHS tracking overlays.",
+              "music": {
+                "genre": ["Synthwave", "Vaporwave", "Electronic"],
+                "tempoFeel": "steady",
+                "instrumentation": [
+                  "synthesizers",
+                  "synth bass",
+                  "electronic drums",
+                  "ambient pads"
+                ],
+                "vocals": "deep pitch-shifted male vocals with an introductory synthesized speech announcement",
+                "mood": ["eerie", "nostalgic", "surreal", "mysterious"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "C": {
+            "ms": 35458,
+            "finish": "stop",
+            "usage": {
+              "input": 5668,
+              "output": 228,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "First-person camera glides continuously through morphing AI-generated liminal spaces, backrooms, arcades, and mazes. The palette shifts between bright pink and cyan synthwave neon and dingy yellow-green fluorescent lighting with VHS overlays.",
+              "music": {
+                "genre": ["synthwave", "darkwave", "synth-pop"],
+                "tempoFeel": "driving, upbeat four-on-the-floor pulse",
+                "instrumentation": ["synthesizer", "synth bass", "electronic drums"],
+                "vocals": "spoken robotic intro followed by processed low-register male vocals",
+                "mood": ["retro-futuristic", "eerie", "hypnotic", "energetic"]
+              },
+              "qualityFlags": ["audio clipping"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "file": "VAPORGRAM_VIDEO_1789384966538.mp4",
+      "duration": 78.99,
+      "gemma": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 29.5,
+          "frames": 8,
+          "ms": 19873,
+          "usage": {
+            "completion_tokens": 443,
+            "prompt_tokens": 1649,
+            "total_tokens": 2092,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "Green terminal text appears line by line on a black background with a CRT scanline effect. The editing pace is slow and steady.",
+            "music": {
+              "genre": ["industrial", "electronic"],
+              "tempoFeel": "slow and steady",
+              "instrumentation": ["synthesized drones", "bleeps", "rhythmic beat"],
+              "vocals": "none",
+              "mood": ["eerie", "technological", "unsettling"]
+            },
+            "qualityFlags": []
+          }
+        },
+        {
+          "index": 1,
+          "start": 29.5,
+          "len": 29.5,
+          "frames": 8,
+          "ms": 23153,
+          "usage": {
+            "completion_tokens": 537,
+            "prompt_tokens": 1651,
+            "total_tokens": 2188,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "A green-on-black computer terminal screen displays scrolling text in a cyberpunk aesthetic. The editing pace is slow, with text appearing line by line.",
+            "music": {
+              "genre": ["lo-fi", "glitch", "industrial"],
+              "tempoFeel": "mid-tempo, stuttering",
+              "instrumentation": ["heavy distorted synth bass", "glitchy percussion"],
+              "vocals": "distorted, stuttering vocal fragments",
+              "mood": ["dark", "unsettling", "dystopian"]
+            },
+            "qualityFlags": []
+          }
+        },
+        {
+          "index": 2,
+          "start": 59,
+          "len": 19.99,
+          "frames": 8,
+          "ms": 23161,
+          "usage": {
+            "completion_tokens": 553,
+            "prompt_tokens": 1425,
+            "total_tokens": 1978,
+            "prompt_tokens_details": {
+              "cached_tokens": 147
+            }
+          },
+          "output": {
+            "visual": "Green monospaced text scrolls and updates on a black background, mimicking a computer terminal or data feed. The editing pace is slow and steady.",
+            "music": {
+              "genre": ["dark ambient", "industrial", "lo-fi electronic"],
+              "tempoFeel": "slow, heavy, dragging",
+              "instrumentation": ["distorted electronics", "glitchy textures"],
+              "vocals": "heavily processed, distorted",
+              "mood": ["eerie", "unsettling", "mysterious"]
+            },
+            "qualityFlags": []
+          }
+        }
+      ],
+      "gemini": [
+        {
+          "index": 0,
+          "start": 0,
+          "len": 60,
+          "bytes": 965874,
+          "cutMs": 921,
+          "A": {
+            "ms": 5267,
+            "finish": "stop",
+            "usage": {
+              "input": 5665,
+              "output": 199,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "A vertical-format video shows green glowing text typing across a dark CRT terminal screen with scanlines and glitch distortions. The text delivers warnings and system prompts related to a fictional corporate interface in a slow, calculated pace.",
+              "music": {
+                "genre": ["Indie Rock", "Dance-Rock", "Post-Punk"],
+                "tempoFeel": "Midtempo",
+                "instrumentation": ["Electric Guitar", "Bass Guitar", "Drum Kit", "Synthesizer"],
+                "vocals": "Spoken, slightly gruff male lead vocals delivering dystopian, satirical lyrics.",
+                "mood": ["Dystopian", "Quirky", "Driving", "Sardonic"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "B": {
+            "ms": 7258,
+            "finish": "stop",
+            "usage": {
+              "input": 5665,
+              "output": 528,
+              "reasoning": 331
+            },
+            "output": {
+              "visual": "A vintage monochrome green CRT monitor displays simulated command-line terminal text and automated warnings with realistic phosphor flicker and scanlines. The editing consists of intermittent cuts between various typing readouts against a solid dark screen.",
+              "music": {
+                "genre": ["Synth-pop", "Electro", "New Wave"],
+                "tempoFeel": "Midtempo groove",
+                "instrumentation": [
+                  "Synthesizer",
+                  "Synth Bass",
+                  "Drum Machine",
+                  "Mechanical Typing Sound Effects"
+                ],
+                "vocals": "Deep male semi-spoken lead vocals with a dry, ironic tone",
+                "mood": ["Dystopian", "Satirical", "Retro-futuristic", "Mysterious"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "C": {
+            "ms": 5902,
+            "finish": "stop",
+            "usage": {
+              "input": 6815,
+              "output": 201,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "Retro green-on-black CRT computer terminal screen displaying typed text messages with occasional screen flicker and scanline effects. Slow, steady pace as text types out across static monitor shots.",
+              "music": {
+                "genre": ["synthwave", "industrial rock", "electropop"],
+                "tempoFeel": "upbeat driving mid-tempo",
+                "instrumentation": [
+                  "synthesizer",
+                  "electronic drums",
+                  "synth bass",
+                  "sound effects"
+                ],
+                "vocals": "gritty male lead vocals",
+                "mood": ["dystopian", "energetic", "retro-futuristic", "edgy"]
+              },
+              "qualityFlags": []
+            }
+          }
+        },
+        {
+          "index": 1,
+          "start": 60,
+          "len": 18.99,
+          "bytes": 299209,
+          "cutMs": 336,
+          "A": {
+            "ms": 4546,
+            "finish": "stop",
+            "usage": {
+              "input": 1949,
+              "output": 172,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "A static shot of a vintage green monochrome computer terminal screen where text is continuously typed out in real time against a black background.",
+              "music": {
+                "genre": ["Art Pop", "Synth-pop", "Indie Pop"],
+                "tempoFeel": "moderate",
+                "instrumentation": ["synthesizer", "drum machine", "bass synth"],
+                "vocals": "theatrical, deep male lead vocal accompanied by high pitched robotic backing vocal",
+                "mood": ["dramatic", "quirky", "dystopian", "surreal"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "B": {
+            "ms": 7164,
+            "finish": "stop",
+            "usage": {
+              "input": 1949,
+              "output": 440,
+              "reasoning": 254
+            },
+            "output": {
+              "visual": "A close-up shot of a retro green phosphor CRT computer terminal displays monospace text being typed onto the screen line by line in the dark.",
+              "music": {
+                "genre": ["synthpop", "industrial pop", "darkwave", "experimental"],
+                "tempoFeel": "midtempo",
+                "instrumentation": [
+                  "analog synthesizers",
+                  "drum machine",
+                  "electronic percussion",
+                  "bass synth"
+                ],
+                "vocals": "theatrical deep male lead vocals transitioning into an eccentric spoken shout",
+                "mood": ["dystopian", "eccentric", "retro-futuristic", "mysterious"]
+              },
+              "qualityFlags": []
+            }
+          },
+          "C": {
+            "ms": 6804,
+            "finish": "stop",
+            "usage": {
+              "input": 2526,
+              "output": 157,
+              "reasoning": 0
+            },
+            "output": {
+              "visual": "Glowing green text types out steadily onto a dark retro computer monitor screen. Near the end, the screen cuts to a new block of green text.",
+              "music": {
+                "genre": ["post-punk", "indie rock", "synth-punk"],
+                "tempoFeel": "upbeat, driving",
+                "instrumentation": ["synthesizer", "drums", "bass", "electric guitar"],
+                "vocals": "theatrical, energetic male lead vocals",
+                "mood": ["quirky", "energetic", "retro", "tense"]
+              },
+              "qualityFlags": []
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "gemmaWakeSec": 186
+}

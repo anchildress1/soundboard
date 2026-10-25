@@ -1,9 +1,9 @@
 import { browserTracingIntegration, handleErrorWithSentry, init } from '@sentry/sveltekit';
-import { env } from '$env/dynamic/public';
-import { scrubBreadcrumb, scrubEvent, scrubSpan } from '$lib/scrub';
+import { PUBLIC_SENTRY_DSN } from '$app/env/public';
+import { scrubBreadcrumb, scrubEvent, scrubSpan } from '#lib/scrub.js';
 
 init({
-  dsn: env.PUBLIC_SENTRY_DSN,
+  dsn: PUBLIC_SENTRY_DSN,
   tracesSampleRate: 1,
   integrations: [browserTracingIntegration()],
   beforeBreadcrumb: scrubBreadcrumb,

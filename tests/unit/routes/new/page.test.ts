@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { takePending } from '$lib/pending';
-import Page from '$routes/new/+page.svelte';
+import { takePending } from '#lib/pending.js';
+import Page from '#src/routes/new/+page.svelte';
 
 const FILE_NAME = 'peekaboo.mp4';
 const LOCAL_BLOB = 'blob:local-1';

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { currentIdentity, withIdentity } from '$lib/server/core/identity';
+import { currentIdentity, withIdentity } from '#lib/server/core/identity.js';
 
 describe('identity', () => {
   it('has no identity outside an operation', () => {

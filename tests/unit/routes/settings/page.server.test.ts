@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
 import { describe, expect, it } from 'vitest';
-import { load } from '$routes/settings/+page.server';
+import { load } from '#src/routes/settings/+page.server.js';
 import { USER_A, USER_B } from '../../../helpers/pipeline';
 
 type Event = Parameters<typeof load>[0];

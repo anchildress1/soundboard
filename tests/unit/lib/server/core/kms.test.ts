@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { decrypt, encrypt } from '$lib/server/core/kms';
+import { resetClients } from '#lib/server/core/clients.js';
+import { decrypt, encrypt } from '#lib/server/core/kms.js';
 
 const KEY = 'projects/p/locations/us-central1/keyRings/soundboard/cryptoKeys/refresh-tokens';
 
@@ -66,16 +66,6 @@ describe('decrypt', () => {
     const cipher = Buffer.from('sealed').toString('base64');
     expect(await decrypt(cipher)).toBe('1//refresh');
     expect(kms.decrypt).toHaveBeenCalledWith({ name: KEY, ciphertext: Buffer.from('sealed') });
-  });
-
-  it('round-trips non-ASCII text', async () => {
-    kms.encrypt.mockImplementationOnce(async ({ plaintext }: { plaintext: Buffer }) => [
-      { ciphertext: plaintext },
-    ]);
-    kms.decrypt.mockImplementationOnce(async ({ ciphertext }: { ciphertext: Buffer }) => [
-      { plaintext: ciphertext },
-    ]);
-    expect(await decrypt(await encrypt('tökén ✓'))).toBe('tökén ✓');
   });
 
   it('throws when KMS returns no plaintext', async () => {

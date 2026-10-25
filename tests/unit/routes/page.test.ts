@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Page from '$routes/+page.svelte';
+import Page from '#src/routes/+page.svelte';
 
 const h = vi.hoisted(() => ({ page: { url: new URL('https://soundboard.test/') } }));
 

@@ -1,5 +1,5 @@
-import type { LiveMetadata, PickFields } from '$lib/types';
-import { required } from '$lib/server/core/env';
+import type { LiveMetadata, PickFields } from '#lib/types.js';
+import { required } from '#lib/server/core/env.js';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/youtube/v3/videos';
@@ -40,34 +40,6 @@ export function uploadFailure(error: unknown): UploadFailure {
   if (error.status === 429 || (error.status === 403 && /rateLimit/i.test(error.message)))
     return 'other';
   return error.status >= 400 && error.status < 500 ? 'denied' : 'other';
-}
-
-const PACIFIC = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'America/Los_Angeles',
-  hourCycle: 'h23',
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-});
-
-/** Pacific wall-clock time minus UTC at `at`, in ms. */
-function pacificOffset(at: number): number {
-  const part = Object.fromEntries(
-    PACIFIC.formatToParts(at).map((p) => [p.type, Number(p.value)]),
-  ) as Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', number>;
-  const wall = Date.UTC(part.year, part.month - 1, part.day, part.hour, part.minute, part.second);
-  return wall - Math.floor(at / 1000) * 1000;
-}
-
-/** The next midnight Pacific time, when YouTube's daily quota resets. */
-export function quotaResetAt(now: number): number {
-  const today = new Date(now + pacificOffset(now));
-  const midnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1);
-  // US clocks change at 2 a.m., so the offset an hour either side of midnight is midnight's own.
-  return midnight - pacificOffset(midnight - pacificOffset(now));
 }
 
 async function readJson<T>(response: Response, what: string): Promise<T> {
@@ -236,13 +208,16 @@ export async function searchMusicVideos(
     .filter((id): id is string => Boolean(id));
 }
 
-/** Fetches a thumbnail and returns it as a data URL, the form the model accepts images in. */
-export async function thumbnailDataUrl(url: string): Promise<string | null> {
+/** A thumbnail as the model takes images: base64 bytes and their type. */
+export type Thumbnail = { data: string; mime_type: string };
+
+/** Fetches a thumbnail for the model; null when it can't be read. */
+export async function thumbnailImage(url: string): Promise<Thumbnail | null> {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) return null;
     const type = response.headers.get('content-type') ?? 'image/jpeg';
-    return `data:${type};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}`;
+    return { data: Buffer.from(await response.arrayBuffer()).toString('base64'), mime_type: type };
   } catch {
     return null;
   }
@@ -292,7 +267,7 @@ export const finalChunk = (offset: number, total: number): boolean =>
 export type ChunkResult = { done: true; videoId: string } | { done: false; next: number };
 
 const nextFromRange = (range: string | null) => {
-  const end = range?.match(/bytes=\d+-(\d+)/)?.[1];
+  const end = /bytes=\d+-(\d+)/.exec(range ?? '')?.[1];
   return end === undefined ? 0 : Number(end) + 1;
 };
 

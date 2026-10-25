@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { ActionError } from '$lib/server/core/errors';
-import { num, readBody, respond, text } from '$lib/server/core/http';
+import { ActionError } from '#lib/server/core/errors.js';
+import { num, readBody, respond, text } from '#lib/server/core/http.js';
 
 const post = (body: string) =>
   new Request('http://localhost/api', {

@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import Privacy from '$routes/privacy/+page.svelte';
+import Privacy from '#src/routes/privacy/+page.svelte';
 
 describe('privacy policy', () => {
   it('explains data processing and manual deletion without account controls', () => {
@@ -12,6 +12,20 @@ describe('privacy policy', () => {
     expect(policy).toHaveTextContent('within seven calendar days');
     expect(policy).toHaveTextContent('asks Google to revoke');
     expect(within(policy).queryByRole('button')).toBeNull();
+  });
+
+  it('discloses what Gemini and Sentry keep without promising zero retention', () => {
+    render(Privacy);
+    const policy = screen.getByRole('main', { name: 'Privacy policy' });
+    expect(policy).toHaveTextContent("paid tier of Google's Gemini API");
+    expect(policy).toHaveTextContent('does not use this content to improve its products');
+    expect(policy).toHaveTextContent('turns off stored interaction history only');
+    expect(policy).toHaveTextContent('does not publish how long those cached copies last');
+    expect(policy).toHaveTextContent('up to 55 days to detect abuse');
+    expect(policy).toHaveTextContent('Authorized Google staff may review flagged requests');
+    expect(policy).toHaveTextContent('Sentry keeps error reports and traces for 30 days');
+    expect(policy).toHaveTextContent('cannot reach the copies Google keeps for abuse monitoring');
+    expect(policy).not.toHaveTextContent(/self-hosted|zero retention|not retained/i);
   });
 
   it.each([

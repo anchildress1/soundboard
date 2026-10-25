@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDraft, draftKey, loadDraft, saveDraft } from '$lib/draft';
+import { clearDraft, draftKey, loadDraft, saveDraft } from '#lib/draft.js';
 
 const KEY = draftKey('job1', 2);
 const DRAFT = {

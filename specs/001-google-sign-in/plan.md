@@ -134,7 +134,7 @@ drizzle/ (generated migrations), drizzle.config.ts (new)
 deploy.sh, service.yaml, .env.example, README.md, AGENTS.md
 ```
 
-**Structure Decision**: Single SvelteKit project, so existing directories are reused. The script runs directly under Node 24's built-in type stripping. `scripts/invite.ts` imports only `pg`, never `$lib`, because `$lib` aliases need Vite.
+**Structure Decision**: Single SvelteKit project, so existing directories are reused. The script runs directly under Node 24's built-in type stripping. `scripts/invite.ts` imports only `pg`, never `#lib`, because `#lib` aliases need Vite.
 
 ## Key Decisions
 

@@ -1,11 +1,9 @@
 import { spawn } from 'node:child_process';
-import type { Readable } from 'node:stream';
 import { startSpan } from '@sentry/sveltekit';
-import type { Measurements, Probe, Reframe } from '$lib/types';
+import type { Measurements, Probe, Reframe } from '#lib/types.js';
 
-/** Gemma's audio input caps at 30 s; each analyze step reads one window this long. */
-export const WINDOW_SEC = 29.5;
-export const FRAMES_PER_WINDOW = 8;
+/** Each analyze step sends the model one clip this long. */
+export const WINDOW_SEC = 60;
 
 const SILENCE_FILTER = 'silencedetect=n=-60dB:d=2';
 // framelog=verbose keeps the per-frame lines out of stderr at the default log level. True peak is
@@ -25,9 +23,9 @@ const SOURCE_INPUT = [
 ] as const;
 const FILTER_GRAPH = '-filter_complex';
 
-type RunResult = { stdout: Buffer; stderr: string; fd3: Buffer };
+type RunResult = { stdout: Buffer; stderr: string };
 
-type Task = 'probe' | 'measure' | 'window' | 'loudness' | 'render';
+type Task = 'probe' | 'measure' | 'clip' | 'loudness' | 'render';
 
 /**
  * Runs ffmpeg or ffprobe inside a span named for the task. The arguments carry the signed source URL,
@@ -47,18 +45,25 @@ function run(task: Task, command: string, args: string[], timeoutMs: number): Pr
 function spawnRun(command: string, args: string[], timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       signal: AbortSignal.timeout(timeoutMs),
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    const fd3: Buffer[] = [];
     child.stdout?.on('data', (c: Buffer) => out.push(c));
     child.stderr?.on('data', (c: Buffer) => err.push(c));
-    (child.stdio[3] as Readable | null)?.on('data', (c: Buffer) => fd3.push(c));
-    child.on('error', reject);
+    let failure: Error | undefined;
+    child.on('error', (error) => {
+      // A started process (aborted on timeout) must exit before callers delete the files it writes.
+      if (child.pid === undefined) reject(error);
+      else failure = error;
+    });
     child.on('close', (code) => {
       const stderr = Buffer.concat(err).toString('utf8');
+      if (failure) {
+        reject(failure);
+        return;
+      }
       if (code !== 0) {
         reject(
           new Error(
@@ -67,7 +72,7 @@ function spawnRun(command: string, args: string[], timeoutMs: number): Promise<R
         );
         return;
       }
-      resolve({ stdout: Buffer.concat(out), fd3: Buffer.concat(fd3), stderr });
+      resolve({ stdout: Buffer.concat(out), stderr });
     });
   });
 }
@@ -180,39 +185,15 @@ export async function measureFile(url: string, durationSec: number): Promise<Mea
   return parseMeasurements(stderr, 0, durationSec);
 }
 
-export type Window = { wav: Buffer; frames: Buffer[]; measurements: Measurements };
-
-/** Splits an MJPEG stream on JPEG start/end markers; ffmpeg's mjpeg encoder writes no EXIF thumbnails. */
-export function splitJpegs(stream: Buffer): Buffer[] {
-  const frames: Buffer[] = [];
-  let start = stream.indexOf(Buffer.from([0xff, 0xd8, 0xff]));
-  while (start !== -1) {
-    const end = stream.indexOf(Buffer.from([0xff, 0xd9]), start + 3);
-    if (end === -1) break;
-    frames.push(stream.subarray(start, end + 2));
-    start = stream.indexOf(Buffer.from([0xff, 0xd8, 0xff]), end + 2);
-  }
-  return frames;
-}
-
-/**
- * One pass over one window: 16 kHz mono WAV on stdout, 8 frames at 360p on fd 3, and the window's
- * measurements on stderr. Everything stays in memory; nothing is written to disk.
- */
-export async function extractWindow(
+/** Loudness, true peak, clipping, and silence of one stretch of the source, in file time. */
+export async function measureRange(
   url: string,
   startSec: number,
   durationSec: number,
-): Promise<Window> {
-  const fps = (FRAMES_PER_WINDOW / durationSec).toFixed(4);
-  const graph = [
-    `[0:a:0]asplit=2[m][o]`,
-    `[m]${MEASURE_FILTER}[ms]`,
-    `[o]aresample=16000,aformat=channel_layouts=mono[a]`,
-    `[0:v:0]fps=${fps},scale=-2:360[v]`,
-  ].join(';');
-  const { stdout, stderr, fd3 } = await run(
-    'window',
+  timeoutMs: number,
+): Promise<Measurements> {
+  const { stderr } = await run(
+    'measure',
     'ffmpeg',
     [
       ...QUIET,
@@ -220,40 +201,84 @@ export async function extractWindow(
       startSec.toFixed(3),
       '-t',
       durationSec.toFixed(3),
+      '-vn',
       ...SOURCE_INPUT,
       '-i',
       url,
       FILTER_GRAPH,
-      graph,
-      '-map',
-      '[ms]',
+      `[0:a:0]${MEASURE_FILTER}`,
       '-f',
       'null',
       '-',
-      '-map',
-      '[a]',
-      '-f',
-      'wav',
-      'pipe:1',
-      '-map',
-      '[v]',
-      '-frames:v',
-      String(FRAMES_PER_WINDOW),
-      '-c:v',
-      'mjpeg',
-      '-q:v',
-      '5',
-      '-f',
-      'image2pipe',
-      'pipe:3',
     ],
-    60_000,
+    timeoutMs,
   );
-  return {
-    wav: stdout,
-    frames: splitJpegs(fd3),
-    measurements: parseMeasurements(stderr, startSec, startSec + durationSec),
-  };
+  return parseMeasurements(stderr, startSec, startSec + durationSec);
+}
+
+/**
+ * Encodes one stretch of the source to a small MP4 for the model: within 640x360 (upright, aspect
+ * kept, never upscaled), at most 30 fps, and bitrate-capped so a 60 s window stays far under the
+ * inline request limit.
+ */
+export async function encodeClip(
+  url: string,
+  startSec: number,
+  durationSec: number,
+  outPath: string,
+  timeoutMs: number,
+): Promise<void> {
+  await run(
+    'clip',
+    'ffmpeg',
+    [
+      ...QUIET,
+      '-loglevel',
+      'error',
+      '-y',
+      '-ss',
+      startSec.toFixed(3),
+      '-t',
+      durationSec.toFixed(3),
+      ...SOURCE_INPUT,
+      '-i',
+      url,
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a:0',
+      '-vf',
+      "scale=w='min(640,iw)':h='min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+      '-fpsmax',
+      '30',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '28',
+      '-maxrate',
+      '600k',
+      '-bufsize',
+      '1200k',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '96k',
+      '-ac',
+      '2',
+      '-ar',
+      '48000',
+      '-movflags',
+      '+faststart',
+      '-f',
+      'mp4',
+      outPath,
+    ],
+    timeoutMs,
+  );
 }
 
 /** Window count covering the file; a trailing sliver under a second is not worth a model call. */

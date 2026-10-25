@@ -1,5 +1,5 @@
 import { init } from '@sentry/sveltekit';
-import { scrubBreadcrumb, scrubEvent, scrubSpan } from '$lib/scrub';
+import { scrubBreadcrumb, scrubEvent, scrubSpan } from '#lib/scrub.js';
 
 init({
   dsn: process.env.PUBLIC_SENTRY_DSN,

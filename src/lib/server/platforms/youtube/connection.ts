@@ -1,11 +1,11 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
-import { query, type Database, type Tx } from '$lib/server/core/db';
-import { required } from '$lib/server/core/env';
-import { invalidGrant } from '$lib/server/core/errors';
-import { decrypt, encrypt } from '$lib/server/core/kms';
-import { connections } from '$lib/server/core/schema';
+import { query, type Database, type Tx } from '#lib/server/core/db.js';
+import { required } from '#lib/server/core/env.js';
+import { invalidGrant } from '#lib/server/core/errors.js';
+import { decrypt, encrypt } from '#lib/server/core/kms.js';
+import { connections } from '#lib/server/core/schema.js';
 import { channelsMine, YOUTUBE_SCOPES } from './youtube';
 
 type Stored = typeof connections.$inferSelect;

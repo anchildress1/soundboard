@@ -2,12 +2,12 @@
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { jobs } from '$lib/server/core/schema';
-import { getJob } from '$lib/server/jobs/jobs';
-import { POST } from '$routes/api/jobs/[id]/short/+server';
-import type { JobView } from '$lib/types';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { jobs } from '#lib/server/core/schema.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { POST } from '#src/routes/api/jobs/[id]/short/+server.js';
+import type { JobView } from '#lib/types.js';
 import { afterJobUpdate, seed, truncate } from '../../../../../../helpers/db';
 import { A_JOB, seedJob, USER_A, USER_B, USERS } from '../../../../../../helpers/pipeline';
 
@@ -24,6 +24,7 @@ async function put(id: string, patch: Parameters<typeof seedJob>[0] = {}) {
     state: 'VERIFIED',
     object: `uploads/${id}`,
     probe: PROBE,
+    chunkCount: 3,
     hashtagCandidates: ['#synthwave'],
     pickVersion: 1,
     trace: { sentryTrace: 't', baggage: 'b' },

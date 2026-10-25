@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { resolve } from '$app/paths';
-  import { approveBrand, discardBrandProposal, proposeBrand } from '$lib/api';
+  import { approveBrand, discardBrandProposal, proposeBrand } from '#lib/api.js';
   import {
     BRAND_THUMBNAILS,
     BRAND_VIDEOS,
@@ -11,11 +11,11 @@
     splitRules,
     STATEMENT_MAX,
     type StoredBrand,
-  } from '$lib/brand';
+  } from '#lib/brand.js';
   import pRetry, { AbortError } from 'p-retry';
-  import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import { WAIT_TEXT } from '$lib/status';
-  import type { Wait } from '$lib/types';
+  import { POLL_BACKOFF, Waiting } from '#lib/retry.js';
+  import { WAIT_TEXT } from '#lib/status.js';
+  import type { Wait } from '#lib/types.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -61,7 +61,7 @@
   const problem = $derived(guide ? guideError(guide) : null);
   const proposing = $derived(wait ? WAIT_TEXT[wait] : 'Reading uploads');
 
-  /** A loading or busy model answers with a wait at once; keep asking until it takes the call. */
+  /** A busy model answers with a wait at once; keep asking until it takes the call. */
   const propose = async () => {
     busy = true;
     message = '';
@@ -71,13 +71,15 @@
           if (stopped) throw new AbortError(new Waiting('stopped'));
           const result = await proposeBrand();
           if ('proposal' in result) return result.proposal;
+          // Asking again can't help until the quota resets at midnight Pacific.
+          if (result.wait === 'model quota spent') throw new AbortError(WAIT_TEXT[result.wait]);
           wait = result.wait;
           throw new Waiting(result.wait);
         },
         {
           ...POLL_BACKOFF,
           retries: Infinity,
-          // A failed model call is not retried on its own: each try holds the GPU for a full call.
+          // A failed model call is not retried on its own: each try is a paid call.
           shouldRetry: ({ error }) => error instanceof Waiting,
         },
       );

@@ -2,25 +2,32 @@
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { action, ApiError, step, uploadToGcs, type ActionName } from '$lib/api';
-  import Bandcamp from '$lib/components/Bandcamp.svelte';
-  import Heard from '$lib/components/Heard.svelte';
-  import Monitor from '$lib/components/Monitor.svelte';
-  import ReleaseBar from '$lib/components/ReleaseBar.svelte';
-  import Review from '$lib/components/Review.svelte';
-  import Short from '$lib/components/Short.svelte';
-  import UploadRecovery from '$lib/components/UploadRecovery.svelte';
-  import Track from '$lib/components/Track.svelte';
+  import { action, ApiError, step, uploadToGcs, type ActionName } from '#lib/api.js';
+  import Bandcamp from '#lib/components/Bandcamp.svelte';
+  import Heard from '#lib/components/Heard.svelte';
+  import Monitor from '#lib/components/Monitor.svelte';
+  import ReleaseBar from '#lib/components/ReleaseBar.svelte';
+  import Review from '#lib/components/Review.svelte';
+  import Short from '#lib/components/Short.svelte';
+  import UploadRecovery from '#lib/components/UploadRecovery.svelte';
+  import Track from '#lib/components/Track.svelte';
   import pRetry, { AbortError } from 'p-retry';
-  import { clearDraft, draftKey } from '$lib/draft';
-  import { drive } from '$lib/driver';
-  import type { FieldErrors } from '$lib/metadata';
-  import { takePending } from '$lib/pending';
-  import { POLL_BACKOFF, Waiting } from '$lib/retry';
-  import { heardTags, jobStatus, modelSeconds, modelWorking, publishPaused } from '$lib/status';
-  import { stepIndex, workCopy, type ReviewStep } from '$lib/release';
-  import { canCutShort, SHORT_MIN_SEC } from '$lib/short';
-  import { DRIVEN_STATES, type JobView, type PickFields } from '$lib/types';
+  import { clearDraft, draftKey } from '#lib/draft.js';
+  import { drive } from '#lib/driver.js';
+  import type { FieldErrors } from '#lib/metadata.js';
+  import { takePending } from '#lib/pending.js';
+  import { POLL_BACKOFF, Waiting } from '#lib/retry.js';
+  import {
+    heardTags,
+    jobStatus,
+    modelLabel,
+    modelSeconds,
+    modelWorking,
+    publishPaused,
+  } from '#lib/status.js';
+  import { stepIndex, workCopy, type ReviewStep } from '#lib/release.js';
+  import { canCutShort, SHORT_MIN_SEC } from '#lib/short.js';
+  import { DRIVEN_STATES, type JobView, type PickFields } from '#lib/types.js';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -56,7 +63,7 @@
   const job = $derived(view.job);
   const working = $derived(modelWorking(view));
   const seconds = $derived(modelSeconds(view, working ? Math.max(0, now - stepStartedAt) : 0));
-  const model = $derived(seconds ? `gemma-4-12b-it · ${seconds}s` : 'gemma-4-12b-it');
+  const model = $derived(modelLabel(view));
   const fields = $derived<PickFields | null>(
     job.finalFields ??
       (view.pick
@@ -87,7 +94,7 @@
     return () => clearInterval(tick);
   });
 
-  const signedOut = () => void goto(resolve('/'), { invalidateAll: true });
+  const signedOut = () => void goto(resolve('/'), { refreshAll: true });
 
   const run = async () => {
     if (driving) return;
@@ -396,7 +403,7 @@
         height={job.probe?.height}
       />
       <div class="panel">
-        <Track {status} {model} />
+        <Track {status} {model} {seconds} />
       </div>
       {#if !approved}
         <Heard tags={heardTags(view)} measurements={job.measurements} />

@@ -1,4 +1,4 @@
-// Stands in for $lib/server/core/db: unit tests (vitest.config.ts alias) and the E2E build
+// Stands in for #lib/server/core/db: unit tests (vitest.config.ts alias) and the E2E build
 // (tests/e2e/fakes/db.ts) run real SQL on an in-process PGlite with the real migrations, so the
 // database is never mocked. Each test file gets its own instance through module isolation.
 import { PGlite } from '@electric-sql/pglite';
@@ -6,9 +6,9 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { resolve } from 'node:path';
-import type { Database, Tx } from '$lib/server/core/db';
-import { currentIdentity } from '$lib/server/core/identity';
-import * as schema from '$lib/server/core/schema';
+import type { Database, Tx } from '#lib/server/core/db.js';
+import { currentIdentity } from '#lib/server/core/identity.js';
+import * as schema from '#lib/server/core/schema.js';
 
 // Resolved from the working directory, not this file: vitest and the Playwright web server both
 // run from the repo root, and the E2E build bundles this module away from its source path.

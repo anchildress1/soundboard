@@ -1,15 +1,16 @@
 // @vitest-environment node
 import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { approve, discard, makeShort, recut, rerun, retry } from '$lib/server/jobs/actions';
-import { ActionError } from '$lib/server/core/errors';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory, connections, jobAudience, jobs, users } from '$lib/server/core/schema';
-import { createJob, getJob, listPicks, type JobDoc } from '$lib/server/jobs/jobs';
-import { jobSet, type JobPatch } from '$lib/server/jobs/rows';
-import { saveAudience } from '$lib/server/jobs/audience';
-import type { Hook, JobState, Pick, Short } from '$lib/types';
+import { approve, discard, makeShort, recut, rerun, retry } from '#lib/server/jobs/actions.js';
+import { STALE_ANALYSIS } from '#lib/server/pipeline/short.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory, connections, jobAudience, jobs, users } from '#lib/server/core/schema.js';
+import { createJob, getJob, listPicks, type JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
+import { saveAudience } from '#lib/server/jobs/audience.js';
+import type { Hook, JobState, Pick, Short } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { CHANNEL_A, USER_A, USER_B, USERS } from '../../../../helpers/pipeline';
 
@@ -656,7 +657,7 @@ describe('makeShort', () => {
   const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
 
   const approved = (patch: Partial<JobDoc> = {}, picks?: number) =>
-    makeJob({ state: 'VERIFIED', picks, patch: { probe: PROBE, ...patch } });
+    makeJob({ state: 'VERIFIED', picks, patch: { probe: PROBE, chunkCount: 3, ...patch } });
 
   it('starts a Short from the approved pick', async () => {
     const id = await makeShort(await approved({}, 2));
@@ -679,7 +680,10 @@ describe('makeShort', () => {
       hashtags: [SYNTHWAVE_TAG],
       tags: ['synthwave'],
     };
-    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, finalFields: final } });
+    const job = await makeJob({
+      state: 'VERIFIED',
+      patch: { probe: PROBE, chunkCount: 3, finalFields: final },
+    });
     const id = await makeShort(job);
     const [stored] = await listPicks(id);
     expect(stored).toMatchObject({ ...final, version: 1, brandCheck: '' });
@@ -689,14 +693,18 @@ describe('makeShort', () => {
     const job = await makeJob({
       owner: USER_A,
       state: 'VERIFIED',
-      patch: { probe: PROBE, destination: { channelId: CHANNEL_A, channelTitle: 'FLR' } },
+      patch: {
+        probe: PROBE,
+        chunkCount: 3,
+        destination: { channelId: CHANNEL_A, channelTitle: 'FLR' },
+      },
     });
     const short = (await getJob(await makeShort(job)))!;
     expect(short).toMatchObject({ ownerUid: USER_A.uid, artistId: 'flr', destination: null });
   });
 
   it('refuses once storage has deleted the video, starting no Short', async () => {
-    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE } });
+    const job = await makeJob({ state: 'VERIFIED', patch: { probe: PROBE, chunkCount: 3 } });
     deleted.add(job.object);
     const error = await rejection(makeShort(job));
     expect([error.status, error.message]).toEqual([
@@ -714,7 +722,7 @@ describe('makeShort', () => {
   });
 
   it('refuses a video under 15 seconds and accepts one of exactly 15', async () => {
-    const short = await approved({ probe: { ...PROBE, durationSec: 14.9 } });
+    const short = await approved({ probe: { ...PROBE, durationSec: 14.9 }, chunkCount: 1 });
     const error = await rejection(makeShort(short));
     expect([error.status, error.message]).toEqual([
       409,
@@ -725,10 +733,17 @@ describe('makeShort', () => {
     expect(await makeShort((await getJob('job1'))!)).toEqual(expect.any(String));
   });
 
+  it('refuses a video analyzed at another window length, starting no Short', async () => {
+    const job = await approved({ chunkCount: 6 });
+    const error = await rejection(makeShort(job));
+    expect([error.status, error.message]).toEqual([409, STALE_ANALYSIS]);
+    expect((await getJob('job1'))!.shortId).toBeNull();
+  });
+
   it.each(['ANALYZE', 'REVIEW'] as const)(
     'refuses a video not yet approved (%s)',
     async (state) => {
-      const job = await makeJob({ state, patch: { probe: PROBE } });
+      const job = await makeJob({ state, patch: { probe: PROBE, chunkCount: 3 } });
       const error = await rejection(makeShort(job));
       expect([error.status, error.message]).toEqual([
         409,
@@ -787,6 +802,8 @@ async function shortJob(
   });
 }
 
+const PROBE_180 = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
+
 describe('recut', () => {
   it('re-renders with the new framing and keeps the reason when the cut stays put', async () => {
     const job = await shortJob();
@@ -805,6 +822,19 @@ describe('recut', () => {
       lengthSec: 22.1,
       reason: '',
     });
+  });
+
+  it('re-cuts an existing cut after its video went stale under older windows', async () => {
+    const id = await makeShort(
+      await makeJob({ state: 'VERIFIED', patch: { probe: PROBE_180, chunkCount: 3 } }),
+    );
+    await patchJob({ chunkCount: 6 });
+    await db()
+      .update(jobs)
+      .set(jobSet({ state: 'REVIEW', short: SHORT }))
+      .where(eq(jobs.id, id));
+    await recut((await getJob(id))!, { startSec: 90, lengthSec: 30, reframe: 'blur' });
+    expect((await getJob(id))!).toMatchObject({ state: 'RENDER', error: null });
   });
 
   it('accepts a cut ending exactly at the end of the source', async () => {

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '$lib/api';
-import { drive, type DriverDeps } from '$lib/driver';
-import { POLL_BACKOFF } from '$lib/retry';
-import type { JobState, JobView, Wait } from '$lib/types';
+import { ApiError } from '#lib/api.js';
+import { drive, type DriverDeps } from '#lib/driver.js';
+import { POLL_BACKOFF } from '#lib/retry.js';
+import type { JobState, JobView, Wait } from '#lib/types.js';
 
 const view = (state: JobState, wait?: Wait): JobView => ({
   job: {
@@ -29,6 +29,7 @@ const view = (state: JobState, wait?: Wait): JobView => ({
   },
   chunks: [],
   pick: null,
+  model: 'gemini-3.8-flash',
   ...(wait ? { wait } : {}),
 });
 
@@ -83,9 +84,9 @@ describe('drive', () => {
 
   it('backs off exponentially through a run of waits without reporting an error', async () => {
     const d = deps([
-      view('ANALYZE', 'waking model'),
-      view('ANALYZE', 'waking model'),
-      view('ANALYZE', 'waking model'),
+      view('ANALYZE', 'model busy'),
+      view('ANALYZE', 'model busy'),
+      view('ANALYZE', 'model busy'),
       view('REVIEW'),
     ]);
     const { final, slept } = await run(view('ANALYZE'), d);
@@ -96,8 +97,19 @@ describe('drive', () => {
     expect(d.onError).not.toHaveBeenCalled();
   });
 
+  it.each(['model busy', 'model quota spent'] as const)(
+    'keeps calling through a %s wait until the step moves on',
+    async (wait) => {
+      const d = deps([view('PICK', wait), view('PICK', wait), view('REVIEW')]);
+      const { final } = await run(view('PICK'), d);
+      expect(final.job.state).toBe('REVIEW');
+      expect(d.step).toHaveBeenCalledTimes(3);
+      expect(d.onError).not.toHaveBeenCalled();
+    },
+  );
+
   it('caps the delay between calls during a long wait', async () => {
-    const waits = Array.from({ length: 12 }, () => view('ANALYZE', 'waking model'));
+    const waits = Array.from({ length: 12 }, () => view('ANALYZE', 'model busy'));
     const d = deps([...waits, view('REVIEW')]);
     const done = drive(view('ANALYZE'), d);
     await vi.advanceTimersByTimeAsync(POLL_BACKOFF.maxTimeout * 20);
@@ -107,9 +119,9 @@ describe('drive', () => {
 
   it('starts the backoff over after a step makes progress', async () => {
     const d = deps([
-      view('ANALYZE', 'waking model'),
+      view('ANALYZE', 'model busy'),
       view('PICK'),
-      view('PICK', 'waiting on another run'),
+      view('PICK', 'model quota spent'),
       view('REVIEW'),
     ]);
     const { slept } = await run(view('ANALYZE'), d);
@@ -167,7 +179,7 @@ describe('drive', () => {
   });
 
   it('signs out after earlier waits once a step 401s', async () => {
-    const d = deps([view('ANALYZE', 'waking model'), new ApiError(401, 'Sign in first.')]);
+    const d = deps([view('ANALYZE', 'model busy'), new ApiError(401, 'Sign in first.')]);
     await run(view('ANALYZE'), d);
     expect(d.step).toHaveBeenCalledTimes(2);
     expect(d.signedOut).toHaveBeenCalledTimes(1);
@@ -186,7 +198,7 @@ describe('drive', () => {
 
   it('stops during a wait without another step', async () => {
     let stop = false;
-    const d = deps([view('ANALYZE', 'waking model'), view('REVIEW')], () => stop);
+    const d = deps([view('ANALYZE', 'model busy'), view('REVIEW')], () => stop);
     const done = drive(view('ANALYZE'), d);
     await vi.advanceTimersByTimeAsync(0);
     stop = true;

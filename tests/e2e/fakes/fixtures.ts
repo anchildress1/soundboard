@@ -2,9 +2,9 @@
 // job but `e2e-b-review`; user B is invited and unlinked. One more user per broken YouTube status
 // backs the Connections page. Each test owns its job IDs, so parallel tests and both Playwright
 // projects never share mutable state.
-import type { JobDoc } from '$lib/server/jobs/jobs';
-import { jobRow } from '$lib/server/jobs/rows';
-import type { Chunk, Pick, Short } from '$lib/types';
+import type { JobDoc } from '#lib/server/jobs/jobs.js';
+import { jobRow } from '#lib/server/jobs/rows.js';
+import type { Chunk, Pick, Short } from '#lib/types.js';
 import type { Seed } from '../../helpers/db';
 import { A_JOB, CHANNEL_A, jobDoc, USER_B, USERS } from '../../helpers/pipeline';
 
@@ -28,8 +28,8 @@ const PICK: Pick = {
 
 const chunk = (index: number): Chunk => ({
   index,
-  startSec: index * 29.5,
-  durationSec: 29.5,
+  startSec: index * 60,
+  durationSec: index === 2 ? 20 : 60,
   measurements: {
     integratedLufs: -14,
     truePeakDbtp: -1.2,
@@ -59,8 +59,9 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
     state: 'REVIEW',
     object: `uploads/${id}`,
     probe: PROBE,
-    chunkCount: 5,
-    chunkIndex: 5,
+    // chunkCount(140) under 60 s windows; any other count sends an analyzing job back to prep.
+    chunkCount: 3,
+    chunkIndex: 3,
     consecutiveFailures: 0,
     hashtagCandidates: [SYNTHWAVE, RETROWAVE],
     audience: {
@@ -84,14 +85,14 @@ function job(id: string, patch: Partial<JobDoc> = {}): JobDoc {
 const SHORT: Short = {
   sourceDurationSec: 140,
   reframe: 'blur',
-  hook: { window: 2, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
+  hook: { window: 1, startSec: 70, lengthSec: 30, reason: 'The chorus lands with the full band.' },
   skipped: [],
   renders: 1,
   modelMs: 6000,
 };
 
 /** A video in review with its chunks and pick. */
-const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2, 3, 4].map(chunk) });
+const reviewed = (id: string) => ({ job: job(id), pick: PICK, chunks: [0, 1, 2].map(chunk) });
 
 /** A video already on YouTube: the Short is offered only once the release is approved. */
 const uploaded = (id: string, patch: Partial<JobDoc> = {}) => ({
@@ -155,9 +156,11 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
   {
     job: job('e2e-b-review', { ownerUid: USER_B.uid, artistId: null, songTitle: 'Vaporgram' }),
     pick: { ...PICK, title: 'Vaporgram', tags: ['synthwave'] },
-    chunks: [0, 1, 2, 3, 4].map(chunk),
+    chunks: [0, 1, 2].map(chunk),
   },
   { ...reviewed('e2e-expired'), job: job('e2e-expired', { songTitle: 'Gone Song' }) },
+  // Analyzed in 29.5 s windows before spec 002: five for 140 s, not chunkCount(140) = 3.
+  uploaded('e2e-stale', { chunkCount: 5, chunkIndex: 5 }),
   // Paused with the upload outcome unknown: its steps make no YouTube call.
   ...['e2e-paused-chromium', 'e2e-paused-mobile'].map((id) => ({
     job: job(id, {
@@ -173,14 +176,33 @@ const JOBS: { job: JobDoc; pick: Pick | null; chunks: Chunk[] }[] = [
       finalChunkAt: 2,
     }),
     pick: PICK,
-    chunks: [0, 1, 2, 3, 4].map(chunk),
+    chunks: [0, 1, 2].map(chunk),
   })),
-  ...['e2e-analyzing', 'e2e-signout-chromium', 'e2e-signout-mobile'].map((id) => ({
+  ...[
+    'e2e-analyzing',
+    'e2e-analyze-chromium',
+    'e2e-analyze-mobile',
+    'e2e-signout-chromium',
+    'e2e-signout-mobile',
+  ].map((id) => ({
     job: job(id, { state: 'ANALYZE', chunkIndex: 1, pickVersion: null }),
     pick: null,
     chunks: [chunk(0)],
   })),
 ];
+
+// Picking for user B, unlinked: no catalog read, and the cached genre search means no YouTube call.
+const PICKING = ['e2e-pick-chromium', 'e2e-pick-mobile'].map((id) => ({
+  job: job(id, {
+    ownerUid: USER_B.uid,
+    artistId: null,
+    songTitle: 'Vaporgram',
+    state: 'PICK',
+    pickVersion: null,
+  }),
+  pick: null,
+  chunks: [0, 1, 2].map(chunk),
+}));
 
 /** One signed-up user per YouTube status that isn't connected, uid `uid-<status>`. */
 export const BROKEN_STATUSES = ['missing_scopes', 'no_channel', 'revoked'] as const;
@@ -205,12 +227,12 @@ export const SEED: Seed = {
       updatedAt: new Date(0),
     })),
   ],
-  jobs: JOBS.map(({ job, pick, chunks }) => ({
+  jobs: [...JOBS, ...PICKING].map(({ job, pick, chunks }) => ({
     ...jobRow(job),
     picks: pick ? [{ ...pick, skipped: false }] : [],
     chunks,
   })),
-  jobAudience: JOBS.flatMap(({ job }) =>
+  jobAudience: [...JOBS, ...PICKING].flatMap(({ job }) =>
     job.audience
       ? [{ jobId: job.id, retrievedAt: new Date(job.audience.retrievedAt), evidence: job.audience }]
       : [],

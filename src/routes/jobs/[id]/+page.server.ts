@@ -1,9 +1,9 @@
 import { redirect } from '@sveltejs/kit';
-import { signedReadUrl } from '$lib/server/media/gcs';
-import { getJob } from '$lib/server/jobs/jobs';
-import { authorizedJob, buildView, mediaExpired } from '$lib/server/jobs/view';
-import { getConnection } from '$lib/server/platforms/youtube';
-import type { Destination } from '$lib/types';
+import { signedReadUrl } from '#lib/server/media/gcs.js';
+import { getJob } from '#lib/server/jobs/jobs.js';
+import { authorizedJob, buildView, mediaExpired } from '#lib/server/jobs/view.js';
+import { getConnection } from '#lib/server/platforms/youtube/index.js';
+import type { Destination } from '#lib/types.js';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals }) => {

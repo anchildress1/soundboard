@@ -1,9 +1,9 @@
-import { TITLE_MAX } from '$lib/metadata';
-import { ActionError } from '$lib/server/core/errors';
-import { signedUploadUrl, uploadObjectName } from '$lib/server/media/gcs';
+import { TITLE_MAX } from '#lib/metadata.js';
+import { ActionError } from '#lib/server/core/errors.js';
+import { signedUploadUrl, uploadObjectName } from '#lib/server/media/gcs.js';
 import { createJob, MAX_MINUTES, newJobId } from './jobs';
-import { num, text } from '$lib/server/core/http';
-import { startJobTrace } from '$lib/server/core/tracing';
+import { num, text } from '#lib/server/core/http.js';
+import { startJobTrace } from '#lib/server/core/tracing.js';
 
 export const NOTES_MAX = 1000;
 export const MAX_BYTES = 2 * 1024 ** 3;

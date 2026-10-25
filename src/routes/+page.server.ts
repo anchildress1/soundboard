@@ -1,4 +1,4 @@
-import { listJobs } from '$lib/server/jobs/jobs';
+import { listJobs } from '#lib/server/jobs/jobs.js';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => ({

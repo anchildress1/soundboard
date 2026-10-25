@@ -2,10 +2,10 @@
 import { isHttpError } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetClients } from '$lib/server/core/clients';
-import { db } from '$lib/server/core/db';
-import { artistMemory } from '$lib/server/core/schema';
-import { POST } from '$routes/api/brand/approve/+server';
+import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { artistMemory } from '#lib/server/core/schema.js';
+import { POST } from '#src/routes/api/brand/approve/+server.js';
 import { seed, truncate } from '../../../../../helpers/db';
 import { USER_A, USER_B } from '../../../../../helpers/pipeline';
 

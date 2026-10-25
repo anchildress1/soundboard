@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
-import { query, type Database, type Tx } from '$lib/server/core/db';
-import { jobAudience, jobAudienceFresh } from '$lib/server/core/schema';
-import type { AudienceEvidence } from '$lib/server/pipeline/hashtags';
+import { query, type Database, type Tx } from '#lib/server/core/db.js';
+import { jobAudience, jobAudienceFresh } from '#lib/server/core/schema.js';
+import type { AudienceEvidence } from '#lib/server/pipeline/hashtags.js';
 
 /** The database clock excludes expired research even before scheduled deletion runs. */
 export async function readAudience(
