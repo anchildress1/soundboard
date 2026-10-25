@@ -18,7 +18,7 @@ import {
   type Part,
   type Turn,
 } from '#lib/server/core/tracing.js';
-import { quotaResetAt } from '#lib/server/platforms/youtube/youtube.js';
+import { quotaResetAt } from '#lib/server/platforms/youtube/index.js';
 
 export type Agent = AgentName;
 
