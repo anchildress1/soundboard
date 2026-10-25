@@ -4,6 +4,7 @@
 // upload user with a profile creates its own jobs through `/new`, and each Playwright project has its own
 // no-profile, rename and guide users, since those tests write. Each test owns its job IDs, so parallel
 // tests and both Playwright projects never share mutable state.
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import type { JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import type { Chunk, Pick, Short } from '#lib/types.js';
@@ -21,6 +22,7 @@ import {
   USER_B,
   USERS,
 } from '../../helpers/pipeline';
+import { evidence } from '../../helpers/evidence';
 
 /** Playwright's project names, and the device each project's own users are named after. */
 const PROJECTS = ['chromium', 'mobile'] as const;
@@ -265,6 +267,61 @@ const broken = BROKEN_STATUSES.map((status) => ({
   email: `${status}@example.com`,
 }));
 
+/**
+ * Each project's own research users: a profile with no approved brand guide, C's connected channel
+ * with analytics shared, and the jobs and finished run the research spec reads (`research`) or
+ * writes by rejecting a peer (`reject`). A rejection hides the peer for the whole artist, so each
+ * role has its own.
+ */
+const researchers = PROJECTS.flatMap((project) =>
+  (['research', 'reject'] as const).map((role) => {
+    const device = DEVICE[project];
+    return {
+      role,
+      project,
+      uid: `uid-${role}-${device}`,
+      artistId: `artist-${role === 'research' ? 'rs' : 'rj'}${device[0]}`,
+    };
+  }),
+);
+
+/** Each project's own sliders user: a profile with an approved brand guide to save them on. */
+const sliders = PROJECTS.map((project) => {
+  const device = DEVICE[project];
+  return { uid: `uid-sliders-${device}`, artistId: `artist-sl${device[0]}` };
+});
+
+const RESEARCH_EXPIRES = '2026-11-20T00:00:00.000Z';
+const ANALYTICS = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+
+/** A draft that cites a fresh peer, a fresh release, its own result, and one peer long gone. */
+const researchPick = (run: string, artist: string): Pick => ({
+  ...PICK,
+  tags: [artist, 'synthwave'],
+  artistName: artist,
+  influence: DEFAULT_INFLUENCE,
+  citations: {
+    sound: ['analysis'],
+    feel: ['voice'],
+    wording: ['P1-R1'],
+    discovery: ['P9'],
+    structure: ['P1-R1'],
+  },
+  recommendation: {
+    approach: 'Open on the chorus hook.',
+    intendedOutcome: 'More listeners reach the second minute.',
+    follows: 'both',
+    followsWhy: 'Your last release and two similar artists agree.',
+    evidence: ['A1', 'P1', 'P1-R1'],
+    limits: ['hearing-off'],
+  },
+  influenceWarning: null,
+  researchRunId: run,
+  evidenceExpiresAt: RESEARCH_EXPIRES,
+  outcomeRefs: { A1: 'e2e-own-video' },
+  limits: ['hearing-off'],
+});
+
 /** Each project's own users for tests that write: one with no profile, one that renames its own. */
 const perProject = PROJECTS.flatMap((project) => {
   const device = DEVICE[project];
@@ -302,6 +359,32 @@ const guideUsers = PROJECTS.flatMap((project) => {
 const proposers = guideUsers.filter(({ uid }) => uid.startsWith('uid-propose-'));
 const reviewers = guideUsers.filter((user) => !proposers.includes(user));
 
+const RESEARCH_JOBS = researchers.flatMap(({ role, project, uid, artistId }) => {
+  const owner = { ownerUid: uid, artistId };
+  const reviewed = (id: string) => ({
+    job: job(id, { ...owner, songTitle: 'Vaporgram' }),
+    pick: researchPick(`e2e-run-${role}-${project}`, 'Research Band'),
+    chunks: [0, 1, 2].map(chunk),
+  });
+  if (role === 'reject') return [reviewed(`e2e-reject-${project}`)];
+  return [
+    reviewed(`e2e-research-${project}`),
+    // Approving moves the job on, so the approval check has its own.
+    reviewed(`e2e-research-approve-${project}`),
+    // No run yet: the first step starts one, and the queue fake finishes it.
+    {
+      job: job(`e2e-research-wait-${project}`, {
+        ...owner,
+        songTitle: 'Vaporgram',
+        state: 'PICK',
+        pickVersion: null,
+      }),
+      pick: null,
+      chunks: [0, 1, 2].map(chunk),
+    },
+  ];
+});
+
 /** Nathan's brand guide as 004 approved it; migration 0006 already carried his voice over. */
 export const NATHAN_BRAND = {
   statement: 'Plain titles, a short story, then the credits.',
@@ -318,6 +401,8 @@ export const SEED: Seed = {
     { id: 'artist-upload', name: 'Upload Band' },
     ...perProject.flatMap(({ artist }) => (artist ? [artist] : [])),
     ...guideUsers.map(({ artistId }) => ({ id: artistId, name: 'Guide Band' })),
+    ...researchers.map(({ artistId }) => ({ id: artistId, name: 'Research Band' })),
+    ...sliders.map(({ artistId }) => ({ id: artistId, name: 'Sliders Band' })),
   ],
   users: [
     ...USERS.users,
@@ -325,11 +410,19 @@ export const SEED: Seed = {
     { uid: 'uid-upload', email: 'upload@example.com', artistId: 'artist-upload' },
     ...perProject.map(({ user }) => user),
     ...guideUsers,
+    ...researchers.map(({ uid, artistId }) => ({ uid, email: `${uid}@example.com`, artistId })),
+    ...sliders.map(({ uid, artistId }) => ({ uid, email: `${uid}@example.com`, artistId })),
   ],
   connections: [
     ...USERS.connections,
     // Same grant and channel as C, so each project proposes on its own claim.
     ...proposers.map(({ uid }) => ({ ...USERS.connections[1]!, uid })),
+    // C's grant again, with analytics shared, so the research user's results are readable.
+    ...researchers.map(({ uid }) => ({
+      ...USERS.connections[1]!,
+      uid,
+      scopes: ['openid', 'email', ANALYTICS],
+    })),
     ...broken.map(({ uid, status }) => ({
       uid,
       status,
@@ -340,17 +433,46 @@ export const SEED: Seed = {
       updatedAt: new Date(0),
     })),
   ],
-  jobs: [...JOBS, ...PICKING].map(({ job, pick, chunks }) => ({
+  jobs: [...JOBS, ...PICKING, ...RESEARCH_JOBS].map(({ job, pick, chunks }) => ({
     ...jobRow(job),
     picks: pick ? [{ ...pick, skipped: false }] : [],
     chunks,
   })),
-  jobAudience: [...JOBS, ...PICKING].flatMap(({ job }) =>
+  jobAudience: [...JOBS, ...PICKING, ...RESEARCH_JOBS].flatMap(({ job }) =>
     job.audience
       ? [{ jobId: job.id, retrievedAt: new Date(job.audience.retrievedAt), evidence: job.audience }]
       : [],
   ),
+  // One finished run per review job; the wait job has none.
+  researchRuns: researchers.map(({ role, project, uid, artistId }) => ({
+    jobId: `e2e-${role}-${project}`,
+    id: `e2e-run-${role}-${project}`,
+    ownerUid: uid,
+    artistId,
+    stage: 'done' as const,
+    limits: ['hearing-off'],
+    finishedAt: new Date(),
+  })),
+  jobResearch: researchers.map(({ role, project }) => ({
+    runId: `e2e-run-${role}-${project}`,
+    jobId: `e2e-${role}-${project}`,
+    retrievedAt: new Date(),
+    evidence: evidence(),
+  })),
+  artistOutcomes: researchers.map(({ artistId }) => ({
+    artistId,
+    videoId: 'e2e-own-video',
+    retrievedAt: new Date(),
+    publishedAt: new Date('2026-09-01T00:00:00Z'),
+    requestedStart: '2026-08-31',
+    requestedEnd: '2026-09-27',
+    coverage: 'open' as const,
+    metrics: { views: 900, subscribersGained: 12, subscribersLost: 2 },
+    live: { title: 'Last Light', description: 'Live copy.', tags: ['synthwave'] },
+    differsFromApproved: null,
+  })),
   artistGuides: [
+    ...sliders.map(({ artistId }) => approvedGuide(artistId, 'brand', NATHAN_BRAND)),
     approvedGuide(ARTIST_A.id, 'brand', NATHAN_BRAND, {
       uploads: 30,
       drafts: 0,

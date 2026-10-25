@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { signIn, USER_A, USER_C } from './session';
+import { researchUser, signIn, USER_A, USER_C } from './session';
 
 const noHorizontalScroll = async (page: Page) =>
   expect(
@@ -46,4 +46,34 @@ test('waits on research, then while the model is busy during the pick', async ({
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Model busy');
   await expect(page.getByText('Configured picker: gemini-4-argon')).toBeVisible();
   await noHorizontalScroll(page);
+});
+
+test('approves a researched draft with the same four clicks and nothing to fill in', async ({
+  page,
+}, testInfo) => {
+  await signIn(page, researchUser(testInfo));
+  // The approval is the check; the upload steps after it would leave the fakes.
+  await page.route('**/step', (route) => route.abort());
+  await page.goto(`/jobs/e2e-research-approve-${testInfo.project.name}`);
+  const clicks = ['Keep it, next', 'Looks right, next', 'Fine, next'];
+  for (const name of clicks) await page.getByRole('button', { name, exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Ready to upload');
+  // The recommendation, peers and results are there to read, and none of them asks for input.
+  await expect(page.getByRole('region', { name: 'Recommendation' })).toBeVisible();
+  await expect(page.getByText(/^Similar artists \(3\)$/)).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Recommendation' }).getByRole('textbox'),
+  ).toHaveCount(0);
+
+  const approval = page.waitForResponse((response) => response.url().endsWith('/approve'));
+  await page.getByRole('button', { name: 'Approve & upload', exact: true }).click();
+  const response = await approval;
+  expect(response.status()).toBe(200);
+  expect(Object.keys(response.request().postDataJSON() as object).sort()).toEqual([
+    'channelId',
+    'description',
+    'pickVersion',
+    'tags',
+    'title',
+  ]);
 });
