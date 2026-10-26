@@ -383,7 +383,7 @@ describe('continuity and idempotency', () => {
         expect(await runDelivery(delivered, stages)).toBe(200);
       }
       expect(await contents()).toEqual(after);
-      expect(fetchMock.mock.calls.length).toBe(sent);
+      expect(fetchMock.mock.calls).toHaveLength(sent);
       next = nextOf(before);
     }
     expect((await stored())?.stage).toBe('done');

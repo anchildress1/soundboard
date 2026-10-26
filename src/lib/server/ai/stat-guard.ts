@@ -28,15 +28,27 @@ const STATISTIC = new RegExp(
 
 export const NOT_STATED = 'Not stated.';
 
-/**
- * Sentences (with their trailing space) and line breaks, in order. A sentence ends only where its
- * punctuation meets a space, so "4.5" stays in one.
- */
-const pieces = (text: string) =>
-  text
-    .split(/(\n)/)
-    .flatMap((line) => line.split(/(?<=[.!?][ \t]+)(?=[^ \t])/))
-    .filter(Boolean);
+const isSpace = (char: string | undefined) => char === ' ' || char === '\t';
+
+/** A line's sentences, each with its trailing space. Only a stop followed by a space ends one. */
+function sentencesOf(line: string): string[] {
+  const found: string[] = [];
+  let start = 0;
+  let stopped = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]!;
+    if (isSpace(char)) continue;
+    if (stopped && isSpace(line[i - 1])) {
+      found.push(line.slice(start, i));
+      start = i;
+    }
+    stopped = char === '.' || char === '!' || char === '?';
+  }
+  return [...found, line.slice(start)];
+}
+
+/** Sentences (with their trailing space) and line breaks, in order; "4.5" stays in one sentence. */
+const pieces = (text: string) => text.split(/(\n)/).flatMap(sentencesOf).filter(Boolean);
 
 /**
  * `text` without the sentences that state a statistic, and whether any were removed. A field left

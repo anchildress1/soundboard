@@ -29,12 +29,21 @@ const RUN_WORDS = 6;
 const SENTENCE_WORDS = 3;
 const PHRASE_WORDS = 3;
 
+/** `word` without leading or trailing apostrophes. */
+function trimQuotes(word: string): string {
+  let from = 0;
+  let to = word.length;
+  while (from < to && word[from] === "'") from += 1;
+  while (to > from && word[to - 1] === "'") to -= 1;
+  return word.slice(from, to);
+}
+
 const words = (text: string) =>
   text
     .toLowerCase()
     .replaceAll('’', "'")
     .split(/[^\p{L}\p{N}']+/u)
-    .map((word) => word.replaceAll(/^'+|'+$/g, ''))
+    .map(trimQuotes)
     .filter(Boolean);
 
 const sentences = (text: string) =>

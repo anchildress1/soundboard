@@ -33,7 +33,7 @@ const STAGES: Stages = {
   releases,
 };
 
-type Outcome = { release: Release; at: number; writes?: Batch['writes'] };
+type Outcome = { release: Release; at: number; writes?: NonNullable<Batch['writes']> };
 
 const merged = (run: ResearchRun, limits: ResearchLimit[] = []) => [
   ...new Set([...run.limits, ...limits]),
