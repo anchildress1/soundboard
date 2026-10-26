@@ -81,7 +81,7 @@ description: 'Task list for learning what grows the fanbase'
   - Tests, add: "Mock Cloud Tasks and Google certificate HTTP via `fetch`. E2E swaps the queue for `tests/e2e/fakes/tasks.ts`; research results come from fixtures."
 - [x] T005 👤 Gate G1, run by the orchestrator (research R5, [quickstart G1](quickstart.md#g1--gemini-hears-a-public-youtube-url-gate-before-hearing-code)). Before T012's hearing part and T020. Gemini ≤ $0.05 of the $0.50 share.
   - Write `specs/006-fanbase-learning/gates/g1/g1.mjs`: two `generateText` calls with the Interactions model and the analyst model, `low` thinking, `mediaResolution: 'low'`, 2048 tokens; a file part with a public music-video watch URL, `mediaType: 'video/mp4'`, `providerOptions.google.processing = { type: 'static', startOffset: 0, endOffset: 60 }`; then a private or removed video ID. A `fetch` wrapper logs request hosts only.
-  - Run from an isolated directory with the repo's pinned `ai` and `@ai-sdk/google`. Read and append `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` before each call.
+  - Run from an isolated directory with the repo's pinned `ai` and `@ai-sdk/google`. Read and append the run's Gemini spend ledger before each call.
   - Record `gates/g1/result.json`: the five pass checks. No key, no URL query.
   - **Result (2026-10-25, `gates/g1/result.json`): passed.** Heard and described; the only host our process called was `generativelanguage.googleapis.com`; 5,500 input tokens for the 60 s clip of a 3.5-minute video; a missing ID answers 403 before any tokens (→ `metadata-only`); one sample at 4.1 s, so `minCallMs` = 5,000. Gemini $0.004.
   - **Pass:** `PEER_HEARING=1` goes into `service.yaml` (T046); `minCallMs` = p95 latency rounded up to the next second, used by T012. **Fail:** `PEER_HEARING` stays unset, T012 skips the `youtube` part, T020 is metadata-only.
@@ -265,15 +265,22 @@ description: 'Task list for learning what grows the fanbase'
   - `git --no-pager diff 005-artist-branding -- package.json pnpm-lock.yaml` adds no dependency (SC-001)
   - no surname anywhere in the diff
 - [x] T048 After a rebase, if 005's migration number moved: delete this migration, its snapshot and journal entry, rerun `pnpm drizzle-kit generate --name fanbase_learning`, paste T006's appended SQL back, and rerun T008 and T049.
-- [ ] T049 Validation loop (max 5 attempts, then stop with the exact errors):
+- [x] T049 Validation loop (max 5 attempts, then stop with the exact errors):
   1. `make ai-checks`: coverage ≥ 85/85/85/80, zero warnings
   2. `pnpm exec playwright test`: both projects
-  3. `semgrep scan --config auto --error --metrics=off` on changed files: zero findings
+  3. `semgrep scan --config p/default --config p/typescript --config p/javascript --config p/secrets --config p/security-audit --error --metrics=off` on changed files: zero findings (`--config auto` refuses `--metrics=off`)
   4. SonarQube `analyze_code_snippet` on each changed or added source file: zero issues
   5. `pnpm audit --prod` and `pnpm audit`: zero
 - [x] T050 👤 Fixed-evidence evaluation E1 (quickstart E1, research R15, #20). ≈ $0.30 of the $0.50 share. Write `specs/006-fanbase-learning/eval/{fixture.ts,eval.test.ts,vitest.eval.config.ts}` (the config reuses the repo's aliases, unmocked `fetch`); run the three picks; record `eval/result.json` against R15's pass criteria. Read and log the ledger before each call. Any pick the share can't cover → **unverified**.
-- [ ] T051 👤 Live local validation ([quickstart](quickstart.md) Q0–Q6). Gemini within what's left of the $0.50 share after T005 and T050.
-  - Read and log `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` before each call.
+- [x] T051 👤 Live local validation ([quickstart](quickstart.md) Q0–Q6). Gemini within what's left of the $0.50 share after T005 and T050.
+  - Result, 2026-10-26, ≈ $0.06 of the share:
+    - Q1 pass: research ran in-process to `done`. Tab-close redelivery is unit-tested only.
+    - Q2 pass: ranges and labeled peers with retrieval dates, no totals; after "Not a peer" on P1, the re-run cites P2 and never the rejected channel.
+    - Q3 pass: defaults 1/0/0/4/4; Wording 4 saved and kept after reload; the earlier pick still shows Wording 0. The no-brand-guide case is E2E-only.
+    - Q4 pass: the test channel has no public uploads, so no outcome rows and the `private-releases` limit. Linking results to an adopted release stays **unverified** live.
+    - Q5: tests pass. The live disconnect was skipped: `artist_outcomes` was already empty, so it proves nothing.
+    - Q6 pass: 15 reloads, GETs only, `research_runs.updated_at` unchanged.
+  - Read and log the run's Gemini spend ledger before each call.
   - Dev `.env` and dev Neon branch only; `RESEARCH_QUEUE` unset.
   - A non-Nathan test user and channel; confirm on `/connections` it isn't Flies Like Robots, else stop and report. No upload.
   - One ≤ 60 s video from `$HOME/Downloads/*.mp4`, read only.
