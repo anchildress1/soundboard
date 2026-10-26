@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { isHttpError } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '#lib/server/core/db.js';
 import { withIdentity } from '#lib/server/core/identity.js';
@@ -132,6 +132,15 @@ describe('POST /api/jobs/[id]/peers/[ref]/reject', () => {
     await seedJob({ id: 'j2', ownerUid: USER_B.uid, artistId: null, state: 'REVIEW' });
     const error = await reject('j2', 'P1', USER_B).catch((e: unknown) => e);
     expect(isHttpError(error) && error.status).toBe(404);
+  });
+
+  it('404s a job whose owner has since relinked to another artist, and records nothing', async () => {
+    await put();
+    await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
+    await db().execute(sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`);
+    const error = await reject('j1', 'P1').catch((e: unknown) => e);
+    expect(isHttpError(error) && error.status).toBe(404);
+    expect(await rejections()).toEqual([]);
   });
 
   it.each([

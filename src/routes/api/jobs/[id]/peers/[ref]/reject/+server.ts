@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { sql } from 'drizzle-orm';
+import { artistJob } from '#lib/server/artist/memory.js';
 import { query } from '#lib/server/core/db.js';
 import { ActionError } from '#lib/server/core/errors.js';
 import { respond } from '#lib/server/core/http.js';
@@ -14,7 +15,8 @@ const EXPIRED = "That peer's evidence has expired. Reload to see it.";
 export const POST: RequestHandler = ({ params, locals }) =>
   respond(async () => {
     const job = await authorizedJob(params.id, locals.user?.uid);
-    if (!job.artistId) error(404, 'Job not found');
+    // A job whose owner has since relinked has no artist memory to write to.
+    if (!(await artistJob(job))) error(404, 'Job not found');
     const pick = await latestPick(job.id);
     const stored = pick?.researchRunId ? await readEvidence(pick.researchRunId) : null;
     const peer = stored?.evidence.peers.find((candidate) => candidate.ref === params.ref);
