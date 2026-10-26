@@ -118,10 +118,12 @@ const copiedSentences = (draft: string[], peers: PeerText[]) =>
  *    text, the analysis or the candidate lists
  * 4. a peer channel title
  *
- * A run made only of whole candidate terms, the song title or the artist name is exempt.
+ * A run made only of whole candidate terms, the song title or the artist name is exempt. A channel
+ * title is exempt only as the song title or artist name: a peer's own tags often carry it.
  */
 export function checkCopy(fields: Record<string, string>, context: CopyContext): CopyViolation[] {
-  const exempt = [...context.terms, ...context.names].map(words).filter((t) => t.length > 0);
+  const names = context.names.map(words).filter((t) => t.length > 0);
+  const exempt = [...context.terms.map(words).filter((t) => t.length > 0), ...names];
   const known = new Set([...context.own, ...context.analysis, ...context.terms].flatMap(words));
   const peerTexts = context.peers.flatMap(({ texts }) => texts.map(words));
   const violations: CopyViolation[] = [];
@@ -144,7 +146,11 @@ export function checkCopy(fields: Record<string, string>, context: CopyContext):
     for (const [rule, run] of copied) {
       const quote = run.join(' ');
       // A longer copied run already says it.
-      if (wholeTerms(run, exempt) || found.some((f) => ` ${f} `.includes(` ${quote} `))) continue;
+      if (
+        wholeTerms(run, rule === 'name' ? names : exempt) ||
+        found.some((f) => ` ${f} `.includes(` ${quote} `))
+      )
+        continue;
       found.push(quote);
       violations.push({ field, rule, quote, message: message(rule, field, quote) });
     }

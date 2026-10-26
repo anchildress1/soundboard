@@ -142,6 +142,14 @@ describe('checkCopy rule 4: a peer name', () => {
     ).toEqual([]);
   });
 
+  it('fails a peer channel title even when a candidate list carries it as a term', () => {
+    const found = quotes(
+      { description: 'Fans of Nova Drift will like this.' },
+      { terms: ['nova drift', 'retro'] },
+    );
+    expect(found).toEqual([['name', 'nova drift']]);
+  });
+
   it('allows the artist name even when a peer shares it', () => {
     const found = quotes(
       { description: 'flies like robots' },
