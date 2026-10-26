@@ -2367,6 +2367,7 @@ describe('runStep: CLAIMED_COMPLETE', () => {
       modelMs: 1,
       flags: [],
       influence: { sound: 1, feel: 0, wording: 0, discovery: 4, structure: 4 },
+      researchRunId: 'run-1',
       recommendation: {
         approach: 'Open on the hook.',
         intendedOutcome: 'More listeners stay.',
@@ -2392,12 +2393,13 @@ describe('runStep: CLAIMED_COMPLETE', () => {
       tags: ['synthwave'],
     };
 
-    it('records what was suggested as refs only, the settings used, and that it was kept as is', async () => {
+    it('records what was suggested as refs bound to their run, the settings used, and that it was kept as is', async () => {
       expect(await withPick(same)).toMatchObject({
         recommendation: {
           approach: 'Open on the hook.',
           intendedOutcome: 'More listeners stay.',
           evidence: ['P1'],
+          researchRunId: 'run-1',
         },
         influence: PICK.influence,
         editedBeforeApproval: false,

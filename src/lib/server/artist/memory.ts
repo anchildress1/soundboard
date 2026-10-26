@@ -106,7 +106,12 @@ export type Publish = {
   fields: PickFields;
   status: 'VERIFIED';
   at: number;
-  recommendation: Pick<Recommendation, 'approach' | 'intendedOutcome' | 'evidence'> | null;
+  /** `evidence` refs are numbered per run, so they name peers only with `researchRunId`. */
+  recommendation:
+    | (Pick<Recommendation, 'approach' | 'intendedOutcome' | 'evidence'> & {
+        researchRunId: string | null;
+      })
+    | null;
   influence: Influence | null;
   /** Whether the approved fields differ from the pick's, so a learned result isn't credited to it. */
   editedBeforeApproval: boolean;

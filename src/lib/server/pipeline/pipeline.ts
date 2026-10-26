@@ -514,6 +514,7 @@ async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<voi
           approach: own.recommendation.approach,
           intendedOutcome: own.recommendation.intendedOutcome,
           evidence: own.recommendation.evidence,
+          researchRunId: own.researchRunId ?? null,
         }
       : null,
     influence: own?.influence ?? null,
