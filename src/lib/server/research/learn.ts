@@ -88,7 +88,7 @@ export async function learn({ run, deadline }: StageContext): Promise<Batch> {
       rows.push(await outcomeOf(access.token, upload, approved.get(upload.videoId), deadline));
       return undefined;
     } catch (error) {
-      // Analytics refuses the token: stop here, keeping what was read before it.
+      // Analytics refuses the token: stop here.
       const failure = analyticsFailure(error);
       if (failure === 'analytics-not-shared') lost = 'analytics-not-shared';
       else if (failure === 'access-lost') lost = 'youtube-not-connected';
@@ -101,12 +101,16 @@ export async function learn({ run, deadline }: StageContext): Promise<Batch> {
     await access.refused({ 'job.id': run.jobId });
     return advance([...limits, lost]);
   }
-  const finished = lost !== null || items.next >= pending.length;
+  if (lost === 'analytics-not-shared') {
+    // Sharing ended: nothing read through it is saved, and the dropped scope deletes the rest.
+    await access.analyticsRefused({ 'job.id': run.jobId });
+    return advance([...limits, lost]);
+  }
   return {
     done: items.done,
-    stage: finished ? 'discover' : 'learn',
+    stage: items.next >= pending.length ? 'discover' : 'learn',
     cursor: 0,
-    limits: lost ? [...limits, lost] : limits,
+    limits,
     wait: items.wait,
     writes:
       rows.length === 0

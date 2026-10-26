@@ -502,7 +502,7 @@ describe('learn: reading the results', () => {
 });
 
 describe('learn: failures', () => {
-  it('moves on as not shared when Analytics refuses the scope, saving what it read first', async () => {
+  it('moves on as not shared when Analytics refuses the scope, dropping the scope and saving nothing', async () => {
     answer({
       uploads: [
         { id: 'a', publishedAt: daysAgo(10) },
@@ -524,7 +524,16 @@ describe('learn: failures', () => {
       limits: ['analytics-not-shared'],
       consecutiveFailures: 0,
     });
-    expect((await outcomes()).map((o) => o.videoId)).toEqual(['a']);
+    expect(await outcomes()).toEqual([]);
+    const [connection] = await db()
+      .select()
+      .from(connections)
+      .where(eq(connections.uid, USER_A.uid));
+    expect(connection).toMatchObject({ status: 'connected', scopes: ['openid', 'email'] });
+    expect(Sentry.captureMessage).toHaveBeenCalledWith('YouTube Analytics refused the grant', {
+      level: 'warning',
+      tags: { 'job.id': 'j1' },
+    });
   });
 
   it('gives up the grant and saves nothing when Analytics says it is lost', async () => {

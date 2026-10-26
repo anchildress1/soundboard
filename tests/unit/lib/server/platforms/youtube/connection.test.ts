@@ -334,6 +334,43 @@ describe('accessTokenFor', () => {
     });
   });
 
+  it('drops only the Analytics scope when Analytics refuses, leaving a newer grant alone', async () => {
+    const shared = [...SCOPES, ANALYTICS_SCOPE];
+    await putConnection(UID, connected({ scopes: shared }));
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
+    const access = (await accessTokenFor(UID, CHANNEL, later()))!;
+    await access.analyticsRefused({ 'job.id': 'j1' });
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected', scopes: SCOPES });
+
+    await putConnection(UID, connected({ scopes: shared, tokenCiphertext: 'bmV3' }));
+    await access.analyticsRefused();
+    expect(await getConnection(UID)).toMatchObject({ scopes: shared, tokenCiphertext: 'bmV3' });
+  });
+
+  it('reports an Analytics refusal it could not record, and still returns', async () => {
+    await putConnection(UID, connected({ scopes: [...SCOPES, ANALYTICS_SCOPE] }));
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
+    const access = (await accessTokenFor(UID, CHANNEL, later()))!;
+    await db().execute(sql`
+      create function refuse_write() returns trigger language plpgsql
+        as $$ begin raise exception 'write refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_write before update on connections
+        for each row execute function refuse_write()
+    `);
+    try {
+      await expect(access.analyticsRefused({ 'job.id': 'j1' })).resolves.toBeUndefined();
+    } finally {
+      await db().execute(sql`drop trigger refuse_write on connections`);
+      await db().execute(sql`drop function refuse_write`);
+    }
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ cause: expect.objectContaining({ message: 'write refused' }) }),
+      { tags: { 'job.id': 'j1', component: 'analytics-revoke-mark' } },
+    );
+  });
+
   it('reports a refused grant it could not mark revoked, and still returns', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });

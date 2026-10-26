@@ -206,6 +206,7 @@ The constitution exception permits research and learning to "run server-side, in
 - **Pick input per outcome `A<n>`:** the suggestion (if any), the approved fields as published (app data), the live metadata (YouTube data, tagged), `editedBeforeApproval`, `differsFromApproved`, coverage, metrics and calculated net. The prompt separates "suggested" from "what was actually published".
 - **No stored lessons:** each pick reasons again over fresh outcomes and adopted publishes (FR-015).
 - **Without consent:** no Analytics call; `limits += 'analytics-not-shared'`; approval unaffected (FR-002).
+- **Consent withdrawn mid-run:** an Analytics 403 for the scope saves nothing from that delivery and drops the scope from the grant it was read through, so the `connections` trigger deletes the artist's outcomes; `limits += 'analytics-not-shared'` and learn advances.
 - **Grant missing or refused during learn:** `limits += 'youtube-not-connected'`, the stage advances. The pick still waits on `reconnect YouTube` (004).
 
 ## R9 · Analytics consent and the OAuth scope (FR-002)
