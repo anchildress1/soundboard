@@ -625,14 +625,21 @@ function pickTags(raw: string[], pool: string[], fix: PickFixups): string[] {
 /** The model never writes a statistic: sentences that state one are removed (research R7). */
 const unstated = (text: string) => stripStats(text).text;
 
+const WORD_END = /[\p{L}\p{N}]$/u;
+const WORD_START = /^[\p{L}\p{N}]/u;
+
 /**
- * `text` with every case-insensitive `needle` replaced. It scans by index over a folded copy that
- * remembers where each folded unit came from, so a character whose lowercase is longer (İ) can't
- * shift the cuts, and no pattern is built from a channel title.
+ * `text` with every case-insensitive, whole-word `needle` replaced: a peer named "Air" leaves
+ * "airy" alone. It scans by index over a folded copy that remembers where each folded unit came
+ * from, so a character whose lowercase is longer (İ) can't shift the cuts, and no pattern is built
+ * from a channel title.
  */
 function replaceFolded(text: string, needle: string, replacement: string): string {
   const target = needle.toLowerCase();
   if (!target) return text;
+  // Only a needle edge that is itself a letter or digit needs a boundary beside it.
+  const startsWord = WORD_START.test(target);
+  const endsWord = WORD_END.test(target);
   let folded = '';
   const origin: number[] = [];
   let index = 0;
@@ -648,6 +655,13 @@ function replaceFolded(text: string, needle: string, replacement: string): strin
   let at = folded.indexOf(target);
   while (at >= 0) {
     const next = at + target.length;
+    const inWord =
+      (startsWord && WORD_END.test(folded.slice(Math.max(0, at - 2), at))) ||
+      (endsWord && WORD_START.test(folded.slice(next, next + 2)));
+    if (inWord) {
+      at = folded.indexOf(target, at + 1);
+      continue;
+    }
     out += text.slice(from, origin[at]) + replacement;
     from = origin[next]!;
     at = folded.indexOf(target, next);

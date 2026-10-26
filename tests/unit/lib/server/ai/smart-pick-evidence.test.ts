@@ -360,6 +360,24 @@ describe('finalizePick: citations and the recommendation', () => {
     expect(pick.recommendation!.approach).toBe('P1 and P1 again; P2 too.');
   });
 
+  it('replaces a title only as a whole word, beside punctuation too', () => {
+    const short = evidence();
+    short.peers[1]!.title = 'Air';
+    short.peers[2]!.title = '(Low)';
+    const pick = finalizePick(
+      raw({
+        recommendation: {
+          ...raw().recommendation,
+          approach: 'Follow the airy hook, like AIR, (low) and "Air". Fair is fine.',
+        },
+      }),
+      fix({ evidence: short }),
+    );
+    expect(pick.recommendation!.approach).toBe(
+      'Follow the airy hook, like P2, P3 and "P2". Fair is fine.',
+    );
+  });
+
   it('removes a statistic the model wrote into the recommendation', () => {
     const pick = finalizePick(
       raw({
