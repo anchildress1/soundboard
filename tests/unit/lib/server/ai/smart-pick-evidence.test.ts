@@ -395,6 +395,25 @@ describe('finalizePick: citations and the recommendation', () => {
     );
   });
 
+  it('drops tags and hashtags that name a peer channel, even from the candidate lists', () => {
+    const named = evidence();
+    const release = named.releases[0]!;
+    release.tags = [...release.tags, PEER_TITLE.toLowerCase(), `${PEER_TITLE} remix`, 'neon'];
+    release.hashtags = [...release.hashtags, '#NeonHarbor'];
+    const pick = finalizePick(
+      raw({
+        tags: [PEER_TITLE.toLowerCase(), `${PEER_TITLE} remix`, 'neon', 'synthwave'],
+        hashtags: ['#neonharbor', '#peer1'],
+      }),
+      fix({ evidence: named, candidateLists: [genre, ...named.releases.map(releaseList)] }),
+    );
+    const tags = pick.tags.map((t) => t.toLowerCase());
+    expect(tags).toContain('neon');
+    expect(tags.filter((t) => t.includes('neon harbor'))).toEqual([]);
+    expect(pick.hashtags.map((h) => h.toLowerCase())).toContain('#peer1');
+    expect(pick.hashtags.map((h) => h.toLowerCase())).not.toContain('#neonharbor');
+  });
+
   it('removes a statistic the model wrote into the recommendation', () => {
     const pick = finalizePick(
       raw({

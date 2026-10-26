@@ -689,12 +689,19 @@ const byRefOnly = (text: string, named: { ref: string; title: string }[]): strin
 export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
   const draft = stripDeep(raw);
   const { name, contactLine } = fix.artist;
+  // A peer's own tags often carry its channel name; that name never goes on this release.
+  const peerNames = (fix.evidence?.peers ?? []).map((peer) => peer.title).filter((t) => t.trim());
+  const peerHashtags = new Set(peerNames.map(asHashtag));
   const tags = pickTags(
     draft.tags,
-    tagPool({ artistName: name, candidateLists: fix.candidateLists }).map((c) => c.tag),
+    tagPool({ artistName: name, candidateLists: fix.candidateLists })
+      .map((c) => c.tag)
+      .filter((tag) => !peerNames.some((peer) => containsWords(tag, peer))),
     fix,
   );
-  const allowedHashtags = [...new Set(fix.candidateLists.flatMap((list) => list.hashtags))];
+  const allowedHashtags = [...new Set(fix.candidateLists.flatMap((list) => list.hashtags))].filter(
+    (hashtag) => !peerHashtags.has(hashtag.toLowerCase()),
+  );
   const hashtags = pickHashtags(draft, allowedHashtags, tags);
 
   const closing = hashtags.join(' ');
