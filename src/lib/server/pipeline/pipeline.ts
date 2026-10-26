@@ -290,8 +290,8 @@ const RESEARCHING: Wait = 'researching similar artists';
 type Research = { runId: string; limits: ResearchLimit[] };
 
 /**
- * The research gate (research R3), after 004's waits. With no run, or an expired one, it starts
- * one and waits; while one runs under 10 minutes, it waits. A queue that can't take the first
+ * The research gate (research R3), after 004's waits. With no run, an expired one, or one made for
+ * another artist before the owner relinked, it starts one and waits; while one runs under 10 minutes, it waits. A queue that can't take the first
  * delivery fails the run and the pick goes ahead without it: never a step failure. A failed run
  * stays failed until a re-run clears it (T054).
  */
@@ -301,7 +301,7 @@ async function researchFor(
   deadline: number,
 ): Promise<Research | { wait: Wait }> {
   const run = await getRun(job.id);
-  if (!run || expired(run)) {
+  if (!run || expired(run) || run.artistId !== artistId) {
     const started = await startRun(job, artistId);
     try {
       await enqueue({ jobId: job.id, uid: job.ownerUid, runId: started.id, seq: 0 }, 0, deadline);

@@ -1113,6 +1113,15 @@ describe('runStep: PICK research', () => {
     expect(run!.id).not.toBe('run-1');
   });
 
+  it("replaces a run made for the owner's earlier artist", async () => {
+    await unresearched();
+    await researched(C_JOB, { artistId: USER_A.artistId });
+    expect(await runStep(await saved())).toEqual({ wait: 'researching similar artists' });
+    const [run] = await runs();
+    expect(run).toMatchObject({ stage: 'learn', seq: 0, artistId: USER_C.artistId });
+    expect(run!.id).not.toBe('run-1');
+  });
+
   it('drafts without research when the queue refuses, and again after a re-run, never failing', async () => {
     on(TASKS, () => json({}, { status: 500 }));
     const job = await unresearched();
