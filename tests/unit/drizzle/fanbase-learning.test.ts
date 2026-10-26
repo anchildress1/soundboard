@@ -35,6 +35,7 @@ const FUNCTIONS = [
   'soundboard_refresh_rejections',
   'soundboard_save_influence',
   'soundboard_forget_outcomes',
+  'soundboard_forget_artist_outcomes',
 ];
 const ago = (ms: number) => new Date(Date.now() - ms);
 const JUST_FRESH = 29 * DAY_MS - 60_000;
@@ -652,6 +653,25 @@ describe('forgetting outcomes when sharing ends', () => {
   ])("deletes the artist's outcomes on %s and leaves other artists'", async (_name, change) => {
     await asUser(USER_A.uid, (tx) => tx.execute(change));
     expect(await left()).toEqual([{ artist_id: ARTIST_C.id }]);
+  });
+
+  it.each([
+    ['an unlink', sql`update users set artist_id = null where uid = ${USER_A.uid}`],
+    [
+      'a relink to another artist',
+      sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`,
+    ],
+  ])("deletes the old artist's outcomes on %s and leaves other artists'", async (_name, change) => {
+    await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
+    await db().execute(change);
+    expect(await left()).toEqual([{ artist_id: ARTIST_C.id }]);
+  });
+
+  it('deletes nothing when a user row changes but keeps its artist', async () => {
+    await db().execute(
+      sql`update users set artist_id = ${ARTIST_A.id}, active = true where uid = ${USER_A.uid}`,
+    );
+    expect(await left()).toEqual([{ artist_id: ARTIST_C.id }, { artist_id: ARTIST_A.id }]);
   });
 
   it('deletes nothing on a reconnect that keeps the scope', async () => {

@@ -101,6 +101,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 
 - "Analytics shared" = `status = 'connected' and scopes @> '{https://www.googleapis.com/auth/yt-analytics.readonly}'`. The app reads it through `analyticsShared` in `platforms/youtube/`.
 - **Trigger** `connections_forget_outcomes` `AFTER DELETE OR UPDATE OF status, scopes, updated_at ON connections FOR EACH ROW` → `public.soundboard_forget_outcomes()`. When the old row was shared and the new row isn't (deleted, not `connected`, or missing the scope), it deletes `artist_outcomes` for the user's `artist_id` (III.D.2.c). Disconnect, `markRevoked` and a reconnect that drops the scope all take this path.
+- **Trigger** `users_forget_artist_outcomes` `AFTER UPDATE OF artist_id ON users FOR EACH ROW WHEN (OLD.artist_id IS NOT NULL AND OLD.artist_id IS DISTINCT FROM NEW.artist_id)` → `public.soundboard_forget_artist_outcomes()`. An unlink or relink deletes the old artist's `artist_outcomes`: `users.artist_id` is unique, so they were read through this user's grant.
 
 ## `jobs.picks` and `artist_memory` publishes (JSON shapes changed)
 

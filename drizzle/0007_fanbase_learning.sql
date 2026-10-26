@@ -281,3 +281,19 @@ REVOKE ALL ON FUNCTION public.soundboard_forget_outcomes() FROM PUBLIC;
 --> statement-breakpoint
 CREATE TRIGGER connections_forget_outcomes AFTER DELETE OR UPDATE OF status, scopes, updated_at
   ON public.connections FOR EACH ROW EXECUTE FUNCTION public.soundboard_forget_outcomes();
+--> statement-breakpoint
+-- An artist's outcomes were read through its one linked user's grant, so an unlink or relink
+-- deletes them as a disconnect would; the trigger above only sees the user's current artist.
+CREATE FUNCTION public.soundboard_forget_artist_outcomes() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+  DELETE FROM public.artist_outcomes o WHERE o.artist_id = OLD.artist_id;
+  RETURN NULL;
+END;
+$$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.soundboard_forget_artist_outcomes() FROM PUBLIC;
+--> statement-breakpoint
+CREATE TRIGGER users_forget_artist_outcomes AFTER UPDATE OF artist_id ON public.users FOR EACH ROW
+  WHEN (OLD.artist_id IS NOT NULL AND OLD.artist_id IS DISTINCT FROM NEW.artist_id)
+  EXECUTE FUNCTION public.soundboard_forget_artist_outcomes();
