@@ -21,6 +21,7 @@ describe('stripStats', () => {
     'Total reach was 3000.',
     'Engagement rate was 0.12.',
     'Retention held at 0.4 for the first minute.',
+    'The release gained zero subscribers.',
   ])('removes the statistic in "%s"', (sentence) => {
     expect(stripStats(sentence)).toEqual({ text: NOT_STATED, removed: true });
   });
