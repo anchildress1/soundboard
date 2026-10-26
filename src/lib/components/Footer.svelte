@@ -1,25 +1,16 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-
-  /** The signed-in user's artist; null signed out, so a shared page names no one's artist. */
-  let { artist }: { artist: { name: string; bandcampUrl: string | null } | null } = $props();
 </script>
 
 <footer>
   <p>
-    {#if artist}
-      Built for
-      {#if artist.bandcampUrl}
-        <a href={artist.bandcampUrl} target="_blank" rel="external noopener noreferrer"
-          >{artist.name}</a
-        >
-      {:else}
-        {artist.name}
-      {/if}
-      by Ashley Childress · PolyForm Noncommercial 1.0.0
-    {:else}
-      Built by Ashley Childress · PolyForm Noncommercial 1.0.0
-    {/if}
+    Built for
+    <a
+      href="https://flieslikerobots.bandcamp.com"
+      target="_blank"
+      rel="external noopener noreferrer">Flies Like Robots</a
+    >
+    by Ashley Childress · PolyForm Noncommercial 1.0.0
   </p>
   <div class="links">
     <nav aria-label="Ashley Childress">

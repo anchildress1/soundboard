@@ -50,12 +50,14 @@ describe('layout', () => {
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
   });
 
-  it('renders the page between header and footer, naming no artist when signed out', () => {
+  it('renders the page between header and footer, naming no artist in the header when signed out', () => {
     setup();
     expect(screen.getByText('page body')).toBeInTheDocument();
     const footer = screen.getByRole('contentinfo');
-    expect(footer).toHaveTextContent('Built by Ashley Childress · PolyForm Noncommercial 1.0.0');
-    expect(document.body).not.toHaveTextContent('Flies Like Robots');
+    expect(footer).toHaveTextContent(
+      'Built for Flies Like Robots by Ashley Childress · PolyForm Noncommercial 1.0.0',
+    );
+    expect(screen.getByRole('banner')).not.toHaveTextContent('Flies Like Robots');
     expect(screen.getByText('page body').closest('#content')).not.toBeNull();
     const legal = within(footer).getByRole('navigation', { name: 'Legal' });
     const privacy = within(legal).getByRole('link', { name: 'Privacy policy' });
@@ -108,7 +110,7 @@ describe('layout', () => {
       name.compareDocumentPosition(screen.getByText(HANDLE)) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.getByRole('contentinfo')).toHaveTextContent(
-      'Built for Test Artist by Ashley Childress',
+      'Built for Flies Like Robots by Ashley Childress',
     );
   });
 

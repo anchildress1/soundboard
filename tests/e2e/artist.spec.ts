@@ -22,8 +22,13 @@ async function save(page: Page, fields: [RegExp, string][], submit: string, show
   }).toPass({ timeout: 20_000 });
 }
 
+/** The fixed footer credit is the one place Flies Like Robots appears for every user. */
 async function expectNoFlr(page: Page) {
-  const html = await page.content();
+  const html = await page.evaluate(() => {
+    const body = document.body.cloneNode(true) as HTMLElement;
+    body.querySelector('footer')?.remove();
+    return document.head.outerHTML + body.outerHTML;
+  });
   for (const value of FLR) expect(html).not.toContain(value);
 }
 
@@ -89,15 +94,13 @@ test.describe("another artist's drafts", () => {
 });
 
 test.describe("the user's artist on screen", () => {
-  test("names C's artist and Bandcamp page, never Nathan's", async ({ page }) => {
+  test("names C's artist and Bandcamp page, and Nathan's only in the footer credit", async ({
+    page,
+  }) => {
     await signIn(page, USER_C);
     await page.goto('/');
     await expect(page.getByRole('banner')).toContainText('Test Artist');
-    const footer = page.getByRole('contentinfo');
-    await expect(footer.getByRole('link', { name: 'Test Artist' })).toHaveAttribute(
-      'href',
-      'https://test-artist.bandcamp.com',
-    );
+    await expect(page.getByRole('contentinfo')).toContainText('Built for Flies Like Robots');
     await expectNoFlr(page);
 
     await page.goto('/jobs/e2e-c-done');
@@ -115,9 +118,9 @@ test.describe("the user's artist on screen", () => {
   });
 
   for (const path of ['/', '/privacy', '/terms']) {
-    test(`names no artist signed out on ${path}`, async ({ page }) => {
+    test(`names no user's artist signed out on ${path}`, async ({ page }) => {
       await page.goto(path);
-      await expect(page.getByRole('contentinfo')).not.toContainText('Built for');
+      await expect(page.getByRole('contentinfo')).toContainText('Built for Flies Like Robots');
       await expect(page.locator('meta[name="description"]')).toHaveAttribute(
         'content',
         'Release agent for musicians: Gemini watches and listens to a music video, then drafts and verifies the YouTube upload.',

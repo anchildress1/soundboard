@@ -13,7 +13,7 @@ Audience: AI coding agents. Directives only.
 - NEVER filter or redact his surname from runtime data (channel credits, model output).
 - UI text: plain labels. NEVER persona or chatbot copy.
 - Description voice: the owner's approved voice from `artist_guides`; without one, `GENERIC_VOICE` in `src/lib/server/ai/smart-pick.ts` and no credit line. NEVER put an artist's voice or credit wording in code. Change `GENERIC_VOICE` only on new evidence.
-- Artist values come from `artists` only. NEVER add an FLR constant to app code.
+- Artist values come from `artists` only. NEVER add an FLR constant to app code. One exception: the fixed "Built for Flies Like Robots" footer credit in `Footer.svelte`, shown on every page.
 - Audio numbers (LUFS, peak, clipping, silence): ffmpeg only (`src/lib/server/ai/numerics.ts`). YouTube numbers: as reported, or computed in `src/lib/server/research/calculated.ts` and labeled calculated. The model NEVER writes a statistic: `src/lib/server/ai/stat-guard.ts` strips them from every stored model-written field.
 - Peer influence on a draft: only through the artist's saved sliders (`src/lib/influence.ts`). NEVER copy a peer's sentence, distinctive phrase or channel name (`src/lib/server/ai/copy-check.ts`).
 - Hashtags and tags: only from the job's candidate lists (PRD R4), plus the pick's own `artistName` tag exactly once. Reject anything else.
