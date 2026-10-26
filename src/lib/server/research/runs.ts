@@ -140,7 +140,7 @@ export async function claim(delivery: Delivery): Promise<Claim> {
       .from(researchRuns)
       .where(and(eq(researchRuns.jobId, delivery.jobId), eq(researchRuns.id, delivery.runId)));
     // A missing row also covers an inactive owner and another user's job: RLS hides both.
-    if (!row || row.ownerUid !== delivery.uid || finished(row.stage)) return { kind: 'stale' };
+    if (row?.ownerUid !== delivery.uid || finished(row.stage)) return { kind: 'stale' };
     if (delivery.seq < row.seq) return { kind: 'stale' };
     const [live] = await tx
       .select({ id: jobs.id })

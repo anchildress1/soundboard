@@ -12,25 +12,31 @@ const NEAR = String.raw`(?:\W+\w+){0,3}?\W+`;
 
 const STATISTIC = new RegExp(
   [
-    `(?<![\\w.,])${NUMBER}${NEAR}${METRIC}`,
-    `\\b${METRIC}${NEAR}${NUMBER}`,
+    String.raw`(?<![\w.,])${NUMBER}${NEAR}${METRIC}`,
+    String.raw`\b${METRIC}${NEAR}${NUMBER}`,
     String.raw`\d\s?%|\bper\s?cent\b`,
-    `\\b${CHANGE}${NEAR}${NUMBER}`,
-    `\\b${SPELLED}${NEAR}${METRIC}`,
-    `\\b${METRIC}${NEAR}${SPELLED}`,
+    String.raw`\b${CHANGE}${NEAR}${NUMBER}`,
+    String.raw`\b${SPELLED}${NEAR}${METRIC}`,
+    String.raw`\b${METRIC}${NEAR}${SPELLED}`,
     String.raw`(?<![\w.])\d+(?:\.\d+)?x\b`,
     String.raw`\b(?:twice|thrice|(?:two|three|four|ten)\s+times)\s+as\s+(?:many|much)\b`,
-    `\\b${MULTIPLIED}${NEAR}${METRIC}`,
-    `\\b${METRIC}${NEAR}${MULTIPLIED}`,
+    String.raw`\b${MULTIPLIED}${NEAR}${METRIC}`,
+    String.raw`\b${METRIC}${NEAR}${MULTIPLIED}`,
   ].join('|'),
   'i',
 );
 
 export const NOT_STATED = 'Not stated.';
 
-/** Sentences (with their trailing space) and line breaks, in order; "4.5" stays in one sentence. */
+/**
+ * Sentences (with their trailing space) and line breaks, in order. A sentence ends only where its
+ * punctuation meets a space, so "4.5" stays in one.
+ */
 const pieces = (text: string) =>
-  text.match(/(?:[^.!?\n]|[.!?](?=[^\s.!?]))+[.!?]*[ \t]*|[.!?]+[ \t]*|\n/g) ?? [];
+  text
+    .split(/(\n)/)
+    .flatMap((line) => line.split(/(?<=[.!?][ \t]+)(?=[^ \t])/))
+    .filter(Boolean);
 
 /**
  * `text` without the sentences that state a statistic, and whether any were removed. A field left

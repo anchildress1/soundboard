@@ -129,11 +129,10 @@ async function outcomeOf(
   const open = last >= today;
   const end = open ? today : last;
   const metrics = await videoReport(token, upload.videoId, start, end, deadline);
-  const coverage: Coverage = open
-    ? 'open'
-    : (await coverageDay(token, upload.videoId, end, deadline))
-      ? 'complete'
-      : 'unknown';
+  let coverage: Coverage = 'open';
+  if (!open) {
+    coverage = (await coverageDay(token, upload.videoId, end, deadline)) ? 'complete' : 'unknown';
+  }
   return {
     videoId: upload.videoId,
     publishedAt: upload.publishedAt,
@@ -157,7 +156,11 @@ const squash = (text: string) => text.replaceAll(/\s+/g, ' ').trim();
  * whitespace squashed, compared before any clipping; a reordered tag list is not a change.
  */
 export function differs(live: OwnUpload, approved: PickFields): boolean {
-  const tags = (list: string[]) => list.map(squash).toSorted().join('\n');
+  const tags = (list: string[]) =>
+    list
+      .map(squash)
+      .toSorted((a, b) => a.localeCompare(b))
+      .join('\n');
   return (
     squash(live.title) !== squash(approved.title) ||
     squash(live.description) !== squash(approved.description) ||

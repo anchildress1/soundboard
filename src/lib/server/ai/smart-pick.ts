@@ -638,7 +638,7 @@ function replaceFolded(text: string, needle: string, replacement: string): strin
   let index = 0;
   for (const char of text) {
     const lower = char.toLowerCase();
-    for (let unit = 0; unit < lower.length; unit += 1) origin.push(index);
+    origin.push(...Array.from({ length: lower.length }, () => index));
     folded += lower;
     index += char.length;
   }

@@ -100,7 +100,7 @@ function leaves(value: unknown, into: Set<string>): void {
   }
 }
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 
 /**
  * Replaces every value from `turns`' YouTube parts, longest first and case-insensitively, with
@@ -121,7 +121,7 @@ export function youtubeRedactor(turns: Turn[]): Redact {
   if (values.size === 0) return keep;
   const alternatives = [...values].sort((a, b) => b.length - a.length).map(escape);
   const pattern = new RegExp(
-    `(?<![\\p{L}\\p{N}])(?:${alternatives.join('|')})(?![\\p{L}\\p{N}])`,
+    String.raw`(?<![\p{L}\p{N}])(?:${alternatives.join('|')})(?![\p{L}\p{N}])`,
     'giu',
   );
   return (text) => text.replace(pattern, YOUTUBE_VALUE);

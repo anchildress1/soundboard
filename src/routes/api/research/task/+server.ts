@@ -12,7 +12,7 @@ let verifier: OAuth2Client | undefined;
  */
 async function fromQueue(authorization: string | null): Promise<boolean> {
   const config = researchQueue();
-  const idToken = authorization?.match(/^Bearer (\S+)$/)?.[1];
+  const idToken = /^Bearer (\S+)$/.exec(authorization ?? '')?.[1];
   if (!config || !idToken) return false;
   verifier ??= new OAuth2Client();
   try {

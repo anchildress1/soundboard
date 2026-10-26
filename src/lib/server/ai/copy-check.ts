@@ -85,6 +85,22 @@ const message = (rule: CopyViolation['rule'], field: string, quote: string) =>
     ? `The ${field} names another artist's channel ("${quote}"). Remove it.`
     : `The ${field} copies another artist's wording ("${quote}"). Say it in your own words.`;
 
+type Copied = [CopyViolation['rule'], string[]];
+
+const as =
+  (rule: CopyViolation['rule']) =>
+  (run: string[]): Copied => [rule, run];
+
+const namedPeers = (draft: string[], peers: PeerText[]) =>
+  peers
+    .map(({ channelTitle }) => words(channelTitle))
+    .filter((title) => title.length > 0 && indexOfRun(draft, title) >= 0);
+
+const copiedSentences = (draft: string[], peers: PeerText[]) =>
+  peers
+    .flatMap(({ texts }) => texts.flatMap(sentences))
+    .filter((sentence) => sentence.length >= SENTENCE_WORDS && indexOfRun(draft, sentence) >= 0);
+
 /**
  * Every place a draft field copies a peer, one violation per copied run:
  * 1. a run of 6+ words shared with one peer text
@@ -98,47 +114,30 @@ const message = (rule: CopyViolation['rule'], field: string, quote: string) =>
 export function checkCopy(fields: Record<string, string>, context: CopyContext): CopyViolation[] {
   const exempt = [...context.terms, ...context.names].map(words).filter((t) => t.length > 0);
   const known = new Set([...context.own, ...context.analysis, ...context.terms].flatMap(words));
-  const peerTexts = context.peers.map(({ texts }) => texts.map(words));
+  const peerTexts = context.peers.flatMap(({ texts }) => texts.map(words));
   const violations: CopyViolation[] = [];
 
   for (const [field, text] of Object.entries(fields)) {
     const draft = words(text);
+    const shared = peerTexts.flatMap((peerWords) =>
+      sharedRuns(draft, peerWords).map(([at, length]) => draft.slice(at, at + length)),
+    );
+    const isPhrase = (run: string[]) =>
+      run.length >= PHRASE_WORDS && run.length < RUN_WORDS && run.some((w) => !known.has(w));
+    // Order matters: a later, shorter run inside one already flagged is skipped.
+    const copied = [
+      ...namedPeers(draft, context.peers).map(as('name')),
+      ...shared.filter((run) => run.length >= RUN_WORDS).map(as('run')),
+      ...copiedSentences(draft, context.peers).map(as('sentence')),
+      ...shared.filter(isPhrase).map(as('phrase')),
+    ];
     const found: string[] = [];
-    const flag = (rule: CopyViolation['rule'], run: string[]) => {
+    for (const [rule, run] of copied) {
       const quote = run.join(' ');
       // A longer copied run already says it.
-      if (wholeTerms(run, exempt) || found.some((f) => ` ${f} `.includes(` ${quote} `))) return;
+      if (wholeTerms(run, exempt) || found.some((f) => ` ${f} `.includes(` ${quote} `))) continue;
       found.push(quote);
       violations.push({ field, rule, quote, message: message(rule, field, quote) });
-    };
-
-    for (const { channelTitle } of context.peers) {
-      const title = words(channelTitle);
-      if (title.length > 0 && indexOfRun(draft, title) >= 0) flag('name', title);
-    }
-    for (const texts of peerTexts) {
-      for (const peerWords of texts) {
-        for (const [at, length] of sharedRuns(draft, peerWords)) {
-          if (length >= RUN_WORDS) flag('run', draft.slice(at, at + length));
-        }
-      }
-    }
-    for (const texts of context.peers) {
-      for (const sentence of texts.texts.flatMap(sentences)) {
-        if (sentence.length >= SENTENCE_WORDS && indexOfRun(draft, sentence) >= 0) {
-          flag('sentence', sentence);
-        }
-      }
-    }
-    for (const texts of peerTexts) {
-      for (const peerWords of texts) {
-        for (const [at, length] of sharedRuns(draft, peerWords)) {
-          const run = draft.slice(at, at + length);
-          if (length >= PHRASE_WORDS && length < RUN_WORDS && run.some((w) => !known.has(w))) {
-            flag('phrase', run);
-          }
-        }
-      }
     }
   }
   return violations;

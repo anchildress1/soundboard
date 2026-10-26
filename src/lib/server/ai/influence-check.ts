@@ -36,6 +36,15 @@ function problem(role: Role, level: Level, peerCited: number, need: number) {
   return `Also cite one of the artist's own sources for ${role}.`;
 }
 
+/** How many different peers `role` must cite at `level`; fewer available than two is a limit. */
+function peersNeeded(role: Role, level: Level, have: string[], limits: string[]): number {
+  if (level === 0) return 0;
+  if (level < 4 || !NEEDS_TWO.has(role)) return 1;
+  const distinct = new Set(have.map((ref) => peerOf(ref))).size;
+  if (distinct < 2) limits.push(`Only one similar artist was available for ${role}.`);
+  return Math.min(2, distinct);
+}
+
 /**
  * Level 0 cites no peer. Levels 1–3 cite at least one peer and one non-peer. Level 4 cites at least
  * one peer, and feel and wording cite two different peers. Evidence a level needs but the job lacks
@@ -59,16 +68,9 @@ export function checkInfluence(
       );
       continue;
     }
-    const peerCited = new Set(peerRefs.map(peerOf)).size;
+    const peerCited = new Set(peerRefs.map((ref) => peerOf(ref))).size;
     const ownCited = cited.length - peerRefs.length;
-    let need = level === 0 ? 0 : 1;
-    if (level === 4 && NEEDS_TWO.has(role)) {
-      const distinct = new Set(have.map(peerOf)).size;
-      if (distinct < 2) {
-        limits.push(`Only one similar artist was available for ${role}.`);
-      }
-      need = Math.min(2, distinct);
-    }
+    const need = peersNeeded(role, level, have, limits);
     const ok =
       level === 0 ? peerRefs.length === 0 : peerCited >= need && (level === 4 || ownCited > 0);
     if (!ok) failing.push({ role, level, problem: problem(role, level, peerCited, need) });

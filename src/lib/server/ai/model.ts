@@ -253,8 +253,9 @@ export async function chatJson<T>(
   schema: Record<string, unknown>,
   validate: (value: unknown) => value is T,
   deadline = stepDeadline(),
-  asks: Asks = { left: 1 },
+  asks?: Asks,
 ): Promise<{ value: T | null; raw: string; ms: number; turns: Turn[] }> {
+  const budget = asks ?? { left: 1 };
   let ms = 0;
   let turns = request.turns;
   for (;;) {
@@ -265,10 +266,10 @@ export async function chatJson<T>(
     if (value !== undefined && validate(value)) {
       return { value, raw: reply.content, ms, turns: answered };
     }
-    if (asks.left < 1 || !hasModelTime(agent, deadline)) {
+    if (budget.left < 1 || !hasModelTime(agent, deadline)) {
       return { value: null, raw: reply.content, ms, turns: answered };
     }
-    asks.left -= 1;
+    budget.left -= 1;
     turns = [...answered, textTurn('user', REASK)];
   }
 }

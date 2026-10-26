@@ -31,8 +31,8 @@
     },
   };
 
-  const valueText = (level: number) =>
-    level === 0 ? '0, your own' : level === 4 ? '4, strongest peer' : String(level);
+  const ENDS: Partial<Record<number, string>> = { 0: '0, your own', 4: '4, strongest peer' };
+  const valueText = (level: number) => ENDS[level] ?? String(level);
 
   // svelte-ignore state_referenced_locally
   let levels = $state<Influence>({ ...initial });
