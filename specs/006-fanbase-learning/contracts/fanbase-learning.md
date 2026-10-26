@@ -87,8 +87,8 @@ Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-m
 ## `/settings` page
 
 - **Load:** `{ influence, saved, canSave }`; `influence` is the saved value or `DEFAULT_INFLUENCE`; `canSave` = an approved brand guide exists.
-- One range input (0–4) per role, labeled with the role and its default source, ends "Your own" and "Strongest peer".
-- Save is disabled when `!canSave`, with "Approve your brand guide to save your own settings. Drafts use these defaults until then." and a link to Brand. Plain labels only.
+- One range input (0–4) per role, labeled with the role and what it changes in the draft, ends "Your own" and "Strongest peer".
+- Save is disabled when `!canSave`, with "Approve your brand guide to save these." and a link to Brand. Plain labels only.
 
 ## `/connections` page and `/auth/login?connect=analytics`
 

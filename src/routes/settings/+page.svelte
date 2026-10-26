@@ -16,7 +16,6 @@
 
   <section class="panel" aria-labelledby="artist">
     <h2 id="artist">Artist</h2>
-    <p class="help">New drafts use these. Drafts you already approved keep what you approved.</p>
     <ArtistForm
       initial={data.artist}
       submitLabel="Save changes"
@@ -28,9 +27,7 @@
   <section class="panel" aria-labelledby="influence">
     <h2 id="influence">Peer influence</h2>
     <p class="help intro">
-      How much each part of a draft leans on artists like you who reach more people, from your own
-      history only to the strongest peer influence. New drafts use these; drafts you already made
-      keep what they used.
+      How closely each part of a draft follows bigger artists with your sound.
     </p>
     <InfluenceSliders
       initial={data.influence}
@@ -38,11 +35,6 @@
       onsaved={() => invalidateAll()}
     />
   </section>
-
-  <p class="help">
-    Settings never override song facts, your identity and credits, the hashtag and tag candidate
-    lists, or your approval.
-  </p>
 </main>
 
 <style>

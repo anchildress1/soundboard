@@ -16,7 +16,7 @@ test('saves the sliders on the approved brand guide and keeps them after a reloa
   await expect(async () => {
     await sound(page).fill('3');
     await save(page).click();
-    await expect(page.getByText('Saved. Applies to later drafts.')).toBeVisible({ timeout: 2000 });
+    await expect(page.getByText('Saved.')).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20_000 });
 
   await page.reload();
@@ -29,9 +29,7 @@ test('shows the defaults and disables Save until a brand guide is approved', asy
   await signIn(page, researchUser(testInfo));
   await page.goto('/settings');
   await expect(save(page)).toBeDisabled();
-  await expect(
-    page.getByText(/Approve your brand guide to save your own settings\./),
-  ).toBeVisible();
+  await expect(page.getByText(/Approve your brand guide to save these\./)).toBeVisible();
   await expect(page.getByRole('link', { name: 'Brand' })).toHaveAttribute('href', '/brand');
   await expect(sound(page)).toHaveValue('1');
   await expect(page.locator('#influence-structure')).toHaveValue('4');

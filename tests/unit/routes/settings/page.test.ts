@@ -69,7 +69,7 @@ describe('settings page', () => {
       'influence-structure',
     ]);
     expect(sliders.map((s) => (s as HTMLInputElement).value)).toEqual(['1', '0', '0', '4', '4']);
-    expect(influence).toHaveTextContent("The artist's own writing and approved edits");
+    expect(influence).toHaveTextContent('The mood and tone');
   });
 
   it('saves the sliders, then says so and reloads the data', async () => {
@@ -79,7 +79,7 @@ describe('settings page', () => {
       target: { value: '2' },
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
-    expect(await screen.findByText('Saved. Applies to later drafts.')).toBeInTheDocument();
+    expect(await screen.findByText('Saved.')).toBeInTheDocument();
     const [path, init] = fetchMock.mock.calls[0]!;
     expect([path, init?.method]).toEqual(['/api/influence', 'PUT']);
     expect(JSON.parse(String(init?.body))).toEqual({ ...DEFAULT_INFLUENCE, feel: 2 });

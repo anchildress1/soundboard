@@ -38,9 +38,7 @@ describe('InfluenceSliders', () => {
       expect(input).toHaveAttribute('max', '4');
       expect(input).toHaveAttribute('step', '1');
     }
-    expect(slider('Feel')).toHaveAccessibleDescription(
-      "The artist's own writing and approved edits",
-    );
+    expect(slider('Feel')).toHaveAccessibleDescription('The mood and tone');
   });
 
   it('names both ends and says what the ends mean to a screen reader', () => {
@@ -58,7 +56,7 @@ describe('InfluenceSliders', () => {
     await fireEvent.input(slider('Wording'), { target: { value: '3' } });
     expect(screen.getByText('3', { selector: 'output' })).toBeInTheDocument();
     await fireEvent.click(save());
-    expect(await screen.findByText('Saved. Applies to later drafts.')).toBeInTheDocument();
+    expect(await screen.findByText('Saved.')).toBeInTheDocument();
     const [path, init] = fetchMock.mock.calls[0]!;
     expect([path, init?.method]).toEqual(['/api/influence', 'PUT']);
     expect(JSON.parse(String(init?.body))).toEqual({ ...DEFAULT_INFLUENCE, wording: 3 });
@@ -90,9 +88,7 @@ describe('InfluenceSliders', () => {
   it('disables Save and explains why, with a link to Brand, until a brand guide is approved', () => {
     renderSliders(DEFAULT_INFLUENCE, false);
     expect(save()).toBeDisabled();
-    expect(
-      screen.getByText(/Approve your brand guide to save your own settings\. Drafts use these/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Approve your brand guide to save these\./)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Brand' })).toHaveAttribute('href', '/brand');
   });
 

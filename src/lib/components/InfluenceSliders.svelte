@@ -15,20 +15,13 @@
     onsaved: (influence: Influence) => void | Promise<void>;
   } = $props();
 
-  // What each part draws on at 0, before any peer influence.
+  // What each part changes in the draft.
   const SOURCES: Record<Role, { name: string; source: string }> = {
-    sound: { name: 'Sound', source: 'Song analysis; peer vocabulary may help describe it' },
-    feel: { name: 'Feel', source: "The artist's own writing and approved edits" },
-    wording: { name: 'Wording', source: "The artist's phrasing, sentence shape, and asides" },
-    discovery: {
-      name: 'Discovery',
-      source:
-        'Eligible peer tags, hashtags, and title keywords, limited to what the analysis heard',
-    },
-    structure: {
-      name: 'Structure',
-      source: "Peer patterns for length and order; the artist's own identity and credit lines",
-    },
+    sound: { name: 'Sound', source: 'How the description describes the song' },
+    feel: { name: 'Feel', source: 'The mood and tone' },
+    wording: { name: 'Wording', source: 'Word choice and sentence shape' },
+    discovery: { name: 'Discovery', source: 'Tags, hashtags, and title keywords' },
+    structure: { name: 'Structure', source: 'Length and order of the description' },
   };
 
   const ENDS: Partial<Record<number, string>> = { 0: '0, your own', 4: '4, strongest peer' };
@@ -85,7 +78,7 @@
   {/each}
   {#if !canSave}
     <p class="help">
-      Approve your brand guide to save your own settings. Drafts use these defaults until then.
+      Approve your brand guide to save these.
       <a href={resolve('/brand')}>Brand</a>
     </p>
   {/if}
@@ -93,7 +86,7 @@
     <button class="btn primary" type="submit" disabled={busy || !canSave}>Save settings</button>
   </div>
   <p class="toast" class:err={failed} aria-live="polite">
-    {message || (saved ? 'Saved. Applies to later drafts.' : '')}
+    {message || (saved ? 'Saved.' : '')}
   </p>
 </form>
 
