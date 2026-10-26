@@ -322,12 +322,14 @@ export async function uploadsOf(
   count: number,
   deadline: number,
 ): Promise<PublicUpload[]> {
-  const page = await keyGet<ListResponse<PlaylistItem>>(
-    'playlistItems',
-    { part: 'contentDetails', playlistId, maxResults: String(Math.min(count, 50)) },
-    deadline,
+  const items = await playlistPage(() =>
+    keyGet(
+      'playlistItems',
+      { part: 'contentDetails', playlistId, maxResults: String(Math.min(count, 50)) },
+      deadline,
+    ),
   );
-  const ids = (page.items ?? [])
+  const ids = items
     .map((item) => item.contentDetails?.videoId)
     .filter((id): id is string => typeof id === 'string' && id !== '');
   if (ids.length === 0) return [];
@@ -391,14 +393,25 @@ export async function searchVideos(
 }
 type PlaylistItem = { contentDetails?: { videoId?: string; videoPublishedAt?: string } };
 
-async function uploadsPage(playlistId: string, deadline: number): Promise<PlaylistItem[]> {
-  const body = await keyGet<ListResponse<PlaylistItem>>(
-    'playlistItems',
-    { part: 'contentDetails', maxResults: '1', playlistId },
-    deadline,
-  );
-  return body.items ?? [];
+/**
+ * One page of an uploads playlist. YouTube answers 404 `playlistNotFound` for the uploads playlist
+ * of a channel with no videos, which is an empty list, not a lost grant.
+ */
+async function playlistPage(
+  read: () => Promise<ListResponse<PlaylistItem>>,
+): Promise<PlaylistItem[]> {
+  try {
+    return (await read()).items ?? [];
+  } catch (error) {
+    if (error instanceof YouTubeError && error.reason === 'playlistNotFound') return [];
+    throw error;
+  }
 }
+
+const uploadsPage = (playlistId: string, deadline: number): Promise<PlaylistItem[]> =>
+  playlistPage(() =>
+    keyGet('playlistItems', { part: 'contentDetails', maxResults: '1', playlistId }, deadline),
+  );
 
 // Keyed by channel ID: each user's header shows their own channel, never another's.
 const statsCache = new Map<string, { at: number; value: ChannelStats }>();
@@ -472,12 +485,14 @@ export async function ownUploads(
   if (!channel) throw new YouTubeError(404, "channels.list: the grant doesn't own the channel");
   const playlistId = channel.contentDetails?.relatedPlaylists?.uploads;
   if (!playlistId) return [];
-  const page = await get<ListResponse<PlaylistItem>>('playlistItems', {
-    part: 'contentDetails',
-    playlistId,
-    maxResults: String(Math.min(count + 5, 50)),
-  });
-  const ids = (page.items ?? [])
+  const items = await playlistPage(() =>
+    get('playlistItems', {
+      part: 'contentDetails',
+      playlistId,
+      maxResults: String(Math.min(count + 5, 50)),
+    }),
+  );
+  const ids = items
     .map((item) => item.contentDetails?.videoId)
     .filter((id): id is string => typeof id === 'string' && id !== '');
   if (ids.length === 0) return [];

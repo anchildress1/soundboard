@@ -517,6 +517,18 @@ describe('ownChannelUploads', () => {
     }
   });
 
+  it('reads a channel with no videos as no uploads and keeps the grant', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes('/channels')
+        ? answer(200, {
+            items: [{ id: CHANNEL, contentDetails: { relatedPlaylists: { uploads: 'UUa' } } }],
+          })
+        : refusal(404, 'playlistNotFound'),
+    );
+    expect(await ownChannelUploads(UID, 3, later())).toEqual([]);
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
     'waits on a reconnect when the connection is %s, with no YouTube call',
     async (status) => {

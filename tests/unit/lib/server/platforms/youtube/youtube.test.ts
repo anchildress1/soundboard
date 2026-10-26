@@ -46,6 +46,10 @@ const json = (body: unknown, init: ResponseInit = {}) =>
     ...init,
   });
 
+// YouTube's answer for the uploads playlist of a channel with no videos.
+const missingPlaylist = (reason = 'playlistNotFound') =>
+  json({ error: { code: 404, errors: [{ reason }] } }, { status: 404 });
+
 const urlOf = (call: number) => new URL(String(fetchMock.mock.calls[call]![0]));
 const initOf = (call: number) => fetchMock.mock.calls[call]![1] as RequestInit;
 const headersOf = (call: number) => initOf(call).headers as Record<string, string>;
@@ -189,6 +193,13 @@ describe('channelStats', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
+  it('reads a channel with no videos as no latest upload, and caches it', async () => {
+    fetchMock.mockResolvedValueOnce(json(channel)).mockResolvedValueOnce(missingPlaylist());
+    expect((await channelStats('UCflr', 0)).lastUploadAt).toBeNull();
+    await channelStats('UCflr', 1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('caches each channel on its own, never serving one channel for another', async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input));
@@ -273,6 +284,14 @@ describe('ownUploads', () => {
     }
     expect(calls()[0]!.searchParams.get('mine')).toBe('true');
     expect(calls()[1]!.searchParams.get('playlistId')).toBe('UUUCx');
+  });
+
+  it('reads a channel with no videos as no uploads, without a videos read', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes('/channels') ? json(mine('UCx')) : missingPlaylist(),
+    );
+    expect(await ownUploads(TOKEN, 'UCx', 3, later())).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('reads each upload with its privacy status', async () => {
@@ -1027,6 +1046,16 @@ describe('peer reads', () => {
     fetchMock.mockResolvedValueOnce(json({}));
     expect(await uploadsOf('UU1', 1, later())).toEqual([]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('reads a channel with no videos as no uploads, and any other 404 as an error', async () => {
+    fetchMock.mockResolvedValueOnce(missingPlaylist());
+    expect(await uploadsOf('UU1', 1, later())).toEqual([]);
+    fetchMock.mockResolvedValueOnce(missingPlaylist('videoNotFound'));
+    await expect(uploadsOf('UU1', 1, later())).rejects.toMatchObject({
+      status: 404,
+      reason: 'videoNotFound',
+    });
   });
 
   it('reads a spent daily quota as quota, and a rate limit as not', async () => {
