@@ -82,11 +82,12 @@
   let research = $derived(data.research);
 
   const notAPeer = async (ref: string) => {
+    if (!research) return;
     busy = true;
     message = '';
     try {
-      await rejectPeer(job.id, ref);
-      if (research?.peers) {
+      await rejectPeer(job.id, ref, research.version);
+      if (research.peers) {
         research = { ...research, peers: research.peers.filter((peer) => peer.ref !== ref) };
       }
     } catch (error) {

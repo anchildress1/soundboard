@@ -185,10 +185,14 @@ export function saveInfluence(influence: Influence) {
   });
 }
 
-/** "Not a peer": later research skips the peer's channel. A 409 means its evidence has expired. */
-export function rejectPeer(id: string, ref: string) {
+/**
+ * "Not a peer" on pick `version`: later research skips the peer's channel. A 409 means its evidence
+ * has expired or a newer pick replaced it.
+ */
+export function rejectPeer(id: string, ref: string, version: number) {
   return call<{ rejected: string }>(`/api/jobs/${id}/peers/${encodeURIComponent(ref)}/reject`, {
     method: 'POST',
+    body: JSON.stringify({ version }),
   });
 }
 

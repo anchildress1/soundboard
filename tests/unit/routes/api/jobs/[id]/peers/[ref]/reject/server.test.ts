@@ -20,9 +20,17 @@ import {
 type Event = Parameters<typeof POST>[0];
 type User = typeof USER_A | typeof USER_B | typeof USER_C;
 
-const reject = async (id: string, ref: string, user: User = USER_A) =>
+const request = (body: unknown) =>
+  new Request('http://localhost/reject', { method: 'POST', body: JSON.stringify(body) });
+
+const reject = async (
+  id: string,
+  ref: string,
+  user: User = USER_A,
+  body: unknown = { version: 1 },
+) =>
   await withIdentity(user.uid, () =>
-    POST({ params: { id, ref }, locals: { user } } as unknown as Event),
+    POST({ params: { id, ref }, locals: { user }, request: request(body) } as unknown as Event),
   );
 
 const EVIDENCE: PeerEvidence = {
@@ -163,6 +171,20 @@ describe('POST /api/jobs/[id]/peers/[ref]/reject', () => {
       error: "That peer's evidence has expired. Reload to see it.",
       fields: null,
     });
+    expect(await rejections()).toEqual([]);
+  });
+
+  it('409s a page showing an older pick, and records nothing', async () => {
+    await put();
+    const response = await reject('j1', 'P1', USER_A, { version: 2 });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining('newer draft') });
+    expect(await rejections()).toEqual([]);
+  });
+
+  it('400s a body without a JSON object, and records nothing', async () => {
+    await put();
+    expect((await reject('j1', 'P1', USER_A, ['P1'])).status).toBe(400);
     expect(await rejections()).toEqual([]);
   });
 

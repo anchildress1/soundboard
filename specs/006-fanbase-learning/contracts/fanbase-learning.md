@@ -74,6 +74,7 @@ Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-m
 ## `POST /api/jobs/{id}/peers/{ref}/reject`
 
 - `authorizedJob` (404 for another user's job). Artist job only, else 404.
+- Body `{ version }`: the pick version the page shows (`ReviewData.version`). Not the latest pick's → `409 "A newer draft replaced this one. Reload to see its peers."` No JSON object → `400`.
 - `ref` must be a fresh `P*` of the pick's `researchRunId` → `soundboard_reject_peer(channelId)`. Unknown or expired → `409 "That peer's evidence has expired. Reload to see it."`
 - `200 { rejected: ref }`. Later runs skip the channel; this job's re-runs leave its sources out.
 

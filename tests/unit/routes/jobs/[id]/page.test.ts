@@ -551,7 +551,10 @@ describe('job page: evidence', () => {
     expect(screen.getByText('Neon Harbor')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs/j1/peers/P2/reject');
-    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST' });
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ version: 1 }),
+    });
   });
 
   it('keeps the peer and shows why when the evidence has expired', async () => {

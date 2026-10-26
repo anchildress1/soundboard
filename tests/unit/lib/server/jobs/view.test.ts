@@ -426,6 +426,7 @@ describe('reviewData', () => {
       'recommendation',
       'results',
       'sources',
+      'version',
     ]);
   });
 

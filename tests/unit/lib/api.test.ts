@@ -171,16 +171,20 @@ describe('guides', () => {
 });
 
 describe('rejectPeer', () => {
-  it('POSTs the peer ref to the job and returns the ref', async () => {
+  it('POSTs the peer ref and the shown pick version to the job and returns the ref', async () => {
     fetchMock.mockResolvedValue(json(200, { rejected: 'P2' }));
-    expect(await rejectPeer('j1', 'P2')).toEqual({ rejected: 'P2' });
+    expect(await rejectPeer('j1', 'P2', 3)).toEqual({ rejected: 'P2' });
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/jobs/j1/peers/P2/reject');
     expect(lastInit().method).toBe('POST');
+    expect(JSON.parse(lastInit().body as string)).toEqual({ version: 3 });
   });
 
   it('carries the 409 message when the evidence has expired', async () => {
     fetchMock.mockResolvedValue(json(409, { error: 'expired' }));
-    await expect(rejectPeer('j1', 'P2')).rejects.toMatchObject({ status: 409, message: 'expired' });
+    await expect(rejectPeer('j1', 'P2', 1)).rejects.toMatchObject({
+      status: 409,
+      message: 'expired',
+    });
   });
 });
 

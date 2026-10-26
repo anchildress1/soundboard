@@ -193,6 +193,7 @@ export async function reviewData(pick: Pick | null): Promise<ReviewData | null> 
   ) as ReviewData['sources'];
   const current = evidence?.artist.bracket ?? null;
   return {
+    version: pick.version,
     recommendation: pick.recommendation ?? null,
     evidence: (pick.recommendation?.evidence ?? []).map(cite),
     influence: pick.influence,

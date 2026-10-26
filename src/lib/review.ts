@@ -56,6 +56,8 @@ export type ReviewResult = {
 export type FieldName = 'title' | 'description' | 'tags';
 
 export type ReviewData = {
+  /** The pick these peers belong to; a rejection names it, so a stale page can't reject another. */
+  version: number;
   recommendation: Recommendation | null;
   /** `recommendation.evidence`, resolved. */
   evidence: Citation[];

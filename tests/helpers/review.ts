@@ -36,6 +36,7 @@ export const SECOND_PEER: ReviewPeer = {
 };
 
 export const REVIEW: ReviewData = {
+  version: 1,
   recommendation: {
     approach: 'Open on the chorus.',
     intendedOutcome: 'More listeners reach the second minute.',
