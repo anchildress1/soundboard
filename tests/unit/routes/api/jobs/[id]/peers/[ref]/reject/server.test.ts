@@ -143,6 +143,14 @@ describe('POST /api/jobs/[id]/peers/[ref]/reject', () => {
     expect(await rejections()).toEqual([]);
   });
 
+  it('404s a job whose owner has since been unlinked from every artist, and records nothing', async () => {
+    await put();
+    await db().execute(sql`update users set artist_id = null where uid = ${USER_A.uid}`);
+    const error = await reject('j1', 'P1').catch((e: unknown) => e);
+    expect(isHttpError(error) && error.status).toBe(404);
+    expect(await rejections()).toEqual([]);
+  });
+
   it.each([
     ['an unknown peer', 'P9'],
     ['a release, which is not a peer', 'P1-R1'],
