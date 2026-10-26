@@ -11,7 +11,8 @@ const onsaved = vi.fn();
 const MINE: Influence = { sound: 0, feel: 2, wording: 3, discovery: 4, structure: 1 };
 const renderSliders = (initial: Influence = DEFAULT_INFLUENCE, canSave = true) =>
   render(InfluenceSliders, { initial, canSave, onsaved });
-const slider = (name: string) => screen.getByRole('slider', { name: new RegExp(`^${name}`) });
+const slider = (name: string) =>
+  screen.getByRole('slider', { name: (accessible) => accessible.startsWith(name) });
 const save = () => screen.getByRole('button', { name: 'Save settings' });
 
 beforeEach(() => {
