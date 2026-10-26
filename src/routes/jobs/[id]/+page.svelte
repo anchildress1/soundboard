@@ -125,8 +125,11 @@
         step: () => step(job.id, data.trace),
         stopped: () => stopped,
         onView: (next) => {
+          const newPick = !!next.pick && next.pick.version !== view.pick?.version;
           view = next;
           message = next.job.error ?? '';
+          // The step returns the view only; the load reads the new pick's evidence.
+          if (newPick) void invalidateAll();
         },
         onError: (text) => (message = text),
         signedOut,

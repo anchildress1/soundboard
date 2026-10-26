@@ -503,6 +503,45 @@ describe('job page: evidence', () => {
     expect(screen.queryByText(/^Sources:/)).toBeNull();
   });
 
+  it('reloads the evidence when a new pick arrives', async () => {
+    const next = view({ state: 'REVIEW' }, { pick: { ...PICK, version: 2, title: 'Second take' } });
+    fetchMock
+      .mockResolvedValueOnce(json(view({ state: 'PICK' }, { pick: PICK })))
+      .mockResolvedValueOnce(json(next));
+    const { rerender } = reviewing();
+    h.invalidateAll.mockImplementation(async () => {
+      await rerender({
+        data: {
+          view: next,
+          research: {
+            ...REVIEW,
+            sources: { ...REVIEW.sources, title: [{ ref: 'P2', label: 'P2 · Quiet Signal' }] },
+          },
+          playbackUrl: PLAYBACK_URL,
+          short: null,
+          shortExpired: false,
+          expired: false,
+          approveTo: CONNECTED,
+          trace: TRACE,
+          channel: null,
+          user: null,
+          uploadSaved: null,
+          uploadGeneration: 1,
+        },
+      } as never);
+    });
+    await fireEvent.click(button('Re-run model'));
+    await waitFor(() => expect(screen.getByText('Sources: P2 · Quiet Signal')).toBeInTheDocument());
+    expect(h.invalidateAll).toHaveBeenCalledOnce();
+  });
+
+  it('does not reload while the steps return the same pick', async () => {
+    fetchMock.mockResolvedValueOnce(json(view({ state: 'REVIEW' }, { pick: PICK })));
+    setup(view({ state: 'PICK' }, { pick: PICK }));
+    await waitFor(() => expect(heading(TITLE_SCREEN)).toBeInTheDocument());
+    expect(h.invalidateAll).not.toHaveBeenCalled();
+  });
+
   it('removes a peer after Not a peer is recorded', async () => {
     fetchMock.mockResolvedValueOnce(json({ rejected: 'P2' }));
     reviewing();
