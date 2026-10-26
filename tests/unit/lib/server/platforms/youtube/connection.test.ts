@@ -676,6 +676,18 @@ describe('revokeGrant', () => {
     expect(await getConnection(UID)).toBeNull();
   });
 
+  it('warns, rather than errors, when the stored grant no longer decrypts', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValue(kmsRefusal(DECRYPTION_FAILED));
+    expect(await revokeGrant(UID)).toBe(false);
+    expect(captureException).not.toHaveBeenCalled();
+    expect(captureMessage).toHaveBeenCalledWith('YouTube grant does not decrypt', {
+      level: 'warning',
+      tags: { component: 'youtube-revoke' },
+    });
+    expect(await getConnection(UID)).toBeNull();
+  });
+
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
     'deletes a %s row without calling Google, since it holds no token',
     async (status) => {

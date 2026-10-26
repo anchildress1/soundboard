@@ -95,7 +95,12 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
       tags: { status: response.status },
     });
   } catch (error) {
-    captureException(error, { tags: { component: 'youtube-revoke' } });
+    if (undecryptable(error))
+      captureMessage('YouTube grant does not decrypt', {
+        level: 'warning',
+        tags: { component: 'youtube-revoke' },
+      });
+    else captureException(error, { tags: { component: 'youtube-revoke' } });
   }
   return false;
 }
