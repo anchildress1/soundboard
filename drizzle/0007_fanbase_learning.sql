@@ -171,6 +171,23 @@ $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.soundboard_caller_artist() FROM PUBLIC;
 --> statement-breakpoint
+-- The caller's artist, only while it is still the run's: a relink mid-run refuses the write rather
+-- than filing what was read for one artist under another.
+CREATE FUNCTION public.soundboard_run_artist(p_run text) RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+  v_artist text := public.soundboard_caller_artist();
+BEGIN
+  PERFORM 1 FROM public.research_runs r WHERE r.id = p_run AND r.artist_id = v_artist;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Research run belongs to another artist' USING ERRCODE = '42501';
+  END IF;
+  RETURN v_artist;
+END;
+$$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.soundboard_run_artist(text) FROM PUBLIC;
+--> statement-breakpoint
 CREATE FUNCTION public.soundboard_save_outcomes(p_run text, p_token text, p_grant_at timestamptz, p_rows jsonb)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
@@ -188,7 +205,7 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'YouTube analytics not shared' USING ERRCODE = '28000';
   END IF;
-  v_artist := public.soundboard_caller_artist();
+  v_artist := public.soundboard_run_artist(p_run);
   DELETE FROM public.artist_outcomes o
     WHERE o.artist_id = v_artist AND o.video_id IN (SELECT r->>'videoId' FROM jsonb_array_elements(p_rows) r);
   INSERT INTO public.artist_outcomes (artist_id, video_id, retrieved_at, published_at, requested_start,
@@ -228,7 +245,7 @@ DECLARE
   v_artist text;
 BEGIN
   PERFORM public.soundboard_research_claim(p_run, p_token);
-  v_artist := public.soundboard_caller_artist();
+  v_artist := public.soundboard_run_artist(p_run);
   UPDATE public.peer_rejections p SET retrieved_at = now()
     WHERE p.artist_id = v_artist AND p.channel_id = ANY (p_kept);
   DELETE FROM public.peer_rejections p WHERE p.artist_id = v_artist AND p.channel_id = ANY (p_gone);

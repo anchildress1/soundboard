@@ -29,6 +29,7 @@ const FUNCTIONS = [
   'soundboard_influence_ok',
   'soundboard_research_claim',
   'soundboard_caller_artist',
+  'soundboard_run_artist',
   'soundboard_save_research',
   'soundboard_save_outcomes',
   'soundboard_reject_peer',
@@ -474,6 +475,27 @@ describe('outcome saves need the live analytics grant', () => {
       { video_id: 'v1', coverage: 'open', metrics: OUTCOME_ROW.metrics, fresh: true },
       { video_id: 'va', coverage: 'complete', metrics: outcome('', '').metrics, fresh: true },
     ]);
+  });
+
+  it('refuses with 42501 after the caller relinks to another artist mid-run', async () => {
+    await claimRun('run-a', 't1');
+    const grantAt = await grantOf(USER_A.uid);
+    await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
+    await db().execute(sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`);
+    await fails(
+      asUser(USER_A.uid, (tx) => saveOutcomes(tx, 'run-a', 't1', grantAt)),
+      '42501',
+    );
+    await fails(
+      asUser(USER_A.uid, (tx) =>
+        tx.execute(
+          sql`select public.soundboard_refresh_rejections('run-a', 't1', '{}', array['UCx'])`,
+        ),
+      ),
+      '42501',
+    );
+    expect(await count('artist_outcomes')).toBe(2);
+    expect(await count('peer_rejections')).toBe(2);
   });
 
   it.each([
