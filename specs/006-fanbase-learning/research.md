@@ -95,7 +95,7 @@ The constitution exception permits research and learning to "run server-side, in
 - **Fresh run:** `started_at` under 29 days old. Its evidence is no older than that, since `retrieved_at ≥ started_at`.
 - **Research failures never fail the release (#8, owner):**
   - Enqueue failure or an ambiguous acknowledgement at start → the run is marked `failed` with `error = 'research-unavailable'`, and the pick proceeds in the same step without peers. The step doesn't throw, so the job's failure streak is untouched. If the task was created after all, its delivery finds the run finished and returns 200.
-  - A run that ends `failed`, or is still running 10 minutes after `started_at` (`RESEARCH_MAX_MS`), → the pick proceeds without it.
+  - A run that ends `failed`, or is still running 10 minutes after `started_at` (`RESEARCH_MAX_MS`), → the pick proceeds with what it found. A run still going is ended `failed` first, so no later delivery changes the evidence the pick keeps.
   - The draft's limits say so: "Peer research is unavailable; this draft uses the genre search only." or "Peer research didn't finish; …".
 - **Waiting:** while the run is running and under 10 minutes, the pick returns `{ wait: 'researching similar artists' }`. A poll only reads the run.
 - **Re-run** (`/rerun`): reuses a fresh `done` run. A `failed` or expired run is replaced by a new run (new `id`, `seq` 0).

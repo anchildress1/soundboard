@@ -1102,6 +1102,13 @@ describe('runStep: PICK research', () => {
     expect(await saved()).toMatchObject({ state: 'REVIEW' });
     expect((await pickAt(1))?.researchRunId).toBe('run-1');
     expect(called(TASKS)).toHaveLength(0);
+    // Ended, so a queued delivery can't change the evidence the pick was drafted from.
+    expect((await runs())[0]).toMatchObject({
+      stage: 'failed',
+      error: 'research-unfinished',
+      limits: ['analytics-not-shared'],
+      claimToken: null,
+    });
   });
 
   it('replaces a run that started 29 days ago', async () => {

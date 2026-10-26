@@ -317,6 +317,8 @@ async function researchFor(
   if (!finished && Date.now() - run.startedAt.getTime() < RESEARCH_MAX_MS) {
     return { wait: RESEARCHING };
   }
+  // Ending the run stops queued deliveries, so the evidence the pick reads is the evidence it keeps.
+  if (!finished) await failRun(job.id, 'research-unfinished', null);
   const limits = run.limits as ResearchLimit[];
   const unfinished = run.stage !== 'done' && !limits.includes('research-unavailable');
   return { runId: run.id, limits: unfinished ? [...limits, 'research-unfinished'] : limits };
