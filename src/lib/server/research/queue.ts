@@ -78,20 +78,24 @@ const DEV_RETRY_MS = 1_000;
 const DEV_ATTEMPTS = 20;
 
 /**
- * Dev only: the delivery runs in this process after its delay, without the OIDC check. A 503 or
- * 500 is retried as the queue would: the next `seq` can arrive before the commit it follows.
+ * Dev only: the delivery runs in this process after its delay, without the OIDC check. Anything but
+ * a 200, a throw included, is retried as the queue would: the next `seq` can arrive before the
+ * commit it follows.
  */
 function inProcess(delivery: Delivery, at: number, attempt = 1): void {
+  const retry = () => {
+    if (attempt < DEV_ATTEMPTS) inProcess(delivery, Date.now() + DEV_RETRY_MS, attempt + 1);
+  };
   setTimeout(
     () => {
       import('./delivery')
         .then(async ({ runDelivery }) => {
-          const status = await runDelivery(delivery);
-          if (status !== 200 && attempt < DEV_ATTEMPTS) {
-            inProcess(delivery, Date.now() + DEV_RETRY_MS, attempt + 1);
-          }
+          if ((await runDelivery(delivery)) !== 200) retry();
         })
-        .catch((error: unknown) => captureException(error, { tags: { component: 'research' } }));
+        .catch((error: unknown) => {
+          captureException(error, { tags: { component: 'research' } });
+          retry();
+        });
     },
     Math.max(0, at - Date.now()),
   );

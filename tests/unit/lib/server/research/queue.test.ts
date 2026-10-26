@@ -5,6 +5,7 @@ import { db } from '#lib/server/core/db.js';
 import { researchRuns } from '#lib/server/core/schema.js';
 import { DeadlineSpent } from '#lib/server/platforms/youtube/index.js';
 import { enqueue } from '#lib/server/research/queue.js';
+import { captureException } from '../../../../mocks/sentry';
 import { seed, truncate } from '../../../../helpers/db';
 import { A_JOB, json, seedJob, USERS, USER_A } from '../../../../helpers/pipeline';
 
@@ -188,4 +189,37 @@ describe('enqueue in dev without a queue', () => {
       expect.stringContaining('cloudtasks'),
     );
   });
+
+  it('retries a delivery that throws, as the queue retries a 500', async () => {
+    await seedJob({ ...A_JOB, id: 'j1', state: 'PICK' });
+    await seedJob({ ...A_JOB, id: 'j2', state: 'PICK' });
+    await seed({
+      researchRuns: [
+        {
+          jobId: 'j1',
+          id: 'run-1',
+          ownerUid: USER_A.uid,
+          artistId: USER_A.artistId,
+          stage: 'discover',
+        },
+      ],
+      // Evidence under this run id for another job: every save of the batch throws.
+      jobResearch: [{ runId: 'run-1', jobId: 'j2', retrievedAt: new Date(), evidence: {} }],
+    });
+    await enqueue({ jobId: 'j1', uid: USER_A.uid, runId: 'run-1', seq: 0 }, Date.now(), later());
+    await vi.waitFor(
+      () =>
+        expect(
+          vi
+            .mocked(captureException)
+            .mock.calls.filter(
+              ([, hint]) =>
+                (hint as { tags?: { component?: string } }).tags?.component === 'research',
+            ).length,
+        ).toBeGreaterThanOrEqual(2),
+      { timeout: 10_000, interval: 50 },
+    );
+    const [run] = await db().select().from(researchRuns).where(eq(researchRuns.jobId, 'j1'));
+    expect(run).toMatchObject({ stage: 'discover', seq: 0 });
+  }, 15_000);
 });

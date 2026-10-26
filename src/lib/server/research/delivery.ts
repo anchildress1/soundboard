@@ -132,29 +132,46 @@ async function deliver(delivery: Delivery, stages: Stages): Promise<DeliveryStat
       },
     },
     async () => {
-      const outcome = await runBatch(run, deadline, stages);
-      const ends = outcome.release.stage === 'done' || outcome.release.stage === 'failed';
-      // Enqueued before the commit, so no crash leaves a running run without a task.
-      if (!ends) {
-        try {
-          await enqueue({ ...delivery, seq: delivery.seq + 1 }, outcome.at, deadline);
-        } catch (error) {
-          captureException(error, { tags: { component: 'research-queue' } });
-          await release(run, token);
-          return 500;
-        }
-      }
-      const writes = outcome.writes;
       try {
-        await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
+        return await batchAndCommit(delivery, run, token, deadline, stages);
       } catch (error) {
-        // 28000: the grant the batch read through changed before it saved (a disconnect, a
-        // revocation or a reconnect). Its reports are dropped and the next delivery reads the
-        // grant again; that is a wait, never a failure.
-        if (pgCode(error) !== '28000') throw error;
-        await commit(run, token, { ...stay(run), wait: 'waiting on YouTube' });
+        // Released, so the retry claims the run now rather than after the claim expires.
+        await release(run, token);
+        throw error;
       }
-      return 200;
     },
   );
+}
+
+/** One batch under the claim, the next delivery enqueued, then the commit. */
+async function batchAndCommit(
+  delivery: Delivery,
+  run: ResearchRun,
+  token: string,
+  deadline: number,
+  stages: Stages,
+): Promise<DeliveryStatus> {
+  const outcome = await runBatch(run, deadline, stages);
+  const ends = outcome.release.stage === 'done' || outcome.release.stage === 'failed';
+  // Enqueued before the commit, so no crash leaves a running run without a task.
+  if (!ends) {
+    try {
+      await enqueue({ ...delivery, seq: delivery.seq + 1 }, outcome.at, deadline);
+    } catch (error) {
+      captureException(error, { tags: { component: 'research-queue' } });
+      await release(run, token);
+      return 500;
+    }
+  }
+  const writes = outcome.writes;
+  try {
+    await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
+  } catch (error) {
+    // 28000: the grant the batch read through changed before it saved (a disconnect, a
+    // revocation or a reconnect). Its reports are dropped and the next delivery reads the
+    // grant again; that is a wait, never a failure.
+    if (pgCode(error) !== '28000') throw error;
+    await commit(run, token, { ...stay(run), wait: 'waiting on YouTube' });
+  }
+  return 200;
 }

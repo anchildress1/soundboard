@@ -426,10 +426,13 @@ describe('continuity and idempotency', () => {
     };
     await expect(runDelivery(DELIVERY, dying)).rejects.toThrow('process died');
     expect(runs).toBe(1);
-    // The next task was already created; the claim is still held.
+    // The next task was already created; a throw releases the claim, and a real crash can't.
     expect(tasks().map((task) => task.name)).toEqual([`${QUEUE}/tasks/run-1-1`]);
-    expect(await stored()).toMatchObject({ seq: 0, stage: 'learn' });
+    expect(await stored()).toMatchObject({ seq: 0, stage: 'learn', claimToken: null });
     expect(await db().select().from(artistOutcomes)).toEqual([]);
+    await db()
+      .update(researchRuns)
+      .set({ claimToken: 'crashed', claimUntil: new Date(Date.now() + 180_000) });
 
     // Both the next task and the original wait on the held claim.
     expect(await runDelivery({ ...DELIVERY, seq: 1 }, survived)).toBe(503);
