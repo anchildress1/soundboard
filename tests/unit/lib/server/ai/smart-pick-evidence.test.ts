@@ -18,6 +18,7 @@ import { releaseList } from '#lib/server/pipeline/hashtags.js';
 import type { PickOutcome } from '#lib/server/research/outcomes.js';
 import { COPIED, evidence, PEER_TITLE } from '../../../../helpers/evidence';
 import { interaction } from '../../../../helpers/gemini';
+import { startSpan } from '../../../../mocks/sentry';
 
 const ARTIST = { name: 'Test Artist', contactLine: null };
 const facts: Fact[] = [{ key: 'artist-name', value: 'Test Artist', kind: 'FACT', public: true }];
@@ -407,7 +408,10 @@ describe('runPick: one re-ask for every check', () => {
       const body = JSON.parse(String((init as RequestInit).body)) as {
         input: { content: { text?: string }[] }[];
       };
-      return body.input.at(-1)!.content[0]!.text ?? '';
+      return body.input
+        .at(-1)!
+        .content.map((part) => part.text ?? '')
+        .join(' ');
     });
   const wordingPeer = (extra: Partial<RawPick['citations']> = {}) =>
     raw({ citations: { ...raw().citations, ...extra } });
@@ -465,6 +469,18 @@ describe('runPick: one re-ask for every check', () => {
     expect(asks()[1]).toContain('wording');
     expect(result!.pick.description).not.toContain('basement');
     expect(result!.pick.influenceWarning).toBeNull();
+  });
+
+  it('records the copy re-ask as a count, never its quote of the peer', async () => {
+    startSpan.mockClear();
+    fetchMock
+      .mockResolvedValueOnce(reply(raw({ description: `Made in ${COPIED}.` })))
+      .mockResolvedValueOnce(reply(raw()));
+    await runPick(ctx(), stepDeadline());
+    expect(asks()[1]).toContain(COPIED);
+    const reask = JSON.stringify(startSpan.mock.calls.at(-1)![0]);
+    expect(reask).toContain('[Copied peer wording: 1]');
+    expect(reask).not.toContain('copies another artist');
   });
 
   it('fails the step when copied wording survives the re-ask', async () => {

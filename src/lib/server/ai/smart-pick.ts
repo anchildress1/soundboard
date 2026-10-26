@@ -25,10 +25,10 @@ import {
   agentInput,
   agentOutput,
   imageParts,
-  textTurn,
   youtubePart,
   type AgentSpan,
   type ModelRequest,
+  type Turn,
 } from '#lib/server/core/tracing.js';
 import type { CatalogVideo, Thumbnail } from '#lib/server/platforms/youtube/index.js';
 
@@ -833,15 +833,25 @@ function findings(pick: FinalPick, ctx: PickContext): Findings {
 const SECONDARY_ASK =
   'The recommendation rests only on secondary (two range up) artists. Base it on the artist’s own sources or results, or on next-range or same-range artists, as well.';
 
-/** One message naming every failure, so a single re-ask fixes them all. */
-const askFor = (found: Findings): string | null => {
+/**
+ * One turn naming every failure, so a single re-ask fixes them all. The copy messages quote peer
+ * text, so they go in a YouTube part that spans record only as a count.
+ */
+const askFor = (found: Findings): Turn | null => {
   const asks = [
     ...(found.repeated.length > 0 ? [repeatAsk(found.repeated)] : []),
     ...found.mismatches.map((m) => m.problem),
-    ...found.copied.map((c) => c.message),
     ...(found.secondaryOnly ? [SECONDARY_ASK] : []),
   ];
-  return asks.length > 0 ? asks.join(' ') : null;
+  const copied = found.copied.map((c) => c.message);
+  if (asks.length === 0 && copied.length === 0) return null;
+  return {
+    role: 'user',
+    parts: [
+      ...(asks.length > 0 ? [{ type: 'text' as const, text: asks.join(' ') }] : []),
+      ...(copied.length > 0 ? [youtubePart(copied, copied.length, 'Copied peer wording')] : []),
+    ],
+  };
 };
 
 /** The pick as it is kept: what the checks found is a limit or a warning, never hidden. */
@@ -883,7 +893,7 @@ export async function runPick(
     const ask = askFor(found);
     if (ask && asks.left > 0 && hasModelTime('smart-pick', deadline)) {
       asks.left -= 1;
-      request = { ...request, turns: [...reply.turns, textTurn('user', ask)] };
+      request = { ...request, turns: [...reply.turns, ask] };
       continue;
     }
     // A re-run must produce a new title and description; a repeat that survives fails the step.
