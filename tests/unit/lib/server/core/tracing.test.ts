@@ -400,6 +400,15 @@ describe('YouTube values in peer-match and smart-pick spans', () => {
     );
   });
 
+  it('redacts the JSON-escaped form of a value with quotes or backslashes', () => {
+    const redact = youtubeRedactor([
+      { role: 'user', parts: [youtubePart({ title: String.raw`A "New" Song \ Live` }, 1)] },
+    ]);
+    const reply = JSON.stringify({ why: String.raw`Uses A "New" Song \ Live as a reference.` });
+    expect(redact(reply)).toBe(JSON.stringify({ why: `Uses ${YOUTUBE_VALUE} as a reference.` }));
+    expect(redact(String.raw`Uses A "New" Song \ Live.`)).toBe(`Uses ${YOUTUBE_VALUE}.`);
+  });
+
   it('changes nothing when the request has no YouTube parts', () => {
     expect(youtubeRedactor(request.turns)('PeekaBoo 2026')).toBe('PeekaBoo 2026');
   });

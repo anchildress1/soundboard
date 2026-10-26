@@ -85,13 +85,16 @@ const keep: Redact = (text) => text;
 
 /**
  * Every string leaf with its sentences, and every number. Short ones too: a peer named "U2" or
- * `subscribersGained: 3` is still YouTube data, even though it also blanks unrelated "3"s.
+ * `subscribersGained: 3` is still YouTube data, even though it also blanks unrelated "3"s. Strings
+ * also go in JSON-escaped, since replies are recorded as raw JSON text.
  */
 function leaves(value: unknown, into: Set<string>): void {
   if (typeof value === 'string') {
     for (const piece of [value, ...value.split(/[.!?\n]+/)]) {
-      const trimmed = piece.trim();
-      if (trimmed) into.add(trimmed.toLowerCase());
+      const trimmed = piece.trim().toLowerCase();
+      if (!trimmed) continue;
+      into.add(trimmed);
+      into.add(JSON.stringify(trimmed).slice(1, -1));
     }
   } else if (typeof value === 'number' && Number.isFinite(value)) {
     into.add(String(value));
