@@ -324,6 +324,26 @@ describe('finalizePick: citations and the recommendation', () => {
     expect(pick.recommendation!.followsWhy).toBe('P1 and P2 agree.');
   });
 
+  it('replaces a peer’s channel title in the brand check and the explanations with its ref', () => {
+    const pick = finalizePick(
+      raw({
+        brandCheck: `Sounds like ${PEER_TITLE}.`,
+        why: {
+          title: `${PEER_TITLE} names tracks this way.`,
+          description: `Velvet Static opens like this.`,
+          tags: `${PEER_TITLE} tags the genre.`,
+        },
+      }),
+      fix(),
+    );
+    expect(pick.brandCheck).toBe('Sounds like P1.');
+    expect(pick.why).toEqual({
+      title: 'P1 names tracks this way.',
+      description: 'P2 opens like this.',
+      tags: 'P1 tags the genre.',
+    });
+  });
+
   it('replaces a title every time it appears, and leaves a blank or length-changing one safe', () => {
     const odd = evidence();
     odd.peers[1]!.title = 'İstanbul Nights';

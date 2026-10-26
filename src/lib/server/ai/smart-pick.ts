@@ -698,11 +698,11 @@ export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
       ...shortFlag(fix.probe),
       ...windowFlags(fix.chunks),
     ],
-    brandCheck: unstated(draft.brandCheck),
+    brandCheck: unstated(byRefOnly(draft.brandCheck, peers)),
     why: {
-      title: unstated(draft.why.title),
-      description: unstated(draft.why.description),
-      tags: unstated(draft.why.tags),
+      title: unstated(byRefOnly(draft.why.title, peers)),
+      description: unstated(byRefOnly(draft.why.description, peers)),
+      tags: unstated(byRefOnly(draft.why.tags, peers)),
     },
     bandcamp: {
       about: clip(cleanText(unstated(draft.bandcamp.about), fix.facts), DESCRIPTION_MAX),
