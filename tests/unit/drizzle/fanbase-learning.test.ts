@@ -29,7 +29,6 @@ const FUNCTIONS = [
   'soundboard_influence_ok',
   'soundboard_research_claim',
   'soundboard_caller_artist',
-  'soundboard_run_artist',
   'soundboard_save_research',
   'soundboard_save_outcomes',
   'soundboard_reject_peer',
@@ -399,6 +398,29 @@ describe('claim-guarded research writes', () => {
       'run-a',
       't1',
     ],
+    [
+      'a deactivated owner',
+      async () => {
+        await claimRun('run-a', 't1');
+        await db().execute(sql`update users set active = false where uid = ${USER_A.uid}`);
+      },
+      USER_A.uid,
+      'run-a',
+      't1',
+    ],
+    [
+      'an owner relinked to another artist',
+      async () => {
+        await claimRun('run-a', 't1');
+        await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
+        await db().execute(
+          sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`,
+        );
+      },
+      USER_A.uid,
+      'run-a',
+      't1',
+    ],
   ])('refuses %s with 55000 and writes nothing', async (_name, setup, uid, runId, token) => {
     await setup();
     const before = await rows(db(), sql`select * from job_research order by run_id`);
@@ -475,27 +497,6 @@ describe('outcome saves need the live analytics grant', () => {
       { video_id: 'v1', coverage: 'open', metrics: OUTCOME_ROW.metrics, fresh: true },
       { video_id: 'va', coverage: 'complete', metrics: outcome('', '').metrics, fresh: true },
     ]);
-  });
-
-  it('refuses with 42501 after the caller relinks to another artist mid-run', async () => {
-    await claimRun('run-a', 't1');
-    const grantAt = await grantOf(USER_A.uid);
-    await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
-    await db().execute(sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`);
-    await fails(
-      asUser(USER_A.uid, (tx) => saveOutcomes(tx, 'run-a', 't1', grantAt)),
-      '42501',
-    );
-    await fails(
-      asUser(USER_A.uid, (tx) =>
-        tx.execute(
-          sql`select public.soundboard_refresh_rejections('run-a', 't1', '{}', array['UCx'])`,
-        ),
-      ),
-      '42501',
-    );
-    expect(await count('artist_outcomes')).toBe(2);
-    expect(await count('peer_rejections')).toBe(2);
   });
 
   it.each([

@@ -110,16 +110,19 @@ GRANT SELECT (artist_id, video_id, retrieved_at), DELETE ON artist_outcomes TO s
 --> statement-breakpoint
 GRANT SELECT (artist_id, channel_id, retrieved_at), DELETE ON peer_rejections TO soundboard_cleanup;
 --> statement-breakpoint
--- The caller's live claim on a run of their own job that isn't discarded; locks the run row.
+-- The caller's live claim on a run of their own job that isn't discarded, while they are active and
+-- still linked to the run's artist; locks the run and owner rows, so neither can change before commit.
 CREATE FUNCTION public.soundboard_research_claim(p_run text, p_token text) RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
   v_job text;
 BEGIN
   SELECT r.job_id INTO v_job FROM public.research_runs r JOIN public.jobs j ON j.id = r.job_id
+    JOIN public.users u ON u.uid = r.owner_uid
     WHERE r.id = p_run AND r.claim_token = p_token AND r.claim_until > now()
       AND r.owner_uid = nullif(current_setting('app.user_sub', true), '') AND j.state <> 'DISCARDED'
-    FOR UPDATE OF r;
+      AND u.active AND u.artist_id = r.artist_id
+    FOR UPDATE OF r, u;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Research claim lost' USING ERRCODE = '55000';
   END IF;
@@ -171,23 +174,6 @@ $$;
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION public.soundboard_caller_artist() FROM PUBLIC;
 --> statement-breakpoint
--- The caller's artist, only while it is still the run's: a relink mid-run refuses the write rather
--- than filing what was read for one artist under another.
-CREATE FUNCTION public.soundboard_run_artist(p_run text) RETURNS text
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-DECLARE
-  v_artist text := public.soundboard_caller_artist();
-BEGIN
-  PERFORM 1 FROM public.research_runs r WHERE r.id = p_run AND r.artist_id = v_artist;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Research run belongs to another artist' USING ERRCODE = '42501';
-  END IF;
-  RETURN v_artist;
-END;
-$$;
---> statement-breakpoint
-REVOKE ALL ON FUNCTION public.soundboard_run_artist(text) FROM PUBLIC;
---> statement-breakpoint
 CREATE FUNCTION public.soundboard_save_outcomes(p_run text, p_token text, p_grant_at timestamptz, p_rows jsonb)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
@@ -205,7 +191,7 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'YouTube analytics not shared' USING ERRCODE = '28000';
   END IF;
-  v_artist := public.soundboard_run_artist(p_run);
+  SELECT r.artist_id INTO v_artist FROM public.research_runs r WHERE r.id = p_run;
   DELETE FROM public.artist_outcomes o
     WHERE o.artist_id = v_artist AND o.video_id IN (SELECT r->>'videoId' FROM jsonb_array_elements(p_rows) r);
   INSERT INTO public.artist_outcomes (artist_id, video_id, retrieved_at, published_at, requested_start,
@@ -245,7 +231,7 @@ DECLARE
   v_artist text;
 BEGIN
   PERFORM public.soundboard_research_claim(p_run, p_token);
-  v_artist := public.soundboard_run_artist(p_run);
+  SELECT r.artist_id INTO v_artist FROM public.research_runs r WHERE r.id = p_run;
   UPDATE public.peer_rejections p SET retrieved_at = now()
     WHERE p.artist_id = v_artist AND p.channel_id = ANY (p_kept);
   DELETE FROM public.peer_rejections p WHERE p.artist_id = v_artist AND p.channel_id = ANY (p_gone);

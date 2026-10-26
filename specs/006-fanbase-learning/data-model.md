@@ -7,7 +7,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 - _Own artist_ means `exists (select 1 from public.users u where u.uid = <principal> and u.active and u.artist_id = <table>.artist_id)`, with the column table-qualified (`${t.artistId}`), as 005 requires.
 - _Shared now_ means `exists (select 1 from public.connections c where c.uid = <principal> and c.status = 'connected' and c.scopes @> '{https://www.googleapis.com/auth/yt-analytics.readonly}')`.
 - _Fresh_ means `retrieved_at > now() - interval '29 days'`; _expired_ is its negation. 29 days, so the daily delete always lands before day 30 (R10).
-- _Claim held_ (inside a write function) means `exists (select 1 from public.research_runs r join public.jobs j on j.id = r.job_id where r.id = p_run and r.claim_token = p_token and r.claim_until > now() and r.owner_uid = <principal> and j.state <> 'DISCARDED')`, locked `FOR UPDATE OF r`. Not held → raise `55000` ("Research claim lost").
+- _Claim held_ (inside a write function) means `exists (select 1 from public.research_runs r join public.jobs j on j.id = r.job_id join public.users u on u.uid = r.owner_uid where r.id = p_run and r.claim_token = p_token and r.claim_until > now() and r.owner_uid = <principal> and j.state <> 'DISCARDED' and u.active and u.artist_id = r.artist_id)`, locked `FOR UPDATE OF r, u`, so a deactivation or relink waits for the write's commit. Not held → raise `55000` ("Research claim lost").
 - Every new table has `ENABLE` and `FORCE ROW LEVEL SECURITY`. Every function is `LANGUAGE plpgsql SECURITY DEFINER`, `SET search_path = pg_catalog, public`, `REVOKE ALL … FROM PUBLIC`, `EXECUTE` only to `soundboard_app`.
 
 ## `research_runs` (new): run state, no YouTube data
@@ -71,7 +71,7 @@ Source of truth after implementation: `src/lib/server/core/schema.ts` and the ge
 - **Writes** only through `soundboard_save_outcomes(p_run text, p_token text, p_grant_at timestamptz, p_rows jsonb)` (#4, #5):
   1. _claim held_
   2. `SELECT 1 FROM connections WHERE uid = <principal> AND status = 'connected' AND scopes @> '{…yt-analytics.readonly}' AND updated_at = p_grant_at FOR SHARE`; not found → raise `28000`, nothing written
-  3. the caller's `artist_id` from the active `users` row (else `42501`); delete their rows for the given video IDs (expired included); insert with `retrieved_at = now()`
+  3. for the run's `artist_id` (the claim holds it to the caller's): delete its rows for the given video IDs (expired included); insert with `retrieved_at = now()`
 - **Grants:** `soundboard_app` `SELECT`, `EXECUTE`. `soundboard_cleanup` `SELECT (artist_id, video_id, retrieved_at)`, `DELETE`.
 
 ## `peer_rejections` (new): "Not a peer", channel IDs, 29 days unless refreshed
