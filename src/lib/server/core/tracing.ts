@@ -83,14 +83,17 @@ export const youtubePart = (value: unknown, count: number, label?: string): Part
 type Redact = (text: string) => string;
 const keep: Redact = (text) => text;
 
-/** String leaves of at least 3 characters with their sentences, and numbers of 2+ digits. */
+/**
+ * Every string leaf with its sentences, and every number. Short ones too: a peer named "U2" or
+ * `subscribersGained: 3` is still YouTube data, even though it also blanks unrelated "3"s.
+ */
 function leaves(value: unknown, into: Set<string>): void {
   if (typeof value === 'string') {
     for (const piece of [value, ...value.split(/[.!?\n]+/)]) {
       const trimmed = piece.trim();
-      if (trimmed.length >= 3) into.add(trimmed.toLowerCase());
+      if (trimmed) into.add(trimmed.toLowerCase());
     }
-  } else if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) >= 10) {
+  } else if (typeof value === 'number' && Number.isFinite(value)) {
     into.add(String(value));
     into.add(value.toLocaleString('en-US'));
   } else if (Array.isArray(value)) {

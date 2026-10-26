@@ -404,11 +404,13 @@ describe('YouTube values in peer-match and smart-pick spans', () => {
     expect(youtubeRedactor(request.turns)('PeekaBoo 2026')).toBe('PeekaBoo 2026');
   });
 
-  it('ignores values under 3 characters and single digits', () => {
+  it('redacts short strings and single digits too', () => {
     const redact = youtubeRedactor([
-      { role: 'user', parts: [youtubePart({ a: 'EP', n: 7, m: -42 }, 1)] },
+      { role: 'user', parts: [youtubePart({ a: 'U2', n: 3, m: -42 }, 1)] },
     ]);
-    expect(redact('EP 7 -42')).toBe(`EP 7 ${YOUTUBE_VALUE}`);
+    expect(redact('U2 gained 3, lost -42; P3 stays')).toBe(
+      `${YOUTUBE_VALUE} gained ${YOUTUBE_VALUE}, lost ${YOUTUBE_VALUE}; P3 stays`,
+    );
   });
 });
 
