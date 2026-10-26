@@ -669,9 +669,15 @@ function replaceFolded(text: string, needle: string, replacement: string): strin
   return out + text.slice(from);
 }
 
-/** `text` with each peer's channel title replaced by the peer's ref. */
-const byRefOnly = (text: string, peers: { ref: string; title: string }[]): string =>
-  peers.reduce((acc, peer) => replaceFolded(acc, peer.title.trim(), peer.ref), text);
+/**
+ * `text` with each peer channel's and peer release's title replaced by its ref, longest first so a
+ * release named after its channel isn't cut short.
+ */
+const byRefOnly = (text: string, named: { ref: string; title: string }[]): string =>
+  named
+    .map(({ ref, title }) => ({ ref, title: title.trim() }))
+    .sort((a, b) => b.title.length - a.title.length)
+    .reduce((acc, { ref, title }) => replaceFolded(acc, title, ref), text);
 
 /**
  * Enforces R4 on the model's draft: hashtags only from candidates (3–5, closing the description),
@@ -699,7 +705,7 @@ export function finalizePick(raw: RawPick, fix: PickFixups): FinalPick {
   );
   const description = closing ? `${body}\n\n${closing}`.trim() : body;
   const refs = refsOf(fix);
-  const peers = fix.evidence?.peers ?? [];
+  const peers = [...(fix.evidence?.peers ?? []), ...(fix.evidence?.releases ?? [])];
   const { recommendation: advice } = draft;
 
   return {

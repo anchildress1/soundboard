@@ -360,6 +360,23 @@ describe('finalizePick: citations and the recommendation', () => {
     expect(pick.recommendation!.approach).toBe('P1 and P1 again; P2 too.');
   });
 
+  it("replaces a peer release's title with its ref, the longer title first", () => {
+    const named = evidence();
+    named.releases[1]!.title = `${PEER_TITLE} Live`;
+    const pick = finalizePick(
+      raw({
+        brandCheck: `Titled like night drive.`,
+        recommendation: {
+          ...raw().recommendation,
+          approach: `Follow the title format of Night Drive and ${PEER_TITLE} Live.`,
+        },
+      }),
+      fix({ evidence: named }),
+    );
+    expect(pick.recommendation!.approach).toBe('Follow the title format of P1-R1 and P2-R1.');
+    expect(pick.brandCheck).toBe('Titled like P1-R1.');
+  });
+
   it('replaces a title only as a whole word, beside punctuation too', () => {
     const short = evidence();
     short.peers[1]!.title = 'Air';
