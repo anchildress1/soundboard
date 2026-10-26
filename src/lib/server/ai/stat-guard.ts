@@ -3,7 +3,7 @@
 // Audio numbers are `numerics.ts`'s job; this file leaves them alone.
 
 const NUMBER = String.raw`\d[\d,.]*(?:\s?[km]\b)?`;
-const METRIC = String.raw`(?:views?|plays?|streams?|subscribers?|subs|followers?|fans?|likes?|comments?|shares?|watch[\s-]time|impressions?|ctr|engagement|reach|retention)\b`;
+const METRIC = String.raw`(?:views?|plays?|streams?|subscribers?|subs|followers?|listeners?|listens?|fans?|likes?|comments?|shares?|watch[\s-]time|impressions?|ctr|engagement|reach|retention)\b`;
 const SPELLED = String.raw`(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?)\b`;
 const CHANGE = String.raw`(?:net|total|sum|average|gained|lost|rose|fell|grew|dropped|increased|decreased)\b`;
 const MULTIPLIED = String.raw`(?:doubled|tripled|quadrupled|halved)\b`;
