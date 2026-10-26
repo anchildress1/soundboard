@@ -113,6 +113,17 @@ export type Claim =
 
 /** Claims the run named by `delivery` with one conditional update (research R2 step 3). */
 export async function claim(delivery: Delivery): Promise<Claim> {
+  try {
+    return await claimOnce(delivery);
+  } catch (error) {
+    // 42501: the owner was relinked to another artist, so the run's row no longer passes the
+    // policy check. Nothing can claim it again.
+    if (pgCode(error) === '42501') return { kind: 'stale' };
+    throw error;
+  }
+}
+
+async function claimOnce(delivery: Delivery): Promise<Claim> {
   const token = randomBytes(16).toString('hex');
   return await query(async (tx) => {
     const [run] = await tx

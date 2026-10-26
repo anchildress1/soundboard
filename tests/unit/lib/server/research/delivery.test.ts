@@ -504,6 +504,15 @@ describe('continuity and idempotency', () => {
     expect((await stored())?.seq).toBe(1);
   });
 
+  it('drops a delivery whose owner was relinked to another artist mid-run', async () => {
+    await db().execute(sql`insert into artists (id, name) values ('artist-new', 'New Artist')`);
+    await db().execute(sql`update users set artist_id = 'artist-new' where uid = ${USER_A.uid}`);
+    expect(await runDelivery(DELIVERY, stages)).toBe(200);
+    expect((await stored())?.seq).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
   it('leaves the artist’s guides unchanged through a full run', async () => {
     const before = await db().select().from(artistGuides);
     expect(before.length).toBeGreaterThan(0);

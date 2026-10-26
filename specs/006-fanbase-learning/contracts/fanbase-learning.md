@@ -9,7 +9,7 @@ Interfaces this feature adds or changes. Shapes are in [data-model.md](../data-m
 - **Body:** `{ "jobId": string, "uid": string, "runId": string, "seq": number }`. Wrong shape → `400`.
 - **Runs** under `withIdentity(uid)`; the claim matches `jobId`, `runId`, `uid` and `seq` together against the row, and the job must not be discarded.
 - **Responses:**
-  - `200 {}`: a batch ran and committed (and the next task was enqueued), or the delivery was stale (finished, failed, discarded or replaced run, lower `seq`, inactive owner, missing job)
+  - `200 {}`: a batch ran and committed (and the next task was enqueued), or the delivery was stale (finished, failed, discarded or replaced run, lower `seq`, inactive owner, owner relinked to another artist, missing job)
   - `503`: the claim is held, the task's `seq` is ahead of the row, or the claim was lost at commit (nothing written)
   - `500`: the next enqueue failed; nothing was written
 - Never returns run contents, evidence, tokens or errors in the body.

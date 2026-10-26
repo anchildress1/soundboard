@@ -64,7 +64,7 @@ The constitution exception permits research and learning to "run server-side, in
   1. Verify the OIDC token: signature, `aud = RESEARCH_TASK_URL`, `email = RESEARCH_TASK_SA`, `email_verified` (`OAuth2Client.verifyIdToken`). Otherwise `401`, nothing read. The service is public (`allUsers` invoker), so Cloud Run IAM can't do this check.
   2. `withIdentity(uid)`: every query runs under RLS as the job's owner.
   3. **Claim** with one conditional `UPDATE … RETURNING`: `job_id = $jobId and id = $runId and owner_uid = $uid and seq = $seq and stage not in ('done','failed') and (claim_until is null or claim_until < now())`, and the job exists and isn't `DISCARDED` (#6, #19). When it claims nothing:
-     - row missing, another `runId`, `seq` below the row's, run finished, job discarded, or inactive owner → `200`, a stale delivery
+     - row missing, another `runId`, `seq` below the row's, run finished, job discarded, inactive owner, or an owner relinked to another artist (the claim fails the policy check, `42501`) → `200`, a stale delivery
      - `seq` above the row's (the next task arrived before the commit), or the claim is held → `503`, so Cloud Tasks retries with backoff
   4. `deadline = stepDeadline()` at claim entry, shared by every read, model call and the enqueue. Never restarted in a helper.
   5. Run one **batch** of the stage (below). Results stay in memory.
