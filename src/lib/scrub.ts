@@ -7,6 +7,13 @@ export function scrubUrl(text: string): string {
   return text.replaceAll(URL_IN_TEXT, `$1?${REDACTED}`);
 }
 
+// Drizzle's failed-query message lists every bound value: ciphertexts, Google subs, job data.
+const QUERY_PARAMS = /\nparams: [\s\S]*/;
+
+function scrubText(text: string): string {
+  return scrubUrl(text).replace(QUERY_PARAMS, `\nparams: ${REDACTED}`);
+}
+
 const URL_KEYS = ['url', 'url.full', 'http.url', 'http.query', 'url.query', 'from', 'to'];
 
 function scrubData(data: Record<string, unknown> | undefined): void {
@@ -22,7 +29,7 @@ type Crumb = { data?: Record<string, unknown>; message?: string };
 
 export function scrubBreadcrumb<T extends Crumb>(crumb: T): T {
   scrubData(crumb.data);
-  if (crumb.message) crumb.message = scrubUrl(crumb.message);
+  if (crumb.message) crumb.message = scrubText(crumb.message);
   return crumb;
 }
 
@@ -36,14 +43,17 @@ type EventLike = {
   transaction?: string;
 };
 
-/** Strips query strings from request, span, and trace data before an event leaves the process. */
+/**
+ * Strips query strings from request, span, and trace data, and bound values from failed-query
+ * messages, before an event leaves the process.
+ */
 export function scrubEvent<T extends EventLike>(event: T): T {
   scrubRequest(event.request);
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
   // ffmpeg and fetch errors quote the signed URL they failed on.
-  if (event.message) event.message = scrubUrl(event.message);
+  if (event.message) event.message = scrubText(event.message);
   for (const exception of event.exception?.values ?? []) {
-    if (exception.value) exception.value = scrubUrl(exception.value);
+    if (exception.value) exception.value = scrubText(exception.value);
   }
   scrubData(event.contexts?.trace?.data);
   for (const span of event.spans ?? []) scrubSpanLike(span);

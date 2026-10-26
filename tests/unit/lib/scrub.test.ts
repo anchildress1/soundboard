@@ -73,6 +73,16 @@ describe('scrubEvent', () => {
     );
   });
 
+  it("drops a failed query's bound values and keeps the statement", () => {
+    const failed =
+      'Failed query: insert into "jobs" ("id") values ($1)\nparams: j1,sub-1,{"sessionCipher":"c2Vj"}';
+    const event = scrubEvent({ message: failed, exception: { values: [{ value: failed }] } });
+    for (const text of [event.message, event.exception!.values![0]!.value]) {
+      expect(text).toBe('Failed query: insert into "jobs" ("id") values ($1)\nparams: [redacted]');
+    }
+    expect(scrubBreadcrumb({ message: failed }).message).not.toContain('sessionCipher');
+  });
+
   it('scrubs request, transaction, trace data, and spans', () => {
     const event = scrubEvent({
       request: { url: SIGNED, query_string: 'X-Goog-Signature=abc' },
