@@ -5,10 +5,11 @@ import { quotaResetAt } from '#lib/server/core/quota.js';
 import { identityFailure, outOfTime, quotaSpent } from '#lib/server/platforms/youtube/index.js';
 import type { ResearchLimit, ResearchRun, RunStage } from './runs';
 
-/** Held back at the end of every delivery for the enqueue and the commit. */
+/** Held back at the end of every delivery for the enqueue and the commit: stages end before it. */
 export const RESERVE_MS = 8_000;
 /** A busy provider, a spent step or a batch that did nothing tries again after this. */
 export const RETRY_MS = 60_000;
+/** `deadline` is the stage's own: the step's, less `RESERVE_MS`. */
 export type StageContext = { run: ResearchRun; deadline: number };
 
 /** One batch's result, kept in memory until the commit. */
@@ -31,7 +32,7 @@ export type Wait = { wait: string; at: number };
 
 /** Whether a stage can take one more item that takes about `estimateMs`. */
 export const hasTime = (deadline: number, estimateMs: number, now = Date.now()) =>
-  deadline - now > RESERVE_MS + estimateMs;
+  deadline - now > estimateMs;
 
 export type Items = { done: number; next: number; stopped: boolean; wait?: Wait };
 

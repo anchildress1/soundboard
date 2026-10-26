@@ -4,7 +4,7 @@ import { scrubUrl } from '#lib/scrub.js';
 import { stepDeadline } from '#lib/server/ai/model.js';
 import { pgCode } from '#lib/server/core/errors.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { RETRY_MS, waitFor, type Batch, type Stage } from './batch';
+import { RESERVE_MS, RETRY_MS, waitFor, type Batch, type Stage } from './batch';
 import { discover } from './discover';
 import { learn } from './learn';
 import { match } from './match';
@@ -152,7 +152,8 @@ async function batchAndCommit(
   deadline: number,
   stages: Stages,
 ): Promise<DeliveryStatus> {
-  const outcome = await runBatch(run, deadline, stages);
+  // The stage's I/O ends at its own deadline, so a slow read can't spend the enqueue and commit's.
+  const outcome = await runBatch(run, deadline - RESERVE_MS, stages);
   const ends = outcome.release.stage === 'done' || outcome.release.stage === 'failed';
   // Enqueued before the commit, so no crash leaves a running run without a task.
   if (!ends) {

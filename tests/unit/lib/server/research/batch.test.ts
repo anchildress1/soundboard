@@ -12,9 +12,9 @@ const failOn =
     item === failing ? Promise.reject(error) : ok();
 
 describe('hasTime', () => {
-  it('keeps the reserve plus the item estimate', () => {
-    expect(hasTime(10_000 + 8_001, 10_000, 0)).toBe(true);
-    expect(hasTime(10_000 + 8_000, 10_000, 0)).toBe(false);
+  it('needs more than the item estimate before the stage deadline', () => {
+    expect(hasTime(10_001, 10_000, 0)).toBe(true);
+    expect(hasTime(10_000, 10_000, 0)).toBe(false);
   });
 });
 
@@ -36,8 +36,8 @@ describe('eachItem', () => {
     expect(items).toEqual({ done: 2, next: 2, stopped: true });
   });
 
-  it('takes nothing when the step has no time for one more', async () => {
-    const items = await eachItem([1], 0, Date.now() + 8_000, 1_000, ok);
+  it('takes nothing when the stage has no time for one more', async () => {
+    const items = await eachItem([1], 0, Date.now() + 1_000, 1_000, ok);
     expect(items).toEqual({ done: 0, next: 0, stopped: false });
   });
 

@@ -14,7 +14,7 @@ import {
   researchRuns,
 } from '#lib/server/core/schema.js';
 import { DeadlineSpent, YouTubeError } from '#lib/server/platforms/youtube/youtube.js';
-import { RETRY_MS, type Batch, type Stage } from '#lib/server/research/batch.js';
+import { RESERVE_MS, RETRY_MS, type Batch, type Stage } from '#lib/server/research/batch.js';
 import { runDelivery, type Stages } from '#lib/server/research/delivery.js';
 import { seed, truncate } from '../../../../helpers/db';
 import { A_JOB, seedJob, USERS, USER_A } from '../../../../helpers/pipeline';
@@ -130,7 +130,7 @@ describe('runDelivery', () => {
     });
   });
 
-  it('hands the stage one deadline, started at the claim', async () => {
+  it("hands the stage the claim's step deadline, less the reserve", async () => {
     const seen: number[] = [];
     const before = Date.now();
     await runDelivery(
@@ -141,8 +141,21 @@ describe('runDelivery', () => {
       }),
     );
     expect(seen).toHaveLength(1);
-    expect(seen[0]! - before).toBeGreaterThanOrEqual(110_000);
-    expect(seen[0]! - Date.now()).toBeLessThanOrEqual(110_000);
+    expect(seen[0]! - before).toBeGreaterThanOrEqual(110_000 - RESERVE_MS);
+    expect(seen[0]! - Date.now()).toBeLessThanOrEqual(110_000 - RESERVE_MS);
+  });
+
+  it('still enqueues and commits when the stage spends its whole deadline', async () => {
+    const status = await runDelivery(
+      DELIVERY,
+      with_(({ deadline }) => {
+        vi.setSystemTime(deadline);
+        return Promise.resolve({ done: 1, stage: 'learn', cursor: 1 });
+      }),
+    ).finally(() => vi.useRealTimers());
+    expect(status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await stored()).toMatchObject({ seq: 1, cursor: 1 });
   });
 
   it('answers a stale delivery 200 and changes nothing', async () => {
