@@ -109,7 +109,8 @@ export type DeliveryStatus = 200 | 500 | 503;
 
 /**
  * Runs one delivery as its job's owner: claim, one batch, enqueue the next, commit. A stale delivery
- * answers 200, a held claim or early arrival 503, and a failed enqueue 500 with nothing written.
+ * answers 200, a held claim, early arrival or lost claim 503, and a failed enqueue 500 with nothing
+ * written.
  */
 export function runDelivery(delivery: Delivery, stages = STAGES): Promise<DeliveryStatus> {
   return withIdentity(delivery.uid, () => deliver(delivery, stages));
@@ -164,14 +165,17 @@ async function batchAndCommit(
     }
   }
   const writes = outcome.writes;
+  let committed: boolean;
   try {
-    await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
+    committed = await commit(run, token, outcome.release, writes && ((tx) => writes(tx, token)));
   } catch (error) {
     // 28000: the grant the batch read through changed before it saved (a disconnect, a
     // revocation or a reconnect). Its reports are dropped and the next delivery reads the
     // grant again; that is a wait, never a failure.
     if (pgCode(error) !== '28000') throw error;
-    await commit(run, token, { ...stay(run), wait: 'waiting on YouTube' });
+    committed = await commit(run, token, { ...stay(run), wait: 'waiting on YouTube' });
   }
-  return 200;
+  // A lost claim wrote nothing and the next `seq` can't claim until this one commits, so this one
+  // is redelivered: it reruns the batch, or finds a redelivery already committed and drops.
+  return committed ? 200 : 503;
 }

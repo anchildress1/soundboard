@@ -473,8 +473,35 @@ describe('continuity and idempotency', () => {
     expect(await runDelivery(DELIVERY, stages)).toBe(200);
     const after = await contents();
     release();
-    expect(await first).toBe(200);
+    // Redelivered, it finds the redelivery already committed and drops.
+    expect(await first).toBe(503);
     expect(await contents()).toEqual(after);
+    expect(await runDelivery(DELIVERY, stages)).toBe(200);
+    expect(await contents()).toEqual(after);
+  });
+
+  it('answers 503 for a lapsed claim no one took, and its redelivery advances the run', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: Stages = {
+      ...stages,
+      learn: async (context) => {
+        await gate;
+        return stages.learn(context);
+      },
+    };
+    const first = runDelivery(DELIVERY, slow);
+    await vi.waitFor(async () => expect((await stored())?.claimToken).not.toBeNull());
+    await db()
+      .update(researchRuns)
+      .set({ claimUntil: new Date(Date.now() - 1_000) });
+    release();
+    expect(await first).toBe(503);
+    expect((await stored())?.seq).toBe(0);
+    expect(await runDelivery(DELIVERY, stages)).toBe(200);
+    expect((await stored())?.seq).toBe(1);
   });
 
   it('leaves the artist’s guides unchanged through a full run', async () => {
