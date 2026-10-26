@@ -390,9 +390,16 @@ describe('learn: reading the results', () => {
     };
     answer(world);
     await deliver(0);
+    // A later run: it started after the first report was saved.
     await db()
       .update(researchRuns)
-      .set({ stage: 'learn', claimToken: null, claimUntil: null, seq: 1 });
+      .set({
+        stage: 'learn',
+        claimToken: null,
+        claimUntil: null,
+        seq: 1,
+        startedAt: new Date(Date.now() + 1_000),
+      });
     world.totals = { old1: [150, 3, 1] };
     await deliver(1);
     const rows = await outcomes();
@@ -446,10 +453,45 @@ describe('learn: reading the results', () => {
     });
   });
 
-  it('moves on when uploads vanished since the cursor was committed', async () => {
+  it('moves on once this run saved every upload, reading none again', async () => {
     answer({ uploads: [{ id: 'old1', publishedAt: daysAgo(60) }] });
-    await db().update(researchRuns).set({ cursor: 5 });
+    await deliver(0);
+    await db().update(researchRuns).set({ stage: 'learn' });
+    const reads = analyticsCalls().length;
     expect(await batch()).toMatchObject({ stage: 'discover', cursor: 0, done: 0 });
+    expect(analyticsCalls()).toHaveLength(reads);
+  });
+
+  it('reads an upload saved before this run started again', async () => {
+    answer({ uploads: [{ id: 'old1', publishedAt: daysAgo(60) }] });
+    await deliver(0);
+    await db()
+      .update(researchRuns)
+      .set({ stage: 'learn', startedAt: new Date(Date.now() + 60_000) });
+    expect(await batch()).toMatchObject({ stage: 'discover', done: 1 });
+  });
+
+  it('skips no upload when one is published between deliveries', async () => {
+    answer({
+      uploads: [
+        { id: 'a', publishedAt: daysAgo(10) },
+        { id: 'b', publishedAt: daysAgo(11) },
+      ],
+      failReport: {
+        at: 2,
+        response: () => json({ error: { errors: [{ reason: 'quotaExceeded' }] } }, { status: 403 }),
+      },
+    });
+    await deliver(0);
+    answer({
+      uploads: [
+        { id: 'new', publishedAt: daysAgo(0) },
+        { id: 'a', publishedAt: daysAgo(10) },
+        { id: 'b', publishedAt: daysAgo(11) },
+      ],
+    });
+    await deliver(1);
+    expect((await outcomes()).map((o) => o.videoId).toSorted()).toEqual(['a', 'b', 'new']);
   });
 
   it('never calls Analytics for another channel than the connected one', async () => {
@@ -537,7 +579,7 @@ describe('learn: failures', () => {
     await deliver(0);
     expect(await storedRun()).toMatchObject({
       stage: 'learn',
-      cursor: 1,
+      cursor: 0,
       wait: 'waiting on YouTube',
     });
     expect((await outcomes()).map((o) => o.videoId)).toEqual(['a']);
@@ -564,7 +606,8 @@ describe('learn: failures', () => {
     // Each upload's report takes 25 s of the 110 s step, so a delivery reads four.
     answer({ uploads, onReport: () => void vi.setSystemTime(Date.now() + 25_000) });
     await deliver(0);
-    expect(await storedRun()).toMatchObject({ stage: 'learn', cursor: 4, seq: 1 });
+    expect(await storedRun()).toMatchObject({ stage: 'learn', seq: 1 });
+    expect(await outcomes()).toHaveLength(4);
     let seq = 1;
     while ((await storedRun()).stage === 'learn') await deliver(seq++);
     expect(await storedRun()).toMatchObject({ stage: 'discover' });

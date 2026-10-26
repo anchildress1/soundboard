@@ -1,9 +1,9 @@
 // Learn (research R8): the artist's own uploads and their first 28 days of results, read through
-// their optional analytics grant. Cursor k is the k-th public upload; a delivery reports as many as
+// their optional analytics grant. A delivery reports as many uploads not yet saved by this run as
 // the step allows and saves them in the commit, under the grant they were read through.
-import { and, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { query } from '#lib/server/core/db.js';
-import { artistMemory } from '#lib/server/core/schema.js';
+import { artistMemory, artistOutcomes } from '#lib/server/core/schema.js';
 import { memoryOf } from '#lib/server/artist/memory.js';
 import {
   accessTokenFor,
@@ -21,7 +21,7 @@ import {
 } from '#lib/server/platforms/youtube/index.js';
 import type { PickFields } from '#lib/types.js';
 import { eachItem, type Batch, type StageContext } from './batch';
-import type { ResearchLimit } from './runs';
+import type { ResearchLimit, ResearchRun } from './runs';
 
 /** Uploads reported per run: recent ones, including those from before Soundboard (FR-004). */
 const UPLOADS = 20;
@@ -73,14 +73,17 @@ export async function learn({ run, deadline }: StageContext): Promise<Batch> {
   }
   const published = uploads.filter((upload) => upload.privacy === 'public');
   const limits: ResearchLimit[] = published.length < uploads.length ? ['private-releases'] : [];
-  const approved = await approvedFields(
-    run.artistId,
-    published.map((upload) => upload.videoId),
-  );
+  const ids = published.map((upload) => upload.videoId);
+  const [approved, saved] = await Promise.all([
+    approvedFields(run.artistId, ids),
+    savedThisRun(run, ids),
+  ]);
+  // Not a position in the list: an upload published or unlisted between deliveries would shift it.
+  const pending = published.filter((upload) => !saved.has(upload.videoId));
 
   const rows: OutcomeRow[] = [];
   let lost: ResearchLimit | null = null;
-  const items = await eachItem(published, run.cursor, deadline, REPORT_MS, async (upload) => {
+  const items = await eachItem(pending, 0, deadline, REPORT_MS, async (upload) => {
     try {
       rows.push(await outcomeOf(access.token, upload, approved.get(upload.videoId), deadline));
       return undefined;
@@ -98,11 +101,11 @@ export async function learn({ run, deadline }: StageContext): Promise<Batch> {
     await access.refused({ 'job.id': run.jobId });
     return advance([...limits, lost]);
   }
-  const finished = lost !== null || items.next >= published.length;
+  const finished = lost !== null || items.next >= pending.length;
   return {
     done: items.done,
     stage: finished ? 'discover' : 'learn',
-    cursor: finished ? 0 : items.next,
+    cursor: 0,
     limits: lost ? [...limits, lost] : limits,
     wait: items.wait,
     writes:
@@ -166,6 +169,24 @@ export function differs(live: OwnUpload, approved: PickFields): boolean {
     squash(live.description) !== squash(approved.description) ||
     tags(live.tags) !== tags(approved.tags)
   );
+}
+
+/** Which of `videoIds` this run already saved an outcome for: every save replaces it at `now()`. */
+async function savedThisRun(run: ResearchRun, videoIds: string[]): Promise<Set<string>> {
+  if (videoIds.length === 0) return new Set();
+  const rows = await query((tx) =>
+    tx
+      .select({ videoId: artistOutcomes.videoId })
+      .from(artistOutcomes)
+      .where(
+        and(
+          eq(artistOutcomes.artistId, run.artistId),
+          inArray(artistOutcomes.videoId, videoIds),
+          gte(artistOutcomes.retrievedAt, run.startedAt),
+        ),
+      ),
+  );
+  return new Set(rows.map((row) => row.videoId));
 }
 
 /** The fields approved for each video the artist published through Soundboard. */

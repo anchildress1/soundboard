@@ -72,6 +72,7 @@ The constitution exception permits research and learning to "run server-side, in
   7. **Commit (#5):** one transaction. Every write function first checks the claim (`id = p_run and claim_token = p_token and claim_until > now()`, `FOR UPDATE`) and that the job isn't discarded; then the release (`stage`, `seq + 1`, `cursor`, `wait`, streak, claim cleared) with the same token check. A lost claim writes nothing and answers `503`: the `seq + 1` task can't claim until this `seq` commits, so the redelivery reruns the batch, or finds a redelivery already committed and drops as stale.
   - The enqueue comes before the commit, so no crash leaves a run with no task. A crash between them leaves the `seq + 1` task getting 503 until the original task is redelivered and commits.
 - **Batches with a committed cursor (#9):** every multi-call stage processes items from `cursor` while `remaining > RESERVE_MS + per-item estimate`, then commits the items done and the new cursor. The stage repeats (`learn → learn`, etc.) until its items are exhausted, then advances with `cursor = 0`.
+  - Learn keeps `cursor = 0` and skips the uploads this run already saved (`retrieved_at >= started_at`), because its list is fetched again on each delivery and an upload published or unlisted in between would shift a position.
   - A delivery that completes zero items (the first item didn't fit) waits +60 s and counts toward the failure streak, so a stage that can never fit ends `failed` instead of looping.
 - **Waits** (constitution III: a wait never fails the run):
 
