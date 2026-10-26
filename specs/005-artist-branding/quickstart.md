@@ -34,7 +34,7 @@ The unit suite covers it ([data-model](data-model.md)):
 
 The share includes the T004 timing gate (up to $0.13), which runs first, at implementation start.
 
-- **Before every call:** read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md`. Stop live calls when the share is spent. Log each call: agent, model, input and output tokens, estimated cost, latency.
+- **Before every call:** read the run's Gemini spend ledger. Stop live calls when the share is spent. Log each call: agent, model, input and output tokens, estimated cost, latency.
 - **Database:** the dev Neon branch only, after Q0 passes there. `.env` is dev-only.
 - **User:** a non-Nathan invited user (`node --env-file=.env scripts/invite.ts add <email>`) with a saved artist profile.
 - **Channel:** connect a test channel through Connections (👤 Google consent). Confirm the connected channel title isn't Flies Like Robots before any proposal; if it is, stop and report.
