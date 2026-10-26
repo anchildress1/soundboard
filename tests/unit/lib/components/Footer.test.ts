@@ -15,4 +15,30 @@ describe('Footer', () => {
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
   });
+
+  it('shows one icon link per profile, each opening a new tab, then the legal links', () => {
+    render(Footer);
+    const legal = screen.getByRole('navigation', { name: 'Legal' });
+    const social = screen.getByRole('navigation', { name: 'Ashley Childress' });
+    expect(social.compareDocumentPosition(legal)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      within(legal)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Terms of Service', 'Privacy policy']);
+    const links = within(social).getAllByRole('link');
+    expect(links.map((a) => [a.getAttribute('aria-label'), a.getAttribute('href')])).toEqual([
+      ['Site', 'https://anchildress1.dev'],
+      ['GitHub', 'https://github.com/anchildress1'],
+      ['DEV', 'https://dev.to/anchildress1'],
+      ['LinkedIn', 'https://www.linkedin.com/in/anchildress1'],
+      ['X', 'https://x.com/anchildress1'],
+    ]);
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
+      expect(link.querySelector('svg path')?.getAttribute('d')).toBeTruthy();
+      expect(link.textContent?.trim()).toBe('');
+    }
+  });
 });

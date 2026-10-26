@@ -64,6 +64,8 @@
     "@ai-sdk/google": "4.0.105",
     "@fontsource-variable/bricolage-grotesque": "5.3.0",
     "@fontsource-variable/onest": "5.3.1",
+    "@fortawesome/free-brands-svg-icons": "7.3.1",
+    "@fortawesome/free-solid-svg-icons": "7.3.1",
     "@google-cloud/kms": "6.3.0",
     "@google-cloud/storage": "8.4.0",
     "@sentry/sveltekit": "11.9.0",
