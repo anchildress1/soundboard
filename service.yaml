@@ -39,6 +39,16 @@ spec:
               value: ${KMS_KEY}
             - name: PUBLIC_SENTRY_DSN
               value: ${PUBLIC_SENTRY_DSN}
+            # Research batches arrive as Cloud Tasks deliveries signed as the runtime identity.
+            - name: RESEARCH_QUEUE
+              value: ${RESEARCH_QUEUE}
+            - name: RESEARCH_TASK_URL
+              value: ${RESEARCH_TASK_URL}
+            - name: RESEARCH_TASK_SA
+              value: ${SERVICE_ACCOUNT}
+            # Gate G1: Gemini hears a peer's public upload by URL (specs/006-fanbase-learning/gates/g1).
+            - name: PEER_HEARING
+              value: '1'
             # Cloud Run terminates TLS; adapter-node reads the origin for the OAuth redirect from these.
             - name: PROTOCOL_HEADER
               value: x-forwarded-proto

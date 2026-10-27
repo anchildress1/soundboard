@@ -5,7 +5,7 @@ import { jobs } from '#lib/server/core/schema.js';
 import type { JobDoc } from './jobs';
 
 type Row = typeof jobs.$inferSelect;
-const transient = new Set(['audience', 'hashtagCandidates']);
+const transient = new Set(['audience', 'hashtagCandidates', 'candidateLists']);
 
 const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 const toMs = (date: Date | null) => (date === null ? null : date.getTime());
@@ -29,6 +29,7 @@ export function fromRow(row: Row): JobDoc {
     finalChunkAt: toMs(row.finalChunkAt),
     videoId: row.videoId,
     audience: null,
+    candidateLists: null,
     hashtagCandidates: null,
   };
 }
@@ -79,7 +80,12 @@ const GUARDED = [
 const guarded = new Set<string>(GUARDED);
 type JobData = Omit<
   JobDoc,
-  (typeof GUARDED)[number] | 'state' | 'videoId' | 'audience' | 'hashtagCandidates'
+  | (typeof GUARDED)[number]
+  | 'state'
+  | 'videoId'
+  | 'audience'
+  | 'candidateLists'
+  | 'hashtagCandidates'
 >;
 
 /** What a step or action may change on a job; `jobSet` drops the guarded fields at runtime too. */

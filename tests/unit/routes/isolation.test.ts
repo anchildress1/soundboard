@@ -2,13 +2,17 @@
 import { isHttpError } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { researchRuns } from '#lib/server/core/schema.js';
 import { getJob } from '#lib/server/jobs/jobs.js';
 import { jobRow } from '#lib/server/jobs/rows.js';
 import { clearStatsCache } from '#lib/server/platforms/youtube/youtube.js';
 import { load as layoutLoad } from '#src/routes/+layout.server.js';
 import { load as homeLoad } from '#src/routes/+page.server.js';
 import { load as jobLoad } from '#src/routes/jobs/[id]/+page.server.js';
+import { load as brandLoad } from '#src/routes/brand/+page.server.js';
 import { load as connectionsLoad } from '#src/routes/connections/+page.server.js';
+import { load as settingsLoad } from '#src/routes/settings/+page.server.js';
 import { GET as getJobApi } from '#src/routes/api/jobs/[id]/+server.js';
 import { POST as approve } from '#src/routes/api/jobs/[id]/approve/+server.js';
 import { POST as confirmUpload } from '#src/routes/api/jobs/[id]/confirm-upload/+server.js';
@@ -285,5 +289,42 @@ describe("another user's browser upload", () => {
     expect(h.createResumableUpload).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('upload_id'))).toBe(false);
     expect(await getJob('bu')).toEqual(before);
+  });
+});
+
+describe('page loads start no research', () => {
+  const loads: [string, (user: User) => unknown][] = [
+    ['layout', (user) => layoutLoad(event(user))],
+    ['home', (user) => homeLoad(event(user))],
+    ['job', (user) => jobLoad(event(user, 'pk'))],
+    ['connections', (user) => connectionsLoad(event(user))],
+    ['settings', (user) => settingsLoad(event(user))],
+    ['brand', (user) => brandLoad(event(user))],
+  ];
+
+  beforeEach(async () => {
+    vi.stubEnv('RESEARCH_QUEUE', 'projects/p/locations/us-central1/queues/soundboard-research');
+    vi.stubEnv('RESEARCH_TASK_URL', 'https://soundboard-1.us-central1.run.app/api/research/task');
+    vi.stubEnv('RESEARCH_TASK_SA', 'research@p.iam.gserviceaccount.com');
+    await seedJob({ id: 'pk', ...A_JOB, state: 'PICK', object: 'uploads/pk', probe: PROBE });
+    fetchMock.mockClear();
+  });
+
+  it.each(loads)('the %s load inserts no run and calls no queue', async (_name, load) => {
+    await load(USER_A);
+    await load(USER_A);
+    expect(await db().select().from(researchRuns)).toEqual([]);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('cloudtasks'))).toBe(
+      false,
+    );
+  });
+
+  it('leaves a PICK job at PICK with every load called in a row', async () => {
+    for (const [, load] of loads) await load(USER_A);
+    expect(await db().select().from(researchRuns)).toEqual([]);
+    expect((await getJob('pk'))?.state).toBe('PICK');
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).host)).not.toContain(
+      'cloudtasks.googleapis.com',
+    );
   });
 });

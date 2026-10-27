@@ -13,10 +13,11 @@ const e2eFakes = process.env.E2E_FAKES === '1';
 
 // App modules can't be swapped by `resolve.alias`: `#lib` subpath imports resolve before it
 // applies. Matching the resolved file catches every import of it. Window media is faked because
-// E2E runs no ffmpeg.
+// E2E runs no ffmpeg, and the research queue because it has no Cloud Tasks.
 const appFakes = new Map([
   [fileURLToPath(new URL('src/lib/server/core/db.ts', import.meta.url)), fake('db')],
   [fileURLToPath(new URL('src/lib/server/media/window.ts', import.meta.url)), fake('window')],
+  [fileURLToPath(new URL('src/lib/server/research/queue.ts', import.meta.url)), fake('tasks')],
 ]);
 const e2eModules: Plugin = {
   name: 'e2e-modules',

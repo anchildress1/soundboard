@@ -3,7 +3,9 @@ set -euo pipefail
 
 SERVICE="soundboard"
 REGION="us-central1"
-APP_DOMAIN="https://soundboard.anchildress1.dev"
+# Another environment (anchildress1-unstable) sets APP_DOMAIN to its own URL.
+APP_DOMAIN="${APP_DOMAIN:-https://soundboard.anchildress1.dev}"
+RESEARCH_QUEUE_NAME="soundboard-research"
 SEPARATOR="=================================================="
 
 command -v gcloud > /dev/null || { echo "Error: gcloud CLI is not installed." >&2; exit 1; }
@@ -49,7 +51,11 @@ export GCP_PROJECT_ID GCS_BUCKET GOOGLE_OAUTH_CLIENT_ID SIGNUP_MODE KMS_KEY \
 SERVICE_ACCOUNT="${SERVICE}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
 GIT_SHA="$(git rev-parse --short HEAD)"
 APP_IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${SERVICE}/app:${GIT_SHA}"
-export SERVICE_ACCOUNT APP_IMAGE
+# Cloud Run's deterministic URL is known before the first deploy, so the OIDC audience is stable.
+PROJECT_NUMBER="$(gcloud projects describe "$GCP_PROJECT_ID" --format 'value(projectNumber)')"
+RESEARCH_QUEUE="projects/${GCP_PROJECT_ID}/locations/${REGION}/queues/${RESEARCH_QUEUE_NAME}"
+RESEARCH_TASK_URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app/api/research/task"
+export SERVICE_ACCOUNT APP_IMAGE RESEARCH_QUEUE RESEARCH_TASK_URL
 
 echo "$SEPARATOR"
 echo "Project: $GCP_PROJECT_ID"
@@ -59,7 +65,8 @@ echo "$SEPARATOR"
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com run.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com cloudkms.googleapis.com \
-  secretmanager.googleapis.com --project "$GCP_PROJECT_ID" --quiet
+  secretmanager.googleapis.com cloudtasks.googleapis.com youtubeanalytics.googleapis.com \
+  --project "$GCP_PROJECT_ID" --quiet
 
 # Runtime identity: create it once, and let the deploying account attach it to the service
 # (Cloud Run requires iam.serviceAccounts.actAs on a user-managed service account).
@@ -104,6 +111,28 @@ gcloud storage buckets add-iam-policy-binding "gs://${GCS_BUCKET}" \
 gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
   --member "serviceAccount:${SERVICE_ACCOUNT}" --role roles/iam.serviceAccountTokenCreator \
   --project "$GCP_PROJECT_ID" --quiet > /dev/null
+
+# Research runs reach the app as Cloud Tasks deliveries: one request per batch, one at a time.
+# Cloud Tasks mints the OIDC token as the runtime identity, so its service agent and the identity
+# that creates tasks may both act as it.
+if ! gcloud tasks queues describe "$RESEARCH_QUEUE_NAME" --location "$REGION" \
+  --project "$GCP_PROJECT_ID" &> /dev/null; then
+  gcloud tasks queues create "$RESEARCH_QUEUE_NAME" --location "$REGION" --project "$GCP_PROJECT_ID"
+fi
+gcloud tasks queues update "$RESEARCH_QUEUE_NAME" --location "$REGION" --project "$GCP_PROJECT_ID" \
+  --max-concurrent-dispatches 1 --max-attempts 20 --min-backoff 10s --max-backoff 300s \
+  --max-retry-duration 3600s --quiet
+gcloud tasks queues add-iam-policy-binding "$RESEARCH_QUEUE_NAME" --location "$REGION" \
+  --project "$GCP_PROJECT_ID" --member "serviceAccount:${SERVICE_ACCOUNT}" \
+  --role roles/cloudtasks.enqueuer --quiet > /dev/null
+gcloud beta services identity create --service cloudtasks.googleapis.com \
+  --project "$GCP_PROJECT_ID" --quiet > /dev/null
+for member in "$SERVICE_ACCOUNT" \
+  "service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com"; do
+  gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
+    --member "serviceAccount:${member}" --role roles/iam.serviceAccountUser \
+    --project "$GCP_PROJECT_ID" --quiet > /dev/null
+done
 
 # YouTube refresh tokens are stored in Postgres as KMS ciphertext. Key rings and keys can't be
 # deleted, so they are created once; the runtime identity may encrypt and decrypt with this key only.
@@ -182,7 +211,8 @@ trap 'rm -f "$rendered"' EXIT
 # Single quotes are deliberate: envsubst takes the variable list literally.
 # shellcheck disable=SC2016
 envsubst '${SERVICE_ACCOUNT} ${APP_IMAGE} ${GCP_PROJECT_ID} ${GCS_BUCKET}
-  ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}' \
+  ${GOOGLE_OAUTH_CLIENT_ID} ${SIGNUP_MODE} ${KMS_KEY} ${PUBLIC_SENTRY_DSN}
+  ${RESEARCH_QUEUE} ${RESEARCH_TASK_URL}' \
   < service.yaml > "$rendered"
 
 gcloud run services replace "$rendered" --region "$REGION" --project "$GCP_PROJECT_ID"

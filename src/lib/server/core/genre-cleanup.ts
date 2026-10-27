@@ -5,6 +5,14 @@ export const DELETE_EXPIRED_GENRE_EVIDENCE =
 export const DELETE_EXPIRED_PROPOSALS =
   "delete from artist_guides where status = 'proposed' and proposed_at <= now() - interval '29 days' returning id";
 
+/** Peer research, the artist's analytics results and peer rejections: hidden at 29 days too. */
+export const DELETE_EXPIRED_RESEARCH =
+  "delete from job_research where retrieved_at <= now() - interval '29 days' returning run_id";
+export const DELETE_EXPIRED_OUTCOMES =
+  "delete from artist_outcomes where retrieved_at <= now() - interval '29 days' returning video_id";
+export const DELETE_EXPIRED_REJECTIONS =
+  "delete from peer_rejections where retrieved_at <= now() - interval '29 days' returning channel_id";
+
 export const CHECK_CLEANUP_ROLE = `
   select current_user = 'soundboard_cleanup' and session_user = 'soundboard_cleanup'
     and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
@@ -43,7 +51,16 @@ export async function handleGenreCleanup(
       throw new Error('Cleanup requires the unprivileged soundboard_cleanup login.');
     const evidence = await client.query(DELETE_EXPIRED_GENRE_EVIDENCE);
     const proposals = await client.query(DELETE_EXPIRED_PROPOSALS);
-    response = Response.json({ deleted: evidence.rows.length, proposals: proposals.rows.length });
+    const research = await client.query(DELETE_EXPIRED_RESEARCH);
+    const outcomes = await client.query(DELETE_EXPIRED_OUTCOMES);
+    const rejections = await client.query(DELETE_EXPIRED_REJECTIONS);
+    response = Response.json({
+      deleted: evidence.rows.length,
+      proposals: proposals.rows.length,
+      research: research.rows.length,
+      outcomes: outcomes.rows.length,
+      rejections: rejections.rows.length,
+    });
   } catch {
     response = new Response('Genre evidence cleanup failed', { status: 500 });
   }

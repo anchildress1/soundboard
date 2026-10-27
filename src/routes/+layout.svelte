@@ -74,7 +74,7 @@
     {@render children()}
   </div>
 
-  <Footer artist={data.artist} />
+  <Footer />
 </div>
 
 <style>

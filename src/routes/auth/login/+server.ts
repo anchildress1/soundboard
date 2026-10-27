@@ -8,14 +8,21 @@ import {
 } from '#lib/server/auth/auth.js';
 import type { RequestHandler } from './$types';
 
-/** `/auth/login` signs in with Google; `?connect=youtube` re-grants the signed-in user's channel. */
+/**
+ * `/auth/login` signs in with Google; `?connect=youtube` re-grants the signed-in user's channel and
+ * `?connect=analytics` also asks to share their YouTube Analytics.
+ */
+const PURPOSES = { youtube: 'connect', analytics: 'analytics' } as const;
+
 export const GET: RequestHandler = ({ url, cookies, locals }) => {
   const connect = url.searchParams.get('connect');
-  if (connect !== null && connect !== 'youtube') error(400, 'Unknown connection');
+  if (connect !== null && connect !== 'youtube' && connect !== 'analytics')
+    error(400, 'Unknown connection');
   // The gate exempts this route, so a connect checks for a user itself.
   if (connect && !locals.user) error(401, 'Sign in first.');
 
-  const state = newOAuthState(connect ? 'connect' : 'sign-in', connect ? locals.user : null);
+  const purpose = connect ? PURPOSES[connect] : 'sign-in';
+  const state = newOAuthState(purpose, connect ? locals.user : null);
   cookies.set(OAUTH_COOKIE, sign(state), {
     path: '/auth',
     httpOnly: true,

@@ -19,6 +19,8 @@ import {
   textTurn,
   toolSpan,
   youtubePart,
+  youtubeRedactor,
+  YOUTUBE_VALUE,
   type ChatReply,
   type ModelRequest,
 } from '#lib/server/core/tracing.js';
@@ -292,6 +294,132 @@ describe('guide proposals in spans', () => {
     expect(recorded).not.toContain(SENTINEL_GUIDE);
     expect(recorded).toContain(`[guide proposal: ${SENTINEL_GUIDE.length} chars]`);
     expect(recorded).toContain(`[guide proposal: ${SENTINEL_GUIDE.length + 9} chars]`);
+  });
+});
+
+describe('YouTube values in peer-match and smart-pick spans', () => {
+  const METRIC = 987654;
+  const PEER_TITLE = 'Velvet Static Arcade';
+  const CHANNEL = 'Moonline Ghosts';
+  const PEER_SENTENCE = 'Recorded live in a parking garage';
+  const youtube: ModelRequest = {
+    system: 'Rules.',
+    turns: [
+      {
+        role: 'user',
+        parts: [
+          { type: 'text', text: '{"songTitle":"PeekaBoo"}' },
+          youtubePart(
+            { peers: [{ ref: 'P1', title: CHANNEL, stats: { views: METRIC } }] },
+            1,
+            'YouTube peers',
+          ),
+          youtubePart(
+            {
+              releases: [
+                { ref: 'P1-R1', title: PEER_TITLE, description: `${PEER_SENTENCE}. Out now!` },
+              ],
+            },
+            1,
+            'YouTube releases',
+          ),
+          {
+            type: 'youtube',
+            url: 'https://www.youtube.com/watch?v=abcdefghijk',
+            start: 0,
+            end: 60,
+          },
+        ],
+      },
+    ],
+  };
+  const echo = `P1 (${CHANNEL}) got ${METRIC.toLocaleString('en-US')} views on "${PEER_TITLE}", ${PEER_SENTENCE.toLowerCase()}; keep the plain wording.`;
+  const recorded = () =>
+    JSON.stringify([
+      startSpan.mock.calls.map(([options]) => options),
+      span.setAttributes.mock.calls,
+      span.setAttribute.mock.calls,
+    ]);
+  const expectRedacted = (text: string) => {
+    for (const value of [String(METRIC), '987,654', PEER_TITLE, CHANNEL, PEER_SENTENCE]) {
+      expect(text.toLowerCase()).not.toContain(value.toLowerCase());
+    }
+    expect(text).toContain(YOUTUBE_VALUE);
+    expect(text).toContain('keep the plain wording');
+    expect(text).not.toContain('youtube.com');
+  };
+
+  it.each(['peer-match', 'smart-pick'] as const)(
+    'keeps %s reply, reasoning and a resent reply with every YouTube value replaced',
+    async (agent) => {
+      const resent: ModelRequest = {
+        ...youtube,
+        turns: [
+          ...youtube.turns,
+          { role: 'assistant', parts: [{ type: 'text', text: echo, source: 'reply' }] },
+          textTurn('user', 'Again.'),
+        ],
+      };
+      await chatSpan(resent, { agent, model: FLASH, maxTokens: 2048 }, async () => ({
+        content: echo,
+        reasoning: `Thinking: ${echo}`,
+        usage: {},
+        finishReason: 'stop',
+        responseId: null,
+      }));
+      expectRedacted(recorded());
+      expect(recorded()).toContain('[YouTube peers: 1]');
+      expect(recorded()).toContain('[YouTube releases: 1]');
+      expect(recorded()).toContain('{\\"type\\":\\"video\\",\\"source\\":\\"youtube\\"}');
+    },
+  );
+
+  it('redacts the agent output with the values of the input the agent recorded', () => {
+    agentInput(span as unknown as Span, youtube);
+    agentOutput(span as unknown as Span, echo, 'smart-pick');
+    expectRedacted(recorded());
+  });
+
+  it('keeps another agent reply as it is', async () => {
+    await chatSpan(youtube, { agent: 'hook-pick', model: FLASH, maxTokens: 8192 }, async () => ({
+      content: echo,
+      reasoning: '',
+      usage: {},
+      finishReason: 'stop',
+      responseId: null,
+    }));
+    expect(recorded()).toContain(PEER_TITLE);
+  });
+
+  it('matches whole words and numbers only, longest first', () => {
+    const redact = youtubeRedactor([
+      { role: 'user', parts: [youtubePart({ a: 'Neon', b: 'Neon Drive', n: 120 }, 1)] },
+    ]);
+    expect(redact('Neon Drive and neon and Neonlight, 120 and 1200 and 120.5')).toBe(
+      `${YOUTUBE_VALUE} and ${YOUTUBE_VALUE} and Neonlight, ${YOUTUBE_VALUE} and 1200 and ${YOUTUBE_VALUE}.5`,
+    );
+  });
+
+  it('redacts the JSON-escaped form of a value with quotes or backslashes', () => {
+    const redact = youtubeRedactor([
+      { role: 'user', parts: [youtubePart({ title: String.raw`A "New" Song \ Live` }, 1)] },
+    ]);
+    const reply = JSON.stringify({ why: String.raw`Uses A "New" Song \ Live as a reference.` });
+    expect(redact(reply)).toBe(JSON.stringify({ why: `Uses ${YOUTUBE_VALUE} as a reference.` }));
+    expect(redact(String.raw`Uses A "New" Song \ Live.`)).toBe(`Uses ${YOUTUBE_VALUE}.`);
+  });
+
+  it('changes nothing when the request has no YouTube parts', () => {
+    expect(youtubeRedactor(request.turns)('PeekaBoo 2026')).toBe('PeekaBoo 2026');
+  });
+
+  it('redacts short strings and single digits too', () => {
+    const redact = youtubeRedactor([
+      { role: 'user', parts: [youtubePart({ a: 'U2', n: 3, m: -42 }, 1)] },
+    ]);
+    expect(redact('U2 gained 3, lost -42; P3 stays')).toBe(
+      `${YOUTUBE_VALUE} gained ${YOUTUBE_VALUE}, lost ${YOUTUBE_VALUE}; P3 stays`,
+    );
   });
 });
 

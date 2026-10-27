@@ -30,6 +30,27 @@ for (const status of BROKEN_STATUSES) {
   });
 }
 
+test('offers Share analytics to a connected channel that has not shared', async ({ page }) => {
+  await signIn(page, USER_A);
+  await page.goto('/connections');
+  await expect(youtube(page)).toContainText('Analytics: Not shared');
+  await expect(youtube(page).getByRole('link', { name: 'Share analytics' })).toHaveAttribute(
+    'href',
+    '/auth/login?connect=analytics',
+  );
+  await expect(youtube(page)).toContainText(
+    'Stop sharing by disconnecting YouTube; Soundboard deletes your stored results.',
+  );
+});
+
+test('explains a declined analytics consent', async ({ page }) => {
+  await signIn(page, USER_A);
+  await page.goto('/connections?analytics=declined');
+  await expect(page.getByRole('status').filter({ hasText: 'Analytics' })).toHaveText(
+    "Analytics wasn't shared. Drafts keep working without it.",
+  );
+});
+
 test('offers Connect to a user who never connected', async ({ page }) => {
   await signIn(page, USER_B);
   await page.goto('/connections');

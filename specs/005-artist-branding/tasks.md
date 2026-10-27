@@ -61,7 +61,7 @@ description: 'Task list for per-artist voice and brand guide'
   - Architecture, claims: "Guide proposals claim (artist, kind) in `guide_claims` with the same token pattern."
   - Architecture, model calls: "smart pick, brand and voice `medium`, hook `low`, each 8192 tokens".
 - [x] T004 👤 Voice timing gate (research R5, Codex #14). Runs at implementation start, before T011 and T016. Docs and ledger only; nothing committed to `src/`.
-  - Read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` first; log the call there (agent, model, tokens, cost, latency).
+  - Read the run's Gemini spend ledger first; log the call there (agent, model, tokens, cost, latency).
   - A throwaway script outside the repo sends one request through `chat` in `src/lib/server/ai/model.ts` with the `brand-guide` settings (same model, `medium`, 8,192 tokens).
   - Request: the R5 system rules, and evidence at the caps: 30 descriptions of 1,500 characters and 60 EDITED rows of 600 + 600 characters. Fill it from the test channel's own descriptions, repeated as needed. Never Nathan's channel.
   - Expected cost: about $0.05 input + up to $0.08 output.
@@ -373,7 +373,7 @@ description: 'Task list for per-artist voice and brand guide'
   4. SonarQube `analyze_code_snippet` on each changed or added source file (`anchildress1_soundboard`): zero issues
   5. `pnpm audit --prod` and `pnpm audit`: zero
 - [x] T031 👤 Live local validation, [quickstart Q4](quickstart.md#q4--live-local-validation-us1-us2-gemini-share--040). Gemini share ≤ $0.40, including T004.
-  - Read `/private/tmp/claude-501/-Users-anchildress1-git-personal-soundboard/62e697ca-854d-4335-b7d9-d69a103885aa/scratchpad/gemini-ledger.md` before each call; log each call.
+  - Read the run's Gemini spend ledger before each call; log each call.
   - Dev Neon branch only; a non-Nathan seeded user with a saved profile and a connected test channel (confirm it isn't Flies Like Robots).
   - One voice proposal and one brand proposal: approve both after an edit. Record SC-001 time and the `voice-guide` latency against T004's `minCallMs`.
   - Two-tab race and disconnected brand proposal (reconnect wait) per Q4.

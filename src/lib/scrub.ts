@@ -7,6 +7,13 @@ export function scrubUrl(text: string): string {
   return text.replaceAll(URL_IN_TEXT, `$1?${REDACTED}`);
 }
 
+// Drizzle's failed-query message lists every bound value: ciphertexts, Google subs, job data.
+const QUERY_PARAMS = /\nparams: [\s\S]*/;
+
+function scrubText(text: string): string {
+  return scrubUrl(text).replace(QUERY_PARAMS, `\nparams: ${REDACTED}`);
+}
+
 const URL_KEYS = ['url', 'url.full', 'http.url', 'http.query', 'url.query', 'from', 'to'];
 
 function scrubData(data: Record<string, unknown> | undefined): void {
@@ -22,7 +29,7 @@ type Crumb = { data?: Record<string, unknown>; message?: string };
 
 export function scrubBreadcrumb<T extends Crumb>(crumb: T): T {
   scrubData(crumb.data);
-  if (crumb.message) crumb.message = scrubUrl(crumb.message);
+  if (crumb.message) crumb.message = scrubText(crumb.message);
   return crumb;
 }
 
@@ -36,14 +43,17 @@ type EventLike = {
   transaction?: string;
 };
 
-/** Strips query strings from request, span, and trace data before an event leaves the process. */
+/**
+ * Strips query strings from request, span, and trace data, and bound values from failed-query
+ * messages, before an event leaves the process.
+ */
 export function scrubEvent<T extends EventLike>(event: T): T {
   scrubRequest(event.request);
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
   // ffmpeg and fetch errors quote the signed URL they failed on.
-  if (event.message) event.message = scrubUrl(event.message);
+  if (event.message) event.message = scrubText(event.message);
   for (const exception of event.exception?.values ?? []) {
-    if (exception.value) exception.value = scrubUrl(exception.value);
+    if (exception.value) exception.value = scrubText(exception.value);
   }
   scrubData(event.contexts?.trace?.data);
   for (const span of event.spans ?? []) scrubSpanLike(span);
@@ -57,19 +67,21 @@ function scrubRequest(request: EventLike['request']): void {
 }
 
 function scrubSpanLike(span: SpanLike): void {
-  if (span.description) span.description = scrubUrl(span.description);
-  scrubData(span.data);
+  if (span.description) span.description = scrubText(span.description);
+  for (const [key, value] of Object.entries(span.data ?? {})) {
+    span.data![key] = scrubAttribute(key, value);
+  }
 }
 
 type StreamedSpanLike = { name: string; attributes: Record<string, unknown> };
 
 /**
  * Span streaming (the SDK default) sends spans one by one instead of in a transaction event, so this
- * is where span names and attributes lose their query strings. Every string attribute is checked:
- * a signed URL can sit in any of them, including the serialized model messages.
+ * is where span names and attributes lose their query strings and failed-query bound values. Every
+ * string attribute is checked: either can sit in any of them, including the serialized model messages.
  */
 export function scrubSpan<T extends StreamedSpanLike>(span: T): T {
-  span.name = scrubUrl(span.name);
+  span.name = scrubText(span.name);
   for (const [key, value] of Object.entries(span.attributes)) {
     span.attributes[key] = scrubAttribute(key, value);
   }
@@ -78,7 +90,7 @@ export function scrubSpan<T extends StreamedSpanLike>(span: T): T {
 
 /** Raw attributes can be a string, a string array, or a `{ value, unit }` object. */
 function scrubAttribute(key: string, value: unknown): unknown {
-  if (typeof value === 'string') return key.endsWith('query') ? REDACTED : scrubUrl(value);
+  if (typeof value === 'string') return key.endsWith('query') ? REDACTED : scrubText(value);
   if (Array.isArray(value)) return value.map((item) => scrubAttribute(key, item));
   if (typeof value === 'object' && value !== null && 'value' in value) {
     return { ...value, value: scrubAttribute(key, value.value) };

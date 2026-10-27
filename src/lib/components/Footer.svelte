@@ -1,35 +1,38 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { faDev, faGithub, faLinkedin, faXTwitter } from '@fortawesome/free-brands-svg-icons';
+  import { faGlobe } from '@fortawesome/free-solid-svg-icons';
 
-  /** The signed-in user's artist; null signed out, so a shared page names no one's artist. */
-  let { artist }: { artist: { name: string; bandcampUrl: string | null } | null } = $props();
+  const SOCIAL = [
+    { name: 'Site', href: 'https://anchildress1.dev', icon: faGlobe },
+    { name: 'GitHub', href: 'https://github.com/anchildress1', icon: faGithub },
+    { name: 'DEV', href: 'https://dev.to/anchildress1', icon: faDev },
+    { name: 'LinkedIn', href: 'https://www.linkedin.com/in/anchildress1', icon: faLinkedin },
+    { name: 'X', href: 'https://x.com/anchildress1', icon: faXTwitter },
+  ];
 </script>
 
 <footer>
   <p>
-    {#if artist}
-      Built for
-      {#if artist.bandcampUrl}
-        <a href={artist.bandcampUrl} target="_blank" rel="noopener noreferrer">{artist.name}</a>
-      {:else}
-        {artist.name}
-      {/if}
-      by Ashley Childress · PolyForm Noncommercial 1.0.0
-    {:else}
-      Built by Ashley Childress · PolyForm Noncommercial 1.0.0
-    {/if}
+    Built for
+    <a
+      href="https://flieslikerobots.bandcamp.com"
+      target="_blank"
+      rel="external noopener noreferrer">Flies Like Robots</a
+    >
+    by Ashley Childress · PolyForm Noncommercial 1.0.0
   </p>
   <div class="links">
-    <nav aria-label="Ashley Childress">
-      <a href="https://anchildress1.dev" target="_blank" rel="noopener noreferrer">Site</a>
-      <a href="https://github.com/anchildress1" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a href="https://dev.to/anchildress1" target="_blank" rel="noopener noreferrer">DEV</a>
-      <a href="https://www.linkedin.com/in/anchildress1" target="_blank" rel="noopener noreferrer"
-        >LinkedIn</a
-      >
-      <a href="https://x.com/anchildress1" target="_blank" rel="noopener noreferrer">X</a>
+    <nav class="social" aria-label="Ashley Childress">
+      {#each SOCIAL as { name, href, icon: { icon: [width, height, , , path] } } (name)}
+        <a {href} target="_blank" rel="external noopener noreferrer" aria-label={name} title={name}>
+          <svg viewBox="0 0 {width} {height}" aria-hidden="true" focusable="false">
+            <path d={[path].flat().join(' ')} />
+          </svg>
+        </a>
+      {/each}
     </nav>
-    <nav aria-label="Legal">
+    <nav class="legal" aria-label="Legal">
       <a href={resolve('terms')} data-sveltekit-reload>Terms of Service</a>
       <a href={resolve('privacy')} data-sveltekit-reload>Privacy policy</a>
     </nav>
@@ -54,15 +57,40 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0 18px;
   }
 
-  /* Phones stack the two groups, where a divider would dangle. */
-  @media (width >= 640px) {
-    .links nav + nav {
-      padding-left: 18px;
-      border-left: 1px solid var(--line-strong);
+  .legal a + a::before {
+    margin: 0 10px;
+    content: '•' / '';
+    color: var(--line-strong);
+  }
+
+  /* Narrow screens wrap the two groups, where a divider would dangle. */
+  @media (width >= 480px) {
+    .links nav + nav::before {
+      width: 1px;
+      height: 1em;
+      margin-right: 18px;
+      content: '';
+      background: var(--line-strong);
     }
+  }
+
+  /* Each icon keeps a 44px touch target; the margin lines the first icon up with the text edge. */
+  .social {
+    margin-left: -13px;
+    margin-right: 5px;
+  }
+
+  .social a {
+    justify-content: center;
+    min-width: 44px;
+  }
+
+  svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
   }
 
   a {
@@ -75,7 +103,14 @@
 
   a:hover {
     color: var(--ink);
+  }
+
+  .legal a:hover {
     text-decoration: underline;
+  }
+
+  p {
+    margin: 0;
   }
 
   p a {

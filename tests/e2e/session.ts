@@ -38,3 +38,10 @@ export async function signIn(page: Page, uid: string): Promise<void> {
     .context()
     .addCookies([{ name: 'sb_session', value: sessionCookie(uid), url: 'http://localhost:4173' }]);
 }
+
+/** The project's own users with a profile and no approved brand guide, whose analytics are shared. */
+export const researchUser = ({ project }: TestInfo) => `uid-research-${DEVICE[project.name]}`;
+/** The same, whose rejections of a peer stay apart from the research user's. */
+export const rejectUser = ({ project }: TestInfo) => `uid-reject-${DEVICE[project.name]}`;
+/** The project's own user with an approved brand guide, for saving peer influence. */
+export const slidersUser = ({ project }: TestInfo) => `uid-sliders-${DEVICE[project.name]}`;

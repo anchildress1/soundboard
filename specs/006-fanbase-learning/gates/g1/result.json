@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-25T17:40:00.097Z",
+  "model": "gemini-3.8-flash",
+  "checks": {
+    "heard": true,
+    "noYouTubeFetch": true,
+    "clippedTokens": 5500,
+    "missingVideo": {
+      "ok": false,
+      "ms": 381,
+      "status": 403,
+      "message": "Forbidden"
+    },
+    "latencyMs": [4073, 381]
+  },
+  "hosts": ["generativelanguage.googleapis.com"],
+  "clipReply": "{\n  \"channelKind\": \"artist\",\n  \"sound\": \"different\",\n  \"explanation\": \"This track is an upbeat 1980s dance-pop song with soulful male vocals, bouncy electronic drums, and brassy synth hooks, which is completely different from dark synthwave.\"\n}"
+}

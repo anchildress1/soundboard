@@ -49,6 +49,10 @@ const TABLES = [
   'artist_memory',
   'artist_guides',
   'guide_claims',
+  'research_runs',
+  'job_research',
+  'artist_outcomes',
+  'peer_rejections',
 ] as const;
 
 function restricted<T>(

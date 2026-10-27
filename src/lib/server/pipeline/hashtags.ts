@@ -1,6 +1,7 @@
 import { parseHashtags } from '#lib/metadata.js';
 import type { Chunk } from '#lib/types.js';
 import { toolSpan } from '#lib/server/core/tracing.js';
+import type { PeerRelease } from '#lib/server/research/evidence.js';
 import {
   searchMusicVideos,
   videosByIds,
@@ -23,7 +24,13 @@ export type AudienceVideo = { title: string; description: string; tags: string[]
 /** A tag observed in a genre search result. */
 export type TagCandidate = { tag: string };
 
+/**
+ * One video's candidates, labeled by where they came from: `G<n>` for a genre search result,
+ * `P<n>-R<m>` for a peer's release, and `draft` for the pick's own selected terms. Lists are never merged, counted or weighted against each other.
+ */
 export type CandidateList = {
+  source: 'genre' | 'peer' | 'draft';
+  ref: string;
   videoId: string;
   title: string;
   hashtags: string[];
@@ -76,7 +83,10 @@ export function rankHashtags(description: string, limit = CANDIDATE_LIMIT): stri
 }
 
 /** Unique observed tags and hashtag terms, retaining first-seen spelling and order. */
-export function rankTags(video: CatalogVideo, limit = TAG_CANDIDATE_LIMIT): TagCandidate[] {
+export function rankTags(
+  video: Pick<CatalogVideo, 'tags' | 'description'>,
+  limit = TAG_CANDIDATE_LIMIT,
+): TagCandidate[] {
   const found = new Map<string, TagCandidate>();
   // A result's own hashtags are tags too: the same evidence, often more specific than its tags.
   const hashtagTerms = parseHashtags(video.description).map((h) => h.slice(1));
@@ -88,6 +98,16 @@ export function rankTags(video: CatalogVideo, limit = TAG_CANDIDATE_LIMIT): TagC
   }
   return [...found.values()].slice(0, limit);
 }
+
+/** A peer release's own candidate list, labeled by its ref. */
+export const releaseList = (release: PeerRelease): CandidateList => ({
+  source: 'peer',
+  ref: release.ref,
+  videoId: release.videoId,
+  title: release.title,
+  hashtags: release.hashtags,
+  tags: rankTags(release),
+});
 
 export function topVideos(videos: CatalogVideo[], count = TOP_VIDEO_COUNT): AudienceVideo[] {
   return videos.slice(0, count).map((v) => ({
@@ -153,7 +173,9 @@ export function audienceEvidence(
     const evidence: AudienceEvidence = {
       retrievedAt,
       query,
-      candidateLists: found.slice(0, CANDIDATE_VIDEO_LIMIT).map((video) => ({
+      candidateLists: found.slice(0, CANDIDATE_VIDEO_LIMIT).map((video, index) => ({
+        source: 'genre',
+        ref: `G${index + 1}`,
         videoId: video.videoId,
         title: video.title,
         hashtags: rankHashtags(video.description),

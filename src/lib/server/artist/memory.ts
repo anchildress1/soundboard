@@ -1,5 +1,6 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
-import type { PickFields } from '#lib/types.js';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import type { Influence } from '#lib/influence.js';
+import type { PickFields, Recommendation } from '#lib/types.js';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
 import { artistMemory, jobs, users } from '#lib/server/core/schema.js';
 
@@ -94,18 +95,41 @@ export async function recentFeedback(artistId: string, limit = 20): Promise<Feed
   return rows.map((r) => r.data as Feedback);
 }
 
-export async function recordPublish(
-  tx: Tx,
-  artistId: string,
-  record: {
-    videoId: string;
-    url: string;
-    jobId: string;
-    fields: PickFields;
-    status: 'VERIFIED';
-    at: number;
-  },
-): Promise<void> {
+/**
+ * A verified upload as the artist's memory keeps it. `recommendation` is what the pick suggested,
+ * as refs only; the approved `fields` are what was published. No YouTube data.
+ */
+export type Publish = {
+  videoId: string;
+  url: string;
+  jobId: string;
+  fields: PickFields;
+  status: 'VERIFIED';
+  at: number;
+  /** `evidence` refs are numbered per run, so they name peers only with `researchRunId`. */
+  recommendation:
+    | (Pick<Recommendation, 'approach' | 'intendedOutcome' | 'evidence'> & {
+        researchRunId: string | null;
+      })
+    | null;
+  influence: Influence | null;
+  /** Whether the approved fields differ from the pick's, so a learned result isn't credited to it. */
+  editedBeforeApproval: boolean;
+};
+
+/** The publish records of these videos, for linking an outcome to what was suggested. */
+export async function publishesFor(artistId: string, videoIds: string[]): Promise<Publish[]> {
+  if (videoIds.length === 0) return [];
+  const rows = await query((tx) =>
+    tx
+      .select({ data: artistMemory.data })
+      .from(artistMemory)
+      .where(and(memoryOf(artistId, 'publish'), inArray(artistMemory.key, videoIds))),
+  );
+  return rows.map((r) => r.data as Publish);
+}
+
+export async function recordPublish(tx: Tx, artistId: string, record: Publish): Promise<void> {
   await tx
     .insert(artistMemory)
     .values({ artistId, kind: 'publish', key: record.videoId, data: record })

@@ -1,5 +1,6 @@
 import type { ArtistInput, ArtistValue } from './artist';
 import type { Approved, BrandGuide, GuideKind, Proposal, VoiceRules } from './brand';
+import type { Influence } from './influence';
 import type { JobView, Wait } from './types';
 
 /** Each field's message, keyed by the form's field names. */
@@ -173,6 +174,25 @@ export function saveArtist(body: ArtistInput) {
   return call<{ artist: ArtistValue }>('/api/artist', {
     method: 'PUT',
     body: JSON.stringify(body),
+  });
+}
+
+/** Saves the peer-influence settings on the approved brand guide; a 409 means there is none. */
+export function saveInfluence(influence: Influence) {
+  return call<{ influence: Influence }>('/api/influence', {
+    method: 'PUT',
+    body: JSON.stringify(influence),
+  });
+}
+
+/**
+ * "Not a peer" on pick `version`: later research skips the peer's channel. A 409 means its evidence
+ * has expired or a newer pick replaced it.
+ */
+export function rejectPeer(id: string, ref: string, version: number) {
+  return call<{ rejected: string }>(`/api/jobs/${id}/peers/${encodeURIComponent(ref)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
   });
 }
 

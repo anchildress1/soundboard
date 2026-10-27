@@ -4,6 +4,8 @@ import { scrubBreadcrumb, scrubEvent, scrubSpan } from '#lib/scrub.js';
 
 init({
   dsn: PUBLIC_SENTRY_DSN,
+  // Without it every event, local dev included, reports as production.
+  environment: import.meta.env.MODE,
   tracesSampleRate: 1,
   integrations: [browserTracingIntegration()],
   beforeBreadcrumb: scrubBreadcrumb,

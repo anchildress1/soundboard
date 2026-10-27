@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { captureException, captureMessage } from '@sentry/sveltekit';
+import { readFileSync } from 'node:fs';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClients } from '#lib/server/core/clients.js';
@@ -7,6 +8,7 @@ import { db } from '#lib/server/core/db.js';
 import { DeadlineExceeded } from '#lib/server/core/deadline.js';
 import {
   accessTokenFor,
+  analyticsShared,
   getConnection,
   markRevoked,
   ownChannelUploads,
@@ -14,8 +16,14 @@ import {
   revokeGrant,
   type ConnectionRow,
 } from '#lib/server/platforms/youtube/connection.js';
-import { artistGuides } from '#lib/server/core/schema.js';
-import { DeadlineSpent, identityFailure } from '#lib/server/platforms/youtube/youtube.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { query } from '#lib/server/core/db.js';
+import { artistGuides, artistOutcomes } from '#lib/server/core/schema.js';
+import {
+  ANALYTICS_SCOPE,
+  DeadlineSpent,
+  identityFailure,
+} from '#lib/server/platforms/youtube/youtube.js';
 import { seed } from '../../../../../helpers/db';
 import { approvedGuide, pendingProposal } from '../../../../../helpers/pipeline';
 
@@ -187,7 +195,25 @@ describe('markRevoked', () => {
   });
 });
 
+describe('analyticsShared', () => {
+  it('is true only for a connected grant with the analytics scope', () => {
+    expect(analyticsShared({ status: 'connected', scopes: [...SCOPES, ANALYTICS_SCOPE] })).toBe(
+      true,
+    );
+    expect(analyticsShared({ status: 'connected', scopes: SCOPES })).toBe(false);
+    expect(analyticsShared({ status: 'revoked', scopes: [ANALYTICS_SCOPE] })).toBe(false);
+    expect(analyticsShared(null)).toBe(false);
+  });
+});
+
 describe('accessTokenFor', () => {
+  it("returns the grant's generation with the token", async () => {
+    await putConnection(UID, connected());
+    oauth.getAccessToken.mockResolvedValueOnce({ token: 'access-token' });
+    const access = await accessTokenFor(UID, CHANNEL, later());
+    expect(access!.grantAt).toEqual((await getConnection(UID))!.updatedAt);
+  });
+
   it('decrypts the stored token and refreshes it', async () => {
     await putConnection(UID, connected());
     oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
@@ -306,6 +332,43 @@ describe('accessTokenFor', () => {
       status: 'connected',
       tokenCiphertext: 'bmV3',
     });
+  });
+
+  it('drops only the Analytics scope when Analytics refuses, leaving a newer grant alone', async () => {
+    const shared = [...SCOPES, ANALYTICS_SCOPE];
+    await putConnection(UID, connected({ scopes: shared }));
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
+    const access = (await accessTokenFor(UID, CHANNEL, later()))!;
+    await access.analyticsRefused({ 'job.id': 'j1' });
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected', scopes: SCOPES });
+
+    await putConnection(UID, connected({ scopes: shared, tokenCiphertext: 'bmV3' }));
+    await access.analyticsRefused();
+    expect(await getConnection(UID)).toMatchObject({ scopes: shared, tokenCiphertext: 'bmV3' });
+  });
+
+  it('reports an Analytics refusal it could not record, and still returns', async () => {
+    await putConnection(UID, connected({ scopes: [...SCOPES, ANALYTICS_SCOPE] }));
+    oauth.getAccessToken.mockResolvedValueOnce({ token: ACCESS });
+    const access = (await accessTokenFor(UID, CHANNEL, later()))!;
+    await db().execute(sql`
+      create function refuse_write() returns trigger language plpgsql
+        as $$ begin raise exception 'write refused'; end $$
+    `);
+    await db().execute(sql`
+      create trigger refuse_write before update on connections
+        for each row execute function refuse_write()
+    `);
+    try {
+      await expect(access.analyticsRefused({ 'job.id': 'j1' })).resolves.toBeUndefined();
+    } finally {
+      await db().execute(sql`drop trigger refuse_write on connections`);
+      await db().execute(sql`drop function refuse_write`);
+    }
+    expect(vi.mocked(captureException)).toHaveBeenCalledWith(
+      expect.objectContaining({ cause: expect.objectContaining({ message: 'write refused' }) }),
+      { tags: { 'job.id': 'j1', component: 'analytics-revoke-mark' } },
+    );
   });
 
   it('reports a refused grant it could not mark revoked, and still returns', async () => {
@@ -491,6 +554,18 @@ describe('ownChannelUploads', () => {
     }
   });
 
+  it('reads a channel with no videos as no uploads and keeps the grant', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes('/channels')
+        ? answer(200, {
+            items: [{ id: CHANNEL, contentDetails: { relatedPlaylists: { uploads: 'UUa' } } }],
+          })
+        : refusal(404, 'playlistNotFound'),
+    );
+    expect(await ownChannelUploads(UID, 3, later())).toEqual([]);
+    expect(await getConnection(UID)).toMatchObject({ status: 'connected' });
+  });
+
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
     'waits on a reconnect when the connection is %s, with no YouTube call',
     async (status) => {
@@ -635,6 +710,18 @@ describe('revokeGrant', () => {
     expect(await revokeGrant(UID)).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(captureException).toHaveBeenCalledOnce();
+    expect(await getConnection(UID)).toBeNull();
+  });
+
+  it('warns, rather than errors, when the stored grant no longer decrypts', async () => {
+    await putConnection(UID, connected());
+    kms.decrypt.mockRejectedValue(kmsRefusal(DECRYPTION_FAILED));
+    expect(await revokeGrant(UID)).toBe(false);
+    expect(captureException).not.toHaveBeenCalled();
+    expect(captureMessage).toHaveBeenCalledWith('YouTube grant does not decrypt', {
+      level: 'warning',
+      tags: { component: 'youtube-revoke' },
+    });
     expect(await getConnection(UID)).toBeNull();
   });
 
@@ -832,5 +919,104 @@ describe('guide proposals across grants', () => {
     });
     await revokeGrant(UID);
     expect(await kinds()).toEqual(['proposed:theirs']);
+  });
+});
+
+describe('artist outcomes across sharing', () => {
+  const SHARED = [...SCOPES, ANALYTICS_SCOPE];
+  const outcome = (artistId: string, videoId: string) => ({
+    artistId,
+    videoId,
+    retrievedAt: new Date(),
+    publishedAt: new Date(Date.now() - 40 * 24 * 60 * 60_000),
+    requestedStart: '2026-09-01',
+    requestedEnd: '2026-09-28',
+    coverage: 'complete' as const,
+    metrics: { views: 10, subscribersGained: 1, subscribersLost: 0 },
+    live: { title: 'Song', description: '', tags: [] },
+  });
+  const stored = async () =>
+    (await db().select({ artistId: artistOutcomes.artistId }).from(artistOutcomes))
+      .map((row) => row.artistId)
+      .toSorted();
+  /** What review reads: the caller's outcomes under RLS. */
+  const visible = () => withIdentity(UID, () => query((tx) => tx.select().from(artistOutcomes)));
+
+  beforeEach(async () => {
+    await db().execute(sql`truncate artists cascade`);
+    await seed({
+      artists: [
+        { id: 'art-1', name: 'Artist One' },
+        { id: 'art-2', name: 'Artist Two' },
+      ],
+      users: [
+        { uid: UID, email: 'a@example.com', artistId: 'art-1' },
+        { uid: 'sub-b', email: 'b@example.com', artistId: 'art-2' },
+      ],
+    });
+    await putConnection(UID, connected({ scopes: SHARED }));
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SHARED }));
+    await seed({ artistOutcomes: [outcome('art-1', 'v1'), outcome('art-2', 'v2')] });
+  });
+
+  it('shows the artist their own results while the grant is shared', async () => {
+    expect((await visible()).map((row) => row.videoId)).toEqual(['v1']);
+  });
+
+  it('deletes them when the grant is marked revoked, sparing every other artist', async () => {
+    await markRevoked(UID, grant('c2VhbGVk'));
+    expect(await stored()).toEqual(['art-2']);
+    expect(await visible()).toEqual([]);
+  });
+
+  it('keeps them when a stale token is refused after a reconnect', async () => {
+    await putConnection(UID, connected({ scopes: SHARED, tokenCiphertext: 'bmV3' }));
+    await markRevoked(UID, grant('b2xk'));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('deletes them when Disconnect removes the connection', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 200 })),
+    );
+    await revokeGrant(UID);
+    expect(await stored()).toEqual(['art-2']);
+    expect(await visible()).toEqual([]);
+  });
+
+  it('deletes them when a reconnect drops the Analytics scope', async () => {
+    await putConnection(UID, connected({ scopes: SCOPES }));
+    expect(await stored()).toEqual(['art-2']);
+  });
+
+  it('keeps them when a reconnect keeps the scope', async () => {
+    await putConnection(UID, connected({ scopes: SHARED, tokenCiphertext: 'bmV3' }));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('hides them at once, before any delete, while sharing is off', async () => {
+    await db().execute(sql`update connections set scopes = '{}' where uid = ${UID}`);
+    await seed({ artistOutcomes: [outcome('art-1', 'v3')] });
+    expect(await visible()).toEqual([]);
+  });
+
+  it('has nothing to delete for a connection that never shared', async () => {
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SCOPES }));
+    await seed({ artistOutcomes: [outcome('art-2', 'v4')] });
+    await putConnection('sub-b', connected({ channelId: 'UC-b', scopes: SCOPES }));
+    expect(await stored()).toEqual(['art-1', 'art-2']);
+  });
+
+  it('keeps platform code free of the research and artist-memory domains', () => {
+    const imports = (file: string) =>
+      readFileSync(`src/lib/server/platforms/youtube/${file}`, 'utf8').match(
+        /#lib\/server\/(?:artist|research)\/[\w-]+\.js/g,
+      ) ?? [];
+    expect(imports('analytics.ts')).toEqual([]);
+    expect(imports('youtube.ts')).toEqual([]);
+    expect(imports('index.ts')).toEqual([]);
+    // Dropping guide proposals with a grant is 005's only dependency.
+    expect(imports('connection.ts')).toEqual(['#lib/server/artist/guides.js']);
   });
 });

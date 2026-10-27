@@ -41,6 +41,7 @@ import { ActionError } from '#lib/server/core/errors.js';
 import { decrypt, UPLOAD_KMS_MS } from '#lib/server/core/kms.js';
 import { cancelUploadSession, objectInfo, sweepUploads } from '#lib/server/media/gcs.js';
 import { STALE_ANALYSIS, staleAnalysis } from '#lib/server/pipeline/short.js';
+import { clearFailedRun, failRun } from '#lib/server/research/runs.js';
 
 function requireState(job: JobDoc, states: JobState[]): void {
   if (!states.includes(job.state))
@@ -61,14 +62,7 @@ function tagError(tags: string[], job: JobDoc, draft: Pick): string | undefined 
   const allowed = new Set(
     tagPool({
       artistName: artist,
-      candidateLists: job.audience?.candidateLists ?? [
-        {
-          videoId: job.videoId ?? job.id,
-          title: draft.title,
-          hashtags: draft.hashtags,
-          tags: draft.tags.map((tag) => ({ tag })),
-        },
-      ],
+      candidateLists: job.candidateLists ?? [],
     }).map((c) => c.tag.toLowerCase()),
   );
   const stray = tags.filter((tag) => !allowed.has(tag.trim().toLowerCase()));
@@ -190,6 +184,8 @@ export async function rerun(job: JobDoc): Promise<void> {
   }
   const current = await latestPick(job.id);
   const skipped = await skipAndRepick(job.id, current?.version ?? null, async (tx) => {
+    // A failed run is terminal while the page polls; only a re-run lets the next pick start anew.
+    await clearFailedRun(tx, job.id);
     if (!current) return;
     await writeFeedback(
       tx,
@@ -240,12 +236,12 @@ async function landedUpload(job: JobDoc): Promise<boolean> {
 /**
  * Marks the job discarded, only while it is as `job` read it: for a job awaiting its upload, the
  * same object and generation. A finished upload's state is cleared in the same statement, since
- * that video is kept.
+ * that video is kept, and the job's research run fails in the same transaction.
  */
 async function markDiscarded(job: JobDoc, landed: boolean): Promise<boolean> {
   const awaiting = job.state === 'AWAITING_UPLOAD';
-  const written = await query((tx) =>
-    tx
+  return await query(async (tx) => {
+    const written = await tx
       .update(jobs)
       .set(jobSet(landed ? { state: 'DISCARDED', videoUpload: null } : { state: 'DISCARDED' }))
       .where(
@@ -258,9 +254,12 @@ async function markDiscarded(job: JobDoc, landed: boolean): Promise<boolean> {
             )
           : and(eq(jobs.id, job.id), inArray(jobs.state, DISCARDABLE)),
       )
-      .returning({ id: jobs.id }),
-  );
-  return written.length > 0;
+      .returning({ id: jobs.id });
+    if (written.length === 0) return false;
+    // An in-flight batch then fails its token check, and queued deliveries find the run finished.
+    await failRun(job.id, 'discarded', null, tx);
+    return true;
+  });
 }
 
 /**

@@ -73,6 +73,16 @@ describe('scrubEvent', () => {
     );
   });
 
+  it("drops a failed query's bound values and keeps the statement", () => {
+    const failed =
+      'Failed query: insert into "jobs" ("id") values ($1)\nparams: j1,sub-1,{"sessionCipher":"c2Vj"}';
+    const event = scrubEvent({ message: failed, exception: { values: [{ value: failed }] } });
+    for (const text of [event.message, event.exception!.values![0]!.value]) {
+      expect(text).toBe('Failed query: insert into "jobs" ("id") values ($1)\nparams: [redacted]');
+    }
+    expect(scrubBreadcrumb({ message: failed }).message).not.toContain('sessionCipher');
+  });
+
   it('scrubs request, transaction, trace data, and spans', () => {
     const event = scrubEvent({
       request: { url: SIGNED, query_string: 'X-Goog-Signature=abc' },
@@ -90,6 +100,17 @@ describe('scrubEvent', () => {
     expect(event.transaction).toBe('GET https://h/a?[redacted]');
     expect(event.spans[1]).toEqual({ description: 'no url' });
     expect(event.spans[2]).toEqual({});
+  });
+
+  it("drops a failed query's bound values from event spans", () => {
+    const failed = 'Failed query: select 1\nparams: sub-1,c2Vj';
+    const event = scrubEvent({
+      spans: [{ description: failed, data: { 'db.error': failed, rows: 2 } }],
+    });
+    expect(event.spans[0]).toEqual({
+      description: 'Failed query: select 1\nparams: [redacted]',
+      data: { 'db.error': 'Failed query: select 1\nparams: [redacted]', rows: 2 },
+    });
   });
 
   it('tolerates an event without request, spans, or contexts', () => {
@@ -128,6 +149,15 @@ describe('scrubSpan', () => {
     expect(span.attributes['url.query']).toBe(REDACTED);
     expect(span.attributes['gen_ai.usage.input_tokens']).toBe(900);
     expect(span.attributes['job.ok']).toBe(true);
+  });
+
+  it("drops a failed query's bound values from the span name and attributes", () => {
+    const failed = 'Failed query: select 1\nparams: sub-1,c2Vj';
+    const span = scrubSpan({ name: failed, attributes: { 'db.error': failed } });
+    expect(span).toEqual({
+      name: 'Failed query: select 1\nparams: [redacted]',
+      attributes: { 'db.error': 'Failed query: select 1\nparams: [redacted]' },
+    });
   });
 
   it('scrubs string arrays and { value, unit } attribute objects', () => {

@@ -5,28 +5,40 @@ import Footer from '#lib/components/Footer.svelte';
 const credit = () => screen.getByRole('contentinfo').querySelector('p')!;
 
 describe('Footer', () => {
-  it('credits the artist with a link to their Bandcamp, opening a new tab', () => {
-    render(Footer, {
-      artist: { name: 'Test Artist', bandcampUrl: 'https://test-artist.bandcamp.com' },
-    });
+  it('credits Flies Like Robots with a link to their Bandcamp, opening a new tab', () => {
+    render(Footer);
     expect(credit()).toHaveTextContent(
-      'Built for Test Artist by Ashley Childress · PolyForm Noncommercial 1.0.0',
+      'Built for Flies Like Robots by Ashley Childress · PolyForm Noncommercial 1.0.0',
     );
-    const link = within(credit()).getByRole('link', { name: 'Test Artist' });
-    expect(link).toHaveAttribute('href', 'https://test-artist.bandcamp.com');
+    const link = within(credit()).getByRole('link', { name: 'Flies Like Robots' });
+    expect(link).toHaveAttribute('href', 'https://flieslikerobots.bandcamp.com');
     expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
   });
 
-  it('names the artist as plain text without a Bandcamp URL', () => {
-    render(Footer, { artist: { name: 'Test Artist', bandcampUrl: null } });
-    expect(credit()).toHaveTextContent('Built for Test Artist by Ashley Childress');
-    expect(within(credit()).queryByRole('link')).toBeNull();
-  });
-
-  it('names no artist without a profile', () => {
-    render(Footer, { artist: null });
-    expect(credit()).toHaveTextContent('Built by Ashley Childress · PolyForm Noncommercial 1.0.0');
-    expect(credit()).not.toHaveTextContent('Built for');
+  it('shows one icon link per profile, each opening a new tab, then the legal links', () => {
+    render(Footer);
+    const legal = screen.getByRole('navigation', { name: 'Legal' });
+    const social = screen.getByRole('navigation', { name: 'Ashley Childress' });
+    expect(social.compareDocumentPosition(legal)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      within(legal)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Terms of Service', 'Privacy policy']);
+    const links = within(social).getAllByRole('link');
+    expect(links.map((a) => [a.getAttribute('aria-label'), a.getAttribute('href')])).toEqual([
+      ['Site', 'https://anchildress1.dev'],
+      ['GitHub', 'https://github.com/anchildress1'],
+      ['DEV', 'https://dev.to/anchildress1'],
+      ['LinkedIn', 'https://www.linkedin.com/in/anchildress1'],
+      ['X', 'https://x.com/anchildress1'],
+    ]);
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'external noopener noreferrer');
+      expect(link.querySelector('svg path')?.getAttribute('d')).toBeTruthy();
+      expect(link.textContent?.trim()).toBe('');
+    }
   });
 });

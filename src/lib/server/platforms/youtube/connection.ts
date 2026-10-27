@@ -1,5 +1,5 @@
 import { captureException, captureMessage } from '@sentry/sveltekit';
-import { and, eq, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, isNull, ne, or, sql } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 import { dropProposals } from '#lib/server/artist/guides.js';
 import { query, type Database, type Tx } from '#lib/server/core/db.js';
@@ -15,6 +15,7 @@ import {
   channelsMine,
   DeadlineSpent,
   identityFailure,
+  ANALYTICS_SCOPE,
   ownUploads,
   YOUTUBE_SCOPES,
   type CatalogVideo,
@@ -45,6 +46,11 @@ export type Connection = ConnectionRow & Pick<Stored, 'uid' | 'updatedAt'>;
 export type ConnectionStatus = Connection['status'];
 
 const mine = (uid: string) => eq(connections.uid, uid);
+
+/** Whether the connection shares the artist's YouTube Analytics right now. */
+export function analyticsShared(connection: Pick<Connection, 'status' | 'scopes'> | null): boolean {
+  return connection?.status === 'connected' && connection.scopes.includes(ANALYTICS_SCOPE);
+}
 
 /** The user's YouTube connection; pass `q` to read it inside the caller's transaction. */
 export async function getConnection(uid: string, q?: Database | Tx): Promise<Connection | null> {
@@ -89,7 +95,12 @@ async function revokeAtGoogle(tokenCiphertext: string): Promise<boolean> {
       tags: { status: response.status },
     });
   } catch (error) {
-    captureException(error, { tags: { component: 'youtube-revoke' } });
+    if (undecryptable(error))
+      captureMessage('YouTube grant does not decrypt', {
+        level: 'warning',
+        tags: { component: 'youtube-revoke' },
+      });
+    else captureException(error, { tags: { component: 'youtube-revoke' } });
   }
   return false;
 }
@@ -143,11 +154,30 @@ export async function markRevoked(uid: string, grant: Grant): Promise<void> {
 }
 
 /**
- * A fresh access token, and how to give up its grant once YouTube refuses the token. `refused`
- * never throws: a failed write is reported (with the caller's tags, such as the job), so the caller
- * still answers with its reconnect wait.
+ * Drops the Analytics scope from the grant Analytics refused, so a save under it fails and the
+ * database trigger deletes the artist's outcomes. A newer grant from a reconnect is left alone.
  */
-export type Access = { token: string; refused: (tags?: Record<string, string>) => Promise<void> };
+async function markAnalyticsRefused(uid: string, grant: Grant): Promise<void> {
+  await query((tx) =>
+    tx
+      .update(connections)
+      .set({ scopes: sql`array_remove(${connections.scopes}, ${ANALYTICS_SCOPE})` })
+      .where(and(mine(uid), eq(connections.tokenCiphertext, grant.tokenCiphertext))),
+  );
+}
+
+/**
+ * A fresh access token, and how to give up its grant, or only its Analytics scope, once YouTube
+ * refuses the token. Neither callback throws: a failed write is reported (with the caller's tags,
+ * such as the job), so the caller still answers with its wait.
+ */
+export type Access = {
+  token: string;
+  /** The grant's generation (`connections.updated_at`); a save under it needs the same grant. */
+  grantAt: Date;
+  refused: (tags?: Record<string, string>) => Promise<void>;
+  analyticsRefused: (tags?: Record<string, string>) => Promise<void>;
+};
 
 // gRPC DEADLINE_EXCEEDED: gax's own timeout, the twin of `within`'s.
 const GRPC_DEADLINE_EXCEEDED = 4;
@@ -207,12 +237,21 @@ export async function accessTokenFor(
   if (!token) throw new Error('Google refreshed the YouTube grant without an access token.');
   return {
     token,
+    grantAt: connection.updatedAt,
     refused: async (tags = {}) => {
       captureMessage('YouTube refused the grant', { level: 'warning', tags });
       try {
         await markRevoked(uid, grant);
       } catch (error) {
         captureException(error, { tags: { ...tags, component: 'youtube-revoke-mark' } });
+      }
+    },
+    analyticsRefused: async (tags = {}) => {
+      captureMessage('YouTube Analytics refused the grant', { level: 'warning', tags });
+      try {
+        await markAnalyticsRefused(uid, grant);
+      } catch (error) {
+        captureException(error, { tags: { ...tags, component: 'analytics-revoke-mark' } });
       }
     },
   };

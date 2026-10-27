@@ -1,0 +1,1375 @@
+{
+  "id": "58d7ed32-69da-4e39-920b-66dc92a8d5d8",
+  "prevId": "71fed3bf-320d-45d2-af38-03bd25ec79d6",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.artist_guides": {
+      "name": "artist_guides",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "artist_guides_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sources": {
+          "name": "sources",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "proposed_at": {
+          "name": "proposed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grant_at": {
+          "name": "grant_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "influence": {
+          "name": "influence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "artist_guides_expiry_idx": {
+          "name": "artist_guides_expiry_idx",
+          "columns": [
+            {
+              "expression": "proposed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"artist_guides\".\"status\" = 'proposed'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "artist_guides_artist_id_artists_id_fk": {
+          "name": "artist_guides_artist_id_artists_id_fk",
+          "tableFrom": "artist_guides",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "artist_guides_slot": {
+          "name": "artist_guides_slot",
+          "nullsNotDistinct": false,
+          "columns": ["artist_id", "kind", "status"]
+        }
+      },
+      "policies": {
+        "guides_read": {
+          "name": "guides_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_guides\".\"artist_id\") and (\"artist_guides\".\"status\" = 'approved' or \"artist_guides\".\"proposed_at\" > now() - interval '29 days')"
+        },
+        "guides_insert": {
+          "name": "guides_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": ["soundboard_app"],
+          "withCheck": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_guides\".\"artist_id\") and \"artist_guides\".\"status\" = 'approved' and \"artist_guides\".\"proposed_at\" <= now() and \"artist_guides\".\"proposed_at\" > now() - interval '29 days'"
+        },
+        "guides_update": {
+          "name": "guides_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_guides\".\"artist_id\") and (\"artist_guides\".\"status\" = 'approved' or \"artist_guides\".\"proposed_at\" > now() - interval '29 days')",
+          "withCheck": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_guides\".\"artist_id\") and \"artist_guides\".\"status\" = 'approved' and \"artist_guides\".\"proposed_at\" <= now() and \"artist_guides\".\"proposed_at\" > now() - interval '29 days'"
+        },
+        "guides_delete": {
+          "name": "guides_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_guides\".\"artist_id\") and \"artist_guides\".\"status\" = 'proposed'"
+        },
+        "guides_cleanup_read": {
+          "name": "guides_cleanup_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_cleanup"],
+          "using": "\"artist_guides\".\"status\" = 'proposed' and \"artist_guides\".\"proposed_at\" <= now() - interval '29 days'"
+        },
+        "guides_cleanup_delete": {
+          "name": "guides_cleanup_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_cleanup"],
+          "using": "\"artist_guides\".\"status\" = 'proposed' and \"artist_guides\".\"proposed_at\" <= now() - interval '29 days'"
+        }
+      },
+      "checkConstraints": {
+        "artist_guides_kind_check": {
+          "name": "artist_guides_kind_check",
+          "value": "\"artist_guides\".\"kind\" in ('voice', 'brand')"
+        },
+        "artist_guides_status_check": {
+          "name": "artist_guides_status_check",
+          "value": "\"artist_guides\".\"status\" in ('proposed', 'approved')"
+        },
+        "artist_guides_approved_check": {
+          "name": "artist_guides_approved_check",
+          "value": "(\"artist_guides\".\"status\" = 'approved') = (\"artist_guides\".\"approved_at\" is not null) and (\"artist_guides\".\"status\" = 'proposed' or \"artist_guides\".\"grant_at\" is null)"
+        },
+        "artist_guides_sources_check": {
+          "name": "artist_guides_sources_check",
+          "value": "jsonb_typeof(\"artist_guides\".\"sources\") is not distinct from 'object' and case \"artist_guides\".\"status\"\n          when 'proposed' then \"artist_guides\".\"sources\" - array['uploads','drafts','edits','approvals','thin'] = '{}'::jsonb\n            and jsonb_typeof(\"artist_guides\".\"sources\"->'uploads') is not distinct from 'array' and jsonb_typeof(\"artist_guides\".\"sources\"->'drafts') is not distinct from 'array'\n            and jsonb_typeof(\"artist_guides\".\"sources\"->'edits') is not distinct from 'number' and jsonb_typeof(\"artist_guides\".\"sources\"->'approvals') is not distinct from 'number' and jsonb_typeof(\"artist_guides\".\"sources\"->'thin') is not distinct from 'boolean'\n          else \"artist_guides\".\"sources\" - array['uploads','drafts','edits','approvals','carriedOver'] = '{}'::jsonb\n            and jsonb_typeof(\"artist_guides\".\"sources\"->'uploads') is not distinct from 'number' and jsonb_typeof(\"artist_guides\".\"sources\"->'drafts') is not distinct from 'number'\n            and jsonb_typeof(\"artist_guides\".\"sources\"->'edits') is not distinct from 'number' and jsonb_typeof(\"artist_guides\".\"sources\"->'approvals') is not distinct from 'number' and jsonb_typeof(\"artist_guides\".\"sources\"->'carriedOver') is not distinct from 'boolean'\n          end"
+        },
+        "artist_guides_influence_slot_check": {
+          "name": "artist_guides_influence_slot_check",
+          "value": "\"artist_guides\".\"influence\" is null or (\"artist_guides\".\"kind\" = 'brand' and \"artist_guides\".\"status\" = 'approved')"
+        },
+        "artist_guides_influence_check": {
+          "name": "artist_guides_influence_check",
+          "value": "\"artist_guides\".\"influence\" is null or public.soundboard_influence_ok(\"artist_guides\".\"influence\")"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.artist_memory": {
+      "name": "artist_memory",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "artist_memory_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "artist_memory_artist_id_artists_id_fk": {
+          "name": "artist_memory_artist_id_artists_id_fk",
+          "tableFrom": "artist_memory",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "artist_memory_key": {
+          "name": "artist_memory_key",
+          "nullsNotDistinct": false,
+          "columns": ["artist_id", "kind", "key"]
+        }
+      },
+      "policies": {
+        "memory_artist": {
+          "name": "memory_artist",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_memory\".\"artist_id\")",
+          "withCheck": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_memory\".\"artist_id\")"
+        }
+      },
+      "checkConstraints": {
+        "artist_memory_kind_check": {
+          "name": "artist_memory_kind_check",
+          "value": "\"artist_memory\".\"kind\" in ('fact', 'feedback', 'publish') and (\"artist_memory\".\"key\" is null) = (\"artist_memory\".\"kind\" = 'feedback')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.artist_outcomes": {
+      "name": "artist_outcomes",
+      "schema": "",
+      "columns": {
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "video_id": {
+          "name": "video_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retrieved_at": {
+          "name": "retrieved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_start": {
+          "name": "requested_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_end": {
+          "name": "requested_end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coverage": {
+          "name": "coverage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metrics": {
+          "name": "metrics",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "live": {
+          "name": "live",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "differs_from_approved": {
+          "name": "differs_from_approved",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "artist_outcomes_artist_id_artists_id_fk": {
+          "name": "artist_outcomes_artist_id_artists_id_fk",
+          "tableFrom": "artist_outcomes",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "artist_outcomes_artist_id_video_id_pk": {
+          "name": "artist_outcomes_artist_id_video_id_pk",
+          "columns": ["artist_id", "video_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "outcomes_read": {
+          "name": "outcomes_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"artist_outcomes\".\"artist_id\") and \"artist_outcomes\".\"retrieved_at\" > now() - interval '29 days' and exists (select 1 from public.connections c where c.uid = nullif(current_setting('app.user_sub', true), '') and c.status = 'connected' and c.scopes @> '{https://www.googleapis.com/auth/yt-analytics.readonly}')"
+        },
+        "outcomes_cleanup_read": {
+          "name": "outcomes_cleanup_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_cleanup"],
+          "using": "\"artist_outcomes\".\"retrieved_at\" <= now() - interval '29 days'"
+        },
+        "outcomes_cleanup_delete": {
+          "name": "outcomes_cleanup_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_cleanup"],
+          "using": "\"artist_outcomes\".\"retrieved_at\" <= now() - interval '29 days'"
+        }
+      },
+      "checkConstraints": {
+        "artist_outcomes_coverage_check": {
+          "name": "artist_outcomes_coverage_check",
+          "value": "\"artist_outcomes\".\"coverage\" in ('open', 'complete', 'unknown')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.artists": {
+      "name": "artists",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bandcamp_url": {
+          "name": "bandcamp_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contact_line": {
+          "name": "contact_line",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "artists_owner_read": {
+          "name": "artists_owner_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "\"artists\".\"id\" = (select u.artist_id from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        },
+        "artists_owner_update": {
+          "name": "artists_owner_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": ["soundboard_app"],
+          "using": "\"artists\".\"id\" = (select u.artist_id from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)",
+          "withCheck": "\"artists\".\"id\" = (select u.artist_id from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        }
+      },
+      "checkConstraints": {
+        "artists_name_check": {
+          "name": "artists_name_check",
+          "value": "\"artists\".\"name\" = btrim(\"artists\".\"name\") and char_length(\"artists\".\"name\") between 1 and 100 and \"artists\".\"name\" !~ '[<>,]' and \"artists\".\"name\" !~ '^#'"
+        },
+        "artists_bandcamp_check": {
+          "name": "artists_bandcamp_check",
+          "value": "\"artists\".\"bandcamp_url\" is null or \"artists\".\"bandcamp_url\" ~ '^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.bandcamp\\.com$'"
+        },
+        "artists_contact_check": {
+          "name": "artists_contact_check",
+          "value": "\"artists\".\"contact_line\" is null or (\"artists\".\"contact_line\" = btrim(\"artists\".\"contact_line\") and char_length(\"artists\".\"contact_line\") between 1 and 200 and \"artists\".\"contact_line\" !~ '[<>#]')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.connections": {
+      "name": "connections",
+      "schema": "",
+      "columns": {
+        "uid": {
+          "name": "uid",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "channel_title": {
+          "name": "channel_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_ciphertext": {
+          "name": "token_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "connections_uid_users_uid_fk": {
+          "name": "connections_uid_users_uid_fk",
+          "tableFrom": "connections",
+          "tableTo": "users",
+          "columnsFrom": ["uid"],
+          "columnsTo": ["uid"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "connections_owner": {
+          "name": "connections_owner",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["soundboard_app"],
+          "using": "\"connections\".\"uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)",
+          "withCheck": "\"connections\".\"uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        }
+      },
+      "checkConstraints": {
+        "connections_status_check": {
+          "name": "connections_status_check",
+          "value": "\"connections\".\"status\" in ('connected', 'missing_scopes', 'no_channel', 'revoked')"
+        },
+        "connections_shape_check": {
+          "name": "connections_shape_check",
+          "value": "(\"connections\".\"status\" = 'connected') = (\"connections\".\"token_ciphertext\" is not null) and (\"connections\".\"status\" <> 'connected' or \"connections\".\"channel_id\" is not null)"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.guide_claims": {
+      "name": "guide_claims",
+      "schema": "",
+      "columns": {
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_until": {
+          "name": "claim_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "limit_until": {
+          "name": "limit_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grant_at": {
+          "name": "grant_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "guide_claims_artist_id_artists_id_fk": {
+          "name": "guide_claims_artist_id_artists_id_fk",
+          "tableFrom": "guide_claims",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "guide_claims_artist_id_kind_pk": {
+          "name": "guide_claims_artist_id_kind_pk",
+          "columns": ["artist_id", "kind"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "claims_own": {
+          "name": "claims_own",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"guide_claims\".\"artist_id\")",
+          "withCheck": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"guide_claims\".\"artist_id\")"
+        }
+      },
+      "checkConstraints": {
+        "guide_claims_kind_check": {
+          "name": "guide_claims_kind_check",
+          "value": "\"guide_claims\".\"kind\" in ('voice', 'brand')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.job_audience": {
+      "name": "job_audience",
+      "schema": "",
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "retrieved_at": {
+          "name": "retrieved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "job_audience_retrieved_idx": {
+          "name": "job_audience_retrieved_idx",
+          "columns": [
+            {
+              "expression": "retrieved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "job_audience_job_id_jobs_id_fk": {
+          "name": "job_audience_job_id_jobs_id_fk",
+          "tableFrom": "job_audience",
+          "tableTo": "jobs",
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "audience_read": {
+          "name": "audience_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "\"job_audience\".\"retrieved_at\" > now() - interval '30 days' and exists (select 1 from public.jobs j where j.id = \"job_audience\".\"job_id\" and j.owner_uid = nullif(current_setting('app.user_sub', true), ''))"
+        },
+        "audience_cleanup_read": {
+          "name": "audience_cleanup_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_cleanup"],
+          "using": "\"job_audience\".\"retrieved_at\" <= now() - interval '30 days'"
+        },
+        "audience_cleanup_delete": {
+          "name": "audience_cleanup_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_cleanup"],
+          "using": "\"job_audience\".\"retrieved_at\" <= now() - interval '30 days'"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.job_research": {
+      "name": "job_research",
+      "schema": "",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retrieved_at": {
+          "name": "retrieved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "job_research_retrieved_idx": {
+          "name": "job_research_retrieved_idx",
+          "columns": [
+            {
+              "expression": "retrieved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "job_research_job_idx": {
+          "name": "job_research_job_idx",
+          "columns": [
+            {
+              "expression": "job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "job_research_job_id_jobs_id_fk": {
+          "name": "job_research_job_id_jobs_id_fk",
+          "tableFrom": "job_research",
+          "tableTo": "jobs",
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "research_read": {
+          "name": "research_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "\"job_research\".\"retrieved_at\" > now() - interval '29 days' and exists (select 1 from public.jobs j where j.id = \"job_research\".\"job_id\" and j.owner_uid = nullif(current_setting('app.user_sub', true), '')) and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        },
+        "research_cleanup_read": {
+          "name": "research_cleanup_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_cleanup"],
+          "using": "\"job_research\".\"retrieved_at\" <= now() - interval '29 days'"
+        },
+        "research_cleanup_delete": {
+          "name": "research_cleanup_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_cleanup"],
+          "using": "\"job_research\".\"retrieved_at\" <= now() - interval '29 days'"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.jobs": {
+      "name": "jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "owner_uid": {
+          "name": "owner_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claim_until": {
+          "name": "claim_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_channel_id": {
+          "name": "destination_channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_channel_title": {
+          "name": "destination_channel_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "upload_started_at": {
+          "name": "upload_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_chunk_at": {
+          "name": "final_chunk_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "video_id": {
+          "name": "video_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "picks": {
+          "name": "picks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "chunks": {
+          "name": "chunks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "feedback": {
+          "name": "feedback",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        }
+      },
+      "indexes": {
+        "jobs_owner_list_idx": {
+          "name": "jobs_owner_list_idx",
+          "columns": [
+            {
+              "expression": "owner_uid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"jobs\".\"parent_id\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "jobs_owner_uid_users_uid_fk": {
+          "name": "jobs_owner_uid_users_uid_fk",
+          "tableFrom": "jobs",
+          "tableTo": "users",
+          "columnsFrom": ["owner_uid"],
+          "columnsTo": ["uid"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "jobs_artist_id_artists_id_fk": {
+          "name": "jobs_artist_id_artists_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "jobs_parent_id_jobs_id_fk": {
+          "name": "jobs_parent_id_jobs_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "jobs",
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "jobs_read": {
+          "name": "jobs_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "\"jobs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        },
+        "jobs_insert": {
+          "name": "jobs_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": ["soundboard_app"],
+          "withCheck": "\"jobs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active) and ((\"jobs\".\"parent_id\" is null and \"jobs\".\"artist_id\" is not null and \"jobs\".\"artist_id\" = (select u.artist_id from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)) or public.soundboard_owns_job(\"jobs\".\"parent_id\", \"jobs\".\"artist_id\"))"
+        },
+        "jobs_update": {
+          "name": "jobs_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": ["soundboard_app"],
+          "using": "\"jobs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)",
+          "withCheck": "\"jobs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        },
+        "jobs_delete": {
+          "name": "jobs_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_app"],
+          "using": "\"jobs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)"
+        }
+      },
+      "checkConstraints": {
+        "jobs_state_check": {
+          "name": "jobs_state_check",
+          "value": "\"jobs\".\"state\" in ('AWAITING_UPLOAD', 'PREP', 'ANALYZE', 'PICK', 'HOOK', 'RENDER', 'REVIEW', 'PUBLISHING', 'CLAIMED_COMPLETE', 'VERIFIED', 'FAILED', 'DISCARDED')"
+        },
+        "jobs_research_external": {
+          "name": "jobs_research_external",
+          "value": "not (\"jobs\".\"data\" ? 'audience') and not (\"jobs\".\"data\" ? 'hashtagCandidates')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.peer_rejections": {
+      "name": "peer_rejections",
+      "schema": "",
+      "columns": {
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retrieved_at": {
+          "name": "retrieved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "peer_rejections_artist_id_artists_id_fk": {
+          "name": "peer_rejections_artist_id_artists_id_fk",
+          "tableFrom": "peer_rejections",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "peer_rejections_artist_id_channel_id_pk": {
+          "name": "peer_rejections_artist_id_channel_id_pk",
+          "columns": ["artist_id", "channel_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "rejections_read": {
+          "name": "rejections_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"peer_rejections\".\"artist_id\") and \"peer_rejections\".\"retrieved_at\" > now() - interval '29 days'"
+        },
+        "rejections_cleanup_read": {
+          "name": "rejections_cleanup_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_cleanup"],
+          "using": "\"peer_rejections\".\"retrieved_at\" <= now() - interval '29 days'"
+        },
+        "rejections_cleanup_delete": {
+          "name": "rejections_cleanup_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": ["soundboard_cleanup"],
+          "using": "\"peer_rejections\".\"retrieved_at\" <= now() - interval '29 days'"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    },
+    "public.research_runs": {
+      "name": "research_runs",
+      "schema": "",
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "owner_uid": {
+          "name": "owner_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_until": {
+          "name": "claim_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consecutive_failures": {
+          "name": "consecutive_failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "wait": {
+          "name": "wait",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "limits": {
+          "name": "limits",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "research_runs_job_id_jobs_id_fk": {
+          "name": "research_runs_job_id_jobs_id_fk",
+          "tableFrom": "research_runs",
+          "tableTo": "jobs",
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "research_runs_owner_uid_users_uid_fk": {
+          "name": "research_runs_owner_uid_users_uid_fk",
+          "tableFrom": "research_runs",
+          "tableTo": "users",
+          "columnsFrom": ["owner_uid"],
+          "columnsTo": ["uid"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "research_runs_artist_id_artists_id_fk": {
+          "name": "research_runs_artist_id_artists_id_fk",
+          "tableFrom": "research_runs",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "research_runs_id_unique": {
+          "name": "research_runs_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id"]
+        }
+      },
+      "policies": {
+        "runs_owner": {
+          "name": "runs_owner",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["soundboard_app"],
+          "using": "\"research_runs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.users u where u.uid = nullif(current_setting('app.user_sub', true), '') and u.active)",
+          "withCheck": "\"research_runs\".\"owner_uid\" = nullif(current_setting('app.user_sub', true), '') and exists (select 1 from public.jobs j join public.users u on u.uid = nullif(current_setting('app.user_sub', true), '') where j.id = \"research_runs\".\"job_id\" and j.owner_uid = nullif(current_setting('app.user_sub', true), '') and u.active and u.artist_id = \"research_runs\".\"artist_id\")"
+        }
+      },
+      "checkConstraints": {
+        "research_runs_stage_check": {
+          "name": "research_runs_stage_check",
+          "value": "\"research_runs\".\"stage\" in ('learn', 'discover', 'match', 'releases', 'done', 'failed')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "uid": {
+          "name": "uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "artist_id": {
+          "name": "artist_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "users_artist_id_artists_id_fk": {
+          "name": "users_artist_id_artists_id_fk",
+          "tableFrom": "users",
+          "tableTo": "artists",
+          "columnsFrom": ["artist_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_uid_unique": {
+          "name": "users_uid_unique",
+          "nullsNotDistinct": false,
+          "columns": ["uid"]
+        },
+        "users_artist_id_unique": {
+          "name": "users_artist_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["artist_id"]
+        }
+      },
+      "policies": {
+        "users_self": {
+          "name": "users_self",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["soundboard_app"],
+          "using": "\"users\".\"uid\" = nullif(current_setting('app.user_sub', true), '') and \"users\".\"active\""
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": true
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {
+    "public.job_audience_fresh": {
+      "columns": {
+        "job_id": {
+          "name": "job_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "retrieved_at": {
+          "name": "retrieved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "definition": "select \"job_id\", \"retrieved_at\", \"evidence\" from \"job_audience\" where \"job_audience\".\"retrieved_at\" > now() - interval '30 days'",
+      "name": "job_audience_fresh",
+      "schema": "public",
+      "isExisting": false,
+      "with": {
+        "securityInvoker": true
+      },
+      "materialized": false
+    }
+  },
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

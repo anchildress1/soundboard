@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { isHttpError, isRedirect } from '@sveltejs/kit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { resetClients } from '#lib/server/core/clients.js';
+import { db } from '#lib/server/core/db.js';
+import { jobs, researchRuns } from '#lib/server/core/schema.js';
+import type { ReviewData } from '#lib/review.js';
 import { load } from '#src/routes/jobs/[id]/+page.server.js';
 import type { JobView } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
@@ -33,6 +37,7 @@ vi.mock('@google-cloud/storage', () => ({
 
 type Event = Parameters<typeof load>[0];
 type Data = {
+  research: ReviewData | null;
   expired: boolean;
   approveTo: { channelId: string; channelTitle: string | null } | null;
   view: JobView;
@@ -303,5 +308,67 @@ describe('job page load: the browser upload', () => {
   it('never puts the session URI in the page data', async () => {
     await uploading();
     expect(JSON.stringify((await run('u')).data)).not.toContain('upload_id');
+  });
+});
+
+describe('job page load: research', () => {
+  const stored = (patch: Record<string, unknown> = {}) => ({
+    version: 1,
+    title: 'T',
+    description: 'd',
+    hashtags: [],
+    tags: [],
+    flags: [],
+    brandCheck: '',
+    why: { title: '', description: '', tags: '' },
+    bandcamp: { about: '', credits: '' },
+    artistName: null,
+    modelMs: 1,
+    skipped: false,
+    ...patch,
+  });
+  const setPick = (pick: Record<string, unknown>) =>
+    db()
+      .update(jobs)
+      .set({ picks: [pick] })
+      .where(eq(jobs.id, 'r'));
+
+  it('has no review data for a pick made before fanbase learning', async () => {
+    await put('r', { state: 'REVIEW' });
+    await setPick(stored());
+    expect((await run('r')).data.research).toBeNull();
+  });
+
+  it('has no review data before there is a pick', async () => {
+    await put('r');
+    expect((await run('r')).data.research).toBeNull();
+  });
+
+  it('builds review data for a pick with its settings, without starting research', async () => {
+    await put('r', { state: 'REVIEW' });
+    await setPick(
+      stored({
+        influence: { sound: 1, feel: 0, wording: 0, discovery: 4, structure: 4 },
+        citations: { sound: ['analysis'], feel: [], wording: [], discovery: [], structure: [] },
+        recommendation: null,
+        researchRunId: 'gone',
+        evidenceExpiresAt: '2026-11-20T00:00:00.000Z',
+        outcomeRefs: {},
+      }),
+    );
+    const { data } = await run('r');
+    expect(data.research).toMatchObject({
+      recommendation: null,
+      peers: null,
+      evidenceExpiresAt: '2026-11-20T00:00:00.000Z',
+      sources: { tags: [{ ref: 'analysis', label: 'Song analysis' }] },
+    });
+    expect(await db().select().from(researchRuns)).toEqual([]);
+  });
+
+  it("never gives another user's job's review data", async () => {
+    await put('r', { state: 'REVIEW' });
+    const error = await run('r', USER_A).catch((e: unknown) => e);
+    expect(isHttpError(error) && error.status).toBe(404);
   });
 });

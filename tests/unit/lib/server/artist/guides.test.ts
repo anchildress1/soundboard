@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProposalSources } from '#lib/brand.js';
+import { DEFAULT_INFLUENCE, type Influence } from '#lib/influence.js';
 import { ModelBusy, ModelQuotaSpent } from '#lib/server/ai/model.js';
 import {
   approveGuide,
@@ -11,8 +12,11 @@ import {
   discardProposal,
   getGuides,
   GUIDE_CHANGED,
+  influenceSettings,
+  NO_BRAND_GUIDE,
   proposeStep,
   releaseProposal,
+  saveInfluence,
   saveProposal,
 } from '#lib/server/artist/guides.js';
 import { db } from '#lib/server/core/db.js';
@@ -83,12 +87,121 @@ describe('getGuides', () => {
   });
 });
 
+const MINE: Influence = { sound: 0, feel: 2, wording: 3, discovery: 4, structure: 1 };
+const OTHER: Influence = { sound: 4, feel: 4, wording: 4, discovery: 0, structure: 0 };
+const brandInfluence = (artistId: string) =>
+  db()
+    .select({ influence: artistGuides.influence })
+    .from(artistGuides)
+    .where(and(eq(artistGuides.artistId, artistId), eq(artistGuides.kind, 'brand')));
+
 describe('approvedGuides', () => {
-  it('returns only approved bodies, never a proposal', async () => {
+  it('returns only approved bodies, never a proposal, with the default influence', async () => {
     await seed({
       artistGuides: [approvedGuide(C, 'brand', GUIDE), pendingProposal(C, 'voice', VOICE)],
     });
-    expect(await asC(() => approvedGuides(C))).toEqual({ voice: null, brand: GUIDE });
+    expect(await asC(() => approvedGuides(C))).toEqual({
+      voice: null,
+      brand: GUIDE,
+      influence: DEFAULT_INFLUENCE,
+    });
+  });
+
+  it('returns the influence saved on the brand guide', async () => {
+    await seed({ artistGuides: [{ ...approvedGuide(C, 'brand', GUIDE), influence: MINE }] });
+    expect((await asC(() => approvedGuides(C))).influence).toEqual(MINE);
+  });
+
+  it('returns the defaults when there is no brand guide', async () => {
+    expect((await asC(() => approvedGuides(C))).influence).toEqual(DEFAULT_INFLUENCE);
+  });
+});
+
+describe('influenceSettings', () => {
+  it('has the defaults, unsaved, and cannot save without an approved brand guide', async () => {
+    await seed({ artistGuides: [pendingProposal(C, 'brand', GUIDE)] });
+    expect(await asC(() => influenceSettings(C))).toEqual({
+      influence: DEFAULT_INFLUENCE,
+      saved: false,
+      canSave: false,
+    });
+  });
+
+  it('can save on an approved brand guide that has no settings yet', async () => {
+    await seed({ artistGuides: [approvedGuide(C, 'brand', GUIDE)] });
+    expect(await asC(() => influenceSettings(C))).toEqual({
+      influence: DEFAULT_INFLUENCE,
+      saved: false,
+      canSave: true,
+    });
+  });
+
+  it('returns saved settings, and never another artist’s', async () => {
+    await seed({ artistGuides: [{ ...approvedGuide(C, 'brand', GUIDE), influence: MINE }] });
+    expect(await asC(() => influenceSettings(C))).toEqual({
+      influence: MINE,
+      saved: true,
+      canSave: true,
+    });
+    expect((await asC(() => influenceSettings(ARTIST_A.id))).canSave).toBe(false);
+  });
+});
+
+describe('saveInfluence', () => {
+  it('saves on the approved brand row and reads back', async () => {
+    await seed({ artistGuides: [approvedGuide(C, 'brand', GUIDE)] });
+    await asC(() => saveInfluence(MINE));
+    expect(await brandInfluence(C)).toEqual([{ influence: MINE }]);
+    expect((await asC(() => approvedGuides(C))).influence).toEqual(MINE);
+  });
+
+  it('replaces earlier settings and leaves the guide itself untouched', async () => {
+    await seed({ artistGuides: [approvedGuide(C, 'brand', GUIDE)] });
+    const [before] = await db().select().from(artistGuides).where(eq(artistGuides.artistId, C));
+    await asC(() => saveInfluence(MINE));
+    await asC(() => saveInfluence(OTHER));
+    const [after] = await db().select().from(artistGuides).where(eq(artistGuides.artistId, C));
+    expect(after).toEqual({ ...before, influence: OTHER });
+  });
+
+  it('survives approving the next brand proposal', async () => {
+    await seed({
+      artistGuides: [
+        { ...approvedGuide(C, 'brand', GUIDE), influence: MINE },
+        pendingProposal(C, 'brand', GUIDE),
+      ],
+    });
+    const [pending] = await db()
+      .select()
+      .from(artistGuides)
+      .where(and(eq(artistGuides.artistId, C), eq(artistGuides.status, 'proposed')));
+    await asC(() => approveGuide(C, 'brand', pending!.id, { ...GUIDE, statement: 'New.' }));
+    expect((await asC(() => approvedGuides(C))).influence).toEqual(MINE);
+  });
+
+  it('409s with no approved brand guide, even with a proposal pending', async () => {
+    await seed({ artistGuides: [pendingProposal(C, 'brand', GUIDE)] });
+    await expect(asC(() => saveInfluence(MINE))).rejects.toMatchObject({
+      status: 409,
+      message: NO_BRAND_GUIDE,
+    });
+    expect(await brandInfluence(C)).toEqual([{ influence: null }]);
+  });
+
+  it('never writes another artist’s brand guide', async () => {
+    await seed({ artistGuides: [approvedGuide(C, 'brand', GUIDE)] });
+    await expect(withIdentity(USER_A.uid, () => saveInfluence(MINE))).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(await brandInfluence(C)).toEqual([{ influence: null }]);
+  });
+
+  it('refuses settings the database check rejects', async () => {
+    await seed({ artistGuides: [approvedGuide(C, 'brand', GUIDE)] });
+    await expect(
+      asC(() => saveInfluence({ ...MINE, sound: 9 } as unknown as Influence)),
+    ).rejects.toThrow();
+    expect(await brandInfluence(C)).toEqual([{ influence: null }]);
   });
 });
 

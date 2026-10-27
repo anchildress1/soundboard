@@ -1,6 +1,6 @@
 # 🎛️ Soundboard — Product Requirements
 
-- **Status:** Draft v7 · 2026-10-25 (v2: sign-in and connections, spec `specs/001-google-sign-in`; Gemini API, spec `specs/002-gemini-api`; artist profiles, spec `specs/004-artist-profile`)
+- **Status:** Draft v7 · 2026-10-25 (v2: sign-in and connections, spec `specs/001-google-sign-in`; Gemini API, spec `specs/002-gemini-api`; artist profiles, spec `specs/004-artist-profile`; fanbase learning, spec `specs/006-fanbase-learning`)
 - **Owner:** Ashley Childress
 - **Users:** every invited user owns one artist profile. Nathan's is Flies Like Robots (FLR), Virginia
 - **Design:** [Soundboard mockup](https://claude.ai/artifact/QjNPi3sTJLiL437QA3FUpg)
@@ -38,7 +38,6 @@
 - Social posting, Bandcamp posting, website, email marketing, merch, content calendar. Bandcamp has no upload API for artist accounts and its editor refuses to be framed, so the app drafts Bandcamp copy and opens the editor instead (R4).
 - Playlists.
 - Lyrics transcription.
-- Competitor research beyond the genre search (R4).
 - Downloading videos from YouTube.
 - Browser automation.
 - Collaboration: a job belongs to one user.
@@ -88,7 +87,10 @@
 
 **R4 · Smart pick**
 
-- Chunk results + audience evidence + the owner's 3 most recent uploads (identity only) + the artist's feedback → one `title, description, hashtags[], tags[], brandCheck`.
+- Chunk results + audience evidence + the owner's 3 most recent uploads (identity only) + the artist's feedback + peer research and the artist's own results (spec 006) → one `title, description, hashtags[], tags[], brandCheck`, plus per-role `citations` and a `recommendation`.
+- **Peer research (spec 006):** comparable artist channels (same sound and genre, found by a relevance search on the genre terms), placed in subscriber-count brackets: next bracket up first, same bracket only as a fallback, two up only as labeled secondary evidence. Up to 3 comparable releases per peer (newest, most viewed, most engaged within that channel). Comparable peer releases replace the genre search's top videos as structure evidence, and each release adds its own labeled candidate list beside the genre lists; never merged, counted or weighted across channels. The genre search's own rules below (view counts never enter its candidate logic, its top videos) stay for the genre lists.
+- Peer influence on the draft comes only through the artist's saved per-role sliders (Sound, Feel, Wording, Discovery, Structure; 0 to 4). Copied peer sentences, distinctive phrases and peer names are refused.
+- Peer and artist statistics may enter the pick prompt; the model writes no statistic, and any it writes is stripped from every stored field. Numbers computed from YouTube statistics are computed in code and labeled "calculated".
 - `flags[]` are never the model's. The server builds them from ffmpeg's measurements, the Short notice, and the windows' own quality flags, each once. A free-form flag field let the model restate the video's look as problems.
 - **Audience evidence (deterministic, one genre search):**
   - `search.list` for the chunk analysis's genre terms + "music video" (`type=video`, `videoCategoryId=10`, `order=viewCount`, `maxResults=50`, `videoDuration` bucket of the upload), then `videos.list` (`snippet,statistics,contentDetails`) for descriptions, tags, views, and length. One search page, with no pagination or refill.
@@ -121,7 +123,8 @@
 - One recommendation, reviewed one field at a time. Every field is editable. Actions: **Approve & upload**, **Re-run model**, **Discard**.
 - Re-run model reruns smart pick only, with this job's skipped versions in the prompt.
 - Approve holds edited tags to the same rules as the pick: the job's tag candidates or the pick's artist name (exactly once), never the song title.
-- Discard ends the job; nothing is learned from it.
+- Discard ends the job and its research; nothing is learned from it.
+- Review adds the Recommendation block (approach, intended outcome, limits, current and target subscriber ranges), each field's cited sources in "Why this", the Peers disclosure (labels, statistics as reported, calculated engagement, **Not a peer**), and the artist's own results. No form and no extra step.
 - [ ] A job linked to its owner's artist profile stores edits, re-runs (as skips), and approvals in `artist_memory`, keyed by the profile. Other jobs keep their feedback on the job.
 - [ ] Each re-run produces a new title and a new description; a repeat of a skipped version is retried once, then fails the pick.
 
@@ -144,6 +147,7 @@
 **R7 · Status**
 
 - The status page drives the run: it calls the next step until the job reaches review.
+- Research and learning (spec 006) are the exception: the first pick step starts a research run, and Cloud Tasks deliveries run its batches with the browser closed. The pick waits "Researching similar artists" for at most 10 minutes. A research failure never fails the release: the draft proceeds without peers and says so.
 - The home page lists only the signed-in user's jobs: the newest one in review up next, then running ones, then the rest, newest first, each with title, state and a continuation link. After reauthentication, users return home and reopen their interrupted job there.
 - Resume depends on the seven-day media lifecycle. Missing media gets a clear new-upload requirement; saved metadata stays visible.
 - [ ] "Window n of m" or a named wait ("model busy", "model quota spent") is always on screen.
@@ -169,6 +173,7 @@
 - One row per platform with its status and Connect, Reconnect, Disconnect. YouTube only for now; YouTube connects only the signed-in Google account; future platforms may use other accounts. Each user has one YouTube connection.
 - Each user's YouTube refresh token is stored per user. A revoked or missing grant blocks approval with "reconnect YouTube" and doesn't fail the job.
 - Connect and Reconnect bind to the initiating user, exact browser session, purpose and ten-minute expiry. Reject expired, replayed, superseded or mismatched callbacks and attempts after sign-out or session replacement; never change the sign-in identity. Failed or cancelled reconnect preserves the existing connection.
+- **Share analytics** (spec 006) is an optional extra grant (`yt-analytics.readonly`), never asked at sign-in. With it, each run reads the artist's own release results. Disconnecting deletes the stored results.
 - Connected means both YouTube upload and read scopes, a usable long-lived grant and the selected channel's ID and name confirmed through that grant. Partial consent or no channel permits identity sign-in but blocks approval with an actionable status.
 - Returning sign-in without a new refresh token preserves a valid existing matching grant. Validate replacement credentials before storing them; never erase a usable connection on an incomplete attempt.
 - [ ] Same-channel Reconnect restores eligible work before upload initiation, during upload and before verification, preserving fields and progress without duplicate uploads.
@@ -181,7 +186,7 @@
 - OAuth consent screen is set to **In production** before tokens are minted; Testing-mode refresh tokens expire after 7 days. The unverified-app screen stays until Google verifies the app: Advanced → Continue.
 - Redirect URI is set to the deployed URL after the first deploy.
 - The database has no client access: only the app (restricted pooled URL from Secret Manager), migrations, and the invite script (owner's direct URL, on the operator's machine) reach Neon. Refresh tokens are stored as Cloud KMS ciphertext, and only the app's service account can decrypt them.
-- All eight application tables enforce row-level security. The app connects as the non-owner `soundboard_app` role, which cannot bypass RLS; each short database transaction uses the verified Google `sub`, and missing identity denies access.
+- All twelve application tables enforce row-level security. The app connects as the non-owner `soundboard_app` role, which cannot bypass RLS; each short database transaction uses the verified Google `sub`, and missing identity denies access.
 - Migrations and operator invites use separate privileged credentials. Account activation, artist assignment, and existing identity bindings cannot be changed by ordinary app queries; sign-in binds an account through a restricted database function. The app claims a new artist profile only through `soundboard_create_artist`; otherwise the artist link is operator-only.
 - [x] A user's token and jobs are reachable only from that user's session.
 
@@ -189,9 +194,9 @@
 
 - SDK: `@sentry/sveltekit` 11.4.0.
 - One job = one trace. Job creation saves `sentry-trace` and `baggage` on the job doc. The status page renders them as `<meta>` tags, so the browser continues the job's trace and every step request carries it. Reloads land in the same trace.
-- Each model call is an `invoke_agent` span (`chunk-analyst`, `smart-pick`, `hook-pick`, `voice-guide` or `brand-guide`) wrapping a `chat <model>` span with provider `gcp.gemini`, the call's actual model, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
+- Each model call is an `invoke_agent` span (`chunk-analyst`, `smart-pick`, `peer-match`, `hook-pick`, `voice-guide` or `brand-guide`) wrapping a `chat <model>` span with provider `gcp.gemini`, the call's actual model, token counts, and messages ([Sentry AI agents spec](https://develop.sentry.dev/sdk/telemetry/traces/modules/ai-agents/)).
 - The hashtag search is an `execute_tool hashtag_search` span inside `smart-pick`, with the query and candidate count.
-- Video and images are recorded as placeholders (type, MIME, bytes, and the clip's time range), keeping Nathan's media out of Sentry. Prompt, reply and reasoning text are kept for every agent, except YouTube-sourced prompt text (the owner's uploads and the genre search's videos), which spans replace with `[YouTube uploads: <n>]`. The `voice-guide` and `brand-guide` reply and reasoning are recorded as `[guide proposal: <n> chars]`, since they restate YouTube data; credentials and signed-URL queries are scrubbed.
+- Video and images are recorded as placeholders (type, MIME, bytes, and the clip's time range), keeping Nathan's media out of Sentry. Prompt, reply and reasoning text are kept for every agent, except YouTube-sourced prompt text (the owner's uploads and the genre search's videos), which spans replace with `[YouTube uploads: <n>]`. The `voice-guide` and `brand-guide` reply and reasoning are recorded as `[guide proposal: <n> chars]`, since they restate YouTube data. The `peer-match` and `smart-pick` reply and reasoning keep their text with the prompt's YouTube-derived values (numbers, peer titles, channel names, peer text) replaced by `[YouTube data]`; credentials and signed-URL queries are scrubbed.
 - `tracesSampleRate: 1.0`, so every job's trace is complete.
 - Release builds upload source maps under the commit's release: Cloud Build reads the upload token from Secret Manager as a BuildKit secret, so it never lands in an image layer. Local builds don't upload.
 - [ ] A 12-minute job is one trace in Sentry, upload through verify.
@@ -229,6 +234,8 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 - **Storage:** one GCS bucket, `uploads/`.
 - **State:** Neon Postgres through Drizzle; SQL migrations in `drizzle/` run before each deploy moves traffic. **Secrets:** Secret Manager. **Refresh tokens:** Cloud KMS key `soundboard/refresh-tokens`.
 - **Region:** us-central1 for everything on Google Cloud. The database is the one exception: Neon runs in `aws-us-east-2`.
+- **Research queue (spec 006):** one Cloud Tasks queue, `soundboard-research`, delivers each research batch as a request to `POST /api/research/task` (Google OIDC). The whole spec 006 environment, service and queue, is GCP project `anchildress1-unstable` until the owner promotes it.
+- **Sliders:** saved as `artist_guides.influence` on the approved brand guide.
 - **Pipeline:** runs in the app container while Nathan watches. The status page calls `POST /api/jobs/{id}/step`; each call does one step and returns the job.
   - **prep:** probe and measure the whole file.
   - **analyze:** cut and analyze one 60 s window per call.
@@ -239,22 +246,26 @@ One Cloud Run service for the app in Ashley's project, and one model provider, t
 
 ### Postgres
 
-| Table           | Holds                                                                                                                                                                                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `users`         | the allowlist and the accounts: invited email, Google account ID bound at first sign-in, artist profile link (unique), active flag                                                                                                                                                         |
-| `artists`       | one artist profile per user: name, optional Bandcamp URL and contact line                                                                                                                                                                                                                  |
-| `connections`   | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                           |
-| `jobs`          | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile  |
-| `artist_memory` | per artist, by kind: facts (FACT · INFERENCE · APPROVED; the name is derived from the profile; Nathan's: Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), and publishes (video ID, URL, final metadata, status) |
-| `artist_guides` | per artist, a voice and a brand guide: at most one proposal (with its source list, expiring at 29 days) and one approved version (source counts only) each                                                                                                                                 |
-| `guide_claims`  | per artist and kind, the running proposal's claim and the model quota hold                                                                                                                                                                                                                 |
+| Table             | Holds                                                                                                                                                                                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`           | the allowlist and the accounts: invited email, Google account ID bound at first sign-in, artist profile link (unique), active flag                                                                                                                                                         |
+| `artists`         | one artist profile per user: name, optional Bandcamp URL and contact line                                                                                                                                                                                                                  |
+| `connections`     | one row per user: YouTube grant status, channel ID and name, scopes, KMS-encrypted refresh token                                                                                                                                                                                           |
+| `jobs`            | owner (`ownerUid`), approved destination channel ID/name, state, claim token and expiry, upload progress, video ID; the rest (trace headers, hashtag candidates, Short fields) as JSON; step results as `picks` and `chunks` arrays, and `feedback` on jobs not tied to an artist profile  |
+| `artist_memory`   | per artist, by kind: facts (FACT · INFERENCE · APPROVED; the name is derived from the profile; Nathan's: Virginia as FACT, the "Mr. Kill" connection as INFERENCE, kept out of public copy), feedback (EDITED · SKIPPED · ACCEPTED), and publishes (video ID, URL, final metadata, status) |
+| `artist_guides`   | per artist, a voice and a brand guide: at most one proposal (with its source list, expiring at 29 days) and one approved version (source counts only) each                                                                                                                                 |
+| `guide_claims`    | per artist and kind, the running proposal's claim and the model quota hold                                                                                                                                                                                                                 |
+| `research_runs`   | per job, the research run's stage, cursor, claim and limits; no YouTube data                                                                                                                                                                                                               |
+| `job_research`    | per research run, the peer evidence (peers, releases, statistics as reported), hidden at 29 days and deleted daily                                                                                                                                                                         |
+| `artist_outcomes` | per artist and video, the artist's own analytics results with Pacific dates and coverage, hidden at 29 days, deleted daily and on disconnect                                                                                                                                               |
+| `peer_rejections` | per artist, channels marked **Not a peer**, refreshed each run, hidden at 29 days                                                                                                                                                                                                          |
 
 ## UX
 
 Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmWvnwQgaf), adapted to what the app can actually back. Dark only.
 
 - **One release, one path:** a release is eight steps: Upload, Listening, Title, Description, Tags, Check, Approve, Upload & verify. Each screen asks one question and has one primary button. A bar on top shows "Step n of 8 · Name", an eight-segment rail, and Back to releases, plus Save & leave from Listening through Upload & verify, once there is something saved to come back to.
-- **Working screens:** while the app works, the screen says what it's doing in one headline and one plain line (window n of m, or the named wait), that moving around the app is safe during the browser upload, and that closing the tab is safe once it is done. Discard shows during the browser upload. The video monitor (R2), the state with its progress bar and model label, and "What the model heard" sit below.
+- **Working screens:** while the app works, the screen says what it's doing in one headline and one plain line (window n of m, or the named wait), that moving around the app is safe during the browser upload, and that closing the tab is safe once it is done. During research it says "Researching similar artists" and that leaving is safe. Discard shows during the browser upload. The video monitor (R2), the state with its progress bar and model label, and "What the model heard" sit below.
 - **Guided review (R5):** Title, then Description, then Tags, each with its live counter and the pick's "Why this". Check appears only when ffmpeg flagged something. Approve shows a summary (title, description length and hashtags, tags, destination channel, Private) with Back, Discard, and Approve & upload; the field screens carry Re-run model. A field the server rejects sends Nathan back to that field. Approve still sends every field at once.
 - **Edits survive leaving:** unsaved review edits and the current step stay in the browser per job and pick version, and clear on approval.
 - **Up next, after approval:** once the YouTube upload is approved, the release offers Make a Short from the hook (R13) and Put it on Bandcamp (R4's copy fields). Each opens as its own screen with a way back. A video under 15 s says why it can't make a Short.
@@ -263,16 +274,16 @@ Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmW
 - **Home, signed in:** the newest release that needs review sits on top as Up next with one Continue button. Running releases follow with "nothing to do yet" and a Watch link. Everything else is under Earlier with its state. New release is the primary action only when nothing is up next. No releases yet: a short explanation of the loop and Start.
 - **Header:** the wordmark, the artist name and the connected channel's handle with its exact video and subscriber counts (on its own row on phones), and a Menu: Connections, Brand (every user with an artist profile), Settings, and Sign out.
 - **Connections:** YouTube with Connected as … / Not connected and Connect, Reconnect, Disconnect. Bandcamp is listed as copy and paste with nothing to connect; Instagram and TikTok as coming later, with no controls.
-- **Settings:** an Artist section edits the name, Bandcamp URL and contact line. Peer influence lists the five roles and the source each uses by default. No sliders until fanbase learning ships (spec 006).
+- **Settings:** an Artist section edits the name, Bandcamp URL and contact line. Peer influence has one slider per role (Sound, Feel, Wording, Discovery, Structure) from "Your own" to "Strongest peer", defaults Sound 1, Feel 0, Wording 0, Discovery 4, Structure 4. Save needs an approved brand guide; without one, drafts use the defaults.
 - **Not found / errors:** the status, a plain explanation, and a link home.
-- **Footer:** the artist credit (signed in only, linked to the Bandcamp page when set), Ashley's credit and the license, text links to Ashley's site and socials, and the Terms of Service and Privacy policy.
+- **Footer:** "Built for Flies Like Robots" on every page, signed in or out and whoever the user's artist is, linked to his Bandcamp page; Ashley's credit and the license; text links to Ashley's site and socials, and the Terms of Service and Privacy policy.
 - **Phones (primary):** one column. On review screens the actions pin to the bottom, primary first and full width.
 - **Color:** one palette in `src/lib/styles/tokens.css`, the only file allowed color values: primitives first, then semantic names (`--ground`, `--panel`, `--well`, `--ink`, `--muted`, `--action`, `--attention`, `--ok`, `--warn`, `--err`). Components use semantic names only; Stylelint rejects a color literal anywhere else and any undeclared token.
 - **Accents have one job each:** cyan for actions, links, focus, and running work; magenta only for what needs Nathan; green verified, amber warnings, red errors. The cyan-to-magenta Signal Line marks the brand and the current step. Control borders meet 3:1 contrast.
 - **States:** running, needs review, verified ("Verified · private" with the video link), failed, and discarded, each as a colored dot or chip with its text.
 - **Type:** Bricolage Grotesque for headings and the wordmark, Onest for everything else, numbers in tabular figures.
 - **Motion:** state changes only, off under `prefers-reduced-motion`.
-- **Board copy the build replaces:** peer statistics such as average title length (no numbers derived from YouTube statistics, per the API terms), the brand thumbnail strip, sample peer artists, working influence sliders, the error page's trace ID, and an Instagram/TikTok connect button.
+- **Board copy the build replaces:** peer statistics such as average title length (no totals across channels), the brand thumbnail strip, the error page's trace ID, and an Instagram/TikTok connect button.
 
 ## Success Metrics
 
@@ -287,6 +298,8 @@ Built from the [Soundboard v2 boards](https://claude.ai/artifact/2u71AaL5GMC2fmW
 - OAuth app verification for `youtube.upload` before open signup.
 - Second GCP project for the read-only YouTube API key.
 - Sentry DSN / org.
+- YouTube's derived-metrics acceptance record (spec 006 plan O1), attached to `docs/youtube-audit/` before the first deploy.
+- OAuth verification and the YouTube audit list `yt-analytics.readonly`.
 
 ## License
 

@@ -11,7 +11,13 @@ import {
 } from '#lib/server/auth/auth.js';
 import { admit } from '#lib/server/auth/users.js';
 import { withIdentity } from '#lib/server/core/identity.js';
-import { connectGrant, type ConnectOutcome } from '#lib/server/platforms/youtube/index.js';
+import {
+  analyticsShared,
+  ANALYTICS_SCOPE,
+  connectGrant,
+  getConnection,
+  type ConnectOutcome,
+} from '#lib/server/platforms/youtube/index.js';
 import type { RequestHandler } from './$types';
 
 type Callback = { url: URL; cookies: Cookies; code: string };
@@ -48,7 +54,9 @@ async function signIn({ url, cookies, code }: Callback): Promise<never> {
 
 /**
  * Re-grants the channel for the session that started the connect. A stale callback (another
- * browser session, or sign-out and back in) or another Google account changes nothing.
+ * browser session, or sign-out and back in) or another Google account changes nothing. The
+ * analytics connect also needs the Analytics scope: without it nothing is written, so a connected
+ * row is never downgraded.
  */
 async function connect(
   { url, code }: Callback,
@@ -61,15 +69,23 @@ async function connect(
   const grant = await exchangeCode(url.origin, code);
   if (!grant) redirect(303, '/?signin=expired');
   if (grant.sub !== uid) redirect(303, '/connections?connect=wrong-account');
+  const analytics = state.purpose === 'analytics';
+  if (analytics && !grant.scopes.includes(ANALYTICS_SCOPE))
+    redirect(303, '/connections?analytics=declined');
   let outcome: ConnectOutcome | 'failed';
+  let shared = false;
   try {
     outcome = await connectGrant(uid, grant, 'connect');
+    // A grant that brought no refresh token leaves the stored row, and its scopes, as they were.
+    shared = analytics && analyticsShared(await getConnection(uid));
   } catch (error) {
     // A YouTube or KMS failure fails before any write, so a stored connection stays as it was.
     captureException(error, { tags: { component: 'connect' } });
     outcome = 'failed';
   }
-  redirect(303, outcome === 'connected' ? '/connections' : `/connections?connect=${outcome}`);
+  if (outcome !== 'connected') redirect(303, `/connections?connect=${outcome}`);
+  if (!analytics) redirect(303, '/connections');
+  redirect(303, `/connections?analytics=${shared ? 'shared' : 'declined'}`);
 }
 
 export const GET: RequestHandler = async ({ url, cookies, locals }) => {
@@ -80,5 +96,5 @@ export const GET: RequestHandler = async ({ url, cookies, locals }) => {
   if (!state || !code || url.searchParams.get('state') !== state.nonce)
     redirect(303, '/?signin=expired');
   const callback = { url, cookies, code };
-  return state.purpose === 'connect' ? connect(callback, state, locals.user) : signIn(callback);
+  return state.purpose === 'sign-in' ? signIn(callback) : connect(callback, state, locals.user);
 };

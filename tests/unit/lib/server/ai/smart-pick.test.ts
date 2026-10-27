@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import { DESCRIPTION_MAX, parseHashtags, tagsLength, TAGS_MAX, TITLE_MAX } from '#lib/metadata.js';
 import type { Fact, Feedback } from '#lib/server/artist/memory.js';
 import {
@@ -50,6 +51,14 @@ const raw = (over: Partial<RawPick> = {}): RawPick => ({
   brandCheck: 'Matches the recent uploads.',
   why: { title: 't', description: 'd', tags: 'g' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  citations: { sound: [], feel: [], wording: [], discovery: [], structure: [] },
+  recommendation: {
+    approach: 'Lead with the synth hook.',
+    intendedOutcome: 'More people reach the end of the track.',
+    follows: 'artist',
+    followsWhy: 'Only the artist’s own sources were available.',
+    evidence: [],
+  },
   ...over,
 });
 
@@ -58,6 +67,8 @@ const tagNames = ['synthwave', 'retrowave', 'synthpop', 'new music', '80s', 'out
 const cands = (...tags: string[]) => tags.map((tag) => ({ tag }));
 const tagCandidates = cands(...tagNames);
 const source = (over: Partial<CandidateList> = {}): CandidateList => ({
+  source: 'genre',
+  ref: 'G1',
   videoId: 'reference-one',
   title: 'Reference one',
   hashtags: candidates,
@@ -65,6 +76,13 @@ const source = (over: Partial<CandidateList> = {}): CandidateList => ({
   ...over,
 });
 const candidateLists = [source()];
+/** A candidate list as the prompt shows it: keyed by its ref, so the ref and source are dropped. */
+const listed = ({ videoId, title, hashtags, tags }: CandidateList) => ({
+  videoId,
+  title,
+  hashtags,
+  tags,
+});
 
 const facts: Fact[] = [
   { key: 'artist-name', value: ARTIST, kind: 'FACT', public: true },
@@ -86,6 +104,10 @@ const fix = (over: Partial<PickFixups> = {}): PickFixups => ({
   facts,
   measurements: null,
   probe: null,
+  influence: DEFAULT_INFLUENCE,
+  evidence: null,
+  outcomes: [],
+  limits: [],
   ...over,
 });
 
@@ -143,6 +165,10 @@ const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   skipped: [],
   voice: NATHAN_VOICE,
   brand: null,
+  influence: DEFAULT_INFLUENCE,
+  evidence: null,
+  outcomes: [],
+  limits: [],
   ...over,
 });
 
@@ -291,6 +317,7 @@ describe('buildPickRequest', () => {
     const lists = [
       source({ tags: [{ tag: 'synthwave', usedBy: 99 } as { tag: string }] }),
       source({
+        ref: 'G2',
         videoId: 'reference-two',
         title: 'Reference two',
         tags: cands('synthwave', 'outrun'),
@@ -298,7 +325,10 @@ describe('buildPickRequest', () => {
     ];
     const body = context(buildPickRequest(ctx({ candidateLists: lists })));
 
-    expect(body.candidateLists).toEqual([source({ tags: cands('synthwave') }), lists[1]]);
+    expect(body.candidateLists).toEqual({
+      G1: listed(source({ tags: cands('synthwave') })),
+      G2: listed(lists[1]!),
+    });
     expect(body).not.toHaveProperty('candidateHashtags');
     expect(body).not.toHaveProperty('candidateTags');
     expect(JSON.stringify(body)).not.toMatch(/usedBy|views|score|weight/);
@@ -310,7 +340,7 @@ describe('buildPickRequest', () => {
     const body = context(messages);
     expect(body.artist).toBe(ARTIST);
     expect(body.artistNotes).toBe('live take');
-    expect(body.candidateLists).toEqual(candidateLists);
+    expect(body.candidateLists).toEqual({ G1: listed(candidateLists[0]!) });
     expect(body).not.toHaveProperty('candidateHashtags');
     expect(body).not.toHaveProperty('candidateTags');
     expect(body.ffmpeg).toEqual(measurements());
@@ -909,7 +939,7 @@ describe('finalizePick: links, tags, and limits', () => {
     );
     const parts = messages.turns[0]!.parts as { text: string; source?: string }[];
     const lists = parts.find((part) => part.source && part.text.includes('candidateLists'))!;
-    expect(JSON.parse(lists.text).candidateLists[0].tags).toEqual([{ tag: 'synthwave' }]);
+    expect(JSON.parse(lists.text).candidateLists.G1.tags).toEqual([{ tag: 'synthwave' }]);
     expect(finalizePick(raw(), fix()).tags.filter((tag) => tag === ARTIST)).toHaveLength(1);
   });
 
@@ -1173,7 +1203,13 @@ describe('runPick', () => {
     expect(input).toHaveLength(1);
     expect(input[0]!['gen_ai.input.messages']).not.toContain('repeats a skipped version');
     expect(input[0]!['gen_ai.system_instructions']).toBeDefined();
-    expect(output).toEqual([JSON.stringify(result!.pick)]);
+    // The pick's own words stay; values from the prompt's YouTube parts, like its tags, don't.
+    expect(output).toHaveLength(1);
+    expect(output[0]).toContain(FRESH_TITLE);
+    expect(output[0]).toContain('[YouTube data]');
+    for (const tag of result!.pick.tags.filter((t) => t !== FLR.name)) {
+      expect(output[0]).not.toContain(`"${tag}"`);
+    }
   });
 
   it('records no agent output when the pick fails', async () => {
@@ -1289,25 +1325,44 @@ describe('runPick', () => {
     expect(await runPick(ctx(), stepDeadline())).toBeNull();
   });
 
-  it('returns null when the retry after a skipped repeat never parses', async () => {
+  it('shares one re-ask: a repeat, then a reply that never parses, is 2 calls and null', async () => {
     fetchMock
       .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))))
       .mockImplementation(async () => reply('{'));
     expect(
       await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
     ).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('fails the step when no time is left to re-ask a repeated title', async () => {
+  it('shares one re-ask: a malformed reply, then a repeat, is 2 calls and null', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply('{'))
+      .mockImplementation(async () => reply(JSON.stringify(raw({ title: 'Old Title' }))));
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), stepDeadline()),
+    ).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a malformed reply, then a valid one, is 2 calls and the pick', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply('{'))
+      .mockResolvedValueOnce(reply(JSON.stringify(raw({ title: FRESH_TITLE }))));
+    const result = await runPick(ctx(), stepDeadline());
+    expect(result!.pick.title).toBe(FRESH_TITLE);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails the pick without a re-ask when no time is left after a repeated title', async () => {
     const now = Date.now();
     fetchMock.mockResolvedValueOnce(reply(JSON.stringify(raw({ title: 'Old Title' }))));
     vi.spyOn(Date, 'now')
       .mockReturnValueOnce(now)
       .mockReturnValue(now + 80_000);
-    await expect(
-      runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), now + 110_000),
-    ).rejects.toThrow('ran out of time');
+    expect(
+      await runPick(ctx({ skipped: [{ title: 'Old Title', description: 'x' }] }), now + 110_000),
+    ).toBeNull();
     vi.restoreAllMocks();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

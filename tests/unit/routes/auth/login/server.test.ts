@@ -116,3 +116,33 @@ describe('GET /auth/login: connect', () => {
     expect(cookies.set).not.toHaveBeenCalled();
   });
 });
+
+describe('GET /auth/login: analytics', () => {
+  it('adds the Analytics scope, forces consent and binds the state to the session', () => {
+    const { thrown, cookies } = call('?connect=analytics', { user: USER_A });
+    const url = location(thrown);
+    expect(url.searchParams.get('scope')).toBe(
+      `${SCOPES} https://www.googleapis.com/auth/yt-analytics.readonly`,
+    );
+    expect(url.searchParams.get('prompt')).toBe('select_account consent');
+    expect(url.searchParams.get('login_hint')).toBe(USER_A.email);
+    expect(readOAuthState(cookies.set.mock.calls[0]![1] as string)).toMatchObject({
+      purpose: 'analytics',
+      uid: USER_A.uid,
+      sid: USER_A.sid,
+    });
+  });
+
+  it('401s without a session, setting nothing', () => {
+    const { thrown, cookies } = call('?connect=analytics');
+    expect(status(thrown)).toBe(401);
+    expect(cookies.set).not.toHaveBeenCalled();
+  });
+
+  it('never asks for the Analytics scope at sign-in or a plain connect', () => {
+    expect(location(call('').thrown).searchParams.get('scope')).toBe(SCOPES);
+    expect(
+      location(call('?connect=youtube', { user: USER_A }).thrown).searchParams.get('scope'),
+    ).toBe(SCOPES);
+  });
+});

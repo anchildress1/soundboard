@@ -14,7 +14,7 @@ test.describe('home page', () => {
     await expect(
       page.getByRole('banner').getByRole('link', { name: 'Soundboard', exact: true }),
     ).toHaveAttribute('href', '/');
-    await expect(page.getByRole('contentinfo')).toContainText('Built for Test Artist');
+    await expect(page.getByRole('contentinfo')).toContainText('Built for Flies Like Robots');
   });
 
   test('starts a new release on its own page', async ({ page }) => {

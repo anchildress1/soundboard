@@ -33,7 +33,7 @@ test.describe('signed out', () => {
     const footer = page.getByRole('contentinfo');
     await expect(footer).toContainText('Ashley Childress');
     await expect(footer).not.toContainText('Hacktoberfest');
-    await footer.getByRole('link', { name: 'Privacy policy' }).click();
+    await footer.getByRole('link', { name: 'Privacy policy', exact: true }).click();
     await expect(page).toHaveURL('/privacy');
     await expect(page).toHaveTitle('Privacy policy · Soundboard');
     await expect(page.getByRole('heading', { name: 'Privacy policy', exact: true })).toBeVisible();
@@ -156,7 +156,7 @@ for (const [name, path] of [
     await signIn(page, USER_B);
     await page.goto('/');
     await page.context().clearCookies();
-    await page.getByRole('contentinfo').getByRole('link', { name }).click();
+    await page.getByRole('contentinfo').getByRole('link', { name, exact: true }).click();
     await expect(page).toHaveURL(path);
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);

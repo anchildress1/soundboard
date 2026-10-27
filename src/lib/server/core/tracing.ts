@@ -6,7 +6,7 @@ export const PROVIDER = 'gcp.gemini';
 export const PIPELINE = 'soundboard';
 
 export type AgentName =
-  'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'voice-guide' | 'hook-pick';
+  'chunk-analyst' | 'smart-pick' | 'brand-guide' | 'voice-guide' | 'hook-pick' | 'peer-match';
 
 /** Guide proposals restate their YouTube sources, so spans keep no reply or reasoning text. */
 export const GUIDE_AGENTS: ReadonlySet<AgentName> = new Set(['voice-guide', 'brand-guide']);
@@ -15,13 +15,29 @@ export const GUIDE_AGENTS: ReadonlySet<AgentName> = new Set(['voice-guide', 'bra
 export const guidePlaceholder = (text: string) => `[guide proposal: ${text.length} chars]`;
 export type AgentSpan = Span;
 
+/**
+ * Agents whose replies can restate their prompt's YouTube data. Spans keep their reply and
+ * reasoning text with each YouTube-sourced value replaced by `YOUTUBE_VALUE`.
+ */
+export const VALUE_AGENTS: ReadonlySet<AgentName> = new Set(['peer-match', 'smart-pick']);
+export const YOUTUBE_VALUE = '[YouTube data]';
+
 export type Part =
   /**
-   * `source: 'youtube'` marks text drawn from YouTube data; spans record only
-   * `[YouTube uploads: <count>]` in its place, while the model still gets the text. `source:
-   * 'guide'` marks a guide agent's earlier reply resent for a re-ask, recorded as its placeholder.
+   * `source: 'youtube'` marks text drawn from YouTube data; spans record only `[<label>: <count>]`
+   * in its place, while the model still gets the text. `source: 'guide'` marks a guide agent's
+   * earlier reply resent for a re-ask, recorded as its placeholder; `source: 'reply'` a
+   * `VALUE_AGENTS` reply, recorded with its YouTube values replaced.
    */
-  | { type: 'text'; text: string; source?: 'youtube' | 'guide'; count?: number }
+  | {
+      type: 'text';
+      text: string;
+      source?: 'youtube' | 'guide' | 'reply';
+      count?: number;
+      label?: string;
+    }
+  /** A peer's public YouTube upload, heard from `start` to `end` seconds; spans keep no URL. */
+  | { type: 'youtube'; url: string; start: number; end: number }
   /** Base64 image, such as a thumbnail. */
   | { type: 'image'; data: string; mime_type: string }
   /** One window's inline clip; `start` and `end` are source seconds. */
@@ -52,22 +68,88 @@ const base64Bytes = (b64: string) => {
   return Math.floor((b64.length * 3) / 4) - padding;
 };
 
-/** A text part of YouTube data, `count` naming how many videos it describes. */
-export const youtubePart = (value: unknown, count: number): Part => ({
+/**
+ * A text part of YouTube data, `count` naming how many items it describes and `label` what they are
+ * (`YouTube uploads` unless given).
+ */
+export const youtubePart = (value: unknown, count: number, label?: string): Part => ({
   type: 'text',
   text: JSON.stringify(value),
   source: 'youtube',
   count,
+  ...(label ? { label } : {}),
 });
 
-function redactText(part: Extract<Part, { type: 'text' }>): string {
-  if (part.source === 'youtube') return `[YouTube uploads: ${part.count ?? 0}]`;
+type Redact = (text: string) => string;
+const keep: Redact = (text) => text;
+
+/**
+ * Every string leaf with its sentences, and every number. Short ones too: a peer named "U2" or
+ * `subscribersGained: 3` is still YouTube data, even though it also blanks unrelated "3"s. Strings
+ * also go in JSON-escaped, since replies are recorded as raw JSON text.
+ */
+function leaves(value: unknown, into: Set<string>): void {
+  if (typeof value === 'string') {
+    for (const piece of [value, ...value.split(/[.!?\n]+/)]) {
+      const trimmed = piece.trim().toLowerCase();
+      if (!trimmed) continue;
+      into.add(trimmed);
+      into.add(JSON.stringify(trimmed).slice(1, -1));
+    }
+  } else if (typeof value === 'number' && Number.isFinite(value)) {
+    into.add(String(value));
+    into.add(value.toLocaleString('en-US'));
+  } else if (Array.isArray(value)) {
+    for (const item of value) leaves(item, into);
+  } else if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) leaves(item, into);
+  }
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+
+/**
+ * Replaces every value from `turns`' YouTube parts, longest first and case-insensitively, with
+ * `YOUTUBE_VALUE` wherever it stands as a whole word or number.
+ */
+export function youtubeRedactor(turns: Turn[]): Redact {
+  const values = new Set<string>();
+  for (const turn of turns) {
+    for (const part of turn.parts) {
+      if (part.type !== 'text' || part.source !== 'youtube') continue;
+      try {
+        leaves(JSON.parse(part.text), values);
+      } catch {
+        leaves(part.text, values);
+      }
+    }
+  }
+  if (values.size === 0) return keep;
+  const alternatives = [...values].sort((a, b) => b.length - a.length).map(escape);
+  const pattern = new RegExp(
+    String.raw`(?<![\p{L}\p{N}])(?:${alternatives.join('|')})(?![\p{L}\p{N}])`,
+    'giu',
+  );
+  return (text) => text.replace(pattern, YOUTUBE_VALUE);
+}
+
+/** How a span records `agent`'s reply and reasoning, given the request it answered. */
+function replyRedactor(agent: AgentName | undefined, turns: Turn[]): Redact {
+  if (agent && GUIDE_AGENTS.has(agent)) return guidePlaceholder;
+  if (agent && VALUE_AGENTS.has(agent)) return youtubeRedactor(turns);
+  return keep;
+}
+
+function redactText(part: Extract<Part, { type: 'text' }>, values: () => Redact): string {
+  if (part.source === 'youtube') return `[${part.label ?? 'YouTube uploads'}: ${part.count ?? 0}]`;
   if (part.source === 'guide') return guidePlaceholder(part.text);
+  if (part.source === 'reply') return values()(part.text);
   return part.text;
 }
 
-function redactPart(part: Part) {
-  if (part.type === 'text') return { type: 'text', content: redactText(part) };
+function redactPart(part: Part, values: () => Redact) {
+  if (part.type === 'text') return { type: 'text', content: redactText(part, values) };
+  if (part.type === 'youtube') return { type: 'video', source: 'youtube' };
   if (part.type === 'image') {
     return { type: 'image', mime: part.mime_type, bytes: base64Bytes(part.data) };
   }
@@ -84,7 +166,12 @@ function redactPart(part: Part) {
  * Sentry while the shape of the request and the rest of its text stay visible.
  */
 export function redactTurns(turns: Turn[]): unknown[] {
-  return turns.map((turn) => ({ role: turn.role, parts: turn.parts.map(redactPart) }));
+  let redactor: Redact | undefined;
+  const values = () => (redactor ??= youtubeRedactor(turns));
+  return turns.map((turn) => ({
+    role: turn.role,
+    parts: turn.parts.map((part) => redactPart(part, values)),
+  }));
 }
 
 /** `invoke_agent` span; model and tool spans started inside become its children. */
@@ -137,14 +224,20 @@ function requestAttributes(request: ModelRequest): Record<string, string> {
   };
 }
 
+const spanTurns = new WeakMap<AgentSpan, Turn[]>();
+
 /** The agent's task on its `invoke_agent` span; Sentry shows an agent's input only from here. */
 export function agentInput(span: AgentSpan, request: ModelRequest): void {
+  spanTurns.set(span, request.turns);
   span.setAttributes(requestAttributes(request));
 }
 
-/** The agent's final answer on its `invoke_agent` span; a guide agent's as its placeholder. */
+/**
+ * The agent's final answer on its `invoke_agent` span: a guide agent's as its placeholder, a
+ * `VALUE_AGENTS` answer with the YouTube values of the input `agentInput` recorded replaced.
+ */
 export function agentOutput(span: AgentSpan, content: string, agent?: AgentName): void {
-  const recorded = agent && GUIDE_AGENTS.has(agent) ? guidePlaceholder(content) : content;
+  const recorded = replyRedactor(agent, spanTurns.get(span) ?? [])(content);
   span.setAttribute(
     'gen_ai.output.messages',
     JSON.stringify([{ role: 'assistant', parts: [{ type: 'text', content: recorded }] }]),
@@ -156,7 +249,7 @@ const optionalCount = (key: string, value: number | undefined) =>
 
 /**
  * `chat` span: system prompt, redacted turns, the reply and its reasoning (placeholders for guide
- * agents), finish reason, and token counts. A reply that later fails to parse is still recorded here; a thrown error passes through
+ * agents, YouTube values replaced for `VALUE_AGENTS`), finish reason, and token counts. A reply that later fails to parse is still recorded here; a thrown error passes through
  * untouched.
  */
 export function chatSpan<T extends ChatReply>(
@@ -181,7 +274,7 @@ export function chatSpan<T extends ChatReply>(
     async (span) => {
       const result = await fn();
       const { usage } = result;
-      const record = GUIDE_AGENTS.has(params.agent) ? guidePlaceholder : (text: string) => text;
+      const record = replyRedactor(params.agent, request.turns);
       const parts = [
         ...(result.reasoning ? [{ type: 'reasoning', content: record(result.reasoning) }] : []),
         { type: 'text', content: record(result.content) },

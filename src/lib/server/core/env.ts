@@ -35,3 +35,27 @@ export function signupMode(): 'invite' | 'open' {
 export function kmsKey(): string {
   return required('KMS_KEY');
 }
+
+export type ResearchQueue = { queue: string; url: string; serviceAccount: string };
+
+/**
+ * The Cloud Tasks queue research deliveries go through, its target URL and the OIDC service
+ * account; all three or none. None means deliveries run in-process (dev only).
+ */
+export function researchQueue(): ResearchQueue | null {
+  const queue = optional('RESEARCH_QUEUE');
+  const url = optional('RESEARCH_TASK_URL');
+  const serviceAccount = optional('RESEARCH_TASK_SA');
+  if (!queue && !url && !serviceAccount) return null;
+  if (!queue || !url || !serviceAccount) {
+    throw new Error('Set RESEARCH_QUEUE, RESEARCH_TASK_URL and RESEARCH_TASK_SA together');
+  }
+  return { queue, url, serviceAccount };
+}
+
+/** Whether peer-match hears a peer's public YouTube upload (gate G1); `'1'` or unset. */
+export function peerHearing(): boolean {
+  const value = optional('PEER_HEARING');
+  if (value && value !== '1') throw new Error(`PEER_HEARING must be 1 or unset, not ${value}`);
+  return value === '1';
+}

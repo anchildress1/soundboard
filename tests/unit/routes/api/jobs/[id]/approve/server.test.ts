@@ -46,6 +46,8 @@ async function put(id: string, patch: Partial<JobDoc> = {}) {
       query: 'synthwave music video',
       candidateLists: [
         {
+          source: 'genre',
+          ref: 'G1',
           videoId: 'peer',
           title: 'Peer release',
           hashtags: CANDIDATES,

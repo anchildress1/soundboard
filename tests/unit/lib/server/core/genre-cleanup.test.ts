@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHECK_CLEANUP_ROLE,
   DELETE_EXPIRED_GENRE_EVIDENCE,
+  DELETE_EXPIRED_OUTCOMES,
   DELETE_EXPIRED_PROPOSALS,
+  DELETE_EXPIRED_REJECTIONS,
+  DELETE_EXPIRED_RESEARCH,
   handleGenreCleanup,
   type CleanupConnection,
 } from '#lib/server/core/genre-cleanup.js';
@@ -32,6 +35,23 @@ const databaseDriver = () => ({
   query: vi.fn((statement: string) => client().query(statement)),
   end: vi.fn(async () => undefined),
 });
+
+const DELETES = [
+  DELETE_EXPIRED_GENRE_EVIDENCE,
+  DELETE_EXPIRED_PROPOSALS,
+  DELETE_EXPIRED_RESEARCH,
+  DELETE_EXPIRED_OUTCOMES,
+  DELETE_EXPIRED_REJECTIONS,
+];
+/** Which delete (1-based) fails. */
+const FAILING = {
+  delete: 1,
+  'proposal delete': 2,
+  'research delete': 3,
+  'outcome delete': 4,
+  'rejection delete': 5,
+} as const;
+const NONE = { deleted: 0, proposals: 0, research: 0, outcomes: 0, rejections: 0 };
 
 beforeEach(truncate);
 
@@ -87,20 +107,36 @@ describe('handleGenreCleanup', () => {
         insert into artist_guides (artist_id, kind, status, body, sources, proposed_at, approved_at) values
           ('artist-1', 'voice', 'proposed', '{"rules":["a"]}', ${PROPOSED_SOURCES}, now() - interval '29 days', null),
           ('artist-1', 'brand', 'proposed', '{"rules":["b"]}', ${PROPOSED_SOURCES}, now() - interval '28 days 23 hours', null),
-          ('artist-1', 'voice', 'approved', '{"rules":["c"]}', ${APPROVED_SOURCES}, now() - interval '400 days', now() - interval '400 days')
+          ('artist-1', 'voice', 'approved', '{"rules":["c"]}', ${APPROVED_SOURCES}, now() - interval '400 days', now() - interval '400 days');
+        insert into job_research (run_id, job_id, retrieved_at, evidence) values
+          ('r-expired', 'expired', now() - interval '29 days', '{}'),
+          ('r-fresh', 'fresh', now() - interval '28 days 23 hours', '{}');
+        insert into artist_outcomes (artist_id, video_id, retrieved_at, published_at, requested_start,
+            requested_end, coverage, metrics, live) values
+          ('artist-1', 'v-expired', now() - interval '30 days', now(), '2026-01-01', '2026-01-28', 'complete', '{}', '{}'),
+          ('artist-1', 'v-boundary', now() - interval '29 days', now(), '2026-01-01', '2026-01-28', 'complete', '{}', '{}'),
+          ('artist-1', 'v-fresh', now() - interval '28 days', now(), '2026-01-01', '2026-01-28', 'open', '{}', '{}');
+        insert into peer_rejections (artist_id, channel_id, retrieved_at) values
+          ('artist-1', 'UC-expired', now() - interval '29 days'),
+          ('artist-1', 'UC-fresh', now() - interval '1 day');
       `);
       await database.exec('set local session authorization soundboard_cleanup');
 
       const response = await handleGenreCleanup(triggerRequest(), factory);
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ deleted: 2, proposals: 1 });
+      expect(await response.json()).toEqual({
+        deleted: 2,
+        proposals: 1,
+        research: 1,
+        outcomes: 2,
+        rejections: 1,
+      });
       expect(factory).toHaveBeenCalledOnce();
       expect(connection.connect).toHaveBeenCalledOnce();
       expect(connection.query.mock.calls).toEqual([
         [CHECK_CLEANUP_ROLE],
-        [DELETE_EXPIRED_GENRE_EVIDENCE],
-        [DELETE_EXPIRED_PROPOSALS],
+        ...DELETES.map((d) => [d]),
       ]);
       expect(connection.end).toHaveBeenCalledOnce();
       // PGlite's RESET SESSION AUTHORIZATION keeps the current identity.
@@ -120,11 +156,20 @@ describe('handleGenreCleanup', () => {
         { kind: 'brand', status: 'proposed' },
         { kind: 'voice', status: 'approved' },
       ]);
+      expect((await database.query('select run_id from job_research')).rows).toEqual([
+        { run_id: 'r-fresh' },
+      ]);
+      expect((await database.query('select video_id from artist_outcomes')).rows).toEqual([
+        { video_id: 'v-fresh' },
+      ]);
+      expect((await database.query('select channel_id from peer_rejections')).rows).toEqual([
+        { channel_id: 'UC-fresh' },
+      ]);
 
       await database.exec('set local session authorization soundboard_cleanup');
       const repeated = await handleGenreCleanup(triggerRequest('1900-01-01T00:00:00Z'), factory);
       expect(repeated.status).toBe(200);
-      expect(await repeated.json()).toEqual({ deleted: 0, proposals: 0 });
+      expect(await repeated.json()).toEqual(NONE);
       expect(connection.end).toHaveBeenCalledTimes(2);
     } finally {
       await database.exec('rollback');
@@ -204,22 +249,27 @@ describe('handleGenreCleanup', () => {
     },
   );
 
-  it.each(['connect', 'role check', 'delete', 'proposal delete'] as const)(
+  it.each([
+    'connect',
+    'role check',
+    'delete',
+    'proposal delete',
+    'research delete',
+    'outcome delete',
+    'rejection delete',
+  ] as const)(
     'closes the connection and hides database errors when %s fails',
     async (operation) => {
       const connection = driver();
       const error = new Error('private connection details');
       if (operation === 'connect') connection.connect.mockRejectedValueOnce(error);
       else if (operation === 'role check') connection.query.mockRejectedValueOnce(error);
-      else if (operation === 'delete')
-        connection.query
-          .mockResolvedValueOnce({ rows: [{ allowed: true }] })
-          .mockRejectedValueOnce(error);
-      else
-        connection.query
-          .mockResolvedValueOnce({ rows: [{ allowed: true }] })
-          .mockResolvedValueOnce({ rows: [] })
-          .mockRejectedValueOnce(error);
+      else {
+        const failing = FAILING[operation];
+        connection.query.mockResolvedValueOnce({ rows: [{ allowed: true }] });
+        for (let i = 1; i < failing; i++) connection.query.mockResolvedValueOnce({ rows: [] });
+        connection.query.mockRejectedValueOnce(error);
+      }
 
       const response = await handleGenreCleanup(triggerRequest(), () => connection);
 
@@ -232,10 +282,7 @@ describe('handleGenreCleanup', () => {
         expect(connection.query).toHaveBeenCalledExactlyOnceWith(CHECK_CLEANUP_ROLE);
       else
         expect(connection.query.mock.calls).toEqual(
-          [[CHECK_CLEANUP_ROLE], [DELETE_EXPIRED_GENRE_EVIDENCE], [DELETE_EXPIRED_PROPOSALS]].slice(
-            0,
-            operation === 'delete' ? 2 : 3,
-          ),
+          [[CHECK_CLEANUP_ROLE], ...DELETES.map((d) => [d])].slice(0, FAILING[operation] + 1),
         );
     },
   );
@@ -248,11 +295,7 @@ describe('handleGenreCleanup', () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe('Genre evidence cleanup connection failed');
-    expect(connection.query.mock.calls).toEqual([
-      [CHECK_CLEANUP_ROLE],
-      [DELETE_EXPIRED_GENRE_EVIDENCE],
-      [DELETE_EXPIRED_PROPOSALS],
-    ]);
+    expect(connection.query.mock.calls).toEqual([[CHECK_CLEANUP_ROLE], ...DELETES.map((d) => [d])]);
     expect(connection.end).toHaveBeenCalledOnce();
   });
 

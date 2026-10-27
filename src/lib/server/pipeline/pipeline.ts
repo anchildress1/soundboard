@@ -14,7 +14,7 @@ import { analyzeChunk } from '#lib/server/ai/chunk-analyst.js';
 import { chunkCount, measureFile, probe, WINDOW_SEC } from '#lib/server/media/ffmpeg.js';
 import { cutWindowClip, measureWindow } from '#lib/server/media/window.js';
 import { objectInfo, signedReadUrl, sweepUploads } from '#lib/server/media/gcs.js';
-import { audienceEvidence, type AudienceEvidence } from './hashtags';
+import { audienceEvidence, releaseList, type AudienceEvidence } from './hashtags';
 import {
   claimJob,
   fail,
@@ -22,6 +22,7 @@ import {
   listChunks,
   listPicks,
   objectIs,
+  pickIn,
   markFinalChunk,
   markUploadStarted,
   ok,
@@ -29,6 +30,7 @@ import {
   releaseJob,
   type JobDoc,
 } from '#lib/server/jobs/jobs.js';
+import { DEFAULT_INFLUENCE } from '#lib/influence.js';
 import { artistJob, listFacts, recentFeedback, recordPublish } from '#lib/server/artist/memory.js';
 import { artistProfile, type ArtistProfile } from '#lib/server/artist/profile.js';
 import type { Tx } from '#lib/server/core/db.js';
@@ -46,12 +48,29 @@ import type { JobPatch } from '#lib/server/jobs/rows.js';
 import { invokeAgent } from '#lib/server/core/tracing.js';
 import { quotaResetAt } from '#lib/server/core/quota.js';
 import {
+  evidenceExpiry,
+  readEvidence,
+  rejectedChannels,
+  withoutRejected,
+} from '#lib/server/research/evidence.js';
+import { pickOutcomes } from '#lib/server/research/outcomes.js';
+import { enqueue } from '#lib/server/research/queue.js';
+import {
+  expired,
+  failRun,
+  getRun,
+  RESEARCH_MAX_MS,
+  startRun,
+  type ResearchLimit,
+} from '#lib/server/research/runs.js';
+import {
   accessTokenFor,
   ChannelMismatch,
   finalChunk,
   identityFailure,
   outOfTime,
   ownChannelUploads,
+  quotaSpent,
   readBack,
   sourceRange,
   startResumableUpload,
@@ -167,6 +186,9 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
     'job.id': job.id,
   });
   if (!Array.isArray(recent)) return recent;
+  const gate = await researchFor(job, artist.id, by);
+  if ('wait' in gate) return gate;
+  const research: Research = gate;
   const [memory, chunks, picks] = await Promise.all([
     artistJob(job),
     listChunks(job.id),
@@ -180,27 +202,36 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
   );
   return invokeAgent('smart-pick', modelFor('smart-pick'), async (span) => {
     let audience = job.audience;
+    const limits: string[] = [...research.limits];
     try {
       audience ??= await audienceEvidence(chunks, job.probe?.durationSec ?? null, by);
     } catch (error) {
       if (outOfTime(error)) return { wait: YOUTUBE_BUSY };
-      throw error;
+      // Not a failure: the draft goes ahead on no genre evidence, stores none, and says so.
+      if (!quotaSpent(error)) throw error;
+      limits.push('genre-search-unavailable');
     }
     // The genre search is one per job: every outcome from here keeps it.
-    if (!hasModelTime('smart-pick', by)) return { audience, wait: 'model busy' };
+    const keep: Patch = audience ? { audience } : {};
+    if (!hasModelTime('smart-pick', by)) return { ...keep, wait: 'model busy' };
     try {
-      return await pickWith(artist, audience, span);
+      return await pickWith(artist, audience ?? noAudience(), limits, keep, span);
     } catch (error) {
-      throw new StepFailure(error, { audience });
+      throw new StepFailure(error, keep);
     }
   });
 
   async function pickWith(
     artist: ArtistProfile,
     audience: AudienceEvidence,
+    limits: string[],
+    keep: Patch,
     span: Span,
   ): Promise<StepOutput> {
-    const [facts, feedback, { voice, brand }] = await memoryFor(artist, memory);
+    const [[facts, feedback, { voice, brand, influence }, outcomes], found] = await Promise.all([
+      memoryFor(artist, memory),
+      evidenceFor(research.runId),
+    ]);
     const result = await runPick(
       {
         artist,
@@ -209,7 +240,10 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         measurements: job.measurements,
         probe: job.probe,
         recent: withThumbs,
-        candidateLists: audience.candidateLists,
+        candidateLists: [
+          ...audience.candidateLists,
+          ...(found?.evidence.releases.map(releaseList) ?? []),
+        ],
         audience: audience.top,
         skipped: picks
           .filter((p) => p.skipped)
@@ -219,6 +253,10 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
         feedback,
         voice,
         brand,
+        influence,
+        evidence: found?.evidence ?? null,
+        outcomes,
+        limits,
       },
       by,
       span,
@@ -227,24 +265,84 @@ async function pick(job: JobDoc, deadline: number): Promise<StepOutput> {
     const version = (picks.at(-1)?.version ?? 0) + 1;
     span.setAttribute('pick.version', version);
     return unlimited(job, {
-      ...ok({
-        state: 'REVIEW',
-        pickVersion: version,
-        audience,
-      }),
+      ...ok({ state: 'REVIEW', pickVersion: version, ...keep }),
       // Each stored pick carries the running total, so a re-run never loses earlier pick time.
-      pick: { ...result.pick, version, modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0) },
+      pick: {
+        ...result.pick,
+        version,
+        modelMs: result.ms + (picks.at(-1)?.modelMs ?? 0),
+        researchRunId: research.runId,
+        evidenceExpiresAt: found?.expiresAt ?? null,
+      },
     });
   }
 }
 
-/** Facts, feedback and the approved guides; feedback and guides only on jobs that use the memory. */
+const noAudience = (): AudienceEvidence => ({
+  retrievedAt: Date.now(),
+  query: '',
+  candidateLists: [],
+  top: [],
+});
+
+const RESEARCHING: Wait = 'researching similar artists';
+
+type Research = { runId: string; limits: ResearchLimit[] };
+
+/**
+ * The research gate (research R3), after 004's waits. With no run, an expired one, or one made for
+ * another artist before the owner relinked, it starts one and waits; while one runs under 10 minutes, it waits. A queue that can't take the first
+ * delivery fails the run and the pick goes ahead without it: never a step failure. A failed run
+ * stays failed until a re-run clears it (T054).
+ */
+async function researchFor(
+  job: JobDoc,
+  artistId: string,
+  deadline: number,
+): Promise<Research | { wait: Wait }> {
+  const run = await getRun(job.id);
+  if (!run || expired(run) || run.artistId !== artistId) {
+    const started = await startRun(job, artistId);
+    try {
+      await enqueue({ jobId: job.id, uid: job.ownerUid, runId: started.id, seq: 0 }, 0, deadline);
+      return { wait: RESEARCHING };
+    } catch (error) {
+      // A timeout may still have created the task: its delivery then finds the run failed.
+      captureException(error, { tags: { component: 'research-queue', 'job.id': job.id } });
+      await failRun(job.id, 'research-unavailable', 'research-unavailable');
+      return { runId: started.id, limits: ['research-unavailable'] };
+    }
+  }
+  const finished = run.stage === 'done' || run.stage === 'failed';
+  if (!finished && Date.now() - run.startedAt.getTime() < RESEARCH_MAX_MS) {
+    return { wait: RESEARCHING };
+  }
+  // Ending the run stops queued deliveries, so the evidence the pick reads is the evidence it keeps.
+  if (!finished) await failRun(job.id, 'research-unfinished', null);
+  const limits = run.limits as ResearchLimit[];
+  const unfinished = run.stage !== 'done' && !limits.includes('research-unavailable');
+  return { runId: run.id, limits: unfinished ? [...limits, 'research-unfinished'] : limits };
+}
+
+/**
+ * Facts, feedback, the approved guides with their slider settings, and the artist's own results;
+ * all but the facts only on jobs that use the memory.
+ */
 const memoryFor = (artist: ArtistProfile, memory: boolean) =>
   Promise.all([
     listFacts(artist, memory),
     memory ? recentFeedback(artist.id) : [],
-    memory ? approvedGuides(artist.id) : { voice: null, brand: null },
+    memory ? approvedGuides(artist.id) : { voice: null, brand: null, influence: DEFAULT_INFLUENCE },
+    memory ? pickOutcomes(artist.id) : [],
   ]);
+
+/** The run's peer evidence while fresh, without the artist's rejected channels, and when it lapses. */
+async function evidenceFor(runId: string) {
+  const stored = await readEvidence(runId);
+  if (!stored) return null;
+  const evidence = withoutRejected(stored.evidence, await rejectedChannels());
+  return { evidence, expiresAt: evidenceExpiry(stored.retrievedAt) };
+}
 
 const OUTCOME_UNKNOWN: Wait = 'upload outcome unknown';
 const DAILY_LIMIT: Wait = 'Daily upload limit reached. Try tomorrow.';
@@ -402,13 +500,31 @@ async function sendChunk(
 /** Verified uploads on artist jobs join the artist's memory; no one else's do. */
 async function recordVerified(tx: Tx, job: JobDoc, videoId: string): Promise<void> {
   if (!job.finalFields || !job.artistId || !(await artistJob(job, tx))) return;
+  const proposed = job.pickVersion === null ? null : await pickIn(tx, job.id, job.pickVersion);
+  const { finalFields: fields } = job;
+  // A Short's pick is its parent's approved text, not a recommendation of its own.
+  const own = proposed && job.parentId === null ? proposed : null;
   await recordPublish(tx, job.artistId, {
     videoId,
     url: `https://youtu.be/${videoId}`,
     jobId: job.id,
-    fields: job.finalFields,
+    fields,
     status: 'VERIFIED',
     at: Date.now(),
+    recommendation: own?.recommendation
+      ? {
+          approach: own.recommendation.approach,
+          intendedOutcome: own.recommendation.intendedOutcome,
+          evidence: own.recommendation.evidence,
+          researchRunId: own.researchRunId ?? null,
+        }
+      : null,
+    influence: own?.influence ?? null,
+    editedBeforeApproval:
+      proposed !== null &&
+      (proposed.title !== fields.title ||
+        proposed.description !== fields.description ||
+        proposed.tags.join('\n') !== fields.tags.join('\n')),
   });
 }
 

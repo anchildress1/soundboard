@@ -264,18 +264,22 @@ describe('audienceEvidence', () => {
 
     expect(first.candidateLists).toEqual([
       {
+        source: 'genre',
+        ref: 'G1',
         videoId: 'a',
         title: 'A',
         hashtags: [INDUSTRIAL],
         tags: [{ tag: 'glitch' }, { tag: 'industrial' }],
       },
       {
+        source: 'genre',
+        ref: 'G2',
         videoId: 'b',
         title: 'B',
         hashtags: ['#retro'],
         tags: [{ tag: 'glitch' }, { tag: 'retro' }],
       },
-      { videoId: 'empty', title: 'Empty', hashtags: [], tags: [] },
+      { source: 'genre', ref: 'G3', videoId: 'empty', title: 'Empty', hashtags: [], tags: [] },
     ]);
     expect(second.candidateLists).toEqual(first.candidateLists);
     expect(first.top.map(({ title }) => title)).toEqual(['A', 'B', 'Empty']);
@@ -360,12 +364,16 @@ describe('audienceEvidence', () => {
     expect(evidence.retrievedAt).toBe(RETRIEVED_AT);
     expect(evidence.candidateLists).toEqual([
       {
+        source: 'genre',
+        ref: 'G1',
         videoId: 'v2',
         title: 'Two',
         hashtags: [SYNTHWAVE_TAG, '#80s'],
         tags: [{ tag: 'synthwave' }, { tag: '80s' }],
       },
       {
+        source: 'genre',
+        ref: 'G2',
         videoId: 'v1',
         title: 'One',
         hashtags: [SYNTHWAVE_TAG, '#retro'],
@@ -426,7 +434,14 @@ describe('audienceEvidence', () => {
     expect(searchUrl.searchParams.get('videoDuration')).toBe('short');
     expect(evidence.top.map((v) => v.title)).toEqual(['Near']);
     expect(evidence.candidateLists).toEqual([
-      { videoId: 'near', title: 'Near', hashtags: [INDUSTRIAL], tags: [{ tag: 'industrial' }] },
+      {
+        source: 'genre',
+        ref: 'G1',
+        videoId: 'near',
+        title: 'Near',
+        hashtags: [INDUSTRIAL],
+        tags: [{ tag: 'industrial' }],
+      },
     ]);
   });
 
@@ -447,7 +462,9 @@ describe('audienceEvidence', () => {
 
     expect(eligible).toHaveLength(12);
     expect(evidence.candidateLists).toEqual(
-      eligible.slice(0, 10).map((id) => ({
+      eligible.slice(0, 10).map((id, index) => ({
+        source: 'genre',
+        ref: `G${index + 1}`,
         videoId: id,
         title: id,
         hashtags: [`#${id}`],

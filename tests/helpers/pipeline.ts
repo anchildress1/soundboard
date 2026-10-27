@@ -81,6 +81,14 @@ export const RAW_PICK = {
   brandCheck: 'Keeps the channel naming pattern.',
   why: { title: 'Matches recent titles.', description: 'Short and plain.', tags: 'Genre first.' },
   bandcamp: { about: 'Bandcamp about.', credits: 'Written by Nathan.' },
+  citations: { sound: [], feel: [], wording: [], discovery: [], structure: [] },
+  recommendation: {
+    approach: 'Open with the hook.',
+    intendedOutcome: 'More listeners stay to the end.',
+    follows: 'artist',
+    followsWhy: 'Only the artist’s own sources were available.',
+    evidence: [],
+  },
 };
 
 export type Handler = {
@@ -143,8 +151,8 @@ export function defaultHandlers(): Handler[] {
       reply: (url) => {
         const params = new URL(url).searchParams;
         const id = params.get('id') ?? '';
-        // The upload read-back asks for status; the owner's identity read only for snippets.
-        if (params.get('part')?.includes('status')) {
+        // The upload read-back asks for one video's status; the owner's identity read, for several.
+        if (params.get('part')?.includes('status') && !id.includes(',')) {
           return json({
             items: [{ id, snippet: { title: 't' }, status: { uploadStatus: 'processed' } }],
           });
@@ -160,6 +168,7 @@ export function defaultHandlers(): Handler[] {
               thumbnails:
                 vid === 'v5' ? {} : { medium: { url: `https://i.ytimg.com/${vid}/m.jpg` } },
             },
+            status: { privacyStatus: 'public' },
           })),
         });
       },
@@ -321,6 +330,7 @@ export function jobDoc(patch: Partial<JobDoc> = {}): JobDoc {
     trace: null,
     hashtagCandidates: null,
     audience: null,
+    candidateLists: null,
     upload: null,
     finalFields: null,
     pickVersion: null,

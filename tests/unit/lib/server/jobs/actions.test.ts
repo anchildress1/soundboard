@@ -11,14 +11,19 @@ import {
   artists,
   connections,
   jobAudience,
+  jobResearch,
   jobs,
+  researchRuns,
   users,
 } from '#lib/server/core/schema.js';
+import { withIdentity } from '#lib/server/core/identity.js';
+import { claim, commit } from '#lib/server/research/runs.js';
 import { createJob, getJob, listPicks, type JobDoc } from '#lib/server/jobs/jobs.js';
 import { jobSet, type JobPatch } from '#lib/server/jobs/rows.js';
 import { saveAudience } from '#lib/server/jobs/audience.js';
 import type { Hook, JobState, Pick, Short } from '#lib/types.js';
 import { seed, truncate } from '../../../../helpers/db';
+import { evidence } from '../../../../helpers/evidence';
 import {
   ARTIST,
   CHANNEL_A,
@@ -120,6 +125,8 @@ async function makeJob(
       query: 'synthwave music video',
       candidateLists: [
         {
+          source: 'genre',
+          ref: 'G1',
           videoId: 'peer',
           title: 'Peer release',
           hashtags: candidates,
@@ -213,12 +220,21 @@ describe('approve', () => {
           query: 'synthwave music video',
           candidateLists: [
             {
+              source: 'genre',
+              ref: 'G1',
               videoId: 'one',
               title: 'One',
               hashtags: [SYNTHWAVE_TAG],
               tags: [{ tag: 'synthwave' }],
             },
-            { videoId: 'two', title: 'Two', hashtags: [RETROWAVE], tags: [{ tag: 'outrun' }] },
+            {
+              source: 'genre',
+              ref: 'G2',
+              videoId: 'two',
+              title: 'Two',
+              hashtags: [RETROWAVE],
+              tags: [{ tag: 'outrun' }],
+            },
           ],
           top: [],
         },
@@ -420,6 +436,153 @@ describe('approve', () => {
   });
 });
 
+describe('approve: the peer pool', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  /** `peer1tag` and `peer2tag` appear only in a peer release's list; the draft chose `peer1tag`. */
+  const ONLY = 'peer1tag';
+  const NEW = 'peer2tag';
+  const asB = <T>(run: () => Promise<T>) => withIdentity(USER_B.uid, run);
+  const pickWithRun = { researchRunId: 'run-1', tags: ['synthwave', ONLY] };
+
+  /** A REVIEW job whose pick cites run-1; its genre pool and peer evidence age as given. */
+  async function peerJob(
+    opts: { genre?: boolean; peerAgeDays?: number | null; patch?: Partial<JobDoc> } = {},
+  ) {
+    await makeJob({ patch: opts.patch });
+    if (opts.genre === false) await db().delete(jobAudience);
+    await db()
+      .update(jobs)
+      .set({ picks: [{ ...pick(1), ...pickWithRun, skipped: false }] })
+      .where(eq(jobs.id, 'job1'));
+    if (opts.peerAgeDays !== null) {
+      await seed({
+        jobResearch: [
+          {
+            runId: 'run-1',
+            jobId: 'job1',
+            retrievedAt: new Date(Date.now() - (opts.peerAgeDays ?? 1) * DAY_MS),
+            evidence: evidence(),
+          },
+        ],
+      });
+    }
+    return (await getJob('job1'))!;
+  }
+  const approveTags = (tags: string[]) =>
+    asB(async () => approve((await getJob('job1'))!, input({ tags })));
+
+  it('approves a tag that only a fresh peer release list carries', async () => {
+    await peerJob();
+    await approveTags(['synthwave', ONLY, NEW]);
+    expect((await getJob('job1'))!.finalFields?.tags).toEqual(['synthwave', ONLY, NEW]);
+  });
+
+  it('keeps the draft’s own peer-only tag after the peer pool expires, and refuses a new one', async () => {
+    await peerJob({ peerAgeDays: 30 });
+    const error = await rejection(approveTags(['synthwave', NEW]));
+    expect(error.fields?.tags).toBe(`Not in this job's tag list: ${NEW}`);
+    await approveTags(['synthwave', ONLY]);
+    expect((await getJob('job1'))!.finalFields?.tags).toEqual(['synthwave', ONLY]);
+  });
+
+  it('does the same once the peer evidence row is deleted', async () => {
+    await peerJob();
+    await db().delete(jobResearch);
+    await rejection(approveTags(['synthwave', NEW]));
+    await approveTags(['synthwave', ONLY]);
+  });
+
+  it('keeps the draft’s own terms after the genre pool expires, and still takes fresh peer terms', async () => {
+    await peerJob({ genre: false });
+    await approveTags(['synthwave', ONLY, NEW]);
+    expect((await getJob('job1'))!.finalFields?.tags).toEqual(['synthwave', ONLY, NEW]);
+  });
+
+  it('refuses a tag nobody offered, whichever pool is fresh', async () => {
+    await peerJob({ genre: false });
+    const error = await rejection(approveTags(['synthwave', 'invented']));
+    expect(error.fields?.tags).toBe("Not in this job's tag list: invented");
+  });
+
+  it('drops a rejected peer’s lists from the pool but keeps what the draft already chose', async () => {
+    await makeJob({ owner: USER_C });
+    await db()
+      .update(jobs)
+      .set({
+        picks: [
+          {
+            ...pick(1, 'Test Artist'),
+            researchRunId: 'run-1',
+            tags: ['Test Artist', 'synthwave', ONLY],
+            skipped: false,
+          },
+        ],
+      })
+      .where(eq(jobs.id, 'job1'));
+    await seed({
+      jobResearch: [
+        { runId: 'run-1', jobId: 'job1', retrievedAt: new Date(), evidence: evidence() },
+      ],
+      peerRejections: [
+        { artistId: USER_C.artistId, channelId: 'UC-peer-2', retrievedAt: new Date() },
+      ],
+    });
+    await withIdentity(USER_C.uid, async () => {
+      const job = (await getJob('job1'))!;
+      const error = await rejection(
+        approve(job, inputC({ tags: ['Test Artist', 'synthwave', NEW] })),
+      );
+      expect(error.fields?.tags).toBe(`Not in this job's tag list: ${NEW}`);
+      await approve(job, inputC({ tags: ['Test Artist', 'synthwave', ONLY] }));
+    });
+    expect((await getJob('job1'))!.finalFields?.tags).toEqual(['Test Artist', 'synthwave', ONLY]);
+  });
+
+  describe('on a Short', () => {
+    const PROBE = { durationSec: 180, width: 1920, height: 1080, hasAudio: true };
+
+    /** The approved video, cut into a Short that is ready to review. */
+    async function reviewedShort(peerAgeDays = 1) {
+      const parent = await peerJob({
+        peerAgeDays,
+        patch: {
+          probe: PROBE,
+          chunkCount: 3,
+          finalFields: {
+            title: 'Approved',
+            description: DESCRIPTION,
+            hashtags: [SYNTHWAVE_TAG, RETROWAVE],
+            tags: ['synthwave', ONLY],
+          },
+        },
+      });
+      await patchJob({ state: 'VERIFIED' });
+      const id = await makeShort({ ...parent, state: 'VERIFIED' }, ARTIST);
+      await db().update(jobs).set({ state: 'REVIEW' }).where(eq(jobs.id, id));
+      return id;
+    }
+    const approveShort = (id: string, tags: string[]) =>
+      asB(async () => approve((await getJob(id))!, input({ tags: [ARTIST, ...tags] })));
+
+    it('approves the parent’s peer-only tag while the evidence is fresh, with no recommendation', async () => {
+      const id = await reviewedShort();
+      expect((await listPicks(id))[0]).toMatchObject({
+        researchRunId: 'run-1',
+        recommendation: null,
+      });
+      await approveShort(id, ['synthwave', ONLY, NEW]);
+      expect((await getJob(id))!.finalFields?.tags).toEqual([ARTIST, 'synthwave', ONLY, NEW]);
+    });
+
+    it('falls back to its own selected terms once the original evidence expires', async () => {
+      const id = await reviewedShort(30);
+      await rejection(approveShort(id, ['synthwave', NEW]));
+      await approveShort(id, ['synthwave', ONLY]);
+      expect((await getJob(id))!.finalFields?.tags).toEqual([ARTIST, 'synthwave', ONLY]);
+    });
+  });
+});
+
 describe('approve: where the upload goes', () => {
   it.each(['missing_scopes', 'no_channel', 'revoked'] as const)(
     'refuses with 409 and changes nothing while YouTube is %s',
@@ -537,6 +700,14 @@ describe('approve: artist memory follows the current link', () => {
   });
 });
 
+/** A research run for `jobId`, owned by C. */
+const seedRun = (jobId: string, id: string, stage: 'learn' | 'done' | 'failed' = 'learn') =>
+  seed({
+    researchRuns: [{ jobId, id, ownerUid: USER_C.uid, artistId: USER_C.artistId, stage }],
+  });
+const runOf = async (jobId: string) =>
+  (await db().select().from(researchRuns).where(eq(researchRuns.jobId, jobId)))[0];
+
 describe('rerun', () => {
   it('requires REVIEW', async () => {
     const job = await makeJob({ state: 'PUBLISHING' });
@@ -577,6 +748,20 @@ describe('rerun', () => {
     await rerun(job);
     expect(await artistRows()).toHaveLength(0);
     expect(await jobRows()).toEqual([expect.objectContaining({ kind: 'SKIPPED' })]);
+  });
+
+  it('drops a failed research run so the next pick starts anew', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await seedRun('job1', 'run-1', 'failed');
+    await rerun(job);
+    expect(await runOf('job1')).toBeUndefined();
+  });
+
+  it('keeps a finished research run for the next pick', async () => {
+    const job = await makeJob({ owner: USER_C });
+    await seedRun('job1', 'run-1', 'done');
+    await rerun(job);
+    expect(await runOf('job1')).toMatchObject({ id: 'run-1', stage: 'done' });
   });
 
   it('still returns to PICK when there is no pick to skip', async () => {
@@ -649,6 +834,48 @@ describe('discard', () => {
     const job = await makeJob({ state: 'CLAIMED_COMPLETE', patch: { videoId: 'vid1' } });
     await discard(job);
     expect(await getJob('job1')).toMatchObject({ state: 'DISCARDED', videoId: 'vid1' });
+  });
+
+  it("fails the job's research run mid-batch, so that batch and the queued delivery do nothing", async () => {
+    const job = await makeJob({ owner: USER_C, state: 'PICK' });
+    await createJob(
+      {
+        ownerUid: USER_C.uid,
+        artistId: USER_C.artistId,
+        songTitle: 'Other',
+        notes: '',
+        filename: 'o.mp4',
+        contentType: 'video/mp4',
+        object: 'uploads/o.mp4',
+        trace: null,
+      },
+      'job2',
+    );
+    await seedRun('job1', 'run-1');
+    await seedRun('job2', 'run-2');
+    const delivery = { jobId: 'job1', uid: USER_C.uid, runId: 'run-1', seq: 0 };
+    const claimed = await withIdentity(USER_C.uid, () => claim(delivery));
+    if (claimed.kind !== 'claimed') throw new Error('not claimed');
+
+    await discard(job);
+    expect(await runOf('job1')).toMatchObject({
+      stage: 'failed',
+      error: 'discarded',
+      claimToken: null,
+    });
+    const release = {
+      stage: 'discover' as const,
+      cursor: 0,
+      wait: null,
+      consecutiveFailures: 0,
+      limits: [],
+      error: null,
+    };
+    expect(await withIdentity(USER_C.uid, () => commit(claimed.run, claimed.token, release))).toBe(
+      false,
+    );
+    expect(await withIdentity(USER_C.uid, () => claim(delivery))).toEqual({ kind: 'stale' });
+    expect(await runOf('job2')).toMatchObject({ stage: 'learn', error: null });
   });
 
   it('learns nothing from a discard', async () => {

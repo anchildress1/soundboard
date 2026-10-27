@@ -26,6 +26,7 @@ const SUB = 'sub-new';
 const EMAIL = 'new@example.com';
 const UPLOAD = 'https://www.googleapis.com/auth/youtube.upload';
 const READ = 'https://www.googleapis.com/auth/youtube.readonly';
+const ANALYTICS = 'https://www.googleapis.com/auth/yt-analytics.readonly';
 const FULL = ['openid', 'email', UPLOAD, READ];
 const CHANNEL = { id: 'UCnew', title: 'New Channel' };
 const CONSENT = '/auth/login?connect=youtube';
@@ -662,5 +663,74 @@ describe('GET /auth/callback: connect', () => {
     google(USER_A.uid, USER_A.email, { verified: false });
     const { thrown } = await call({ cookie: connectState(), user: USER_A });
     expect(redirectTo(thrown)).toEqual([303, '/?signin=expired']);
+  });
+});
+
+describe('GET /auth/callback: analytics', () => {
+  const analyticsState = (user: { uid: string; sid: string } = USER_A) =>
+    sign(state({ purpose: 'analytics', uid: user.uid, sid: user.sid }));
+  const granted = [...FULL, ANALYTICS];
+
+  beforeEach(async () => {
+    await seed(USERS);
+    channel({ id: CHANNEL_A, title: 'Flies Like Robots' });
+  });
+
+  it('stores the grant with the Analytics scope and lands on shared', async () => {
+    google(USER_A.uid, USER_A.email, { scopes: granted, refresh: 'rt-analytics' });
+    const { thrown } = await call({ cookie: analyticsState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?analytics=shared']);
+    expect(await connectionOf(USER_A.uid)).toMatchObject({
+      status: 'connected',
+      scopes: granted,
+      tokenCiphertext: Buffer.from('sealed:rt-analytics').toString('base64'),
+    });
+  });
+
+  it('lands on declined, leaving the row as it was, when Google withheld the scope', async () => {
+    const before = await connectionOf(USER_A.uid);
+    google(USER_A.uid, USER_A.email, { scopes: FULL });
+    const { thrown } = await call({ cookie: analyticsState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?analytics=declined']);
+    expect(await connectionOf(USER_A.uid)).toEqual(before);
+    expect(h.encrypt).not.toHaveBeenCalled();
+  });
+
+  it('lands on declined when no refresh token came back, so the stored scopes stay', async () => {
+    const before = await connectionOf(USER_A.uid);
+    google(USER_A.uid, USER_A.email, { scopes: granted, refresh: null });
+    const { thrown } = await call({ cookie: analyticsState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?analytics=declined']);
+    expect(await connectionOf(USER_A.uid)).toEqual(before);
+  });
+
+  it.each<[string, User]>([
+    ['signed out', null],
+    ['a session for another user', USER_B],
+    ['a stale callback after sign-out and back in', { ...USER_A, sid: 'sid-later' }],
+  ])('rejects %s as a mismatch, changing nothing', async (_label, user) => {
+    const before = await allConnections();
+    google(USER_A.uid, USER_A.email, { scopes: granted });
+    const { thrown } = await call({ cookie: analyticsState(), user });
+    expect(redirectTo(thrown)).toEqual([303, MISMATCH]);
+    expect(h.getToken).not.toHaveBeenCalled();
+    expect(await allConnections()).toEqual(before);
+  });
+
+  it('rejects a grant from another Google account', async () => {
+    const before = await allConnections();
+    google(USER_B.uid, USER_B.email, { scopes: granted });
+    const { thrown } = await call({ cookie: analyticsState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=wrong-account']);
+    expect(await allConnections()).toEqual(before);
+  });
+
+  it('keeps the stored connection and reports a failure, as a plain connect does', async () => {
+    const before = await connectionOf(USER_A.uid);
+    h.encrypt.mockRejectedValue(new Error('PERMISSION_DENIED'));
+    google(USER_A.uid, USER_A.email, { scopes: granted });
+    const { thrown } = await call({ cookie: analyticsState(), user: USER_A });
+    expect(redirectTo(thrown)).toEqual([303, '/connections?connect=failed']);
+    expect(await connectionOf(USER_A.uid)).toEqual(before);
   });
 });

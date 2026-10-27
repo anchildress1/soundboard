@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import type { ComponentProps } from 'svelte';
+import { createRawSnippet, type ComponentProps } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Review from '#lib/components/Review.svelte';
 import type { Pick } from '#lib/types.js';
+import { REVIEW } from '../../../helpers/review';
 
 const KEY = 'review:j1:1';
 const APPROVE = 'Approve & upload';
@@ -348,5 +349,59 @@ describe('Review: draft', () => {
     );
     setup();
     expect(field(/^Title/).value).toBe(PICK.title);
+  });
+});
+
+describe('Review: sources and summary', () => {
+  it("lists a field's cited sources under Why this", async () => {
+    setup({ sources: REVIEW.sources });
+    expect(screen.getByText('Matches.')).toBeInTheDocument();
+    expect(screen.getByText('Sources: P1-R1 · Night Drive')).toBeInTheDocument();
+    await walk('Keep it, next');
+    expect(screen.getByText('Sources: Your voice guide')).toBeInTheDocument();
+    await walk('Looks right, next');
+    expect(screen.getByText('Sources: Peer evidence expired on Nov 20, 2026')).toBeInTheDocument();
+  });
+
+  it('separates several sources', () => {
+    setup({
+      sources: {
+        ...REVIEW.sources,
+        title: [
+          { ref: 'analysis', label: 'Song analysis' },
+          { ref: 'voice', label: 'Your voice guide' },
+        ],
+      },
+    });
+    expect(screen.getByText('Sources: Song analysis; Your voice guide')).toBeInTheDocument();
+  });
+
+  it('shows no sources line without any', () => {
+    setup({ sources: { title: [], description: [], tags: [] } });
+    expect(screen.queryByText(/^Sources:/)).toBeNull();
+  });
+
+  it('shows no sources line when the why is empty', () => {
+    setup({
+      pick: { ...PICK, why: { title: '', description: '', tags: '' } },
+      sources: REVIEW.sources,
+    });
+    expect(screen.queryByText(/^Sources:/)).toBeNull();
+  });
+
+  it('renders the summary on the approval screen only', async () => {
+    const summary = createRawSnippet(() => ({ render: () => '<p>Evidence summary</p>' }));
+    setup({ summary });
+    expect(screen.queryByText('Evidence summary')).toBeNull();
+    await toApprove();
+    expect(screen.getByText('Evidence summary')).toBeInTheDocument();
+    expect(button(APPROVE)).toBeInTheDocument();
+  });
+
+  it('approves the same with or without a summary', async () => {
+    const { onapprove } = setup();
+    await toApprove();
+    await fireEvent.click(button(APPROVE));
+    expect(onapprove).toHaveBeenCalledOnce();
   });
 });

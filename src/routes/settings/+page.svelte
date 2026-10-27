@@ -2,25 +2,10 @@
   import { invalidateAll } from '$app/navigation';
   import { resolve } from '$app/paths';
   import ArtistForm from '#lib/components/ArtistForm.svelte';
+  import InfluenceSliders from '#lib/components/InfluenceSliders.svelte';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
-
-  // Spec 006, FR-021: what each role draws on before any slider moves.
-  const ROLES = [
-    { name: 'Sound', source: 'Song analysis; peer vocabulary may help describe it' },
-    { name: 'Feel', source: "The artist's own writing and approved edits" },
-    { name: 'Wording', source: "The artist's phrasing, sentence shape, and asides" },
-    {
-      name: 'Discovery',
-      source:
-        'Eligible peer tags, hashtags, and title keywords, limited to what the analysis heard',
-    },
-    {
-      name: 'Structure',
-      source: "Peer patterns for length and order; the artist's own identity and credit lines",
-    },
-  ];
 </script>
 
 <svelte:head><title>Settings · Soundboard</title></svelte:head>
@@ -31,7 +16,6 @@
 
   <section class="panel" aria-labelledby="artist">
     <h2 id="artist">Artist</h2>
-    <p class="help">New drafts use these. Drafts you already approved keep what you approved.</p>
     <ArtistForm
       initial={data.artist}
       submitLabel="Save changes"
@@ -40,31 +24,17 @@
     />
   </section>
 
-  <div class="intro">
-    <h2>Peer influence</h2>
-    <p class="help">
-      How much each part of a draft leans on artists like you who reach more people, from your own
-      history only to the strongest peer influence. The sliders arrive with fanbase learning; until
-      then every pick uses the defaults below.
+  <section class="panel" aria-labelledby="influence">
+    <h2 id="influence">Peer influence</h2>
+    <p class="help intro">
+      How closely each part of a draft follows bigger artists with your sound.
     </p>
-  </div>
-
-  <section class="panel" aria-labelledby="defaults">
-    <h2 id="defaults">Default sources</h2>
-    <dl>
-      {#each ROLES as role (role.name)}
-        <div>
-          <dt>{role.name}</dt>
-          <dd class="help">{role.source}</dd>
-        </div>
-      {/each}
-    </dl>
+    <InfluenceSliders
+      initial={data.influence}
+      canSave={data.canSave}
+      onsaved={() => invalidateAll()}
+    />
   </section>
-
-  <p class="help">
-    Settings never override song facts, your identity and credits, the hashtag and tag candidate
-    lists, or your approval.
-  </p>
 </main>
 
 <style>
@@ -85,43 +55,11 @@
   }
 
   .intro {
-    display: grid;
-    gap: 6px;
-  }
-
-  .intro p {
     max-width: 64ch;
-    font-size: 16px;
   }
 
   .panel {
     display: grid;
     gap: 8px;
-  }
-
-  dl {
-    margin: 0;
-  }
-
-  dl div {
-    display: grid;
-    grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
-    gap: 4px 20px;
-    padding: 14px 0;
-    border-top: 1px solid var(--line);
-  }
-
-  dt {
-    font-weight: 600;
-  }
-
-  dd {
-    margin: 0;
-  }
-
-  @media (width < 560px) {
-    dl div {
-      grid-template-columns: minmax(0, 1fr);
-    }
   }
 </style>
