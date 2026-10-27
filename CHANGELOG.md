@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.0](https://github.com/anchildress1/soundboard/compare/v1.0.0...v1.1.0) (2026-10-27)
+
+
+### Features
+
+* add YouTube audit privacy and research retention ([#20](https://github.com/anchildress1/soundboard/issues/20)) ([cef38f2](https://github.com/anchildress1/soundboard/commit/cef38f297dffa8fcac4b9d4153baafb0bc3c4277))
+* **artist:** give each user their own artist profile ([#29](https://github.com/anchildress1/soundboard/issues/29)) ([5d8d09d](https://github.com/anchildress1/soundboard/commit/5d8d09d767266ae2ab0b9b5f9d0cd28c33ca592d))
+* **brand:** give every artist an approved voice and brand guide ([#31](https://github.com/anchildress1/soundboard/issues/31)) ([0898c72](https://github.com/anchildress1/soundboard/commit/0898c72fc20e627f0ee9211bc57b01fb33814bb3))
+* google sign-in, per-user jobs, and youtube connections ([#18](https://github.com/anchildress1/soundboard/issues/18)) ([ba88563](https://github.com/anchildress1/soundboard/commit/ba885638145d1c04dfc32e3316fc9f20fad89db2))
+* guide each release step by step on a single token palette ([#25](https://github.com/anchildress1/soundboard/issues/25)) ([6f7c3e9](https://github.com/anchildress1/soundboard/commit/6f7c3e97343a5cc45cf4b97e24c0657e3ccb95b2))
+* **legal:** add public Terms of Service page ([#23](https://github.com/anchildress1/soundboard/issues/23)) ([41c257c](https://github.com/anchildress1/soundboard/commit/41c257c5ffa3066a05aececf0cf2fd9436dcfd11))
+* **research:** learn what grows the fanbase from peers and results ([#32](https://github.com/anchildress1/soundboard/issues/32)) ([2d8ee88](https://github.com/anchildress1/soundboard/commit/2d8ee889abbd974eda2f42e53162b3954570aa2d))
+* swap self-hosted Gemma for the Gemini API ([#26](https://github.com/anchildress1/soundboard/issues/26)) ([fcee227](https://github.com/anchildress1/soundboard/commit/fcee22719a8af46cc3435d53e862857ec8d8ded4))
+* **upload:** resume video uploads after dropped connections ([#28](https://github.com/anchildress1/soundboard/issues/28)) ([737ce2b](https://github.com/anchildress1/soundboard/commit/737ce2b156dd11a50949586cc27efadf9253ab28))
+
+
+### Bug Fixes
+
+* clear dependency advisories, Semgrep findings, and the dev SSR crash ([#27](https://github.com/anchildress1/soundboard/issues/27)) ([ac38a71](https://github.com/anchildress1/soundboard/commit/ac38a71fedccabf61d3f096bc32d450de969f3c5))
+* enforce Neon row-level isolation ([#24](https://github.com/anchildress1/soundboard/issues/24)) ([1d71e55](https://github.com/anchildress1/soundboard/commit/1d71e55305aaecd501782d66b827785e3fa33c10))
+* handle revoked tokens and model scale-down, and back off retries with p-retry ([#15](https://github.com/anchildress1/soundboard/issues/15)) ([f713688](https://github.com/anchildress1/soundboard/commit/f713688fca9846fc1dedc87a88044fa29da8883c))
+
 ## 1.0.0 (2026-10-05)
 
 
